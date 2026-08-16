@@ -197,6 +197,26 @@ test("uses an exact StudyInstanceUID before accession and returns study metadata
   assert.equal(result.status, "matched"); assert.equal(result.matchKey, "study_instance_uid"); assert.equal(result.study?.orthancStudyId, "study-a"); assert.match(bodies[0] || "", /StudyInstanceUID/); assert.doesNotMatch(bodies[0] || "", /AccessionNumber/);
 });
 
+test("requests and parses computed ModalitiesInStudy from study details", async () => {
+  const urls: URL[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const requestedUrl = new URL(String(url));
+    urls.push(requestedUrl);
+    if (requestedUrl.pathname.endsWith("/statistics")) return json({ CountSeries: 2, CountInstances: 5 });
+    return json({
+      MainDicomTags: { StudyInstanceUID: "1.2.3", AccessionNumber: "ACC-1", StudyDate: "20260816" },
+      RequestedTags: { ModalitiesInStudy: "CT\\US" },
+    });
+  });
+
+  const result = await new service.AuthoritativeOrthancClient(enabled).getStudy("study-a");
+
+  assert.deepEqual(result.modalitiesInStudy, ["CT", "US"]);
+  const detailUrl = urls.find((url) => url.pathname === "/studies/study-a");
+  assert.equal(detailUrl?.searchParams.get("requestedTags"), "ModalitiesInStudy");
+  assert.equal(urls.length, 2);
+});
+
 test("returns a unique accession match, no-match, and ambiguity safely", async () => {
   installStudyFetch(["study-a"]);
   assert.equal((await new service.AuthoritativeOrthancClient(enabled).findStudy({ accessionNumber: "V2-000042", expectedPatientIds: ["MRN42"], expectedModalityCode: "CT", expectedStudyDate: "2026-07-27" })).status, "matched");

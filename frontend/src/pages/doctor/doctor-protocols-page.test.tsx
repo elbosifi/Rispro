@@ -97,6 +97,7 @@ describe("Doctor protocoling request documents", () => {
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
     mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
+    mockFetchProtocolingPatientHistory.mockClear();
     mockFetchProtocolingPatientHistory.mockResolvedValue({ items: [], pacsStatus: "available" });
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
@@ -107,7 +108,7 @@ describe("Doctor protocoling request documents", () => {
     mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
   });
 
-  it("renders reconciled history with client-side modality filtering and PACS-only actions", async () => {
+  it("renders reconciled history with client-side modality filtering", async () => {
     mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
       { appointmentId: 11, orthancStudyId: "s1", accessionNumber: "A-CT", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "CT Chest", appointmentStatus: "completed", reportAvailable: true, source: "rispro_pacs" },
       { appointmentId: 12, orthancStudyId: null, accessionNumber: "A-MR", date: "2026-08-15", time: "10:00", modalities: ["MRI"], description: "MRI Brain", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only" },
@@ -127,6 +128,132 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(history.getByRole("button", { name: "CT" })); expect(history.queryByText(/CT Chest/)).toBeNull(); expect(history.getByText(/MRI Brain/)).toBeTruthy();
     await userEvent.click(history.getByRole("button", { name: "MRI" })); expect(history.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true"); expect(history.getByText(/US Abdomen/)).toBeTruthy();
     expect(mockFetchProtocolingPatientHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides PACS viewers but preserves the report action for a RISpro-only history row", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
+      { appointmentId: 11, orthancStudyId: null, accessionNumber: "V2-001111", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "RIS only CT", appointmentStatus: "completed", reportAvailable: true, source: "rispro_only" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const row = (await screen.findByText(/RIS only CT/)).closest("div")!;
+
+    expect(within(row).getByText("Not in PACS")).toBeTruthy();
+    expect(within(row).queryByRole("link", { name: "SonicDICOM" })).toBeNull();
+    expect(within(row).queryByRole("link", { name: "RadiAnt" })).toBeNull();
+    expect(within(row).getByRole("link", { name: "Open report" })).toBeTruthy();
+  });
+
+  it("keeps matched PACS study viewers on the appointment study-scope route", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
+      { appointmentId: 11, orthancStudyId: "study-11", accessionNumber: "V2-001111", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "Matched PACS CT", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const row = (await screen.findByText(/Matched PACS CT/)).closest("div")!;
+
+    expect(within(row).getByText("PACS")).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "SonicDICOM" }).getAttribute("href")).toContain("/api/doctor/protocoling/appointments/11/open-sonicdicom?scope=study");
+    expect(within(row).getByRole("link", { name: "RadiAnt" })).toBeTruthy();
+  });
+
+  it("keeps PACS-only accession viewers and omits the appointment-bound report action", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
+      { appointmentId: null, orthancStudyId: "old-study", accessionNumber: "OLD-123", date: "2024-01-10", time: null, modalities: ["CT"], description: "Old PACS CT", appointmentStatus: null, reportAvailable: false, source: "pacs_only" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const row = (await screen.findByText(/Old PACS CT/)).closest("div")!;
+
+    expect(within(row).getByRole("link", { name: "SonicDICOM" }).getAttribute("href")).toContain("/api/doctor/protocoling/history/open-sonicdicom?accession=OLD-123");
+    expect(within(row).getByRole("link", { name: "RadiAnt" }).getAttribute("href")).toContain("00080050");
+    expect(within(row).queryByRole("link", { name: "Open report" })).toBeNull();
+  });
+
+  it("moves the patient-level viewer actions from the modal header into Patient History", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    const modal = screen.getByRole("dialog", { name: "Assign protocol" });
+    const modalHeader = within(modal).getByRole("button", { name: "Patient history" }).closest("header")!;
+
+    expect(within(modalHeader).queryByRole("link", { name: "Patient studies" })).toBeNull();
+    expect(within(modalHeader).queryByRole("link", { name: "Patient studies in RadiAnt" })).toBeNull();
+    expect(within(modalHeader).getByRole("button", { name: "Patient history" })).toBeTruthy();
+
+    await userEvent.click(within(modalHeader).getByRole("button", { name: "Patient history" }));
+    const panel = within(modal).getByRole("heading", { name: "Patient history" }).closest("aside")!;
+    const patientStudies = within(panel).getAllByRole("link", { name: "Patient studies" });
+    const patientStudiesInRadiAnt = within(panel).getAllByRole("link", { name: "Patient studies in RadiAnt" });
+    expect(patientStudies).toHaveLength(1);
+    expect(patientStudiesInRadiAnt).toHaveLength(1);
+    expect(patientStudies[0].getAttribute("href")).toContain("/api/doctor/protocoling/appointments/42/open-sonicdicom?scope=patient");
+    expect(patientStudiesInRadiAnt[0].getAttribute("href")).toContain("00100020");
+    expect(patientStudiesInRadiAnt[0].getAttribute("href")).toContain("002888");
+  });
+
+  it("shows additional history rows client-side without another API request", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: Array.from({ length: 7 }, (_, index) => ({
+      appointmentId: index + 1,
+      orthancStudyId: null,
+      accessionNumber: `HISTORY-${index + 1}`,
+      date: `2026-08-${String(16 - index).padStart(2, "0")}`,
+      time: "10:00",
+      modalities: ["CT"],
+      description: `History Study ${index + 1}`,
+      appointmentStatus: "completed",
+      reportAvailable: false,
+      source: "rispro_only",
+    })) });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
+    const history = within(panel);
+    await history.findByText(/History Study 1/);
+
+    for (let index = 1; index <= 5; index += 1) expect(history.getByText(new RegExp(`History Study ${index}$`))).toBeTruthy();
+    expect(history.queryByText(/History Study 6$/)).toBeNull();
+    expect(history.queryByText(/History Study 7$/)).toBeNull();
+    await userEvent.click(history.getByRole("button", { name: "Show more" }));
+    for (let index = 1; index <= 7; index += 1) expect(history.getByText(new RegExp(`History Study ${index}$`))).toBeTruthy();
+    expect(history.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(mockFetchProtocolingPatientHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps RISpro history visible without PACS status or viewer actions when PACS is unavailable", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "unavailable", items: [
+      { appointmentId: 11, orthancStudyId: null, accessionNumber: "A-CT", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "CT Chest History", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
+    const history = within(panel);
+    const row = (await history.findByText(/CT Chest History/)).closest("div")!;
+
+    expect(history.getByText("PACS availability could not be checked. RISpro history is still shown.")).toBeTruthy();
+    expect(history.queryByText("Not in PACS")).toBeNull();
+    expect(within(row).queryByRole("link", { name: "SonicDICOM" })).toBeNull();
+    expect(within(row).queryByRole("link", { name: "RadiAnt" })).toBeNull();
+  });
+
+  it("keeps RISpro history visible without viewer actions when Patient ID is unavailable", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "patient_id_unavailable", items: [
+      { appointmentId: 11, orthancStudyId: null, accessionNumber: "A-CT", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "Patient ID unavailable history", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
+    const history = within(panel);
+    const row = (await history.findByText(/Patient ID unavailable history/)).closest("div")!;
+
+    expect(history.getByText("PACS history could not be checked because Patient ID is unavailable.")).toBeTruthy();
+    expect(within(row).queryByRole("link", { name: "SonicDICOM" })).toBeNull();
+    expect(within(row).queryByRole("link", { name: "RadiAnt" })).toBeNull();
   });
 
   it("shows the request-document queue policy only when enabled", async () => {
@@ -153,7 +280,7 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByText("Age / sex").parentElement?.textContent).toContain("35 / M");
     expect(screen.getByText("Primary ID").parentElement?.textContent).toContain("002888");
     expect(screen.getByText("MRN").parentElement?.textContent).toContain("MRN-9");
-    expect(screen.getByText("Appointment").parentElement?.textContent).toContain("22/07/2026 Â· 09:00");
+    expect(screen.getByText("Appointment").parentElement?.textContent).toContain("22/07/2026 · 09:00");
     const modal = screen.getByRole("dialog", { name: "Assign protocol" });
     expect(within(modal).getByText("Modality").parentElement?.textContent).toContain("CT");
     expect(within(modal).getByText("Examination").parentElement?.textContent).toContain("CT Chest");
@@ -161,9 +288,9 @@ describe("Doctor protocoling request documents", () => {
     expect(within(modal).queryByText("Clinical indication:")).toBeNull();
     expect(within(modal).getByRole("button", { name: "Edit report requirement" }).textContent).toContain("Report required");
     expect(screen.queryByRole("link", { name: "Open current study" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Patient studies" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("00100020");
-    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("002888");
+    expect(within(modal).queryByRole("link", { name: "Patient studies" })).toBeNull();
+    expect(within(modal).queryByRole("link", { name: "Patient studies in RadiAnt" })).toBeNull();
+    expect(within(modal).getByRole("button", { name: "Patient history" })).toBeTruthy();
   });
 
   it("renders MRI primary-screening badges in the worklist and assignment header only for the MRI workflow", async () => {
