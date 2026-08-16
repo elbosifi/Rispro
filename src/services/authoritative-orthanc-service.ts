@@ -176,6 +176,14 @@ export class AuthoritativeOrthancClient {
     return detail;
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const row = { ...record(detail), ...record(statistics) }; const dicom = tags(row); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
+  async listStudiesByPatientId(patientId: string): Promise<OrthancStudyDetails[]> {
+    const requestedPatientId = text(patientId);
+    if (!requestedPatientId) throw new HttpError(400, "DICOM Patient ID is required.");
+    const ids = await this.request("/tools/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: "Study", Query: { PatientID: requestedPatientId } }) });
+    if (!Array.isArray(ids)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study search response.");
+    const studies = await Promise.all(ids.filter((id): id is string => typeof id === "string").map((id) => this.getStudy(id)));
+    return studies.filter((study) => text(study.patientId) === requestedPatientId);
+  }
   async getStudySummaryForTransferredResource(resourceId: string): Promise<OrthancTransferredStudySummary | null> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(resourceId)) throw new HttpError(400, "Invalid Orthanc resource ID.");
     const seriesStudy = await this.request(`/series/${encodeURIComponent(resourceId)}/study`, {}, { acceptableStatuses: [404] });

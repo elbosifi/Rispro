@@ -5,6 +5,8 @@ import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSo
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
+import { createAuthoritativeOrthancClient } from "../../services/authoritative-orthanc-service.js";
+import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
 import {
   assertRequestDocumentProtocolEligibility,
   isRequestDocumentRequiredForProtocolQueue,
@@ -469,13 +471,9 @@ export async function cancelProtocolAssignment(appointmentId: number): Promise<D
   return detail;
 }
 
-export async function listProtocolingPreviousAppointments(appointmentId: number, limit = 5, offset = 0) {
-  const current = await pool.query<{ patient_id: number; modality_id: number; exam_type_id: number | null }>(
-    "select patient_id, modality_id, exam_type_id from appointments_v2.bookings where id = $1",
-    [appointmentId]
-  );
-  const row = current.rows[0];
-  if (!row) throw new HttpError(404, "Appointment not found.");
+export async function getProtocolingPatientHistory(appointmentId: number) {
+  const current = await getProtocolingAppointment(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
   const result = await pool.query<RawRecord>(
     `
       select
@@ -487,39 +485,34 @@ export async function listProtocolingPreviousAppointments(appointmentId: number,
         m.name_en as modality_name,
         et.name_en as exam_type_name,
         b.status as appointment_status,
-        b.study_instance_uid,
-        coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_dicom_id,
         coalesce(cache.report_status = 'final', false) as report_available
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
-      left join lateral (
-        select pi.value from patient_identifiers pi
-        where pi.patient_id = p.id and pi.is_primary = true
-        order by pi.id asc limit 1
-      ) primary_identifier on true
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       where b.patient_id = $1 and b.id <> $2
-      order by (b.modality_id = $3) desc, (b.exam_type_id is not distinct from $4) desc,
-        b.booking_date desc, b.booking_time desc nulls last, b.id desc
-      limit $5 offset $6
+      order by b.booking_date desc, b.booking_time desc nulls last, b.id desc
     `,
-    [row.patient_id, appointmentId, row.modality_id, row.exam_type_id, limit + 1, offset]
+    [current.patientId, appointmentId]
   );
-  return result.rows.map((value) => ({
+  const rispro = result.rows.map((value) => ({
     appointmentId: Number(value.appointment_id),
-    accessionNumber: String(value.accession_number),
-    appointmentDate: String(value.appointment_date),
-    appointmentTime: stringOrNull(value.appointment_time),
-    modalityCode: String(value.modality_code),
-    modalityName: stringOrNull(value.modality_name),
-    examTypeName: stringOrNull(value.exam_type_name),
+    accessionNumber: stringOrNull(value.accession_number),
+    date: stringOrNull(value.appointment_date),
+    time: stringOrNull(value.appointment_time),
+    modalityCode: stringOrNull(value.modality_code),
+    description: stringOrNull(value.exam_type_name) ?? stringOrNull(value.modality_name),
     appointmentStatus: String(value.appointment_status),
-    studyInstanceUid: stringOrNull(value.study_instance_uid),
-    patientDicomId: stringOrNull(value.patient_dicom_id),
     reportAvailable: Boolean(value.report_available),
   }));
+  if (!current.patientDicomId?.trim()) return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "patient_id_unavailable" as const };
+  try {
+    const pacs = await (await createAuthoritativeOrthancClient()).listStudiesByPatientId(current.patientDicomId);
+    return { items: reconcileProtocolingPatientHistory(rispro, pacs, current.accessionNumber), pacsStatus: "available" as const };
+  } catch {
+    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "unavailable" as const };
+  }
 }
 
 async function assertProtocolingDocument(documentId: number): Promise<void> {
@@ -623,6 +616,12 @@ export async function getProtocolingSonicDicomRedirect(appointmentId: number, sc
     target: scope === "study" ? "studyViewer" : "patientList",
     value,
   });
+}
+
+export async function getProtocolingHistorySonicDicomRedirect(accessionNumber: string, requestHostname: string): Promise<string> {
+  const value = accessionNumber.trim();
+  if (!value) throw new HttpError(400, "Accession number is required.");
+  return buildSonicDicomStaffViewerUrl({ settings: await readSonicDicomReportSettings(), requestHostname, target: "studyViewer", value });
 }
 
 export async function getProtocolingReportRedirect(appointmentId: number, requestHostname: string): Promise<string> {

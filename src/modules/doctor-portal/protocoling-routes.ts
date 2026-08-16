@@ -11,7 +11,8 @@ import {
   getProtocolingAppointmentDetail,
   getProtocolingReportRedirect,
   getProtocolingSonicDicomRedirect,
-  listProtocolingPreviousAppointments,
+  getProtocolingHistorySonicDicomRedirect,
+  getProtocolingPatientHistory,
   listProtocolDocumentAnnotations,
   createProtocolDocumentAnnotation,
   updateProtocolDocumentAnnotation,
@@ -144,12 +145,14 @@ router.get(
   "/appointments/:appointmentId/history",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 5)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
-    const appointments = await listProtocolingPreviousAppointments(positiveInteger(req.params.appointmentId, "appointmentId"), limit, offset);
-    res.json({ appointments, hasMore: appointments.length > limit });
+    res.json(await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId")));
   })
 );
+
+router.get("/history/open-sonicdicom", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  await requireProtocolingAccess(req);
+  res.redirect(await getProtocolingHistorySonicDicomRedirect(String(req.query.accession ?? ""), req.hostname));
+}));
 
 router.get(
   "/appointments/:appointmentId/open-sonicdicom",

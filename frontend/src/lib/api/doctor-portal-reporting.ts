@@ -18,7 +18,7 @@ import type {
   DoctorProtocolingAppointmentDetail, DoctorProtocolingFilters, ProtocolAssignmentPayload, ProtocolTask, ImagingScanner, CtPhasePreset,
   MriSequencePreset, TeamWorkloadSummaryRow, WorkloadCalculationSummary, WorkloadCatalogRule, WorkloadFilters,
   AvailabilityStatus, LeaveType, RosterDutyType, RosterTeamRole, ModalityProtocolAssignment,
-  ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType, ProtocolingPreviousAppointment,
+  ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType, ProtocolingPatientHistoryResponse,
 } from "@/types/api";
 
 const MRI_SEQUENCE_IMPORT_TIMEOUT_MS = 180_000;
@@ -1473,9 +1473,8 @@ export async function fetchRegistrationProtocolAssignment(appointmentId: number)
   return raw.assignment ? mapModalityProtocolAssignment(raw.assignment) : null;
 }
 
-export async function fetchProtocolingPreviousAppointments(appointmentId: number, limit = 5, offset = 0): Promise<ProtocolingPreviousAppointment[]> {
-  const raw = await api<{ appointments: ProtocolingPreviousAppointment[] }>(`/doctor/protocoling/appointments/${appointmentId}/history?limit=${limit}&offset=${offset}`);
-  return raw.appointments;
+export async function fetchProtocolingPatientHistory(appointmentId: number): Promise<ProtocolingPatientHistoryResponse> {
+  return api<ProtocolingPatientHistoryResponse>(`/doctor/protocoling/appointments/${appointmentId}/history`);
 }
 
 export async function openProtocolingSonicDicom(appointmentId: number, scope: "study" | "patient"): Promise<void> {

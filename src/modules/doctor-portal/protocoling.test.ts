@@ -148,7 +148,7 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(policy, /A request document must be attached before this appointment can be protocolled\./);
     assert.match(migration, /require_request_document_for_protocol_queue/);
     assert.match(migration, /"disabled"/);
-    assert.doesNotMatch(repo, /orthanc|sante|mwl/i);
+    assert.doesNotMatch(repo, /sante|mwl/i);
   });
 
   it("returns assigned protocol CT phases and MRI sequences for read-only assignment detail", () => {
@@ -171,6 +171,6 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(routes, /documents\/:documentId\/annotations/);
     assert.match(routes, /freeTextProtocol/);
     assert.match(repo, /Select a saved protocol or enter a free-text protocol/);
-    assert.match(repo, /listProtocolingPreviousAppointments/);
+    assert.match(repo, /getProtocolingPatientHistory/);
   });
 });

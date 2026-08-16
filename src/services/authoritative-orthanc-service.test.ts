@@ -305,6 +305,14 @@ test("preserves Orthanc availability errors while trying tag fallbacks", async (
   await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1"), /unavailable/i);
 });
 
+test("finds studies by exact PatientID read-only and excludes mismatched metadata", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { const path = new URL(String(url)).pathname; calls.push({ path, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null }); if (path === "/tools/find") return json(["study-a", "study-b"]); if (path.endsWith("/statistics")) return json({}); return json({ ...study(), PatientMainDicomTags: { PatientID: path.includes("study-b") ? "OTHER" : "P1" } }); });
+  const result = await new service.AuthoritativeOrthancClient(enabled).listStudiesByPatientId(" P1 ");
+  assert.deepEqual(result.map((item) => item.orthancStudyId), ["study-a"]); assert.deepEqual(calls[0], { path: "/tools/find", method: "POST", body: { Level: "Study", Query: { PatientID: "P1" } } }); assert.ok(calls.every((call) => call.method === "GET" || (call.method === "POST" && call.path === "/tools/find")));
+  await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).listStudiesByPatientId(" "), /Patient ID is required/);
+});
+
 test("resolves transferred series, direct studies, and unavailable resources read-only", async () => {
   for (const [resource, expected, responses] of [
     ["series-1", "study-1", { "/series/series-1/study": json({ ID: "study-1", MainDicomTags: { PatientName: "Sample Patient", PatientID: "P-1042", AccessionNumber: "ACC-1042", StudyDescription: "CT chest", ModalitiesInStudy: "CT" } }) }],

@@ -22,7 +22,7 @@ import {
   fetchDoctorProtocolingAppointmentDetail,
   fetchDoctorProtocolingAppointments,
   fetchRequestDocumentProtocolPolicy,
-  fetchProtocolingPreviousAppointments,
+  fetchProtocolingPatientHistory,
   fetchProtocolLibraryAnatomyRegions,
   fetchProtocolLibraryCtPhasePresets,
   fetchProtocolLibraryMriSequencePresets,
@@ -54,7 +54,7 @@ import {
   type ProtocolLibraryProtocolPayload,
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
-import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail, ProtocolingPreviousAppointment } from "@/types/api";
+import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy } from "@/lib/date-format";
@@ -1255,6 +1255,7 @@ function ProtocolAssignmentModal({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(5);
+  const [selectedHistoryModalities, setSelectedHistoryModalities] = useState<string[]>([]);
   const [annotationDirty, setAnnotationDirty] = useState(false);
   const [documentExpanded, setDocumentExpanded] = useState(false);
   const [additionalInstructionsOpen, setAdditionalInstructionsOpen] = useState(Boolean(existing?.scannerId || existing?.protocolNotes || existing?.contrastNotes));
@@ -1337,10 +1338,13 @@ function ProtocolAssignmentModal({
     enabled: selectedVersionId !== null && protocolMode === "saved",
   });
   const historyQuery = useQuery({
-    queryKey: ["doctor", "protocoling", "history", appointment.patientId, appointment.appointmentId, historyLimit],
-    queryFn: () => fetchProtocolingPreviousAppointments(appointment.appointmentId, historyLimit),
+    queryKey: ["doctor", "protocoling", "history", appointment.patientId, appointment.appointmentId],
+    queryFn: () => fetchProtocolingPatientHistory(appointment.appointmentId),
     enabled: historyOpen,
   });
+  const historyItems = historyQuery.data?.items ?? [];
+  const historyModalities = useMemo(() => [...new Set(historyItems.flatMap((item) => item.modalities))].sort(), [historyItems]);
+  const filteredHistory = selectedHistoryModalities.length ? historyItems.filter((item) => item.modalities.some((modality) => selectedHistoryModalities.includes(modality))) : historyItems;
   const printableSheet = doctorAssignmentPrintSheet({
     appointment,
     detail,
@@ -1457,7 +1461,7 @@ function ProtocolAssignmentModal({
               </div>
               <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
               <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
-              <button type="button" onClick={() => setHistoryOpen((current) => !current)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
+              <button type="button" onClick={() => setHistoryOpen((current) => { const next = !current; if (next) { setSelectedHistoryModalities([]); setHistoryLimit(5); } return next; })} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
               <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
             </div>
@@ -1482,8 +1486,13 @@ function ProtocolAssignmentModal({
               </div>
                {!documentExpanded ? (historyOpen ? <aside className="min-h-0 overflow-y-auto rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                 <div className="flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">Patient history</h4><button type="button" className="text-xs font-semibold text-accent" onClick={() => setHistoryOpen(false)}>Back to protocol</button></div>
-                {historyQuery.isLoading ? <p className="mt-4 text-xs" style={{ color: "var(--text-muted)" }}>Loading history...</p> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load previous appointments.</p> : <div className="mt-3 space-y-2">{(historyQuery.data ?? []).slice(0, 5).map((history: ProtocolingPreviousAppointment) => <div key={history.appointmentId} className="rounded-lg border p-2 text-xs" style={{ borderColor: "var(--border)" }}><p className="font-semibold">{history.appointmentDate} {history.appointmentTime ?? ""} · {history.modalityName ?? history.modalityCode}</p><p className="mt-1" style={{ color: "var(--text-muted)" }}>{history.examTypeName ?? "-"} · {history.appointmentStatus}</p><div className="mt-2 flex flex-wrap gap-1">{history.accessionNumber ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">SonicDICOM</a> : null}{history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 font-semibold">RadiAnt</a> : null}{history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">Open report</a> : null}</div></div>)}</div>}
-                {(historyQuery.data?.length ?? 0) > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
+                {historyQuery.isLoading ? <p className="mt-4 text-xs" style={{ color: "var(--text-muted)" }}>Loading history...</p> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load patient history.</p> : <>
+                  {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
+                  {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
+                  <div className="mt-3 flex flex-wrap gap-1" aria-label="History modality filters"><button type="button" onClick={() => setSelectedHistoryModalities([])} aria-pressed={selectedHistoryModalities.length === 0} className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${selectedHistoryModalities.length === 0 ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>All</button>{historyModalities.map((modality) => <button key={modality} type="button" onClick={() => setSelectedHistoryModalities((current) => current.includes(modality) ? current.filter((entry) => entry !== modality) : [...current, modality])} aria-pressed={selectedHistoryModalities.includes(modality)} className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${selectedHistoryModalities.includes(modality) ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>{modality}</button>)}</div>
+                  <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => { const firstModality = history.modalities[0]; const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200"; const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700"; const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only"; const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only"; return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-l-2 p-2 text-xs ${accent}`} style={{ borderColor: "var(--border)" }}><p className="font-semibold">{history.date ?? "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-[10px] ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">SonicDICOM</a> : null}{history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">Open report</a> : null}</div></div>; })}</div>
+                </>}
+                {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
                </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}

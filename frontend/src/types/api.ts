@@ -1051,19 +1051,10 @@ export interface ProtocolDocumentAnnotation {
   updatedAt: string;
 }
 
-export interface ProtocolingPreviousAppointment {
-  appointmentId: number;
-  accessionNumber: string;
-  appointmentDate: string;
-  appointmentTime: string | null;
-  modalityCode: string;
-  modalityName: string | null;
-  examTypeName: string | null;
-  appointmentStatus: string;
-  studyInstanceUid: string | null;
-  patientDicomId: string | null;
-  reportAvailable: boolean;
-}
+export type ProtocolingHistorySource = "rispro_pacs" | "rispro_only" | "pacs_only";
+export type ProtocolingHistoryPacsStatus = "available" | "unavailable" | "patient_id_unavailable";
+export interface ProtocolingPatientHistoryItem { appointmentId: number | null; orthancStudyId: string | null; accessionNumber: string | null; date: string | null; time: string | null; modalities: string[]; description: string | null; appointmentStatus: string | null; reportAvailable: boolean; source: ProtocolingHistorySource; }
+export interface ProtocolingPatientHistoryResponse { items: ProtocolingPatientHistoryItem[]; pacsStatus: ProtocolingHistoryPacsStatus; }
 
 export interface ModalityCtProtocolPhase {
   orderIndex: number;

@@ -35,7 +35,7 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -46,6 +46,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
   fetchRequestDocumentProtocolPolicy: mockFetchProtocolPolicy,
+  fetchProtocolingPatientHistory: mockFetchProtocolingPatientHistory,
   getAppointmentById: mockGetAppointmentById,
   fetchProtocolLibraryAnatomyRegions: vi.fn(async () => []), fetchProtocolLibraryCtPhasePresets: vi.fn(async () => []),
   fetchProtocolLibraryMriSequencePresets: vi.fn(async () => []), fetchProtocolLibraryVersionDetail: vi.fn(async () => null),
@@ -96,6 +97,7 @@ describe("Doctor protocoling request documents", () => {
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
     mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ items: [], pacsStatus: "available" });
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
@@ -103,6 +105,22 @@ describe("Doctor protocoling request documents", () => {
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
     mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
+  });
+
+  it("renders reconciled history with client-side modality filtering and PACS-only actions", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
+      { appointmentId: 11, orthancStudyId: "s1", accessionNumber: "A-CT", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "CT Chest", appointmentStatus: "completed", reportAvailable: true, source: "rispro_pacs" },
+      { appointmentId: 12, orthancStudyId: null, accessionNumber: "A-MR", date: "2026-08-15", time: "10:00", modalities: ["MRI"], description: "MRI Brain", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only" },
+      { appointmentId: null, orthancStudyId: "s3", accessionNumber: "A-US", date: "2026-08-14", time: null, modalities: ["US"], description: "US Abdomen", appointmentStatus: null, reportAvailable: false, source: "pacs_only" },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    expect((await screen.findAllByText("CT Chest")).length).toBeGreaterThan(1); expect(screen.getByText("PACS only")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("/history/open-sonicdicom?accession=A-US"))).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "CT" }));
+    expect(screen.getAllByText("CT Chest").length).toBeGreaterThan(1); expect(screen.queryByText("MRI Brain")).toBeNull();
+    expect(mockFetchProtocolingPatientHistory).toHaveBeenCalledTimes(1);
   });
 
   it("shows the request-document queue policy only when enabled", async () => {
