@@ -90,7 +90,13 @@ export default function QzTrayPrintingSection() {
       {settings.profiles.map((profile) => {
         const standardPaper = profile.documentType === "A4_DOCUMENT" || profile.documentType === "A4_LANDSCAPE_DOCUMENT" || profile.documentType === "A5_DOCUMENT";
         const margins = profile.marginsMm ?? { top: 0, right: 0, bottom: 0, left: 0 };
-        const updateMargin = (side: keyof typeof margins, value: number) => updateProfile(profile.documentType, { marginsMm: { ...margins, [side]: value } });
+        const updateMargin = (side: keyof typeof margins, value: number) => {
+          const maximum = Math.max(0, side === "top" || side === "bottom"
+            ? profile.paperHeightMm - (side === "top" ? margins.bottom : margins.top) - 0.01
+            : profile.paperWidthMm - (side === "left" ? margins.right : margins.left) - 0.01);
+          const boundedValue = Number.isFinite(value) ? Math.min(Math.max(value, 0), maximum) : 0;
+          updateProfile(profile.documentType, { marginsMm: { ...margins, [side]: boundedValue } });
+        };
         return (
           <section key={profile.documentType} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{PROFILE_LABELS[profile.documentType]}</h4><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.enabled} onChange={(event) => updateProfile(profile.documentType, { enabled: event.target.checked })} />Enabled</label></div>

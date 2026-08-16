@@ -112,4 +112,20 @@ describe("QzTrayPrintingSection", () => {
       })]),
     }));
   });
+
+  it("clamps an out-of-range accession-label margin before saving", async () => {
+    render(<QzTrayPrintingSection />);
+    await waitFor(() => expect(mockConnectQzTray).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Accession label right margin"), { target: { value: "49" } });
+    fireEvent.change(screen.getByLabelText("Accession label left margin"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(mockSaveQzPrinterSettings).toHaveBeenCalledWith(expect.objectContaining({
+      profiles: expect.arrayContaining([expect.objectContaining({
+        documentType: "ACCESSION_LABEL",
+        marginsMm: { top: 0, right: 49, bottom: 0, left: 0.99 },
+      })]),
+    }));
+  });
 });
