@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
+import { formatDateLy } from "@/lib/date-format";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 
 const appointment: DoctorProtocolingAppointment = {
@@ -117,6 +118,7 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
     await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     expect((await screen.findAllByText("CT Chest")).length).toBeGreaterThan(1); expect(screen.getByText("PACS only")).toBeTruthy();
+    expect(screen.getByText(new RegExp(formatDateLy("2026-08-16")))).toBeTruthy();
     expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("/history/open-sonicdicom?accession=A-US"))).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "CT" }));
     expect(screen.getAllByText("CT Chest").length).toBeGreaterThan(1); expect(screen.queryByText("MRI Brain")).toBeNull();

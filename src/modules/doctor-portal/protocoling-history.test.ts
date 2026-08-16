@@ -14,3 +14,20 @@ test("keeps duplicate PACS accession conflicts and the current study unconsumed"
   const items = reconcileProtocolingPatientHistory([rispro("A")], [pacs("A"), { ...pacs("A"), orthancStudyId: "study-a-2" }, pacs("CURRENT")], "CURRENT");
   assert.equal(items.filter((item) => item.source === "rispro_only").length, 1); assert.equal(items.filter((item) => item.source === "pacs_only").length, 2);
 });
+
+test("uses trimmed accessions only, ignores UIDs, and excludes the current study", () => {
+  const items = reconcileProtocolingPatientHistory([rispro(" A ")], [{ ...pacs("A"), studyInstanceUid: "different" }, pacs("B"), pacs("CURRENT")], "CURRENT");
+  assert.equal(items.find((item) => item.appointmentId === 7)?.source, "rispro_pacs");
+  assert.equal(items.some((item) => item.accessionNumber === "B" && item.source === "rispro_pacs"), false);
+  assert.equal(items.some((item) => item.accessionNumber === "CURRENT"), false);
+});
+
+test("normalizes modalities, validates PACS dates, and orders mixed history chronologically", () => {
+  const items = reconcileProtocolingPatientHistory([rispro("R", "2026-08-16", "MR"), { ...rispro("C", "2026-08-16", "CT"), appointmentId: 8, time: "11:00:00" }], [pacs("U", "20260816", ["US"]), pacs("ISO", "2026-08-16"), pacs("BAD", "UNKNOWN"), pacs("BAD2", "20261340"), pacs("BAD3", "2026-13-40")], "CURRENT");
+  assert.deepEqual(items.find((item) => item.appointmentId === 7)?.modalities, ["MRI"]);
+  assert.deepEqual(items.find((item) => item.appointmentId === 8)?.modalities, ["CT"]);
+  assert.deepEqual(items.find((item) => item.accessionNumber === "U")?.modalities, ["US"]);
+  assert.equal(items.find((item) => item.accessionNumber === "U")?.date, "2026-08-16"); assert.equal(items.find((item) => item.accessionNumber === "ISO")?.date, "2026-08-16");
+  assert.equal(items.find((item) => item.accessionNumber === "BAD")?.date, null); assert.equal(items.find((item) => item.accessionNumber === "BAD2")?.date, null); assert.equal(items.find((item) => item.accessionNumber === "BAD3")?.date, null);
+  assert.equal(items[0]?.appointmentId, 8);
+});
