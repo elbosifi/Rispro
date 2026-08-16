@@ -31,7 +31,13 @@ type OperationsSummary = {
   generatedAt: string;
 };
 type StudyResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; reason?: string; study: { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number } | null };
-type Confirmation = { title: string; description: string; run: () => void } | null;
+type HistoricalPacsStatus = {
+  indexStatus: "ready" | "stale" | "unavailable" | "uninitialized"; runStatus: "idle" | "running" | "failed"; mode: "full" | "incremental" | null;
+  indexedStudies: number; historicalPatientIds: number; orthancStudies: number | null; processed: number | null; total: number | null; progressPercent: number | null;
+  startedAt: string | null; progressAt: string | null; lastSuccessAt: string | null; lastFullSyncAt: string | null; lastAttemptAt: string | null;
+  lastChangeSequence: number | null; lastError: string | null;
+};
+type Confirmation = { title: string; description: string; confirmLabel?: string; run: () => void } | null;
 
 const statePresentation = {
   healthy: { label: "Healthy", variant: "success" as const, className: "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30" },
@@ -43,6 +49,8 @@ const statePresentation = {
 function formatDate(value: string | null): string { if (!value) return "—"; const compact = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(?:\.(\d+))?$/); const parsed = compact ? new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3]), Number(compact[4]), Number(compact[5]), Number(compact[6]), Number((compact[7] || "").slice(0, 3).padEnd(3, "0")))) : new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(); }
 function formatDicomDate(value: string | null): string { if (!value) return "—"; return /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : value; }
 function formatStorage(bytes: number | null, mb: number | null): string { const value = bytes ?? (mb == null ? null : mb * 1024 * 1024); if (value == null) return "Unavailable"; const units = ["B", "KB", "MB", "GB", "TB"]; let scaled = value; let index = 0; while (scaled >= 1024 && index < units.length - 1) { scaled /= 1024; index += 1; } return `${scaled >= 10 || index === 0 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[index]}`; }
+function formatCount(value: number): string { return value.toLocaleString("en-US"); }
+function formatRelativeDate(value: string | null): string { if (!value) return "—"; const time = new Date(value).getTime(); if (!Number.isFinite(time)) return formatDate(value); const seconds = Math.round((time - Date.now()) / 1000); const magnitude = Math.abs(seconds); const [amount, unit] = magnitude < 60 ? [seconds, "second"] : magnitude < 3600 ? [Math.round(seconds / 60), "minute"] : magnitude < 86400 ? [Math.round(seconds / 3600), "hour"] : [Math.round(seconds / 86400), "day"]; return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(amount, unit as Intl.RelativeTimeFormatUnit); }
 function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) { return <Card variant="compact" className="flex min-w-0 items-center gap-3"><span className="rounded-lg bg-accent/10 p-2 text-accent">{icon}</span><span className="min-w-0"><span className="block text-xs font-medium text-muted-foreground">{label}</span><strong className="block truncate text-xl text-foreground">{value}</strong></span></Card>; }
 function SectionHeading({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="text-sm text-muted-foreground">{description}</p></div>{action}</div>; }
 function RouteTestBadge({ state }: { state: RouteTestState }) { const display = { not_tested: ["Not tested", "neutral"], reachable: ["Reachable", "success"], unreachable: ["Unreachable", "error"], timeout: ["Timeout", "error"], missing_route: ["Missing route", "warning"], configuration_error: ["Configuration error", "warning"] } as const; return <Badge variant={display[state][1]}>{display[state][0]}</Badge>; }
@@ -61,11 +69,22 @@ export default function AuthoritativeOrthancOperationsPage() {
   const canOperate = user?.role === "supervisor" || user?.role === "super_admin";
   const isSuperAdmin = user?.role === "super_admin";
   const summary = useQuery({ queryKey: ["authoritative-orthanc", "operations", "summary"], queryFn: () => api<OperationsSummary>("/integrations/authoritative-orthanc/operations/summary"), refetchInterval: 30_000, retry: false });
-  const refresh = async () => { await summary.refetch(); setNotice("Operations status refreshed."); };
+  const historicalPacs = useQuery({
+    queryKey: ["authoritative-orthanc", "operations", "historical-pacs-index"],
+    queryFn: () => api<HistoricalPacsStatus>("/integrations/authoritative-orthanc/operations/historical-pacs-index/status"),
+    refetchInterval: (query) => query.state.data?.runStatus === "running" ? 2_500 : 30_000,
+    retry: false,
+  });
+  const refresh = async () => { await Promise.all([summary.refetch(), historicalPacs.refetch()]); setNotice("Operations status refreshed."); };
   const mutation = useMutation({
     mutationFn: async ({ path, method = "POST" }: { path: string; method?: string }) => api<unknown>(path, { method }),
     onSuccess: async () => { setConfirmation(null); setNotice("Action completed."); await queryClient.invalidateQueries({ queryKey: ["authoritative-orthanc", "operations"] }); },
     onError: (error: Error) => { setConfirmation(null); setNotice(error.message); },
+  });
+  const historicalPacsMutation = useMutation({
+    mutationFn: (kind: "sync" | "full") => api(`/integrations/authoritative-orthanc/operations/historical-pacs-index/${kind === "full" ? "full-reconciliation" : "sync"}`, { method: "POST" }),
+    onSuccess: async (_result, kind) => { setConfirmation(null); setNotice(kind === "full" ? "Full Historical PACS reconciliation started." : "Historical PACS synchronization started."); await historicalPacs.refetch(); },
+    onError: (error: Error) => { setConfirmation(null); setNotice(error.message); void historicalPacs.refetch(); },
   });
   const lookup = useMutation({
     mutationFn: () => api<StudyResult>(`/integrations/authoritative-orthanc/operations/studies/search?${new URLSearchParams({ [lookupType]: lookupValue.trim() })}`),
@@ -81,7 +100,7 @@ export default function AuthoritativeOrthancOperationsPage() {
   const data = summary.data;
   const presentation = statePresentation[data?.overallState || "offline"];
   const orthancActionsDisabled = !data || data.overallState === "offline" || data.overallState === "disabled" || mutation.isPending;
-  const runConfirmed = (title: string, description: string, path: string) => setConfirmation({ title, description, run: () => mutation.mutate({ path }) });
+  const runConfirmed = (title: string, description: string, path: string, confirmLabel?: string) => setConfirmation({ title, description, confirmLabel, run: () => mutation.mutate({ path }) });
 
   return <div className="mx-auto max-w-[1500px] space-y-5" data-testid="authoritative-orthanc-operations-page">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -105,6 +124,30 @@ export default function AuthoritativeOrthancOperationsPage() {
         <MetricCard label="Pending jobs" value={data.jobs.summary.pending} icon={<Activity size={18}/>} />
         <MetricCard label="Failed jobs" value={data.jobs.summary.failed} icon={<AlertTriangle size={18}/>} />
       </section>
+
+      <Card className="space-y-4 p-5" data-testid="historical-pacs-index-card">
+        <SectionHeading title="Historical PACS Index" description="Read-only synchronization from Authoritative Orthanc into RISpro's historical search index." action={historicalPacs.data ? <Badge variant={historicalPacs.data.runStatus === "running" ? "info" : historicalPacs.data.runStatus === "failed" ? "error" : historicalPacs.data.indexStatus === "ready" ? "success" : historicalPacs.data.indexStatus === "stale" ? "warning" : "neutral"}>{historicalPacs.data.runStatus === "running" ? "Syncing" : historicalPacs.data.runStatus === "failed" ? "Failed" : historicalPacs.data.indexStatus === "ready" ? "Ready" : historicalPacs.data.indexStatus === "stale" ? "Stale" : "Not initialized"}</Badge> : undefined}/>
+        {historicalPacs.isLoading ? <LoadingState message="Loading Historical PACS index status…" /> : historicalPacs.error ? <ErrorState message={(historicalPacs.error as Error).message} onRetry={() => void historicalPacs.refetch()} /> : historicalPacs.data ? <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard label="Indexed studies" value={formatCount(historicalPacs.data.indexedStudies)} icon={<Database size={18}/>} />
+            <MetricCard label="Historical Patient IDs" value={formatCount(historicalPacs.data.historicalPatientIds)} icon={<Database size={18}/>} />
+            <MetricCard label="Orthanc studies" value={historicalPacs.data.orthancStudies == null ? "Unavailable" : formatCount(historicalPacs.data.orthancStudies)} icon={<Database size={18}/>} />
+            <MetricCard label="Coverage" value={historicalPacs.data.orthancStudies && historicalPacs.data.orthancStudies > 0 ? `${Number(Math.min(100, (historicalPacs.data.indexedStudies / historicalPacs.data.orthancStudies) * 100).toFixed(1))}%` : "Unavailable"} icon={<Activity size={18}/>} />
+          </div>
+          {historicalPacs.data.runStatus === "running" ? <div className="rounded-lg border bg-muted/20 p-4" data-testid="historical-pacs-running">
+            <p className="font-semibold">{historicalPacs.data.mode === "full" ? "Full synchronization in progress" : "Incremental synchronization in progress"}</p>
+            {historicalPacs.data.mode === "full" ? <div className="mt-3 space-y-2">
+              <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Historical PACS reconciliation progress" aria-valuemin={0} aria-valuemax={historicalPacs.data.total == null ? undefined : 100} aria-valuenow={historicalPacs.data.progressPercent ?? undefined}><div className={`h-full rounded-full bg-accent ${historicalPacs.data.progressPercent == null ? "w-1/3 animate-pulse" : ""}`} style={historicalPacs.data.progressPercent == null ? undefined : { width: `${historicalPacs.data.progressPercent}%` }}/></div>
+              <p className="text-sm font-medium">{historicalPacs.data.total == null ? `${formatCount(historicalPacs.data.processed ?? 0)} studies processed` : `${formatCount(historicalPacs.data.processed ?? 0)} / ${formatCount(historicalPacs.data.total)} studies`}{historicalPacs.data.progressPercent == null ? "" : ` · ${historicalPacs.data.progressPercent.toFixed(1)}%`}</p>
+            </div> : null}
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><p><span className="text-muted-foreground">Started:</span> {formatDate(historicalPacs.data.startedAt)}</p><p><span className="text-muted-foreground">Last progress:</span> {formatDate(historicalPacs.data.progressAt)}</p></div>
+          </div> : null}
+          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3"><div><dt className="text-muted-foreground">Last successful sync</dt><dd className="font-medium">{formatRelativeDate(historicalPacs.data.lastSuccessAt)}</dd></div><div><dt className="text-muted-foreground">Last full reconciliation</dt><dd className="font-medium">{formatDate(historicalPacs.data.lastFullSyncAt)}</dd></div><div><dt className="text-muted-foreground">Changes cursor</dt><dd className="font-medium">{historicalPacs.data.lastChangeSequence == null ? "—" : formatCount(historicalPacs.data.lastChangeSequence)}</dd></div></dl>
+          {historicalPacs.data.lastError ? <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100" role="alert">{historicalPacs.data.lastError}</div> : <p className="text-sm text-muted-foreground">No synchronization errors</p>}
+          {historicalPacs.data.indexStatus !== "ready" ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Patient History can use indexed PACS results, but absence in PACS is not definitive until the historical index is current.</div> : null}
+          {canOperate ? <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={historicalPacs.data.runStatus === "running" || historicalPacsMutation.isPending} onClick={() => historicalPacsMutation.mutate("sync")}>{historicalPacsMutation.isPending && historicalPacsMutation.variables === "sync" ? "Starting…" : "Sync now"}</Button><Button disabled={historicalPacs.data.runStatus === "running" || historicalPacsMutation.isPending} onClick={() => setConfirmation({ title: "Run full Historical PACS reconciliation?", description: "RISpro will read the complete Authoritative Orthanc study inventory and refresh the local historical search index. This is read-only toward Orthanc but can take several minutes.", confirmLabel: "Run full reconciliation", run: () => historicalPacsMutation.mutate("full") })}>{historicalPacsMutation.isPending && historicalPacsMutation.variables === "full" ? "Starting…" : "Run full reconciliation"}</Button></div> : null}
+        </> : null}
+      </Card>
 
       <Card className="space-y-4 p-5">
         <SectionHeading title="Routing destinations" description="Selected PACS destinations and their expected RISpro-managed Authoritative Orthanc aliases." action={canOperate ? <Button variant="secondary" size="sm" disabled={orthancActionsDisabled} onClick={() => mutation.mutate({ path: "/integrations/authoritative-orthanc/operations/routes/test-all" })}>Test all</Button> : undefined}/>
@@ -133,7 +176,7 @@ export default function AuthoritativeOrthancOperationsPage() {
       {isSuperAdmin ? <div className="flex justify-end"><Button variant="ghost" onClick={() => navigate("/settings?section=authoritative_orthanc")}>Open Authoritative Orthanc Settings</Button></div> : null}
     </> : null}
 
-    <Dialog open={Boolean(confirmation)} onClose={() => { if (!mutation.isPending) setConfirmation(null); }}><DialogContent maxWidth="520px"><DialogHeader><DialogTitle>{confirmation?.title}</DialogTitle><DialogDescription>{confirmation?.description}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" disabled={mutation.isPending} onClick={() => setConfirmation(null)}>Cancel</Button><Button disabled={mutation.isPending} onClick={() => confirmation?.run()}>{mutation.isPending ? "Working…" : "Confirm"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(confirmation)} onClose={() => { if (!mutation.isPending && !historicalPacsMutation.isPending) setConfirmation(null); }}><DialogContent maxWidth="520px"><DialogHeader><DialogTitle>{confirmation?.title}</DialogTitle><DialogDescription>{confirmation?.description}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" disabled={mutation.isPending || historicalPacsMutation.isPending} onClick={() => setConfirmation(null)}>Cancel</Button><Button disabled={mutation.isPending || historicalPacsMutation.isPending} onClick={() => confirmation?.run()}>{mutation.isPending || historicalPacsMutation.isPending ? "Working…" : confirmation?.confirmLabel || "Confirm"}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={Boolean(selectedJob)} onClose={() => setSelectedJob(null)}><DialogContent maxWidth="560px"><DialogHeader><DialogTitle>Transfer details</DialogTitle><DialogDescription>Operational transfer context and read-only Orthanc job information.</DialogDescription></DialogHeader>{selectedJob ? <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">Patient</span><p>{selectedJob.transfer?.study?.patientName || "Context unavailable"}</p></div><div><span className="text-xs text-muted-foreground">Patient ID</span><p>{selectedJob.transfer?.study?.patientId || "-"}</p></div><div><span className="text-xs text-muted-foreground">Accession</span><p>{selectedJob.transfer?.study?.accessionNumber || "-"}</p></div><div><span className="text-xs text-muted-foreground">Study / modality</span><p>{selectedJob.transfer?.study?.studyDescription || "-"} {selectedJob.transfer?.study?.modalitiesInStudy.join(", ")}</p></div><div><span className="text-xs text-muted-foreground">Destination</span><p>{selectedJob.transfer?.destinationName || "-"}</p></div><div><span className="text-xs text-muted-foreground">Instances</span><p>{selectedJob.transfer?.instanceCount ?? "-"} {selectedJob.transfer?.failedInstanceCount != null ? `${selectedJob.transfer.failedInstanceCount} failed` : ""}</p></div>{selectedJob.error ? <div className="sm:col-span-2"><span className="text-xs text-muted-foreground">Error</span><p>{selectedJob.error}</p></div> : null}<div className="border-t pt-3 sm:col-span-2"><span className="text-xs font-medium text-muted-foreground">Technical</span></div><div><span className="text-xs text-muted-foreground">Orthanc job ID / type</span><p>{selectedJob.id} / {selectedJob.type}</p></div><div><span className="text-xs text-muted-foreground">Description</span><p>{selectedJob.description}</p></div><div><span className="text-xs text-muted-foreground">Local / remote AET</span><p>{selectedJob.transfer?.localAet || "-"} / {selectedJob.transfer?.remoteAet || "-"}</p></div><div><span className="text-xs text-muted-foreground">Parent resource IDs</span><p>{selectedJob.transfer?.parentResourceIds.join(", ") || "-"}</p></div><div><span className="text-xs text-muted-foreground">Creation / start</span><p>{formatDate(selectedJob.creationTime)} / {formatDate(selectedJob.startTime)}</p></div><div><span className="text-xs text-muted-foreground">Completion / update</span><p>{formatDate(selectedJob.completionTime || selectedJob.updatedAt)}</p></div></div> : null}<DialogFooter><Button variant="secondary" onClick={() => setSelectedJob(null)}>Close</Button></DialogFooter></DialogContent></Dialog>
   </div>;
 }

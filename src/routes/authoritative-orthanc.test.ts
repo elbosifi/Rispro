@@ -10,6 +10,9 @@ test("authoritative Orthanc routes keep settings restricted and modality status 
   assert.match(source, /get\("\/status", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\)/);
   assert.match(source, /use\("\/operations", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\), requirePageAccess\("authoritative\.orthanc"\)\)/);
   assert.match(source, /get\("\/operations\/summary"/);
+  assert.match(source, /get\("\/operations\/historical-pacs-index\/status"/);
+  assert.match(source, /post\("\/operations\/historical-pacs-index\/sync", requireAnyRole\(\["supervisor", "super_admin"\]\)/);
+  assert.match(source, /post\("\/operations\/historical-pacs-index\/full-reconciliation", requireAnyRole\(\["supervisor", "super_admin"\]\)/);
   assert.match(source, /get\("\/operations\/routes"/);
   assert.match(source, /get\("\/operations\/jobs"/);
   assert.match(source, /get\("\/operations\/studies\/search"/);

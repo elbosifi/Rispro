@@ -34,9 +34,18 @@ function fixture(state: "healthy" | "degraded" | "offline" | "disabled" = "healt
 }
 
 let summary = fixture();
+let historicalPacsStatus: {
+  indexStatus: "ready" | "stale" | "unavailable" | "uninitialized"; runStatus: "idle" | "running" | "failed"; mode: "full" | "incremental" | null;
+  indexedStudies: number; historicalPatientIds: number; orthancStudies: number | null; processed: number | null; total: number | null; progressPercent: number | null;
+  startedAt: string | null; progressAt: string | null; lastSuccessAt: string | null; lastFullSyncAt: string | null; lastAttemptAt: string | null; lastChangeSequence: number | null; lastError: string | null;
+};
+function historicalPacsFixture() {
+  return { indexStatus: "ready" as const, runStatus: "idle" as const, mode: null, indexedStudies: 31192, historicalPatientIds: 18406, orthancStudies: 31192, processed: null, total: null, progressPercent: null, startedAt: null, progressAt: "2026-08-17T00:32:00.000Z", lastSuccessAt: "2026-08-17T00:32:00.000Z", lastFullSyncAt: "2026-08-17T00:31:00.000Z", lastAttemptAt: "2026-08-17T00:32:00.000Z", lastChangeSequence: 284731, lastError: null };
+}
 function installApi() {
   vi.mocked(api).mockImplementation(async (path, options) => {
     if (path === "/integrations/authoritative-orthanc/operations/summary") return summary as never;
+    if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/status") return historicalPacsStatus as never;
     if (path.includes("/operations/studies/search")) return ({ status: "matched", matchKey: "accession_number", study: { orthancStudyId: "study-1", studyInstanceUid: "1.2.3", accessionNumber: "ACC-1", patientId: "P-1", patientName: "Sample Patient", patientBirthDate: "19900101", patientSex: "F", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 50 } }) as never;
     if (options?.method === "POST") return {} as never;
     throw new Error(`Unexpected API call ${path}`);
@@ -44,9 +53,47 @@ function installApi() {
 }
 function renderPage() { return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><AuthoritativeOrthancOperationsPage/></QueryClientProvider></MemoryRouter>); }
 
-beforeEach(() => { role = "super_admin"; summary = fixture(); vi.clearAllMocks(); installApi(); });
+beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); vi.clearAllMocks(); installApi(); });
 
 describe("AuthoritativeOrthancOperationsPage", () => {
+  it("renders the ready Historical PACS index metrics and triggers Sync now", async () => {
+    renderPage();
+    expect(await screen.findByTestId("historical-pacs-index-card")).toBeTruthy();
+    for (const text of ["Historical PACS Index", "Ready", "31,192", "18,406", "284,731", "No synchronization errors"]) expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/historical-pacs-index/sync", expect.objectContaining({ method: "POST" })));
+  });
+
+  it("renders full progress, an unknown total without a fake percentage, and incremental progress", async () => {
+    historicalPacsStatus = { ...historicalPacsFixture(), runStatus: "running", mode: "full", processed: 18000, total: 31192, progressPercent: 57.7, startedAt: "2026-08-17T00:00:00.000Z" };
+    const view = renderPage();
+    expect(await screen.findByText("Full synchronization in progress")).toBeTruthy();
+    expect(screen.getByText("18,000 / 31,192 studies · 57.7%")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+    view.unmount();
+    historicalPacsStatus = { ...historicalPacsStatus, total: null, progressPercent: null };
+    const unknown = renderPage();
+    expect(await screen.findByText("18,000 studies processed")).toBeTruthy();
+    expect(screen.queryByText("57.7%")).toBeNull();
+    unknown.unmount();
+    historicalPacsStatus = { ...historicalPacsFixture(), runStatus: "running", mode: "incremental", processed: 0 };
+    renderPage();
+    expect(await screen.findByText("Incremental synchronization in progress")).toBeTruthy();
+  });
+
+  it("shows stale and failed warnings safely and confirms full reconciliation", async () => {
+    historicalPacsStatus = { ...historicalPacsFixture(), indexStatus: "stale", runStatus: "failed", mode: "full", processed: 1000, lastError: "Orthanc inventory request failed." };
+    renderPage();
+    expect(await screen.findByText("Failed", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("Orthanc inventory request failed.")).toBeTruthy();
+    expect(screen.getByText(/absence in PACS is not definitive/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Run full reconciliation" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/read the complete Authoritative Orthanc study inventory/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Run full reconciliation" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/historical-pacs-index/full-reconciliation", expect.objectContaining({ method: "POST" })));
+  });
+
   it.each(["healthy", "degraded", "offline", "disabled"] as const)("renders the %s state without crashing", async (state) => {
     summary = fixture(state);
     renderPage();

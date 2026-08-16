@@ -6,6 +6,7 @@ import { reconcileProtocolingPatientHistory } from "../modules/doctor-portal/pro
 import {
   dicomPatientNameVariants,
   discoverHistoricalPacsForPatient,
+  getHistoricalPacsAdminStatus,
   getHistoricalPacsIndexState,
   HISTORICAL_PACS_INDEX_FRESHNESS_MS,
   lookupHistoricalPacsByPatientId,
@@ -51,11 +52,21 @@ async function removePatient(id: number): Promise<void> {
 }
 
 async function readyIndex(): Promise<void> {
-  await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),last_success_at=now(),last_error=null where singleton_key=true`);
+  await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),last_success_at=now(),last_error=null,
+    sync_run_status='idle',sync_mode=null,sync_started_at=null,sync_progress_at=now(),sync_processed=0,sync_total=null where singleton_key=true`);
 }
 
 test("historical PACS index discovery and synchronization", async (t) => {
   await readyIndex();
+
+  await t.test("sync progress migration has valid singleton defaults", async () => {
+    const state = await pool.query(`select sync_run_status,sync_mode,sync_started_at,sync_processed,sync_total,last_observed_orthanc_study_count from historical_pacs_sync_state where singleton_key=true`);
+    assert.equal(state.rows[0]?.sync_run_status, "idle");
+    assert.equal(state.rows[0]?.sync_mode, null);
+    assert.equal(state.rows[0]?.sync_started_at, null);
+    assert.equal(state.rows[0]?.sync_processed, 0);
+    assert.equal(state.rows[0]?.sync_total, null);
+  });
 
   await t.test("exact known PatientID is authoritative, excluded from fuzzy candidates, and outranks fuzzy", async () => {
     const patientId = await createPatient({ englishName: "Muhammad Salem", identifier: "LEGACY-EXACT", dob: "1980-01-02", sex: "M" });
@@ -489,5 +500,100 @@ test("historical PACS index discovery and synchronization", async (t) => {
     assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='offline-retained'`)).rows[0]?.count), 1);
     assert.match(String((await pool.query(`select last_error from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.last_error), /unavailable/);
     await pool.query(`delete from historical_pacs_studies where orthanc_study_id='offline-retained'`);
+  });
+
+  await t.test("admin status reuses index freshness and reports ready, stale, uninitialized, failed, and running modes", async () => {
+    await readyIndex();
+    let status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.indexStatus, "ready");
+    assert.equal(status.runStatus, "idle");
+    assert.ok(status.indexedStudies >= 0);
+    assert.ok(status.historicalPatientIds >= 0);
+
+    await pool.query(`update historical_pacs_sync_state set last_success_at=now()-interval '10 minutes' where singleton_key=true`);
+    assert.equal((await getHistoricalPacsAdminStatus()).indexStatus, "stale");
+    await pool.query(`update historical_pacs_sync_state set last_full_sync_at=null,last_error=null where singleton_key=true`);
+    assert.equal((await getHistoricalPacsAdminStatus()).indexStatus, "uninitialized");
+
+    await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),sync_run_status='failed',sync_mode='incremental',sync_started_at=now(),sync_progress_at=now(),sync_processed=12,last_error=$1 where singleton_key=true`, ["x".repeat(500)]);
+    status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.runStatus, "failed");
+    assert.equal(status.mode, "incremental");
+    assert.equal(status.processed, 12);
+    assert.equal(status.lastError?.length, 500);
+
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_processed=18000,sync_total=31192 where singleton_key=true`);
+    status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.progressPercent, 57.7);
+    assert.equal(status.total, 31192);
+    await pool.query(`update historical_pacs_sync_state set sync_mode='incremental',sync_total=null where singleton_key=true`);
+    status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.runStatus, "running");
+    assert.equal(status.mode, "incremental");
+    assert.equal(status.progressPercent, null);
+    await readyIndex();
+  });
+
+  await t.test("forced full reconciliation records statistics and page progress, then clears active run state", async () => {
+    await readyIndex();
+    let pages = 0;
+    let progressAfterFirstPage = 0;
+    const client = {
+      async getStatistics() { return { studies: 1001, series: null, instances: null, diskSizeBytes: null, diskSizeMb: null, uncompressedSizeBytes: null, uncompressedSizeMb: null }; },
+      async getChanges() { return { changes: [], lastSequence: 91, done: true }; },
+      async listStudiesForIndexPage() {
+        pages += 1;
+        if (pages === 2) progressAfterFirstPage = Number((await pool.query(`select sync_processed from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.sync_processed);
+        return pages === 1 ? { studies: [], resourceCount: 1000 } : { studies: [], resourceCount: 1 };
+      },
+      async getStudyForIndex() { return null; },
+    };
+    const result = await runHistoricalPacsSyncCycle(async () => {
+      const running = await pool.query(`select sync_run_status,sync_mode,sync_started_at,sync_processed,sync_total,last_error from historical_pacs_sync_state where singleton_key=true`);
+      assert.equal(running.rows[0]?.sync_run_status, "running");
+      assert.equal(running.rows[0]?.sync_mode, "full");
+      assert.ok(running.rows[0]?.sync_started_at);
+      assert.equal(running.rows[0]?.sync_processed, 0);
+      assert.equal(running.rows[0]?.sync_total, null);
+      assert.equal(running.rows[0]?.last_error, null);
+      return client;
+    }, { forceFull: true });
+    assert.equal(result.mode, "full");
+    assert.equal(progressAfterFirstPage, 1000);
+    const state = await pool.query(`select sync_run_status,sync_mode,sync_processed,sync_total,last_observed_orthanc_study_count,last_change_sequence,last_success_at from historical_pacs_sync_state where singleton_key=true`);
+    assert.equal(state.rows[0]?.sync_run_status, "idle");
+    assert.equal(state.rows[0]?.sync_mode, null);
+    assert.equal(state.rows[0]?.sync_processed, 0);
+    assert.equal(state.rows[0]?.sync_total, null);
+    assert.equal(state.rows[0]?.last_observed_orthanc_study_count, 1001);
+    assert.equal(String(state.rows[0]?.last_change_sequence), "91");
+    assert.ok(state.rows[0]?.last_success_at);
+  });
+
+  await t.test("full reconciliation continues without statistics and advisory locking prevents overlap", async () => {
+    await readyIndex();
+    const client = {
+      async getStatistics() { throw new Error("statistics unavailable"); },
+      async getChanges() { return { changes: [], lastSequence: 92, done: true }; },
+      async listStudiesForIndexPage() {
+        const state = await pool.query(`select sync_run_status,sync_mode,sync_total from historical_pacs_sync_state where singleton_key=true`);
+        assert.equal(state.rows[0]?.sync_run_status, "running");
+        assert.equal(state.rows[0]?.sync_mode, "full");
+        assert.equal(state.rows[0]?.sync_total, null);
+        return { studies: [], resourceCount: 0 };
+      },
+      async getStudyForIndex() { return null; },
+    };
+    const result = await runHistoricalPacsSyncCycle(async () => client, { forceFull: true });
+    assert.equal(result.mode, "full");
+    const lockClient = await pool.connect();
+    try {
+      await lockClient.query(`select pg_advisory_lock(712364092)`);
+      const blocked = await runHistoricalPacsSyncCycle(async () => client, { forceFull: true });
+      assert.equal(blocked.lockAcquired, false);
+    } finally {
+      await lockClient.query(`select pg_advisory_unlock(712364092)`);
+      lockClient.release();
+    }
   });
 });

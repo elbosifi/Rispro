@@ -16,6 +16,7 @@ import {
   testAllAuthoritativeOrthancOperationalRoutes,
   testAuthoritativeOrthancOperationalRoute,
 } from "../services/authoritative-orthanc-operations-service.js";
+import { getHistoricalPacsAdminStatus, triggerHistoricalPacsSync } from "../services/historical-pacs-index-service.js";
 
 function appointmentId(value: unknown): number { const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1) throw new HttpError(400, "appointmentId must be a positive integer."); return parsed; }
 function orthancErrorCode(error: HttpError): string { const details = error.details; return details && typeof details === "object" && "code" in details ? String((details as { code?: unknown }).code || "") : ""; }
@@ -27,6 +28,17 @@ authoritativeOrthancRouter.post("/test", requireAnyRole(["supervisor", "super_ad
 authoritativeOrthancRouter.get("/status", requireAnyRole(["modality_staff", "supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => { res.json(await getAuthoritativeOrthancStatus()); }));
 authoritativeOrthancRouter.use("/operations", requireAnyRole(["modality_staff", "supervisor", "super_admin"]), requirePageAccess("authoritative.orthanc"));
 authoritativeOrthancRouter.get("/operations/summary", asyncRoute(async (_req: Request, res: Response) => { res.json(await getAuthoritativeOrthancOperationsSummary()); }));
+authoritativeOrthancRouter.get("/operations/historical-pacs-index/status", asyncRoute(async (_req: Request, res: Response) => { res.json(await getHistoricalPacsAdminStatus()); }));
+authoritativeOrthancRouter.post("/operations/historical-pacs-index/sync", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => {
+  const result = await triggerHistoricalPacsSync();
+  if (!result.accepted) throw new HttpError(409, "A Historical PACS synchronization is already running.", { code: "historical_pacs_sync_already_running" });
+  res.status(202).json(result);
+}));
+authoritativeOrthancRouter.post("/operations/historical-pacs-index/full-reconciliation", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => {
+  const result = await triggerHistoricalPacsSync({ forceFull: true });
+  if (!result.accepted) throw new HttpError(409, "A Historical PACS synchronization is already running.", { code: "historical_pacs_sync_already_running" });
+  res.status(202).json(result);
+}));
 authoritativeOrthancRouter.get("/operations/routes", asyncRoute(async (_req: Request, res: Response) => { res.json(await getAuthoritativeOrthancOperationalRoutes()); }));
 authoritativeOrthancRouter.post("/operations/routes/test-all", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.json(await testAllAuthoritativeOrthancOperationalRoutes(req.user!.sub)); }));
 authoritativeOrthancRouter.post("/operations/routes/:alias/test", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.json(await testAuthoritativeOrthancOperationalRoute(String(req.params.alias || ""), req.user!.sub)); }));

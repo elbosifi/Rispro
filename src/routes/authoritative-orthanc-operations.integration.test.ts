@@ -49,6 +49,35 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     assert.equal((await request("/operations/summary", receptionist)).status, 403);
     assert.equal((await request("/operations/summary", doctor)).status, 403);
     assert.equal((await request("/operations/summary", modalityStaff)).status, 200);
+    assert.equal((await request("/operations/historical-pacs-index/status", modalityStaff)).status, 200);
+    assert.equal((await request("/operations/historical-pacs-index/sync", modalityStaff, "POST")).status, 403);
+    const lockClient = await pool.connect();
+    try {
+      await lockClient.query(`select pg_advisory_lock(712364092)`);
+      const alreadyRunning = await request("/operations/historical-pacs-index/sync", supervisor, "POST");
+      assert.equal(alreadyRunning.status, 409);
+      assert.equal((await alreadyRunning.json()).error.details.code, "historical_pacs_sync_already_running");
+    } finally {
+      await lockClient.query(`select pg_advisory_unlock(712364092)`);
+      lockClient.release();
+    }
+    const waitForSyncLockRelease = async () => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const probe = await pool.connect();
+        try {
+          const result = await probe.query<{ acquired: boolean }>(`select pg_try_advisory_lock(712364092) acquired`);
+          if (result.rows[0]?.acquired) { await probe.query(`select pg_advisory_unlock(712364092)`); return; }
+        } finally { probe.release(); }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.fail("Historical PACS synchronization lock was not released.");
+    };
+    assert.equal((await request("/operations/historical-pacs-index/sync", supervisor, "POST")).status, 202);
+    await waitForSyncLockRelease();
+    const forced = await request("/operations/historical-pacs-index/full-reconciliation", superAdmin, "POST");
+    assert.equal(forced.status, 202);
+    assert.equal((await forced.json()).mode, "full");
+    await waitForSyncLockRelease();
     assert.equal((await request("/operations/routes/test-all", modalityStaff, "POST")).status, 403);
     assert.equal((await request("/operations/routes/test-all", supervisor, "POST")).status, 409);
     assert.equal((await request("/operations/routes/synchronize", supervisor, "POST")).status, 403);
