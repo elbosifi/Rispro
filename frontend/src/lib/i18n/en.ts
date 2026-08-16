@@ -1876,6 +1876,10 @@ export const en = {
 
   "modality.fieldAccession": "رقم الوصول",
   "modality.fieldPatient": "المريض",
+  "modality.specimenLabel.print": "Print specimen label",
+  "modality.specimenLabel.description": "The print timestamp is generated automatically when the label is printed.",
+  "modality.specimenLabel.specimenSite": "Specimen / Site",
+  "modality.specimenLabel.printing": "Printing...",
   "modality.fieldModality": "الجهاز",
   "modality.fieldExam": "الفحص",
   "modality.fieldDate": "التاريخ",

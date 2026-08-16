@@ -349,6 +349,49 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Print specimen label" })).toBeNull());
   });
 
+  it("localizes the IR specimen label workflow in Arabic", async () => {
+    languageState.language = "ar";
+    const user = userEvent.setup();
+    renderPage([appointment({ id: 104, modalityId: 2, modalityCode: "IR", modalityNameEn: "Interventional Radiology", accessionNumber: "V2-000104", englishFullName: "IR Patient" })], "/modality", [], { modalities: [{ id: 2, nameAr: "IR", nameEn: "Interventional Radiology", code: "IR", isActive: true }] });
+    await screen.findByRole("option", { name: "IR" });
+    await user.selectOptions(screen.getByRole("combobox"), "2");
+
+    const row = await screen.findByTestId("modality-board-row-104");
+    await user.click(within(row).getByRole("button", { name: "إجراءات إضافية" }));
+    const menuItem = screen.getByRole("menuitem", { name: "طباعة ملصق العينة" });
+    expect(menuItem).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Print specimen label" })).toBeNull();
+    await user.click(menuItem);
+
+    const firstDialog = screen.getByRole("heading", { name: "طباعة ملصق العينة" }).parentElement?.parentElement?.parentElement ?? document.body;
+    expect(within(firstDialog).getByText("يتم تسجيل وقت الطباعة تلقائياً عند طباعة الملصق.")).toBeTruthy();
+    expect(within(firstDialog).getByText("المريض")).toBeTruthy();
+    expect(within(firstDialog).getByText("رقم الوصول")).toBeTruthy();
+    expect(within(firstDialog).getByLabelText("العينة / الموقع")).toBeTruthy();
+    expect(within(firstDialog).getByRole("button", { name: "إلغاء" })).toBeTruthy();
+    expect(within(firstDialog).getByRole("button", { name: "طباعة" })).toBeTruthy();
+    expect(screen.queryByText("Print specimen label")).toBeNull();
+    expect(within(firstDialog).queryByText("Specimen / Site")).toBeNull();
+    await user.click(within(firstDialog).getByRole("button", { name: "إلغاء" }));
+
+    await user.click(row);
+    const drawer = screen.getByTestId("selected-appointment-drawer");
+    const clinicalPrint = within(drawer).getByRole("button", { name: "طباعة ملصق العينة" });
+    expect(clinicalPrint).toBeTruthy();
+    await user.click(clinicalPrint);
+
+    let resolvePrint!: (result: { success: true; printerName: string; jobName: string }) => void;
+    printIrSpecimenLabelByIdMock.mockReturnValue(new Promise<{ success: true; printerName: string; jobName: string }>((resolve) => { resolvePrint = resolve; }));
+    const dialog = screen.getByRole("heading", { name: "طباعة ملصق العينة" }).parentElement?.parentElement?.parentElement ?? document.body;
+    const text = within(dialog).getByLabelText("العينة / الموقع");
+    await user.type(text, "خزعة الكبد");
+    await user.click(within(dialog).getByRole("button", { name: "طباعة" }));
+    expect(within(dialog).getByRole("button", { name: "جارٍ الطباعة..." })).toBeTruthy();
+    expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledWith(104, "خزعة الكبد", "ar");
+    resolvePrint({ success: true, printerName: "Label Queue", jobName: "test" });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "طباعة ملصق العينة" })).toBeNull());
+  });
+
   it("keeps the IR specimen dialog and exact text open after a print failure", async () => {
     printIrSpecimenLabelByIdMock.mockResolvedValue({ success: false, errorCode: "PRINTER_NOT_CONFIGURED", message: "No label printer." });
     const user = userEvent.setup();

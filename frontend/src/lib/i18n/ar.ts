@@ -1917,6 +1917,10 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
 
   "modality.fieldAccession": "رقم الوصول",
   "modality.fieldPatient": "المريض",
+  "modality.specimenLabel.print": "طباعة ملصق العينة",
+  "modality.specimenLabel.description": "يتم تسجيل وقت الطباعة تلقائياً عند طباعة الملصق.",
+  "modality.specimenLabel.specimenSite": "العينة / الموقع",
+  "modality.specimenLabel.printing": "جارٍ الطباعة...",
   "modality.fieldModality": "الجهاز",
   "modality.fieldExam": "الفحص",
   "modality.fieldDate": "التاريخ",

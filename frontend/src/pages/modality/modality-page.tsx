@@ -1415,7 +1415,7 @@ export default function ModalityPage() {
           {isIrModality ? (
             <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => openSpecimenLabel(moreMenuAppointment)}>
               <Printer size={14} />
-              <span>Print specimen label</span>
+              <span>{t(language, "modality.specimenLabel.print")}</span>
             </button>
           ) : null}
           {moreMenuAppointment.status === "completed" ? (
@@ -1440,24 +1440,24 @@ export default function ModalityPage() {
       <Dialog open={Boolean(specimenLabelAppointment)} onClose={closeSpecimenLabel}>
         <DialogContent maxWidth="min(92vw, 420px)">
           <DialogHeader>
-            <DialogTitle>Print specimen label</DialogTitle>
-            <DialogDescription>The print timestamp is generated automatically when the label is printed.</DialogDescription>
+            <DialogTitle>{t(language, "modality.specimenLabel.print")}</DialogTitle>
+            <DialogDescription>{t(language, "modality.specimenLabel.description")}</DialogDescription>
           </DialogHeader>
           {specimenLabelAppointment ? (
             <div className="space-y-4 text-sm">
               <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div><span className="text-xs text-muted-foreground">Patient</span><p dir="auto" className="font-medium">{chooseLocalized(language, specimenLabelAppointment.arabicFullName, specimenLabelAppointment.englishFullName)}</p></div>
-                <div><span className="text-xs text-muted-foreground">Accession number</span><p className="font-medium">{specimenLabelAppointment.accessionNumber}</p></div>
+                <div><span className="text-xs text-muted-foreground">{t(language, "modality.fieldPatient")}</span><p dir="auto" className="font-medium">{chooseLocalized(language, specimenLabelAppointment.arabicFullName, specimenLabelAppointment.englishFullName)}</p></div>
+                <div><span className="text-xs text-muted-foreground">{t(language, "modality.fieldAccession")}</span><p className="font-medium">{specimenLabelAppointment.accessionNumber}</p></div>
               </div>
               <div>
-                <label htmlFor="ir-specimen-label-text" className="mb-1 block text-sm font-medium">Specimen / Site</label>
+                <label htmlFor="ir-specimen-label-text" className="mb-1 block text-sm font-medium">{t(language, "modality.specimenLabel.specimenSite")}</label>
                 <Input id="ir-specimen-label-text" autoFocus maxLength={80} value={specimenLabelText} onChange={(event) => setSpecimenLabelText(event.target.value)} />
               </div>
             </div>
           ) : null}
           <DialogFooter className="mt-5">
-            <Button type="button" variant="secondary" disabled={specimenLabelPrinting} onClick={closeSpecimenLabel}>Cancel</Button>
-            <Button type="button" disabled={specimenLabelPrinting || !specimenLabelText.replace(/\s+/g, " ").trim()} onClick={() => void submitSpecimenLabel()}>{specimenLabelPrinting ? "Printing..." : "Print"}</Button>
+            <Button type="button" variant="secondary" disabled={specimenLabelPrinting} onClick={closeSpecimenLabel}>{t(language, "common.cancel")}</Button>
+            <Button type="button" disabled={specimenLabelPrinting || !specimenLabelText.replace(/\s+/g, " ").trim()} onClick={() => void submitSpecimenLabel()}>{specimenLabelPrinting ? t(language, "modality.specimenLabel.printing") : t(language, "common.print")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1543,7 +1543,7 @@ export default function ModalityPage() {
                       <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
                     </div>
                   </div>
-                  <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>Print specimen label</Button> : null}</div>
+                  <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>{t(language, "modality.specimenLabel.print")}</Button> : null}</div>
                 </div>
               </DialogHeader>
 
