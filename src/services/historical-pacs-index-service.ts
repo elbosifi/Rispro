@@ -27,7 +27,9 @@ type MatchReason =
   | "fuzzy_english_name"
   | "arabic_normalized_name"
   | "double_metaphone"
+  | "soundex"
   | "exact_dob"
+  | "age_within_5_years"
   | "compatible_sex"
   | "dob_mismatch"
   | "sex_mismatch"
@@ -106,6 +108,7 @@ interface NameMatchRow {
   match_rank: number;
   name_similarity: number;
   phonetic_match_count: number;
+  soundex_match_count: number;
   matched_arabic?: boolean;
 }
 
@@ -113,6 +116,10 @@ interface HistoricalPacsSyncClient {
   listStudiesForIndexPage(since: number, limit?: number): Promise<OrthancStudiesIndexPage>;
   getStudyForIndex(id: string): Promise<OrthancStudyDetails | null>;
   getChanges(since: number, limit?: number): Promise<OrthancChangesPage>;
+}
+
+interface HistoricalPacsPatientLookupClient {
+  listStudiesByPatientId(patientId: string): Promise<OrthancStudyDetails[]>;
 }
 
 const clean = (value: unknown): string => String(value ?? "").trim();
@@ -318,16 +325,26 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
     select n.*,
       ${historicalPatientNameSearch.rankSql} match_rank,
       ${historicalPatientNameSearch.similaritySql} name_similarity,
-      phonetic_match.matching_token_count phonetic_match_count
+      phonetic_match.matching_token_count phonetic_match_count,
+      case when $6 <> '' then (
+        select count(*)::int
+        from unnest(regexp_split_to_array(trim(n.english_name), E'\\s+')) candidate_token
+        where candidate_token <> ''
+          and soundex(candidate_token) in (
+            select soundex(search_token)
+            from unnest(regexp_split_to_array(trim($6), E'\\s+')) search_token
+            where search_token <> ''
+          )
+      ) else 0 end soundex_match_count
     from name_rows n
     ${historicalPatientNameSearch.phoneticLaterals}
     where ${historicalPatientNameSearch.matchSql}
   )
   select distinct on (patient_id)
     patient_id, patient_name_raw, patient_birth_date, patient_sex,
-    match_rank::int, name_similarity::real, phonetic_match_count::int
+    match_rank::int, name_similarity::real, phonetic_match_count::int, soundex_match_count::int
   from scored
-  order by patient_id, match_rank, name_similarity desc, phonetic_match_count desc
+  order by patient_id, match_rank, name_similarity desc, phonetic_match_count desc, soundex_match_count desc
 `;
 
 async function searchNameMatches(term: string, excludedIds: string[]): Promise<NameMatchRow[]> {
@@ -356,11 +373,24 @@ function normalizedSex(value: string | null | undefined): "M" | "F" | null {
 }
 
 function matchReasons(row: NameMatchRow): MatchReason[] {
-  if (row.matched_arabic) return ["arabic_normalized_name"];
-  if (row.match_rank <= 3) return ["arabic_normalized_name"];
-  if (row.match_rank === 4 || row.match_rank === 7) return ["exact_normalized_name"];
-  if (row.match_rank === 10) return ["double_metaphone"];
-  return [row.match_rank === 8 ? "arabic_normalized_name" : "fuzzy_english_name"];
+  const reasons: MatchReason[] = row.matched_arabic
+    ? ["arabic_normalized_name"]
+    : row.match_rank <= 3
+      ? ["arabic_normalized_name"]
+      : row.match_rank === 4 || row.match_rank === 7
+        ? ["exact_normalized_name"]
+        : row.match_rank === 10
+          ? ["double_metaphone"]
+          : [row.match_rank === 8 ? "arabic_normalized_name" : "fuzzy_english_name"];
+  if (!row.matched_arabic && Number(row.soundex_match_count) > 0) reasons.push("soundex");
+  return reasons;
+}
+
+function birthDatesWithinFiveYears(left: string | null, right: string | null): boolean {
+  if (!left || !right || left === right) return false;
+  const leftTime = Date.parse(`${left}T00:00:00Z`);
+  const rightTime = Date.parse(`${right}T00:00:00Z`);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && Math.abs(leftTime - rightTime) <= 5 * 365.25 * 24 * 60 * 60 * 1000;
 }
 
 async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<string, HistoricalPacsStudy[]>> {
@@ -417,15 +447,12 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
   const strongest = new Map<string, NameMatchRow>();
   for (const match of matches) {
     const current = strongest.get(match.patient_id);
-    if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && Number(match.name_similarity) > Number(current.name_similarity))) strongest.set(match.patient_id, match);
+    if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && (Number(match.name_similarity) > Number(current.name_similarity) || (Number(match.name_similarity) === Number(current.name_similarity) && (match.phonetic_match_count > current.phonetic_match_count || (match.phonetic_match_count === current.phonetic_match_count && match.soundex_match_count > current.soundex_match_count)))))) strongest.set(match.patient_id, match);
   }
-  const ordered = [...strongest.values()].sort((a, b) => a.match_rank - b.match_rank || Number(b.name_similarity) - Number(a.name_similarity) || b.phonetic_match_count - a.phonetic_match_count);
+  const ordered = [...strongest.values()].sort((a, b) => a.match_rank - b.match_rank || Number(b.name_similarity) - Number(a.name_similarity) || b.phonetic_match_count - a.phonetic_match_count || b.soundex_match_count - a.soundex_match_count);
   const eligible = ordered.filter((row) => {
-    const pacsDob = normalizedDicomDate(row.patient_birth_date);
-    const risproDob = normalizedDicomDate(profile.birthDate);
     const pacsSex = normalizedSex(row.patient_sex);
     const risproSex = normalizedSex(profile.sex);
-    if (profile.birthDateReliable && pacsDob && risproDob && pacsDob !== risproDob) return false;
     if (pacsSex && risproSex && pacsSex !== risproSex) return false;
     return true;
   }).slice(0, 20);
@@ -440,8 +467,10 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
     const risproSex = normalizedSex(profile.sex);
     const reasons = matchReasons(row);
     const exactDob = Boolean(profile.birthDateReliable && pacsDob && risproDob && pacsDob === risproDob);
+    const ageWithinFiveYears = Boolean(profile.birthDateReliable && birthDatesWithinFiveYears(pacsDob, risproDob));
     const compatibleSex = Boolean(pacsSex && risproSex && pacsSex === risproSex);
     if (exactDob) reasons.push("exact_dob");
+    if (ageWithinFiveYears) reasons.push("age_within_5_years");
     if (compatibleSex) reasons.push("compatible_sex");
     const veryStrongName = row.match_rank <= 4 || (row.match_rank <= 9 && Number(row.name_similarity) >= 0.75);
     candidates.push({
@@ -462,7 +491,7 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
   const first = candidates[0];
   const second = candidates[1];
   if (first && second && first.classification !== "strong_demographic" && second.matchRank === first.matchRank && Math.abs(second.nameSimilarity - first.nameSimilarity) <= 0.05) {
-    for (const candidate of candidates.filter((item) => item.matchRank === first.matchRank && Math.abs(item.nameSimilarity - first.nameSimilarity) <= 0.05)) {
+    for (const candidate of candidates.filter((item) => item.classification !== "strong_demographic" && item.matchRank === first.matchRank && Math.abs(item.nameSimilarity - first.nameSimilarity) <= 0.05)) {
       candidate.classification = "ambiguous";
       candidate.reasons.push("multiple_competing_identities");
     }
@@ -502,11 +531,12 @@ export async function discoverHistoricalPacsForPatient(patientId: number, studyI
   };
 }
 
-export async function lookupHistoricalPacsByPatientId(patientId: string): Promise<HistoricalPacsCandidate[]> {
+export async function lookupHistoricalPacsByPatientId(patientId: string, lookupClient?: HistoricalPacsPatientLookupClient): Promise<HistoricalPacsCandidate[]> {
   const exactPatientId = clean(patientId);
   if (!exactPatientId) throw new HttpError(400, "Old PACS Patient ID is required.");
   if (exactPatientId.length > 256) throw new HttpError(400, "Old PACS Patient ID is too long.");
-  const studies = (await loadStudiesForPatientIds([exactPatientId])).get(exactPatientId) || [];
+  const client = lookupClient ?? await createAuthoritativeOrthancClient();
+  const studies = (await client.listStudiesByPatientId(exactPatientId)).filter((study) => clean(study.patientId) === exactPatientId);
   if (!studies.length) return [];
   return [{
     historicalPatientId: exactPatientId,
@@ -544,7 +574,7 @@ export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncCli
   const reconciliationMarker = marker.rows[0]?.reconciliation_marker;
   if (!reconciliationMarker) throw new Error("Could not establish the historical PACS reconciliation marker.");
   const state = await db.query<{ last_change_sequence: string | null }>(`select last_change_sequence::text from historical_pacs_sync_state where singleton_key=true`);
-  const lastSequence = state.rows[0]?.last_change_sequence == null ? await readChangesTail(client) : Number(state.rows[0].last_change_sequence);
+  const baselineSequence = state.rows[0]?.last_change_sequence == null ? await readChangesTail(client) : Number(state.rows[0].last_change_sequence);
   let indexed = 0;
   let since = 0;
   for (;;) {
@@ -555,15 +585,15 @@ export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncCli
     since += page.resourceCount;
   }
   const removed = await db.query(`delete from historical_pacs_studies where synchronized_at < $1::timestamptz`, [reconciliationMarker]);
+  const catchup = await drainChanges(client, baselineSequence, db);
   await db.query(
     `update historical_pacs_sync_state set last_change_sequence=$1,last_full_sync_at=now(),last_success_at=now(),last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`,
-    [lastSequence],
+    [catchup.lastSequence],
   );
-  return { indexed, removed: removed.rowCount || 0, lastSequence };
+  return { indexed: indexed + catchup.upserted, removed: (removed.rowCount || 0) + catchup.removed, lastSequence: catchup.lastSequence };
 }
 
-async function applyChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable): Promise<{ upserted: number; removed: number; lastSequence: number }> {
-  const page = await client.getChanges(since, CHANGE_BATCH_SIZE);
+async function applyChangePage(client: HistoricalPacsSyncClient, page: OrthancChangesPage, db: Queryable): Promise<{ upserted: number; removed: number }> {
   const latestStudyChanges = new Map<string, "upsert" | "delete">();
   for (const change of page.changes) {
     if (!change.resourceId) continue;
@@ -582,8 +612,28 @@ async function applyChanges(client: HistoricalPacsSyncClient, since: number, db:
     const details = (await Promise.all(upsertIds.slice(offset, offset + STUDY_BATCH_SIZE).map((id) => client.getStudyForIndex(id)))).filter((study): study is OrthancStudyDetails => study !== null);
     upserted += await upsertHistoricalPacsStudies(details, db);
   }
-  await db.query(`update historical_pacs_sync_state set last_change_sequence=$1,last_success_at=now(),last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`, [page.lastSequence]);
-  return { upserted, removed, lastSequence: page.lastSequence };
+  return { upserted, removed };
+}
+
+async function drainChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable): Promise<{ upserted: number; removed: number; lastSequence: number }> {
+  let cursor = since;
+  let upserted = 0;
+  let removed = 0;
+  for (;;) {
+    const page = await client.getChanges(cursor, CHANGE_BATCH_SIZE);
+    if (!page.done && page.lastSequence <= cursor) throw new Error("Authoritative Orthanc changes cursor did not advance.");
+    const applied = await applyChangePage(client, page, db);
+    upserted += applied.upserted;
+    removed += applied.removed;
+    cursor = page.lastSequence;
+    if (page.done) return { upserted, removed, lastSequence: cursor };
+  }
+}
+
+async function applyChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable): Promise<{ upserted: number; removed: number; lastSequence: number }> {
+  const result = await drainChanges(client, since, db);
+  await db.query(`update historical_pacs_sync_state set last_change_sequence=$1,last_success_at=now(),last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`, [result.lastSequence]);
+  return result;
 }
 
 export async function runHistoricalPacsSyncCycle(clientFactory: () => Promise<HistoricalPacsSyncClient> = createAuthoritativeOrthancClient): Promise<{ lockAcquired: boolean; mode: "full" | "incremental" | "failed"; indexed: number; removed: number }> {
