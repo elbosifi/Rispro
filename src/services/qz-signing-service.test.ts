@@ -88,11 +88,14 @@ describe("QZ request signing", () => {
     assert.ok(signed({ call: "printers.find", params: {}, timestamp: Date.now() }));
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.detail", timestamp: Date.now() })), /not approved/);
   });
-  it("accepts physical portrait and landscape A4, A5, and 50 x 30 mm label options", () => {
+  it("accepts physical portrait and landscape A4, A5, and automatic custom-media label options", () => {
     assert.ok(signed(printPayload(printOptions())));
     assert.ok(signed(printPayload(printOptions({ orientation: "landscape", margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false, jobName: "RISpro registration list" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, jobName: "RISpro A5" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", scaleContent: false, rasterize: true, printerTray: "Tray 1", jobName: "RISpro label" }))));
+    for (const size of [{ width: 50, height: 30, custom: true }, { width: 30, height: 20, custom: true }, { width: 20, height: 30, custom: true }]) {
+      assert.ok(signed(printPayload(printOptions({ size, orientation: null, jobName: "RISpro label" }))));
+    }
   });
   it("accepts only strict finalized A4 geometry", () => {
     const finalizedPortrait = { orientation: null, margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false };
@@ -107,7 +110,6 @@ describe("QZ request signing", () => {
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalizedLandscape, margins: { top: 1, right: 0, bottom: 0, left: 0 } })))), /preserve page geometry/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalizedPortrait, size: null, orientation: "portrait" })))), /default-media/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalizedPortrait, size: { width: 148, height: 210, custom: false } })))), /orientation/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalizedPortrait, size: { width: 50, height: 30, custom: true } })))), /orientation/);
   });
   it("requires exactly one flat PDF data item", () => {
     assert.match(validationError(printPayload(printOptions(), { name: "P" }, [])), /Exactly one PDF/);
@@ -178,6 +180,9 @@ describe("QZ request signing", () => {
       assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size })))), /size|custom-media/);
     }
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "portrait" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 30, height: 20, custom: true }, orientation: "portrait" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 20, height: 30, custom: true }, orientation: "landscape" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, orientation: null })))), /orientation/);
     const finalizedLandscapeWithScaling = printPayload(printOptions({ orientation: "landscape" }));
     assert.throws(() => validateQzSigningRequest(JSON.stringify(finalizedLandscapeWithScaling)), /preserve page geometry/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "landscape" })))), /custom-media/);

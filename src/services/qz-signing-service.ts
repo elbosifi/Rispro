@@ -143,7 +143,8 @@ function validatePrintOptions(options: unknown): void {
     finalizedPdfGeometry = canonicalA4 && size.custom === false && options.orientation === null;
     const finalizedA4Landscape = canonicalA4 && size.custom === false && options.orientation === "landscape";
     const canonicalA4Orientation = canonicalA4 && size.custom === false && (options.orientation === "portrait" || options.orientation === "landscape");
-    if (!finalizedPdfGeometry && !canonicalA4Orientation && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+    const automaticCustomMediaOrientation = size.custom === true && options.orientation === null;
+    if (!finalizedPdfGeometry && !canonicalA4Orientation && !automaticCustomMediaOrientation && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
     finalizedPdfGeometry ||= finalizedA4Landscape;
   }
 
