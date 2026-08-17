@@ -125,6 +125,15 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
+  await t.test("ISSA/EISA phonetic overlap remains below the canonical short-token guard", async () => {
+    const evidence = await pool.query<{ codes_overlap: boolean; token_similarity: number }>(
+      `select patient_english_name_dmetaphone_tokens('issa') && patient_english_name_dmetaphone_tokens('eisa') codes_overlap,
+        similarity('issa','eisa')::real token_similarity`,
+    );
+    assert.equal(evidence.rows[0]?.codes_overlap, true);
+    assert.ok(Number(evidence.rows[0]?.token_similarity) < 0.25);
+  });
+
   await t.test("Soundex corroborates gated English matches but cannot introduce a candidate alone", async () => {
     assert.equal((await pool.query<{ matches: boolean }>(`select soundex('Knuth') = soundex('Kant') matches`)).rows[0]?.matches, true);
     const patientId = await createPatient({ englishName: "Knuth Example" });
@@ -139,26 +148,34 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
-  await t.test("historical component coverage rejects the BEN ISSA common-name false positives", async () => {
-    const patientId = await createPatient({ englishName: "BEN ISSA YOUSSEF MOHAMMED SHALWI", sex: "M" });
+  await t.test("historical component coverage and age corroboration retain only plausible BEN ISSA identities", async () => {
+    const patientId = await createPatient({ englishName: "BEN ISSA YOUSSEF MOHAMMED SHALWI", dob: "1963-01-01", estimated: false, sex: "M" });
     const fixtures = [
-      ["REAL-BEN-1", "BEN EISA YOUSEF MOHAMMED"],
-      ["REAL-BEN-2", "BEN ESSA YOSEF MOHAMED"],
-      ["FALSE-REPEATED", "BEN ISSA MOHAMMED BEN ISSA"],
-      ["FALSE-TWO-COMMON", "MOHAMMED MOUSA YOUSEF"],
-      ["FALSE-BELHASSAN", "YOUSSEF MOHAMMED BELHASSAN MAJID"],
-      ["FALSE-MOHAMMED-REPEATED", "MOHAMMED YOUSEF MOHAMMED"],
-      ["FALSE-TWO-TOKEN", "YOUSEF MOHAMMED"],
-      ["FALSE-MOSTAFA", "MOSTAFA YOUSSEF MOHAMMED"],
-      ["FALSE-MEFTAH", "MEFTAH YOUSSEF MOHAMMED"],
-      ["FALSE-SALAH", "SALAH MOHAMMED YOUSEF"],
-      ["FALSE-SALEM", "YOUSEF SALEM MOHAMMED"],
+      ["REAL-BEN-1", "BEN EISA YOUSEF MOHAMMED", "19610101"],
+      ["REAL-BEN-1-FAR", "BEN EISA YOUSEF MOHAMMED", "19400101"],
+      ["REAL-BEN-2", "BEN ESSA YOSEF MOHAMED", null],
+      ["FALSE-REPEATED", "BEN ISSA MOHAMMED BEN ISSA", "19610101"],
+      ["FALSE-TWO-COMMON", "MOHAMMED MOUSA YOUSEF", "19610101"],
+      ["FALSE-BELHASSAN", "YOUSSEF MOHAMMED BELHASSAN MAJID", "19610101"],
+      ["FALSE-MOHAMMED-REPEATED", "MOHAMMED YOUSEF MOHAMMED", "19610101"],
+      ["FALSE-TWO-TOKEN", "YOUSEF MOHAMMED", "19610101"],
+      ["FALSE-MOSTAFA", "MOSTAFA YOUSSEF MOHAMMED", "19610101"],
+      ["FALSE-MEFTAH", "MEFTAH YOUSSEF MOHAMMED", "19610101"],
+      ["FALSE-SALAH", "SALAH MOHAMMED YOUSEF", "19610101"],
+      ["FALSE-SALEM", "YOUSEF SALEM MOHAMMED", "19610101"],
     ] as const;
     try {
-      await upsertHistoricalPacsStudies(fixtures.map(([legacyId, patientName], index) => study({ orthancStudyId: `ben-gate-${index}`, patientId: legacyId, patientName, patientSex: "M" })));
+      await upsertHistoricalPacsStudies(fixtures.map(([legacyId, patientName, patientBirthDate], index) => study({
+        orthancStudyId: `ben-gate-${index}`,
+        patientId: legacyId,
+        patientName,
+        patientBirthDate,
+        patientSex: "M",
+      })));
       const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
       const returnedIds = new Set(candidates.map((candidate) => candidate.historicalPatientId));
       assert.equal(returnedIds.has("REAL-BEN-1"), true, JSON.stringify(candidates));
+      assert.equal(returnedIds.has("REAL-BEN-1-FAR"), false, JSON.stringify(candidates));
       assert.equal(returnedIds.has("REAL-BEN-2"), true, JSON.stringify(candidates));
       for (const [legacyId] of fixtures.filter(([legacyId]) => legacyId.startsWith("FALSE-"))) assert.equal(returnedIds.has(legacyId), false, legacyId);
     } finally {
@@ -199,17 +216,23 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
-  await t.test("Arabic normalization and one-character spelling variation reuse PostgreSQL name semantics", async () => {
-    const patientId = await createPatient({ englishName: "Unrelated Latin Name", arabicName: "خالد علي" });
-    const orthancStudyId = `arabic-${suffix()}`;
+  await t.test("Arabic dictionary fallback still applies the English PACS structural gate", async () => {
+    const dictionary = await pool.query<{ arabic_text: string; english_text: string }>(
+      `select arabic_text,english_text from name_dictionary where is_active=true and arabic_text=any($1::text[])`,
+      [["محمد", "علي"]],
+    );
+    assert.deepEqual(new Map(dictionary.rows.map((row) => [row.arabic_text, row.english_text])), new Map([["محمد", "Mohamed"], ["علي", "Ali"]]));
+    const patientId = await createPatient({ englishName: "", arabicName: "محمد علي" });
     try {
-      await upsertHistoricalPacsStudies([study({ orthancStudyId, patientId: `AR-${suffix()}`, patientName: "حالد^علي" })]);
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "arabic-dictionary-adequate", patientId: "ARABIC-DICTIONARY-ADEQUATE", patientName: "MOHAMED^ALI" }),
+        study({ orthancStudyId: "arabic-dictionary-weak", patientId: "ARABIC-DICTIONARY-WEAK", patientName: "KAREEM^ALI" }),
+      ]);
       const result = await discoverHistoricalPacsForPatient(patientId);
-      const candidate = result.candidates.find((item) => item.studies.some((entry) => entry.orthancStudyId === orthancStudyId));
-      assert.ok(candidate);
-      assert.ok(candidate.reasons.includes("arabic_normalized_name"));
+      assert.ok(result.candidates.some((candidate) => candidate.historicalPatientId === "ARABIC-DICTIONARY-ADEQUATE"), JSON.stringify(result.candidates));
+      assert.equal(result.candidates.some((candidate) => candidate.historicalPatientId === "ARABIC-DICTIONARY-WEAK"), false);
     } finally {
-      await pool.query(`delete from historical_pacs_studies where orthanc_study_id=$1`, [orthancStudyId]);
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('arabic-dictionary-adequate','arabic-dictionary-weak')`);
       await removePatient(patientId);
     }
   });

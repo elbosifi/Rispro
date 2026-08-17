@@ -21,6 +21,8 @@ const STUDY_BATCH_SIZE = 50;
 const FULL_STUDY_PAGE_SIZE = 1000;
 const CHANGE_BATCH_SIZE = 500;
 const HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD = 0.55;
+const HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD = 0.25;
+const HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD = 0.08;
 
 type Queryable = Pick<PoolClient, "query"> | typeof pool;
 type MatchClassification = "exact" | "strong_demographic" | "possible" | "ambiguous";
@@ -118,7 +120,6 @@ interface NameMatchRow {
   query_component_coverage: number;
   candidate_component_coverage: number;
   anchor_matched: boolean;
-  matched_arabic?: boolean;
 }
 
 interface HistoricalPacsSyncClient {
@@ -372,7 +373,11 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
         select query_token.ordinal query_ordinal, candidate_token.ordinal candidate_ordinal,
           case
             when query_token.token = candidate_token.token then 3
-            when patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token) then 2
+            when patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token)
+              and similarity(query_token.token, candidate_token.token) >= case
+                when least(length(query_token.token), length(candidate_token.token)) <= 4 then ${HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD}
+                else ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD}
+              end then 2
             when similarity(query_token.token, candidate_token.token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD} then 1
             else 0
           end evidence_strength,
@@ -414,8 +419,7 @@ async function searchNameMatches(term: string, excludedIds: string[]): Promise<N
   if (!term.trim()) return [];
   const prepared = await preparePatientSearch(term);
   const result = await pool.query<NameMatchRow>(HISTORICAL_NAME_SEARCH_SQL, [...prepared.queryParameters, excludedIds]);
-  const matchedArabic = /[\u0600-\u06ff]/.test(term);
-  return result.rows.map((row) => ({ ...row, matched_arabic: matchedArabic }));
+  return result.rows;
 }
 
 function normalizedDicomDate(value: string | null | undefined): string | null {
@@ -436,16 +440,14 @@ function normalizedSex(value: string | null | undefined): "M" | "F" | null {
 }
 
 function matchReasons(row: NameMatchRow): MatchReason[] {
-  const reasons: MatchReason[] = row.matched_arabic
+  const reasons: MatchReason[] = row.match_rank <= 3
     ? ["arabic_normalized_name"]
-    : row.match_rank <= 3
-      ? ["arabic_normalized_name"]
-      : row.match_rank === 4 || row.match_rank === 7
-        ? ["exact_normalized_name"]
-        : row.match_rank === 10
-          ? ["double_metaphone"]
-          : [row.match_rank === 8 ? "arabic_normalized_name" : "fuzzy_english_name"];
-  if (!row.matched_arabic && Number(row.soundex_match_count) > 0) reasons.push("soundex");
+    : row.match_rank === 4 || row.match_rank === 7
+      ? ["exact_normalized_name"]
+      : row.match_rank === 10
+        ? ["double_metaphone"]
+        : [row.match_rank === 8 ? "arabic_normalized_name" : "fuzzy_english_name"];
+  if (Number(row.soundex_match_count) > 0) reasons.push("soundex");
   return reasons;
 }
 
@@ -480,8 +482,8 @@ function demographicEvidenceScore(row: NameMatchRow, profile: PatientIdentityPro
 type DemographicEvidence = ReturnType<typeof demographicEvidenceScore>;
 
 function passesHistoricalNameComponentGate(row: NameMatchRow, demographics: DemographicEvidence): boolean {
-  if (row.matched_arabic) return true;
   const queryComponents = Number(row.query_component_count);
+  const candidateComponents = Number(row.candidate_component_count);
   const matchedComponents = Number(row.matched_component_count);
   const queryCoverage = Number(row.query_component_coverage);
   const candidateCoverage = Number(row.candidate_component_coverage);
@@ -492,7 +494,10 @@ function passesHistoricalNameComponentGate(row: NameMatchRow, demographics: Demo
   const normalAdmission = matchedComponents >= 3 && queryCoverage >= 0.7 && candidateCoverage >= 0.7;
   const demographicRescue = matchedComponents >= 3 && queryCoverage >= 0.6 && candidateCoverage >= 0.6
     && demographics.exactDob && demographics.compatibleSex;
-  return normalAdmission || demographicRescue;
+  const ageSupportedBorderlineAdmission = queryComponents >= 4 && candidateComponents >= 4 && matchedComponents >= 3
+    && queryCoverage >= 0.6 && candidateCoverage >= 0.75
+    && demographics.compatibleSex && (demographics.exactDob || demographics.ageWithinFiveYears);
+  return normalAdmission || demographicRescue || ageSupportedBorderlineAdmission;
 }
 
 async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<string, HistoricalPacsStudy[]>> {
@@ -545,7 +550,7 @@ async function exactCandidates(profile: PatientIdentityProfile): Promise<Histori
 }
 
 async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<HistoricalPacsCandidate[]> {
-  const matches = [...await searchNameMatches(profile.englishName, profile.identifiers), ...await searchNameMatches(profile.arabicName, profile.identifiers)];
+  const matches = await searchNameMatches(profile.englishName || profile.arabicName, profile.identifiers);
   const strongest = new Map<string, NameMatchRow>();
   for (const match of matches) {
     const current = strongest.get(match.patient_id);
