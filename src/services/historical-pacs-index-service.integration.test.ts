@@ -139,6 +139,47 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
+  await t.test("historical component coverage rejects the BEN ISSA common-name false positives", async () => {
+    const patientId = await createPatient({ englishName: "BEN ISSA YOUSSEF MOHAMMED SHALWI", sex: "M" });
+    const fixtures = [
+      ["REAL-BEN-1", "BEN EISA YOUSEF MOHAMMED"],
+      ["REAL-BEN-2", "BEN ESSA YOSEF MOHAMED"],
+      ["FALSE-REPEATED", "BEN ISSA MOHAMMED BEN ISSA"],
+      ["FALSE-TWO-COMMON", "MOHAMMED MOUSA YOUSEF"],
+      ["FALSE-BELHASSAN", "YOUSSEF MOHAMMED BELHASSAN MAJID"],
+      ["FALSE-MOHAMMED-REPEATED", "MOHAMMED YOUSEF MOHAMMED"],
+      ["FALSE-TWO-TOKEN", "YOUSEF MOHAMMED"],
+      ["FALSE-MOSTAFA", "MOSTAFA YOUSSEF MOHAMMED"],
+      ["FALSE-MEFTAH", "MEFTAH YOUSSEF MOHAMMED"],
+      ["FALSE-SALAH", "SALAH MOHAMMED YOUSEF"],
+      ["FALSE-SALEM", "YOUSEF SALEM MOHAMMED"],
+    ] as const;
+    try {
+      await upsertHistoricalPacsStudies(fixtures.map(([legacyId, patientName], index) => study({ orthancStudyId: `ben-gate-${index}`, patientId: legacyId, patientName, patientSex: "M" })));
+      const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+      const returnedIds = new Set(candidates.map((candidate) => candidate.historicalPatientId));
+      assert.equal(returnedIds.has("REAL-BEN-1"), true, JSON.stringify(candidates));
+      assert.equal(returnedIds.has("REAL-BEN-2"), true, JSON.stringify(candidates));
+      for (const [legacyId] of fixtures.filter(([legacyId]) => legacyId.startsWith("FALSE-"))) assert.equal(returnedIds.has(legacyId), false, legacyId);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id like 'ben-gate-%'`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("Soundex cannot supply structural coverage or the current-name anchor", async () => {
+    assert.equal((await pool.query<{ matches: boolean }>(`select soundex('Knuth') = soundex('Kant') matches`)).rows[0]?.matches, true);
+    const patientId = await createPatient({ englishName: "Knuth Example Third" });
+    try {
+      await upsertHistoricalPacsStudies([study({ orthancStudyId: "soundex-structural", patientId: "SOUNDEX-STRUCTURAL", patientName: "KANT^EXAMPLE^DIFFERENT" })]);
+      const candidates = await discoverHistoricalPacsForPatient(patientId);
+      assert.equal(candidates.candidates.some((candidate) => candidate.historicalPatientId === "SOUNDEX-STRUCTURAL"), false);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id='soundex-structural'`);
+      await removePatient(patientId);
+    }
+  });
+
   await t.test("indexed StudyInstanceUID reconciles a study while surfacing a different PACS PatientID", async () => {
     const patientId = await createPatient({ englishName: "UID Match Patient", identifier: "CURRENT-PID" });
     const indexed = study({ orthancStudyId: "uid-patient-mismatch", studyInstanceUid: "1.2.840.uid-mismatch", accessionNumber: "PACS-OTHER", patientId: "OTHER-PID", patientName: "UNRELATED^NAME" });
@@ -213,6 +254,42 @@ test("historical PACS index discovery and synchronization", async (t) => {
       assert.equal(result.candidates.some((item) => item.historicalPatientId === "SEX-NO"), false);
     } finally {
       await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('dob-compatible','dob-near','dob-far','sex-mismatch')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("exact reliable DOB rescues only an anchored 60-percent structural match", async () => {
+    const patientId = await createPatient({ englishName: "Nabil Hassan Ali Salem Omar", dob: "1980-01-01", estimated: false, sex: "M" });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "borderline-rescued", patientId: "BORDERLINE-RESCUED", patientName: "NABIL^HASSAN^ALI^DIFFERENT^EXTRA", patientBirthDate: "19800101", patientSex: "M" }),
+        study({ orthancStudyId: "borderline-wrong-anchor", patientId: "BORDERLINE-WRONG-ANCHOR", patientName: "KAREEM^HASSAN^ALI^SALEM^EXTRA", patientBirthDate: "19800101", patientSex: "M" }),
+        study({ orthancStudyId: "far-dob-strong-name", patientId: "FAR-DOB-STRONG-NAME", patientName: "NABIL^HASSAN^ALI^SALEM", patientBirthDate: "19500101", patientSex: "M" }),
+      ]);
+      const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+      assert.ok(candidates.some((candidate) => candidate.historicalPatientId === "BORDERLINE-RESCUED"), JSON.stringify(candidates));
+      assert.equal(candidates.some((candidate) => candidate.historicalPatientId === "BORDERLINE-WRONG-ANCHOR"), false);
+      assert.ok(candidates.some((candidate) => candidate.historicalPatientId === "FAR-DOB-STRONG-NAME"), JSON.stringify(candidates));
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('borderline-rescued','borderline-wrong-anchor','far-dob-strong-name')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("a one-component name requires exact reliable DOB and compatible known sex", async () => {
+    const patientId = await createPatient({ englishName: "Fatima", dob: "1990-02-03", estimated: false, sex: "F" });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "single-proven", patientId: "SINGLE-PROVEN", patientName: "FATIMA", patientBirthDate: "19900203", patientSex: "F" }),
+        study({ orthancStudyId: "single-no-dob", patientId: "SINGLE-NO-DOB", patientName: "FATIMA", patientBirthDate: null, patientSex: "F" }),
+        study({ orthancStudyId: "single-wrong-anchor", patientId: "SINGLE-WRONG-ANCHOR", patientName: "KHADIJA^ALI^MOHAMMED", patientBirthDate: "19900203", patientSex: "F" }),
+      ]);
+      const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+      assert.ok(candidates.some((candidate) => candidate.historicalPatientId === "SINGLE-PROVEN"), JSON.stringify(candidates));
+      assert.equal(candidates.some((candidate) => candidate.historicalPatientId === "SINGLE-NO-DOB"), false);
+      assert.equal(candidates.some((candidate) => candidate.historicalPatientId === "SINGLE-WRONG-ANCHOR"), false);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('single-proven','single-no-dob','single-wrong-anchor')`);
       await removePatient(patientId);
     }
   });
@@ -339,6 +416,23 @@ test("historical PACS index discovery and synchronization", async (t) => {
       assert.equal(candidates.find((candidate) => candidate.historicalPatientId === ids[0])?.studyCount, 15);
     } finally {
       await pool.query(`delete from historical_pacs_studies where patient_id=any($1::text[])`, [ids]);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("equivalent structural names with different demographic evidence are ranked without ambiguity", async () => {
+    const patientId = await createPatient({ englishName: "Yousef Mohammed Ali Salem", dob: "1980-01-01", estimated: false, sex: "M" });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "demographic-rank-stronger", patientId: "ZZ-DEMOGRAPHIC-STRONGER", patientName: "YOUSEF^MOHAMMED^ALI^SALEM", patientBirthDate: "19830101", patientSex: "M" }),
+        study({ orthancStudyId: "demographic-rank-weaker", patientId: "AA-DEMOGRAPHIC-WEAKER", patientName: "YOUSEF^MOHAMMED^ALI^SALEM", patientBirthDate: null, patientSex: "M" }),
+      ]);
+      const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates.filter((candidate) => candidate.historicalPatientId.includes("DEMOGRAPHIC-"));
+      assert.deepEqual(candidates.map((candidate) => candidate.historicalPatientId), ["ZZ-DEMOGRAPHIC-STRONGER", "AA-DEMOGRAPHIC-WEAKER"]);
+      assert.ok(candidates[0]?.reasons.includes("age_within_5_years"));
+      assert.ok(candidates.every((candidate) => candidate.classification !== "ambiguous"));
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('demographic-rank-stronger','demographic-rank-weaker')`);
       await removePatient(patientId);
     }
   });

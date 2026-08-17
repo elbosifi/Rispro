@@ -20,6 +20,7 @@ export const HISTORICAL_PACS_INDEX_FRESHNESS_MS = 5 * 60 * 1000;
 const STUDY_BATCH_SIZE = 50;
 const FULL_STUDY_PAGE_SIZE = 1000;
 const CHANGE_BATCH_SIZE = 500;
+const HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD = 0.55;
 
 type Queryable = Pick<PoolClient, "query"> | typeof pool;
 type MatchClassification = "exact" | "strong_demographic" | "possible" | "ambiguous";
@@ -111,6 +112,12 @@ interface NameMatchRow {
   name_similarity: number;
   phonetic_match_count: number;
   soundex_match_count: number;
+  query_component_count: number;
+  candidate_component_count: number;
+  matched_component_count: number;
+  query_component_coverage: number;
+  candidate_component_coverage: number;
+  anchor_matched: boolean;
   matched_arabic?: boolean;
 }
 
@@ -342,12 +349,65 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
     from name_rows n
     ${historicalPatientNameSearch.phoneticLaterals}
     where ${historicalPatientNameSearch.matchSql}
+  ), structurally_scored as (
+    select scored.*, coalesce(structural.query_component_count, 0)::int query_component_count,
+      coalesce(structural.candidate_component_count, 0)::int candidate_component_count,
+      coalesce(structural.matched_component_count, 0)::int matched_component_count,
+      coalesce(structural.query_component_coverage, 0)::real query_component_coverage,
+      coalesce(structural.candidate_component_coverage, 0)::real candidate_component_coverage,
+      coalesce(structural.anchor_matched, false) anchor_matched
+    from scored
+    left join lateral (
+      with query_tokens as materialized (
+        select ordinal::int ordinal, token
+        from unnest(regexp_split_to_array(trim($6), E'\\s+')) with ordinality raw_token(raw, ordinal)
+        cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
+        where length(token) > 1
+      ), candidate_tokens as materialized (
+        select ordinal::int ordinal, token
+        from unnest(regexp_split_to_array(trim(scored.english_name), E'\\s+')) with ordinality raw_token(raw, ordinal)
+        cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
+        where length(token) > 1
+      ), viable_pairs as materialized (
+        select query_token.ordinal query_ordinal, candidate_token.ordinal candidate_ordinal,
+          case
+            when query_token.token = candidate_token.token then 3
+            when patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token) then 2
+            when similarity(query_token.token, candidate_token.token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD} then 1
+            else 0
+          end evidence_strength,
+          similarity(query_token.token, candidate_token.token) token_similarity
+        from query_tokens query_token
+        cross join candidate_tokens candidate_token
+      ), ranked_pairs as materialized (
+        select *,
+          row_number() over (partition by query_ordinal order by evidence_strength desc, token_similarity desc, candidate_ordinal) query_choice,
+          row_number() over (partition by candidate_ordinal order by evidence_strength desc, token_similarity desc, query_ordinal) candidate_choice
+        from viable_pairs
+        where evidence_strength > 0
+      ), accepted_pairs as (
+        select * from ranked_pairs where query_choice = 1 and candidate_choice = 1
+      ), counts as (
+        select (select count(*) from query_tokens)::int query_component_count,
+          (select count(*) from candidate_tokens)::int candidate_component_count,
+          (select count(*) from accepted_pairs)::int matched_component_count,
+          (select min(ordinal) from query_tokens)::int anchor_ordinal
+      )
+      select counts.query_component_count, counts.candidate_component_count, counts.matched_component_count,
+        case when counts.query_component_count > 0 then counts.matched_component_count::real / counts.query_component_count else 0 end query_component_coverage,
+        case when counts.candidate_component_count > 0 then counts.matched_component_count::real / counts.candidate_component_count else 0 end candidate_component_coverage,
+        exists(select 1 from accepted_pairs where query_ordinal = counts.anchor_ordinal) anchor_matched
+      from counts
+    ) structural on $6 <> ''
   )
   select distinct on (patient_id)
     patient_id, patient_name_raw, patient_birth_date, patient_sex,
-    match_rank::int, name_similarity::real, phonetic_match_count::int, soundex_match_count::int
-  from scored
-  order by patient_id, match_rank, name_similarity desc, phonetic_match_count desc, soundex_match_count desc
+    match_rank::int, name_similarity::real, phonetic_match_count::int, soundex_match_count::int,
+    query_component_count, candidate_component_count, matched_component_count,
+    query_component_coverage, candidate_component_coverage, anchor_matched
+  from structurally_scored
+  order by patient_id, match_rank, matched_component_count desc, query_component_coverage desc,
+    candidate_component_coverage desc, name_similarity desc, phonetic_match_count desc, soundex_match_count desc
 `;
 
 async function searchNameMatches(term: string, excludedIds: string[]): Promise<NameMatchRow[]> {
@@ -417,6 +477,24 @@ function demographicEvidenceScore(row: NameMatchRow, profile: PatientIdentityPro
   return { score: (exactDob ? 3 : ageWithinFiveYears ? 2 : 0) + (compatibleSex ? 1 : 0), exactDob, ageWithinFiveYears, compatibleSex, sexConflict };
 }
 
+type DemographicEvidence = ReturnType<typeof demographicEvidenceScore>;
+
+function passesHistoricalNameComponentGate(row: NameMatchRow, demographics: DemographicEvidence): boolean {
+  if (row.matched_arabic) return true;
+  const queryComponents = Number(row.query_component_count);
+  const matchedComponents = Number(row.matched_component_count);
+  const queryCoverage = Number(row.query_component_coverage);
+  const candidateCoverage = Number(row.candidate_component_coverage);
+  if (!row.anchor_matched || queryComponents < 1) return false;
+  if (queryComponents === 1) return matchedComponents === 1 && demographics.exactDob && demographics.compatibleSex;
+  if (queryComponents === 2) return matchedComponents === 2 && candidateCoverage >= 2 / 3;
+  if (queryComponents === 3) return matchedComponents >= 2 && queryCoverage >= 2 / 3 && candidateCoverage >= 2 / 3;
+  const normalAdmission = matchedComponents >= 3 && queryCoverage >= 0.7 && candidateCoverage >= 0.7;
+  const demographicRescue = matchedComponents >= 3 && queryCoverage >= 0.6 && candidateCoverage >= 0.6
+    && demographics.exactDob && demographics.compatibleSex;
+  return normalAdmission || demographicRescue;
+}
+
 async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<string, HistoricalPacsStudy[]>> {
   const grouped = new Map<string, HistoricalPacsStudy[]>();
   if (!patientIds.length) return grouped;
@@ -471,19 +549,35 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
   const strongest = new Map<string, NameMatchRow>();
   for (const match of matches) {
     const current = strongest.get(match.patient_id);
-    if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && (Number(match.name_similarity) > Number(current.name_similarity) || (Number(match.name_similarity) === Number(current.name_similarity) && (match.phonetic_match_count > current.phonetic_match_count || (match.phonetic_match_count === current.phonetic_match_count && match.soundex_match_count > current.soundex_match_count)))))) strongest.set(match.patient_id, match);
+    if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && (
+      match.matched_component_count > current.matched_component_count
+      || (match.matched_component_count === current.matched_component_count && (
+        Number(match.query_component_coverage) > Number(current.query_component_coverage)
+        || (Number(match.query_component_coverage) === Number(current.query_component_coverage) && (
+          Number(match.candidate_component_coverage) > Number(current.candidate_component_coverage)
+          || (Number(match.candidate_component_coverage) === Number(current.candidate_component_coverage) && (
+            Number(match.name_similarity) > Number(current.name_similarity)
+            || (Number(match.name_similarity) === Number(current.name_similarity) && (match.phonetic_match_count > current.phonetic_match_count || (match.phonetic_match_count === current.phonetic_match_count && match.soundex_match_count > current.soundex_match_count)))
+          ))
+        ))
+      ))
+    ))) strongest.set(match.patient_id, match);
   }
   const eligible = [...strongest.values()]
     .map((row) => ({ row, demographics: demographicEvidenceScore(row, profile) }))
     .filter((candidate) => !candidate.demographics.sexConflict)
+    .filter((candidate) => passesHistoricalNameComponentGate(candidate.row, candidate.demographics))
     .sort((a, b) => a.row.match_rank - b.row.match_rank
+      || b.row.matched_component_count - a.row.matched_component_count
+      || Number(b.row.query_component_coverage) - Number(a.row.query_component_coverage)
+      || Number(b.row.candidate_component_coverage) - Number(a.row.candidate_component_coverage)
       || Number(b.row.name_similarity) - Number(a.row.name_similarity)
       || b.row.phonetic_match_count - a.row.phonetic_match_count
       || b.row.soundex_match_count - a.row.soundex_match_count
       || b.demographics.score - a.demographics.score)
     .slice(0, 20);
   const studiesById = await loadStudiesForPatientIds(eligible.map((candidate) => candidate.row.patient_id));
-  const candidates: HistoricalPacsCandidate[] = [];
+  const candidates: Array<{ candidate: HistoricalPacsCandidate; row: NameMatchRow; demographics: DemographicEvidence }> = [];
   for (const { row, demographics } of eligible) {
     const studies = studiesById.get(row.patient_id) || [];
     if (!studies.length) continue;
@@ -492,7 +586,7 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
     if (demographics.ageWithinFiveYears) reasons.push("age_within_5_years");
     if (demographics.compatibleSex) reasons.push("compatible_sex");
     const veryStrongName = row.match_rank <= 4 || (row.match_rank <= 9 && Number(row.name_similarity) >= 0.75);
-    candidates.push({
+    candidates.push({ candidate: {
       historicalPatientId: row.patient_id,
       patientName: row.patient_name_raw,
       patientBirthDate: row.patient_birth_date,
@@ -505,17 +599,22 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
       phoneticMatchCount: Number(row.phonetic_match_count),
       studyCount: studies.length,
       studies,
-    });
+    }, row, demographics });
   }
-  const first = candidates[0];
-  const second = candidates[1];
-  if (first && second && first.classification !== "strong_demographic" && second.matchRank === first.matchRank && Math.abs(second.nameSimilarity - first.nameSimilarity) <= 0.05) {
-    for (const candidate of candidates.filter((item) => item.classification !== "strong_demographic" && item.matchRank === first.matchRank && Math.abs(item.nameSimilarity - first.nameSimilarity) <= 0.05)) {
-      candidate.classification = "ambiguous";
-      candidate.reasons.push("multiple_competing_identities");
+  const comparableEvidence = (left: typeof candidates[number], right: typeof candidates[number]) => left.row.match_rank === right.row.match_rank
+    && left.row.matched_component_count === right.row.matched_component_count
+    && Math.abs(Number(left.row.query_component_coverage) - Number(right.row.query_component_coverage)) <= 0.05
+    && Math.abs(Number(left.row.candidate_component_coverage) - Number(right.row.candidate_component_coverage)) <= 0.05
+    && Math.abs(left.candidate.nameSimilarity - right.candidate.nameSimilarity) <= 0.05
+    && left.demographics.score === right.demographics.score;
+  for (const item of candidates) {
+    if (item.candidate.classification === "strong_demographic") continue;
+    if (candidates.some((other) => other !== item && other.candidate.classification !== "strong_demographic" && comparableEvidence(item, other))) {
+      item.candidate.classification = "ambiguous";
+      item.candidate.reasons.push("multiple_competing_identities");
     }
   }
-  return candidates;
+  return candidates.map(({ candidate }) => candidate);
 }
 
 export interface HistoricalPacsIndexState { status: HistoricalPacsIndexStatus; lastSuccessAt: string | null }
