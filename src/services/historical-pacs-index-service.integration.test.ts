@@ -148,7 +148,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
-  await t.test("historical component coverage and age corroboration retain only plausible BEN ISSA identities", async () => {
+  await t.test("ordered BEN ISSA chains retain contextual EISA and trailing-prefix transliterations", async () => {
     const patientId = await createPatient({ englishName: "BEN ISSA YOUSSEF MOHAMMED SHALWI", dob: "1963-01-01", estimated: false, sex: "M" });
     const fixtures = [
       ["REAL-BEN-1", "BEN EISA YOUSEF MOHAMMED", "19610101"],
@@ -175,12 +175,88 @@ test("historical PACS index discovery and synchronization", async (t) => {
       const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
       const returnedIds = new Set(candidates.map((candidate) => candidate.historicalPatientId));
       assert.equal(returnedIds.has("REAL-BEN-1"), true, JSON.stringify(candidates));
-      assert.equal(returnedIds.has("REAL-BEN-1-FAR"), false, JSON.stringify(candidates));
+      assert.equal(returnedIds.has("REAL-BEN-1-FAR"), true, JSON.stringify(candidates));
       assert.equal(returnedIds.has("REAL-BEN-2"), true, JSON.stringify(candidates));
+      assert.ok(candidates.findIndex((candidate) => candidate.historicalPatientId === "REAL-BEN-2") < candidates.findIndex((candidate) => candidate.historicalPatientId === "REAL-BEN-1"), JSON.stringify(candidates));
       for (const [legacyId] of fixtures.filter(([legacyId]) => legacyId.startsWith("FALSE-"))) assert.equal(returnedIds.has(legacyId), false, legacyId);
     } finally {
       await pool.query(`delete from historical_pacs_studies where orthanc_study_id like 'ben-gate-%'`);
       await removePatient(patientId);
+    }
+  });
+
+  await t.test("ordered trailing prefixes preserve NAEEMA, RABHA, and SALWA transliterations", async () => {
+    const fixtures = [
+      ["Naeema Mohammed Ibrahim Alkaraghli", "ORDERED-NAEEMA", "NAEEMA MOHAMED IBRAHIM", []],
+      ["Rabha Ahmed Hamed Alalwani", "ORDERED-RABHA", "RABHA AHMED HAMAD", []],
+      ["Salwa Nouri Abdelkarim", "ORDERED-SALWA", "SALWA NOURI AALKREM", ["SALAH AWAD ABDULLAH", "SALHA ABED ABDALNE"]],
+    ] as const;
+    const patientIds: number[] = [];
+    try {
+      for (const [currentName, historicalId, historicalName, rejectedNames] of fixtures) {
+        const patientId = await createPatient({ englishName: currentName });
+        patientIds.push(patientId);
+        await upsertHistoricalPacsStudies([
+          study({ orthancStudyId: historicalId.toLowerCase(), patientId: historicalId, patientName: historicalName }),
+          ...rejectedNames.map((patientName, index) => study({ orthancStudyId: `${historicalId.toLowerCase()}-reject-${index}`, patientId: `${historicalId}-REJECT-${index}`, patientName })),
+        ]);
+        const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+        assert.ok(candidates.some((candidate) => candidate.historicalPatientId === historicalId), `${historicalId}: ${JSON.stringify(candidates)}`);
+        for (let index = 0; index < rejectedNames.length; index += 1) assert.equal(candidates.some((candidate) => candidate.historicalPatientId === `${historicalId}-REJECT-${index}`), false);
+      }
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where patient_id like 'ORDERED-%'`);
+      for (const patientId of patientIds) await removePatient(patientId);
+    }
+  });
+
+  await t.test("ordered chains reject skipped, restarted, reordered, and disagreeing components despite demographics", async () => {
+    const fixtures = [
+      ["Ali Khayri Faraj", ["ALI FARAJ", "FARAJ ALI FARAJ", "ALI FARAJ ALI"]],
+      ["Amal Raheel Mohammed", ["AMAL MOHAMMED MOHAMMED", "AMAL ALHAMED MOHAMMED", "AMAL OMAR MOHAMMED", "AMAL FATHI MOHAMMED", "AMAL FAWZE MOHAMMED"]],
+      ["Hamza Meftah Ahmed", ["HAMZA AHMED", "HAMZA AMJEHED MOFTAH", "HAMZA AMJAHED MUFTAH"]],
+      ["Fatima Milad Alzwai", ["FATIMA MILAD MOKHTAR", "FATIMA MILAD"]],
+    ] as const;
+    const patientIds: number[] = [];
+    const historicalIds: string[] = [];
+    try {
+      for (const [groupIndex, [currentName, historicalNames]] of fixtures.entries()) {
+        const patientId = await createPatient({ englishName: currentName, dob: "1980-01-01", estimated: false, sex: "M" });
+        patientIds.push(patientId);
+        const studies = historicalNames.map((patientName, candidateIndex) => {
+          const historicalId = `ORDER-REJECT-${groupIndex}-${candidateIndex}`;
+          historicalIds.push(historicalId);
+          return study({ orthancStudyId: historicalId.toLowerCase(), patientId: historicalId, patientName, patientBirthDate: "19820101", patientSex: "M" });
+        });
+        await upsertHistoricalPacsStudies(studies);
+        const returnedIds = new Set((await discoverHistoricalPacsForPatient(patientId)).candidates.map((candidate) => candidate.historicalPatientId));
+        for (const historicalId of historicalIds.slice(-historicalNames.length)) assert.equal(returnedIds.has(historicalId), false, `${historicalId}: ${JSON.stringify([...returnedIds])}`);
+      }
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where patient_id like 'ORDER-REJECT-%'`);
+      for (const patientId of patientIds) await removePatient(patientId);
+    }
+  });
+
+  await t.test("contextual phonetic bridge requires strong neighbors, cannot anchor, and is limited to one", async () => {
+    const fixtures = [
+      ["BRIDGE-SURROUNDED", "Ben Issa Youssef Mohammed", "BEN EISA YOUSEF MOHAMMED", true],
+      ["BRIDGE-FIRST", "Issa Youssef Mohammed", "EISA YOUSEF MOHAMMED", false],
+      ["BRIDGE-NO-FOLLOW", "Ben Issa Youssef Mohammed", "BEN EISA DIFFERENT", false],
+      ["BRIDGE-TWICE", "Ben Issa Youssef Issa Mohammed", "BEN EISA YOUSEF EISA MOHAMMED", false],
+    ] as const;
+    const patientIds: number[] = [];
+    try {
+      for (const [historicalId, currentName, historicalName, expected] of fixtures) {
+        const patientId = await createPatient({ englishName: currentName });
+        patientIds.push(patientId);
+        await upsertHistoricalPacsStudies([study({ orthancStudyId: historicalId.toLowerCase(), patientId: historicalId, patientName: historicalName })]);
+        const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+        assert.equal(candidates.some((candidate) => candidate.historicalPatientId === historicalId), expected, `${historicalId}: ${JSON.stringify(candidates)}`);
+      }
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where patient_id like 'BRIDGE-%'`);
+      for (const patientId of patientIds) await removePatient(patientId);
     }
   });
 
@@ -281,7 +357,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
-  await t.test("exact reliable DOB rescues only an anchored 60-percent structural match", async () => {
+  await t.test("demographics cannot rescue a broken ordered chain and far DOB does not reject a valid prefix", async () => {
     const patientId = await createPatient({ englishName: "Nabil Hassan Ali Salem Omar", dob: "1980-01-01", estimated: false, sex: "M" });
     try {
       await upsertHistoricalPacsStudies([
@@ -290,7 +366,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
         study({ orthancStudyId: "far-dob-strong-name", patientId: "FAR-DOB-STRONG-NAME", patientName: "NABIL^HASSAN^ALI^SALEM", patientBirthDate: "19500101", patientSex: "M" }),
       ]);
       const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
-      assert.ok(candidates.some((candidate) => candidate.historicalPatientId === "BORDERLINE-RESCUED"), JSON.stringify(candidates));
+      assert.equal(candidates.some((candidate) => candidate.historicalPatientId === "BORDERLINE-RESCUED"), false, JSON.stringify(candidates));
       assert.equal(candidates.some((candidate) => candidate.historicalPatientId === "BORDERLINE-WRONG-ANCHOR"), false);
       assert.ok(candidates.some((candidate) => candidate.historicalPatientId === "FAR-DOB-STRONG-NAME"), JSON.stringify(candidates));
     } finally {

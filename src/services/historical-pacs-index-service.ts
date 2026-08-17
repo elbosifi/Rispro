@@ -116,9 +116,9 @@ interface NameMatchRow {
   soundex_match_count: number;
   query_component_count: number;
   candidate_component_count: number;
-  matched_component_count: number;
-  query_component_coverage: number;
-  candidate_component_coverage: number;
+  ordered_match_count: number;
+  weak_bridge_count: number;
+  candidate_fully_consumed: boolean;
   anchor_matched: boolean;
 }
 
@@ -353,66 +353,87 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
   ), structurally_scored as (
     select scored.*, coalesce(structural.query_component_count, 0)::int query_component_count,
       coalesce(structural.candidate_component_count, 0)::int candidate_component_count,
-      coalesce(structural.matched_component_count, 0)::int matched_component_count,
-      coalesce(structural.query_component_coverage, 0)::real query_component_coverage,
-      coalesce(structural.candidate_component_coverage, 0)::real candidate_component_coverage,
+      coalesce(structural.ordered_match_count, 0)::int ordered_match_count,
+      coalesce(structural.weak_bridge_count, 0)::int weak_bridge_count,
+      coalesce(structural.candidate_fully_consumed, false) candidate_fully_consumed,
       coalesce(structural.anchor_matched, false) anchor_matched
     from scored
     left join lateral (
-      with query_tokens as materialized (
-        select ordinal::int ordinal, token
+      with normalized_query_tokens as materialized (
+        select ordinal::int raw_ordinal, token
         from unnest(regexp_split_to_array(trim($6), E'\\s+')) with ordinality raw_token(raw, ordinal)
         cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
         where length(token) > 1
-      ), candidate_tokens as materialized (
-        select ordinal::int ordinal, token
+      ), query_tokens as materialized (
+        select row_number() over (order by raw_ordinal)::int ordinal, token
+        from normalized_query_tokens
+      ), normalized_candidate_tokens as materialized (
+        select ordinal::int raw_ordinal, token
         from unnest(regexp_split_to_array(trim(scored.english_name), E'\\s+')) with ordinality raw_token(raw, ordinal)
         cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
         where length(token) > 1
-      ), viable_pairs as materialized (
-        select query_token.ordinal query_ordinal, candidate_token.ordinal candidate_ordinal,
-          case
-            when query_token.token = candidate_token.token then 3
-            when patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token)
+      ), candidate_tokens as materialized (
+        select row_number() over (order by raw_ordinal)::int ordinal, token
+        from normalized_candidate_tokens
+      ), positional_evidence as materialized (
+        select query_token.ordinal,
+          query_token.token query_token,
+          candidate_token.token candidate_token,
+          query_token.token = candidate_token.token
+            or (patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token)
               and similarity(query_token.token, candidate_token.token) >= case
                 when least(length(query_token.token), length(candidate_token.token)) <= 4 then ${HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD}
                 else ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD}
-              end then 2
-            when similarity(query_token.token, candidate_token.token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD} then 1
-            else 0
-          end evidence_strength,
-          similarity(query_token.token, candidate_token.token) token_similarity
+              end)
+            or similarity(query_token.token, candidate_token.token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD} strong_match,
+          patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token) phonetic_overlap
         from query_tokens query_token
-        cross join candidate_tokens candidate_token
-      ), ranked_pairs as materialized (
+        join candidate_tokens candidate_token on candidate_token.ordinal = query_token.ordinal
+      ), positional_kinds as materialized (
+        select *, case
+          when strong_match then 2
+          when ordinal > 1 and phonetic_overlap
+            and lag(strong_match) over (order by ordinal)
+            and lead(strong_match) over (order by ordinal)
+            then 1
+          else 0
+        end match_kind
+        from positional_evidence
+      ), prefix_status as materialized (
         select *,
-          row_number() over (partition by query_ordinal order by evidence_strength desc, token_similarity desc, candidate_ordinal) query_choice,
-          row_number() over (partition by candidate_ordinal order by evidence_strength desc, token_similarity desc, query_ordinal) candidate_choice
-        from viable_pairs
-        where evidence_strength > 0
-      ), accepted_pairs as (
-        select * from ranked_pairs where query_choice = 1 and candidate_choice = 1
+          count(*) filter (where match_kind = 0) over (order by ordinal) mismatch_count,
+          count(*) filter (where match_kind = 1) over (order by ordinal) bridge_count
+        from positional_kinds
+      ), accepted_prefix as materialized (
+        select * from prefix_status where mismatch_count = 0 and bridge_count <= 1
       ), counts as (
         select (select count(*) from query_tokens)::int query_component_count,
           (select count(*) from candidate_tokens)::int candidate_component_count,
-          (select count(*) from accepted_pairs)::int matched_component_count,
-          (select min(ordinal) from query_tokens)::int anchor_ordinal
+          (select count(*) from accepted_prefix)::int ordered_match_count,
+          (select count(*) from accepted_prefix where match_kind = 1)::int weak_bridge_count
       )
-      select counts.query_component_count, counts.candidate_component_count, counts.matched_component_count,
-        case when counts.query_component_count > 0 then counts.matched_component_count::real / counts.query_component_count else 0 end query_component_coverage,
-        case when counts.candidate_component_count > 0 then counts.matched_component_count::real / counts.candidate_component_count else 0 end candidate_component_coverage,
-        exists(select 1 from accepted_pairs where query_ordinal = counts.anchor_ordinal) anchor_matched
+      select counts.query_component_count, counts.candidate_component_count, counts.ordered_match_count,
+        counts.weak_bridge_count,
+        counts.ordered_match_count = counts.candidate_component_count candidate_fully_consumed,
+        exists(select 1 from positional_evidence where ordinal = 1 and strong_match) anchor_matched
       from counts
     ) structural on $6 <> ''
   )
   select distinct on (patient_id)
     patient_id, patient_name_raw, patient_birth_date, patient_sex,
     match_rank::int, name_similarity::real, phonetic_match_count::int, soundex_match_count::int,
-    query_component_count, candidate_component_count, matched_component_count,
-    query_component_coverage, candidate_component_coverage, anchor_matched
+    query_component_count, candidate_component_count, ordered_match_count,
+    weak_bridge_count, candidate_fully_consumed, anchor_matched
   from structurally_scored
-  order by patient_id, match_rank, matched_component_count desc, query_component_coverage desc,
-    candidate_component_coverage desc, name_similarity desc, phonetic_match_count desc, soundex_match_count desc
+  order by patient_id, (case
+      when query_component_count = 1 then anchor_matched and ordered_match_count = 1
+      when query_component_count = 2 then anchor_matched and candidate_component_count = 2
+        and ordered_match_count = 2 and candidate_fully_consumed
+      else anchor_matched and candidate_component_count <= query_component_count
+        and ordered_match_count >= 3 and candidate_fully_consumed
+    end) desc,
+    ordered_match_count desc, weak_bridge_count, match_rank,
+    name_similarity desc, phonetic_match_count desc, soundex_match_count desc
 `;
 
 async function searchNameMatches(term: string, excludedIds: string[]): Promise<NameMatchRow[]> {
@@ -484,20 +505,11 @@ type DemographicEvidence = ReturnType<typeof demographicEvidenceScore>;
 function passesHistoricalNameComponentGate(row: NameMatchRow, demographics: DemographicEvidence): boolean {
   const queryComponents = Number(row.query_component_count);
   const candidateComponents = Number(row.candidate_component_count);
-  const matchedComponents = Number(row.matched_component_count);
-  const queryCoverage = Number(row.query_component_coverage);
-  const candidateCoverage = Number(row.candidate_component_coverage);
+  const orderedMatches = Number(row.ordered_match_count);
   if (!row.anchor_matched || queryComponents < 1) return false;
-  if (queryComponents === 1) return matchedComponents === 1 && demographics.exactDob && demographics.compatibleSex;
-  if (queryComponents === 2) return matchedComponents === 2 && candidateCoverage >= 2 / 3;
-  if (queryComponents === 3) return matchedComponents >= 2 && queryCoverage >= 2 / 3 && candidateCoverage >= 2 / 3;
-  const normalAdmission = matchedComponents >= 3 && queryCoverage >= 0.7 && candidateCoverage >= 0.7;
-  const demographicRescue = matchedComponents >= 3 && queryCoverage >= 0.6 && candidateCoverage >= 0.6
-    && demographics.exactDob && demographics.compatibleSex;
-  const ageSupportedBorderlineAdmission = queryComponents >= 4 && candidateComponents >= 4 && matchedComponents >= 3
-    && queryCoverage >= 0.6 && candidateCoverage >= 0.75
-    && demographics.compatibleSex && (demographics.exactDob || demographics.ageWithinFiveYears);
-  return normalAdmission || demographicRescue || ageSupportedBorderlineAdmission;
+  if (queryComponents === 1) return orderedMatches === 1 && demographics.exactDob && demographics.compatibleSex;
+  if (queryComponents === 2) return candidateComponents === 2 && orderedMatches === 2 && row.candidate_fully_consumed;
+  return candidateComponents <= queryComponents && orderedMatches >= 3 && row.candidate_fully_consumed;
 }
 
 async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<string, HistoricalPacsStudy[]>> {
@@ -554,28 +566,26 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
   const strongest = new Map<string, NameMatchRow>();
   for (const match of matches) {
     const current = strongest.get(match.patient_id);
-    if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && (
-      match.matched_component_count > current.matched_component_count
-      || (match.matched_component_count === current.matched_component_count && (
-        Number(match.query_component_coverage) > Number(current.query_component_coverage)
-        || (Number(match.query_component_coverage) === Number(current.query_component_coverage) && (
-          Number(match.candidate_component_coverage) > Number(current.candidate_component_coverage)
-          || (Number(match.candidate_component_coverage) === Number(current.candidate_component_coverage) && (
+    if (!current
+      || match.ordered_match_count > current.ordered_match_count
+      || (match.ordered_match_count === current.ordered_match_count && (
+        match.weak_bridge_count < current.weak_bridge_count
+        || (match.weak_bridge_count === current.weak_bridge_count && (
+          match.match_rank < current.match_rank
+          || (match.match_rank === current.match_rank && (
             Number(match.name_similarity) > Number(current.name_similarity)
             || (Number(match.name_similarity) === Number(current.name_similarity) && (match.phonetic_match_count > current.phonetic_match_count || (match.phonetic_match_count === current.phonetic_match_count && match.soundex_match_count > current.soundex_match_count)))
           ))
         ))
-      ))
-    ))) strongest.set(match.patient_id, match);
+      ))) strongest.set(match.patient_id, match);
   }
   const eligible = [...strongest.values()]
     .map((row) => ({ row, demographics: demographicEvidenceScore(row, profile) }))
     .filter((candidate) => !candidate.demographics.sexConflict)
     .filter((candidate) => passesHistoricalNameComponentGate(candidate.row, candidate.demographics))
-    .sort((a, b) => a.row.match_rank - b.row.match_rank
-      || b.row.matched_component_count - a.row.matched_component_count
-      || Number(b.row.query_component_coverage) - Number(a.row.query_component_coverage)
-      || Number(b.row.candidate_component_coverage) - Number(a.row.candidate_component_coverage)
+    .sort((a, b) => b.row.ordered_match_count - a.row.ordered_match_count
+      || a.row.weak_bridge_count - b.row.weak_bridge_count
+      || a.row.match_rank - b.row.match_rank
       || Number(b.row.name_similarity) - Number(a.row.name_similarity)
       || b.row.phonetic_match_count - a.row.phonetic_match_count
       || b.row.soundex_match_count - a.row.soundex_match_count
@@ -607,10 +617,11 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
     }, row, demographics });
   }
   const comparableEvidence = (left: typeof candidates[number], right: typeof candidates[number]) => left.row.match_rank === right.row.match_rank
-    && left.row.matched_component_count === right.row.matched_component_count
-    && Math.abs(Number(left.row.query_component_coverage) - Number(right.row.query_component_coverage)) <= 0.05
-    && Math.abs(Number(left.row.candidate_component_coverage) - Number(right.row.candidate_component_coverage)) <= 0.05
+    && left.row.ordered_match_count === right.row.ordered_match_count
+    && left.row.weak_bridge_count === right.row.weak_bridge_count
     && Math.abs(left.candidate.nameSimilarity - right.candidate.nameSimilarity) <= 0.05
+    && left.row.phonetic_match_count === right.row.phonetic_match_count
+    && left.row.soundex_match_count === right.row.soundex_match_count
     && left.demographics.score === right.demographics.score;
   for (const item of candidates) {
     if (item.candidate.classification === "strong_demographic") continue;
