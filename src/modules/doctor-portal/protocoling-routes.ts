@@ -12,6 +12,7 @@ import {
   getProtocolingReportRedirect,
   getProtocolingSonicDicomRedirect,
   getProtocolingHistorySonicDicomRedirect,
+  getProtocolingHistoricalPacsCandidates,
   getProtocolingPatientHistory,
   searchProtocolingHistoricalPacsPatientId,
   listProtocolDocumentAnnotations,
@@ -147,6 +148,14 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
     res.json(await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId")));
+  })
+);
+
+router.get(
+  "/appointments/:appointmentId/history/historical-candidates",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    res.json(await getProtocolingHistoricalPacsCandidates(positiveInteger(req.params.appointmentId, "appointmentId")));
   })
 );
 

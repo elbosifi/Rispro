@@ -181,4 +181,13 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.doesNotMatch(routes, /old-patient-id[\s\S]{0,400}req\.query\.patientId/);
     assert.match(client, /history\/old-patient-id`, \{\s*method: "POST",\s*body: JSON\.stringify\(\{ patientId: patientId\.trim\(\) \}\)/);
   });
+
+  it("keeps fast history and fuzzy historical candidates on independently authorized GET routes", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocoling-routes.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    assert.match(routes, /router\.get\(\s*"\/appointments\/:appointmentId\/history"[\s\S]*?requireProtocolingAccess\(req\)[\s\S]*?getProtocolingPatientHistory/);
+    assert.match(routes, /router\.get\(\s*"\/appointments\/:appointmentId\/history\/historical-candidates"[\s\S]*?requireProtocolingAccess\(req\)[\s\S]*?getProtocolingHistoricalPacsCandidates/);
+    assert.match(repo, /getProtocolingPatientHistory[\s\S]*?getHistoricalPacsReconciliationForPatient/);
+    assert.match(repo, /getProtocolingHistoricalPacsCandidates[\s\S]*?discoverHistoricalPacsCandidatesForPatient/);
+  });
 });

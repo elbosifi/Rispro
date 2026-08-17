@@ -80,6 +80,19 @@ export interface HistoricalPacsDiscoveryResult {
   knownPatientIds: string[];
 }
 
+export interface HistoricalPacsReconciliationResult {
+  exactStudies: OrthancStudyDetails[];
+  indexStatus: HistoricalPacsIndexStatus;
+  lastSuccessAt: string | null;
+  knownPatientIds: string[];
+}
+
+export interface HistoricalPacsCandidatesResult {
+  candidates: HistoricalPacsCandidate[];
+  indexStatus: HistoricalPacsIndexStatus;
+  lastSuccessAt: string | null;
+}
+
 interface IndexedStudyRow {
   orthanc_study_id: string;
   study_instance_uid: string | null;
@@ -762,13 +775,35 @@ export async function getHistoricalPacsAdminStatus(): Promise<HistoricalPacsAdmi
   };
 }
 
-export async function discoverHistoricalPacsForPatient(patientId: number, studyInstanceUids: string[] = []): Promise<HistoricalPacsDiscoveryResult> {
-  const profile = await loadPatientProfile(patientId);
-  const [exact, uidStudies, fuzzy, indexState] = await Promise.all([exactCandidates(profile), loadStudiesForStudyInstanceUids(studyInstanceUids), fuzzyCandidates(profile), getHistoricalPacsIndexState()]);
+async function reconciliationStudiesForProfile(profile: PatientIdentityProfile, studyInstanceUids: string[]): Promise<OrthancStudyDetails[]> {
+  const [exact, uidStudies] = await Promise.all([exactCandidates(profile), loadStudiesForStudyInstanceUids(studyInstanceUids)]);
   const reconciliationStudies = new Map<string, OrthancStudyDetails>();
   for (const study of [...exact.flatMap((candidate) => candidate.studies), ...uidStudies]) reconciliationStudies.set(study.orthancStudyId, toOrthancStudy(study));
+  return [...reconciliationStudies.values()];
+}
+
+export async function getHistoricalPacsReconciliationForPatient(patientId: number, studyInstanceUids: string[] = []): Promise<HistoricalPacsReconciliationResult> {
+  const profile = await loadPatientProfile(patientId);
+  const [exactStudies, indexState] = await Promise.all([reconciliationStudiesForProfile(profile, studyInstanceUids), getHistoricalPacsIndexState()]);
   return {
-    exactStudies: [...reconciliationStudies.values()],
+    exactStudies,
+    indexStatus: indexState.status,
+    lastSuccessAt: indexState.lastSuccessAt,
+    knownPatientIds: profile.identifiers,
+  };
+}
+
+export async function discoverHistoricalPacsCandidatesForPatient(patientId: number): Promise<HistoricalPacsCandidatesResult> {
+  const profile = await loadPatientProfile(patientId);
+  const [candidates, indexState] = await Promise.all([fuzzyCandidates(profile), getHistoricalPacsIndexState()]);
+  return { candidates, indexStatus: indexState.status, lastSuccessAt: indexState.lastSuccessAt };
+}
+
+export async function discoverHistoricalPacsForPatient(patientId: number, studyInstanceUids: string[] = []): Promise<HistoricalPacsDiscoveryResult> {
+  const profile = await loadPatientProfile(patientId);
+  const [exactStudies, fuzzy, indexState] = await Promise.all([reconciliationStudiesForProfile(profile, studyInstanceUids), fuzzyCandidates(profile), getHistoricalPacsIndexState()]);
+  return {
+    exactStudies,
     candidates: fuzzy,
     indexStatus: indexState.status,
     lastSuccessAt: indexState.lastSuccessAt,

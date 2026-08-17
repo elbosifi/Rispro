@@ -1058,7 +1058,8 @@ export type HistoricalPacsMatchClassification = "exact" | "strong_demographic" |
 export type HistoricalPacsIndexStatus = "ready" | "stale" | "unavailable" | "uninitialized";
 export interface HistoricalPacsStudy { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number; }
 export interface HistoricalPacsCandidate { historicalPatientId: string; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; classification: HistoricalPacsMatchClassification; reasons: string[]; authoritative: boolean; matchRank: number; nameSimilarity: number; phoneticMatchCount: number; studyCount: number; studies: HistoricalPacsStudy[]; }
-export interface ProtocolingPatientHistoryResponse { items: ProtocolingPatientHistoryItem[]; pacsStatus: ProtocolingHistoryPacsStatus; historicalPacsIndexStatus: HistoricalPacsIndexStatus; historicalPacsLastSuccessAt: string | null; historicalCandidates: HistoricalPacsCandidate[]; }
+export interface ProtocolingPatientHistoryResponse { items: ProtocolingPatientHistoryItem[]; pacsStatus: ProtocolingHistoryPacsStatus; historicalPacsIndexStatus: HistoricalPacsIndexStatus; historicalPacsLastSuccessAt: string | null; }
+export interface ProtocolingHistoricalPacsCandidatesResponse { historicalCandidates: HistoricalPacsCandidate[]; historicalPacsIndexStatus: HistoricalPacsIndexStatus; historicalPacsLastSuccessAt: string | null; }
 
 export interface ModalityCtProtocolPhase {
   orderIndex: number;
