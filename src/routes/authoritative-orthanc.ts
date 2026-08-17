@@ -17,6 +17,7 @@ import {
   testAuthoritativeOrthancOperationalRoute,
 } from "../services/authoritative-orthanc-operations-service.js";
 import { getHistoricalPacsAdminStatus, recoverStalledHistoricalPacsSync, triggerHistoricalPacsSync } from "../services/historical-pacs-index-service.js";
+import { listPatientIdentityReconciliationJobs, requestPatientIdentityReconciliationReversal } from "../services/patient-identity-reconciliation-service.js";
 
 function appointmentId(value: unknown): number { const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1) throw new HttpError(400, "appointmentId must be a positive integer."); return parsed; }
 function orthancErrorCode(error: HttpError): string { const details = error.details; return details && typeof details === "object" && "code" in details ? String((details as { code?: unknown }).code || "") : ""; }
@@ -27,6 +28,8 @@ authoritativeOrthancRouter.put("/settings", requireAnyRole(["supervisor", "super
 authoritativeOrthancRouter.post("/test", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { const system = await testAuthoritativeOrthancConnection(req.user!.sub); res.json({ connected: true, system, testedAt: new Date().toISOString() }); }));
 authoritativeOrthancRouter.get("/status", requireAnyRole(["modality_staff", "supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => { res.json(await getAuthoritativeOrthancStatus()); }));
 authoritativeOrthancRouter.use("/operations", requireAnyRole(["modality_staff", "supervisor", "super_admin"]), requirePageAccess("authoritative.orthanc"));
+authoritativeOrthancRouter.get("/operations/patient-identity-reconciliations",requireAnyRole(["supervisor","super_admin"]),asyncRoute(async(req:Request,res:Response)=>{res.json(await listPatientIdentityReconciliationJobs({search:String(req.query.search||""),limit:Number(req.query.limit||25),offset:Number(req.query.offset||0)}));}));
+authoritativeOrthancRouter.post("/operations/patient-identity-reconciliations/:jobId/reverse",requireAnyRole(["supervisor","super_admin"]),asyncRoute(async(req:Request,res:Response)=>{res.status(202).json({job:await requestPatientIdentityReconciliationReversal(appointmentId(req.params.jobId),req.user!.sub)});}));
 authoritativeOrthancRouter.get("/operations/summary", asyncRoute(async (_req: Request, res: Response) => { res.json(await getAuthoritativeOrthancOperationsSummary()); }));
 authoritativeOrthancRouter.get("/operations/historical-pacs-index/status", asyncRoute(async (_req: Request, res: Response) => { res.json(await getHistoricalPacsAdminStatus()); }));
 authoritativeOrthancRouter.post("/operations/historical-pacs-index/sync", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => {

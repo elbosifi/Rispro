@@ -7,6 +7,7 @@ import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
 import { discoverHistoricalPacsCandidatesForPatient, getHistoricalPacsReconciliationForPatient, lookupHistoricalPacsByPatientId } from "../../services/historical-pacs-index-service.js";
 import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
+import { getPatientIdentityReconciliationForStudies, requestPatientIdentityReconciliation } from "../../services/patient-identity-reconciliation-service.js";
 import {
   assertRequestDocumentProtocolEligibility,
   isRequestDocumentRequiredForProtocolQueue,
@@ -513,16 +514,22 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
     const pacsStatus = discovery.knownPatientIds.length === 0
       ? "patient_id_unavailable" as const
       : discovery.indexStatus === "ready" ? "available" as const : "unavailable" as const;
+    const baseItems=reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber, current.studyInstanceUid, discovery.knownPatientIds);
+    const jobs=await getPatientIdentityReconciliationForStudies(baseItems.map((item)=>item.studyInstanceUid).filter((value):value is string=>Boolean(value))); const latest=new Map<string,typeof jobs[number]>(); for(const job of jobs) if(!latest.has(job.study_instance_uid)) latest.set(job.study_instance_uid,job);
+    const patientRow=(await pool.query<{patient_id:string|null;name:string|null;birth_date:string|null}>(`select coalesce(nullif(trim(pi.value),''),nullif(trim(p.identifier_value),''),nullif(trim(p.national_id),'')) patient_id,coalesce(nullif(trim(p.english_full_name),''),p.arabic_full_name) name,p.estimated_date_of_birth::text birth_date from patients p left join lateral(select value from patient_identifiers where patient_id=p.id and is_primary=true order by id limit 1) pi on true where p.id=$1`,[current.patientId])).rows[0];
     return {
-      items: reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber, current.studyInstanceUid, discovery.knownPatientIds),
+      items: baseItems.map((item)=>{const job=item.studyInstanceUid?latest.get(item.studyInstanceUid):undefined;return {...item,reconciliation:job?{id:job.id,status:job.status,oldPatientId:job.old_patient_id,operationType:job.operation_type,failureCode:job.failure_code}:null};}),
       pacsStatus,
       historicalPacsIndexStatus: discovery.indexStatus,
       historicalPacsLastSuccessAt: discovery.lastSuccessAt,
+      currentPatient:{id:current.patientId,patientId:patientRow?.patient_id||current.patientDicomId,name:patientRow?.name||current.patientEnglishName||current.patientArabicName,birthDate:patientRow?.birth_date||null},
     };
   } catch {
     return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber, current.studyInstanceUid), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalPacsLastSuccessAt: null };
   }
 }
+
+export async function requestProtocolingPatientIdentityReconciliation(appointmentId:number,studyInstanceUid:string,accessionNumber:string|null,userId:number){const current=await getProtocolingAppointment(appointmentId);if(!current)throw new HttpError(404,"Appointment not found.");return requestPatientIdentityReconciliation({patientId:current.patientId,studyInstanceUid,accessionNumber,requestedByUserId:userId});}
 
 export async function getProtocolingHistoricalPacsCandidates(appointmentId: number) {
   const current = await getProtocolingAppointment(appointmentId);

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,8 +24,37 @@ describe("AuthoritativeOrthancSection", () => {
       if (path.endsWith("/settings") && options?.method === "PUT") return { settings };
       if (path.endsWith("/pacs/orthanc-modalities")) return { modalities };
       if (path.endsWith("/test")) return { connected: true, system: { name: "Authoritative", version: "1.12.4", apiVersion: "19" }, testedAt: "2026-07-27T10:00:00.000Z" };
+      if (path.includes("patient-identity-reconciliations")) return {jobs:[{id:1,requested_at:"2026-08-18T10:00:00Z",study_date:"20240102",accession_number:"ACC-1",study_instance_uid:"1.2.3",old_patient_id:"OLD",new_patient_id:"NEW",operator_name:"Supervisor",operation_type:"reconcile",status:"completed",failure_code:null,reversed_by_job_id:null}],total:1};
       throw new Error(`Unexpected ${path}`);
     });
+  });
+
+  it("shows reconciliation history and exposes reversal only for effective completed jobs",async()=>{const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));expect(await screen.findByText("ACC-1")).toBeTruthy();await user.click(screen.getByRole("button",{name:"Reverse"}));expect(screen.getByRole("dialog").textContent).toContain("current Patient ID NEW back to OLD");});
+
+  it("sends reconciliation history search to the bounded admin endpoint",async()=>{const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));await user.type(await screen.findByRole("textbox",{name:"Search reconciliation history"}),"OLD-9");await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([path])=>String(path).includes("search=OLD-9")&&String(path).includes("limit=50"))).toBe(true));});
+
+  it("does not expose reversal for pending, failed, reversed, or manual-review jobs", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.endsWith("/settings")) return { settings };
+      if (path.endsWith("/pacs/orthanc-modalities")) return { modalities };
+      if (path.includes("patient-identity-reconciliations")) return {jobs:[
+        {id:1,requested_at:"2026-08-18T10:00:00Z",study_date:null,accession_number:"PENDING",study_instance_uid:"1.pending",old_patient_id:"OLD-1",new_patient_id:"NEW",operator_name:"Supervisor",operation_type:"reconcile",status:"processing",failure_code:null,reversed_by_job_id:null},
+        {id:2,requested_at:"2026-08-18T10:01:00Z",study_date:null,accession_number:"FAILED",study_instance_uid:"1.failed",old_patient_id:"OLD-2",new_patient_id:"NEW",operator_name:"Supervisor",operation_type:"reverse",status:"failed",failure_code:"PATIENT_IDENTITY_RECONCILIATION_MANUAL_REVIEW_REQUIRED",reversed_by_job_id:null},
+        {id:3,requested_at:"2026-08-18T10:02:00Z",study_date:null,accession_number:"REVERSED",study_instance_uid:"1.reversed",old_patient_id:"OLD-3",new_patient_id:"NEW",operator_name:"Supervisor",operation_type:"reconcile",status:"completed",failure_code:null,reversed_by_job_id:4},
+      ],total:3};
+      throw new Error(`Unexpected ${path}`);
+    });
+    const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));
+    expect(await screen.findByText("Manual review required")).toBeTruthy();
+    expect(screen.queryByRole("button",{name:"Reverse"})).toBeNull();
+  });
+
+  it("submits a confirmed reversal and refreshes reconciliation history", async () => {
+    const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));
+    await user.click(await screen.findByRole("button",{name:"Reverse"}));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button",{name:"Reverse reconciliation"}));
+    await waitFor(()=>expect(vi.mocked(api)).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/patient-identity-reconciliations/1/reverse",{method:"POST"}));
+    await waitFor(()=>expect(vi.mocked(api).mock.calls.filter(([path])=>String(path).includes("patient-identity-reconciliations")).length).toBeGreaterThanOrEqual(3));
   });
 
   it("saves the automatic PACS export setting and retains it while the connection is disabled", async () => {

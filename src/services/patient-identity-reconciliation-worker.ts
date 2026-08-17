@@ -1,0 +1,11 @@
+import { randomUUID } from "node:crypto";
+import { claimNextPatientIdentityReconciliationJob, processClaimedPatientIdentityReconciliationJob } from "./patient-identity-reconciliation-service.js";
+import type { PatientIdentityReconciliationJob } from "./patient-identity-reconciliation-service.js";
+export interface PatientIdentityReconciliationWorker { stop():Promise<void> }
+let timer:NodeJS.Timeout|null=null,running=false,stopped=false;
+const owner=`patient-identity-reconciliation-${process.pid}-${randomUUID()}`;
+let claimJob = claimNextPatientIdentityReconciliationJob;
+let processJob = processClaimedPatientIdentityReconciliationJob;
+export async function runPatientIdentityReconciliationWorkerTick(options:{owner?:string;leaseSeconds?:number}={}):Promise<{claimed:number;completed:number;failed:number}>{if(running||stopped)return{claimed:0,completed:0,failed:0};running=true;try{const job=await claimJob(options.owner||owner,options.leaseSeconds||120);if(!job)return{claimed:0,completed:0,failed:0};try{await processJob({job,leaseOwner:options.owner||owner,leaseSeconds:options.leaseSeconds||120});return{claimed:1,completed:1,failed:0};}catch{return{claimed:1,completed:0,failed:1};}}finally{running=false;}}
+export const __patientIdentityReconciliationWorkerTestables={setDependencies(dependencies:{claim?:(owner:string,leaseSeconds?:number)=>Promise<PatientIdentityReconciliationJob|null>;process?:typeof processClaimedPatientIdentityReconciliationJob}){claimJob=dependencies.claim||claimNextPatientIdentityReconciliationJob;processJob=dependencies.process||processClaimedPatientIdentityReconciliationJob;},resetDependencies(){claimJob=claimNextPatientIdentityReconciliationJob;processJob=processClaimedPatientIdentityReconciliationJob;stopped=false;}};
+export async function startPatientIdentityReconciliationWorker(options:{intervalMs?:number}={}):Promise<PatientIdentityReconciliationWorker>{stopped=false;await runPatientIdentityReconciliationWorkerTick();timer=setInterval(()=>void runPatientIdentityReconciliationWorkerTick(),Math.max(1_000,options.intervalMs??5_000));timer.unref();return{async stop(){stopped=true;if(timer){clearInterval(timer);timer=null;}while(running)await new Promise((resolve)=>setTimeout(resolve,50));}};}

@@ -42,7 +42,7 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -56,6 +56,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchProtocolingHistoricalPacsCandidates: mockFetchHistoricalPacsCandidates,
   fetchProtocolingPatientHistory: mockFetchProtocolingPatientHistory,
   searchProtocolingHistoricalPacsPatientId: mockSearchHistoricalPacsPatientId,
+  requestProtocolingPatientIdentityReconciliation:mockRequestReconciliation,
   getAppointmentById: mockGetAppointmentById,
   fetchProtocolLibraryAnatomyRegions: vi.fn(async () => []), fetchProtocolLibraryCtPhasePresets: vi.fn(async () => []),
   fetchProtocolLibraryMriSequencePresets: vi.fn(async () => []), fetchProtocolLibraryVersionDetail: vi.fn(async () => null),
@@ -119,6 +120,26 @@ describe("Doctor protocoling request documents", () => {
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
     mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
+    mockRequestReconciliation.mockReset();mockRequestReconciliation.mockResolvedValue({job:{id:1,status:"queued"}});
+  });
+
+  it("requires explicit confirmation before requesting Patient Identity Reconciliation",async()=>{mockFetchProtocolingPatientHistory.mockResolvedValue({pacsStatus:"available",historicalPacsIndexStatus:"ready",historicalPacsLastSuccessAt:null,canReconcilePatientIdentity:true,currentPatient:{id:9,patientId:"NEW-9",name:"Current Patient",birthDate:"1990-01-02"},items:[{appointmentId:null,orthancStudyId:"study-old",studyInstanceUid:"1.2.3.4",accessionNumber:"OLD-ACC",date:"2024-01-02",time:null,modalities:["CT"],description:"Historical CT",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"OLD-9",historicalPatientName:"Old^Patient",historicalPatientBirthDate:"19800102",reconciliation:null}]});render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><DoctorProtocolsPage me={me}/></QueryClientProvider>);await userEvent.click(await screen.findByRole("button",{name:"Assign"}));await userEvent.click(screen.getByRole("button",{name:"Patient history"}));await userEvent.click(await screen.findByRole("button",{name:"Reconcile patient identity"}));const dialog=screen.getByRole("heading",{name:"Patient Identity Reconciliation"}).closest<HTMLElement>('[role="dialog"]')!;expect(within(dialog).getByText(/Old\^Patient/)).toBeTruthy();expect(within(dialog).getByText(/Current Patient/)).toBeTruthy();const submit=within(dialog).getByRole("button",{name:"Reconcile patient identity"});expect(submit.hasAttribute("disabled")).toBe(true);await userEvent.click(within(dialog).getByRole("checkbox"));await userEvent.click(submit);await waitFor(()=>expect(mockRequestReconciliation).toHaveBeenCalledWith(42,"1.2.3.4","OLD-ACC"));expect(mockRequestReconciliation).toHaveBeenCalledTimes(1);});
+
+  it("shows queued, completed, and failed reconciliation states without hiding history or offering unnecessary actions", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({pacsStatus:"available",historicalPacsIndexStatus:"ready",historicalPacsLastSuccessAt:null,canReconcilePatientIdentity:true,currentPatient:{id:9,patientId:"NEW-9",name:"Current Patient",birthDate:"1990-01-02"},items:[
+      {appointmentId:null,orthancStudyId:"current",studyInstanceUid:"1.current",accessionNumber:"CURRENT",date:"2024-01-01",time:null,modalities:["CT"],description:"Already current",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"NEW-9",reconciliation:null},
+      {appointmentId:null,orthancStudyId:"queued",studyInstanceUid:"1.queued",accessionNumber:"QUEUED",date:"2024-01-02",time:null,modalities:["CT"],description:"Queued study",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"OLD-1",reconciliation:{id:1,status:"queued",oldPatientId:"OLD-1",operationType:"reconcile",failureCode:null}},
+      {appointmentId:null,orthancStudyId:"done",studyInstanceUid:"1.done",accessionNumber:"DONE",date:"2024-01-03",time:null,modalities:["CT"],description:"Completed study",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"NEW-9",reconciliation:{id:2,status:"completed",oldPatientId:"OLD-2",operationType:"reconcile",failureCode:null}},
+      {appointmentId:null,orthancStudyId:"failed",studyInstanceUid:"1.failed",accessionNumber:"FAILED",date:"2024-01-04",time:null,modalities:["CT"],description:"Failed study",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"OLD-3",reconciliation:{id:3,status:"failed",oldPatientId:"OLD-3",operationType:"reconcile",failureCode:"SAFE_FAILURE"}},
+    ]});
+    render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><DoctorProtocolsPage me={me}/></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button",{name:"Assign"}));
+    await userEvent.click(screen.getByRole("button",{name:"Patient history"}));
+    expect(await screen.findByText("Reconciliation pending")).toBeTruthy();
+    expect(screen.getByText(/Reconciled · Previous ID: OLD-2/)).toBeTruthy();
+    expect(screen.getByText("Reconciliation failed")).toBeTruthy();
+    expect(screen.getByText(/Already current/)).toBeTruthy();
+    expect(screen.queryByRole("button",{name:"Reconcile patient identity"})).toBeNull();
   });
 
   it("renders reconciled history with client-side modality filtering", async () => {

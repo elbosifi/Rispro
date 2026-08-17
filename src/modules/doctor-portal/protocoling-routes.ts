@@ -21,7 +21,9 @@ import {
   deleteProtocolDocumentAnnotation,
   listProtocolingAppointments,
   saveProtocolAssignment,
+  requestProtocolingPatientIdentityReconciliation,
 } from "./protocoling-repository.js";
+import { requirePatientIdentityReconciliationAccess } from "../../services/patient-identity-reconciliation-service.js";
 import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 
 const router = Router();
@@ -143,11 +145,15 @@ router.get(
   })
 );
 
+router.post("/appointments/:appointmentId/history/patient-identity-reconciliation",asyncRoute(async(req:DoctorRequest,res:Response)=>{const userId=await requireProtocolingAccess(req);await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);const body=asUnknownRecord(req.body);const job=await requestProtocolingPatientIdentityReconciliation(positiveInteger(req.params.appointmentId,"appointmentId"),asString(body.studyInstanceUid),asOptionalString(body.accessionNumber)??null,userId!);res.status(202).json({job});}));
+
 router.get(
   "/appointments/:appointmentId/history",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
-    res.json(await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId")));
+    const result=await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId"));
+    let canReconcilePatientIdentity=true;try{await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);}catch{canReconcilePatientIdentity=false;}
+    res.json({...result,canReconcilePatientIdentity});
   })
 );
 

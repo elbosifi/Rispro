@@ -17,6 +17,7 @@ import type { BackupV3Worker } from "./services/backup-v3-worker.js";
 import type { RequestScanWorker } from "./services/request-scan-worker.js";
 import type { ClinicalDocumentExportWorker } from "./services/clinical-document-export-service.js";
 import type { HistoricalPacsSyncWorker } from "./services/historical-pacs-index-service.js";
+import type { PatientIdentityReconciliationWorker } from "./services/patient-identity-reconciliation-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -36,6 +37,7 @@ let backupV3Worker: BackupV3Worker | null = null;
 let requestScanWorker: RequestScanWorker | null = null;
 let clinicalDocumentExportWorker: ClinicalDocumentExportWorker | null = null;
 let historicalPacsSyncWorker: HistoricalPacsSyncWorker | null = null;
+let patientIdentityReconciliationWorker: PatientIdentityReconciliationWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -123,6 +125,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   if (requestScanWorker) { try { await requestScanWorker.stop(); } catch (error) { console.error("Failed to stop Request Scan worker.", error); } }
   if (clinicalDocumentExportWorker) { try { await clinicalDocumentExportWorker.stop(); } catch (error) { console.error("Failed to stop Clinical Document Export worker.", error); } }
   if (historicalPacsSyncWorker) { try { await historicalPacsSyncWorker.stop(); } catch (error) { console.error("Failed to stop historical PACS index worker.", error); } }
+  if (patientIdentityReconciliationWorker) { try { await patientIdentityReconciliationWorker.stop(); } catch (error) { console.error("Failed to stop Patient Identity Reconciliation worker.", error); } }
 
   server.close(async (serverError?: Error) => {
     try {
@@ -328,6 +331,8 @@ async function start(): Promise<void> {
     logError(error);
     startupSummary.reporting_board_sonicdicom_cache = "initialization_failed";
   }
+
+  try { const {startPatientIdentityReconciliationWorker}=await import("./services/patient-identity-reconciliation-worker.js");patientIdentityReconciliationWorker=await startPatientIdentityReconciliationWorker();startupSummary.patient_identity_reconciliation_worker="started";} catch(error){console.error("Patient Identity Reconciliation worker initialization failed. Continuing without blocking startup.");logError(error);startupSummary.patient_identity_reconciliation_worker="initialization_failed";}
 
   try {
     const { startHistoricalPacsSyncWorker } = await import("./services/historical-pacs-index-service.js");

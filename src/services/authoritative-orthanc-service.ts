@@ -11,6 +11,8 @@ import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 export const AUTHORITATIVE_ORTHANC_CATEGORY = "authoritative_orthanc";
 export const AUTHORITATIVE_ORTHANC_ROUTE_PREFIX = "rispro_route_";
 export const AUTHORITATIVE_ORTHANC_CD_PREFIX = "rispro_cd_";
+export const PATIENT_IDENTITY_RECONCILIATION_LABEL = "rispro_patient_identity_reconciliation";
+export const PATIENT_IDENTITY_RECONCILIATION_SOURCE_LABEL = "rispro_patient_identity_reconciliation_source";
 const LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = /^rispro_autoroute(?:_[2-9][0-9]*)?$/;
 export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; autoRouteDestinationKeys: string[]; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
@@ -24,6 +26,7 @@ export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambig
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
 export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
 export type OrthancUploadedInstance = OrthancInstanceDetails;
+export type OrthancPatientIdentitySnapshot = OrthancStudyDetails & { otherPatientIdsSequence: Array<Record<string, unknown>>; seriesInstanceUids: string[]; sopInstanceUids: string[] };
 export type OrthancResourceStatistics = { studies: number | null; series: number | null; instances: number | null; diskSizeBytes: number | null; diskSizeMb: number | null; uncompressedSizeBytes: number | null; uncompressedSizeMb: number | null };
 export type AuthoritativeOrthancRouteSynchronizationSummary = { created: number; updated: number; unchanged: number; removed: number; warnings: string[] };
 
@@ -247,6 +250,44 @@ export class AuthoritativeOrthancClient {
     return studyDetails(detail, orthancStudyId);
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); return studyDetails(detail, orthancStudyId, statistics); }
+  async getStudyForPatientIdentityReconciliation(query: OrthancStudyQuery): Promise<OrthancPatientIdentitySnapshot> {
+    const found = await this.findStudy(query);
+    if (found.status !== "matched" || !found.study) throw new HttpError(found.status === "ambiguous" ? 409 : 404, found.status === "ambiguous" ? "Authoritative Orthanc study match is ambiguous." : "Authoritative Orthanc study was not found.", { code: found.status === "ambiguous" ? "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" : "PATIENT_IDENTITY_RECONCILIATION_STUDY_NOT_FOUND" });
+    const studyId = found.study.orthancStudyId;
+    const [shared, instances] = await Promise.all([
+      this.request(`/studies/${encodeURIComponent(studyId)}/shared-tags`),
+      this.request(`/studies/${encodeURIComponent(studyId)}/instances`),
+    ]);
+    const sharedTags = tags(shared);
+    const rawSequence = sharedTags.OtherPatientIDsSequence ?? sharedTags["00101002"] ?? sharedTags["0010,1002"] ?? sharedTags["0010-1002"];
+    const otherPatientIdsSequence = Array.isArray(rawSequence) ? rawSequence.map(record) : Array.isArray(record(rawSequence).Value) ? (record(rawSequence).Value as unknown[]).map(record) : [];
+    if (!Array.isArray(instances)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study inventory.", { code: "orthanc_invalid_response" });
+    const inventory = await Promise.all(instances.map((item) => this.getInstance(first(record(item).ID, record(item).Id, item) || "")));
+    return { ...found.study, otherPatientIdsSequence, seriesInstanceUids: [...new Set(inventory.map((item) => item.seriesInstanceUid!).filter(Boolean))].sort(), sopInstanceUids: [...new Set(inventory.map((item) => item.sopInstanceUid!).filter(Boolean))].sort() };
+  }
+  async listPatientIdentityReconciliationStudies(studyInstanceUid: string): Promise<OrthancPatientIdentitySnapshot[]> {
+    const uid = text(studyInstanceUid); if (!uid) throw new HttpError(400, "StudyInstanceUID is required.");
+    const ids = await this.request("/tools/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: "Study", Query: { StudyInstanceUID: uid } }) });
+    if (!Array.isArray(ids)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study search response.", { code: "orthanc_invalid_response" });
+    const snapshots: OrthancPatientIdentitySnapshot[] = [];
+    for (const id of ids.filter((value): value is string => typeof value === "string")) {
+      const study = await this.getStudy(id); if (study.studyInstanceUid !== uid) throw new HttpError(409, "Authoritative Orthanc returned conflicting study identity.", { code: "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" });
+      const [shared, instances] = await Promise.all([this.request(`/studies/${encodeURIComponent(id)}/shared-tags`), this.request(`/studies/${encodeURIComponent(id)}/instances`)]);
+      const sharedTags = tags(shared); const rawSequence = sharedTags.OtherPatientIDsSequence ?? sharedTags["00101002"] ?? sharedTags["0010,1002"] ?? sharedTags["0010-1002"];
+      const sequence = Array.isArray(rawSequence) ? rawSequence.map(record) : Array.isArray(record(rawSequence).Value) ? (record(rawSequence).Value as unknown[]).map(record) : [];
+      const inventory = await Promise.all((Array.isArray(instances) ? instances : []).map((item) => this.getInstance(first(record(item).ID, item) || "")));
+      snapshots.push({ ...study, otherPatientIdsSequence: sequence, seriesInstanceUids: [...new Set(inventory.map((item) => item.seriesInstanceUid!).filter(Boolean))].sort(), sopInstanceUids: [...new Set(inventory.map((item) => item.sopInstanceUid!).filter(Boolean))].sort() });
+    }
+    return snapshots;
+  }
+  async markPatientIdentityReconciliationSourceNoRoute(orthancStudyId: string): Promise<void> { await this.putLabel("studies", orthancStudyId, PATIENT_IDENTITY_RECONCILIATION_SOURCE_LABEL); }
+  async markPatientIdentityReconciliationResourceNoRoute(orthancStudyId: string): Promise<void> { await this.putLabel("studies", orthancStudyId, PATIENT_IDENTITY_RECONCILIATION_LABEL); }
+  private async putLabel(level: "studies" | "series", resourceId: string, label: string): Promise<void> { await this.request(`/${level}/${encodeURIComponent(resourceId)}/labels/${encodeURIComponent(label)}`, { method: "PUT", body: "" }); }
+  async startPatientIdentityReconciliation(input: { orthancStudyId: string; patientId: string; otherPatientIdsSequence: Array<Record<string, unknown>> }): Promise<{ jobId: string | null; studyId: string | null }> {
+    const payload = record(await this.request(`/studies/${encodeURIComponent(input.orthancStudyId)}/modify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Replace: { PatientID: input.patientId, OtherPatientIDsSequence: input.otherPatientIdsSequence }, Keep: ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"], Force: true, KeepSource: false, Asynchronous: true }) }));
+    return { jobId: first(payload.ID, payload.Job, payload.jobId), studyId: first(payload.Study, payload.Resource, payload.studyId) };
+  }
+  async uploadPatientIdentityReconciliationAudit(bytes: Buffer, studyInstanceUid: string): Promise<OrthancUploadedInstance> { return this.uploadDicomInstance(bytes, studyInstanceUid); }
   async listStudiesByPatientId(patientId: string): Promise<OrthancStudyDetails[]> {
     const requestedPatientId = text(patientId);
     if (!requestedPatientId) throw new HttpError(400, "DICOM Patient ID is required.");

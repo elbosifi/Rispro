@@ -43,6 +43,7 @@ export type ClinicalDocumentDicomMetadata = {
 export type SecondaryCaptureMetadata = Omit<ClinicalDocumentDicomMetadata, "documentTitle" | "originalFilename" | "instanceNumber"> & {
   modality: string;
   instanceNumber: number;
+  seriesDescription?: string;
 };
 
 const MODALITY_ALIASES: Record<string, string> = {
@@ -190,7 +191,7 @@ export async function createClinicalDocumentSecondaryCapture(rgbPixels: Buffer, 
     _meta: { FileMetaInformationVersion: new Uint8Array([0, 1]), MediaStorageSOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, MediaStorageSOPInstanceUID: metadata.sopInstanceUid, TransferSyntaxUID: "1.2.840.10008.1.2.1", ImplementationClassUID: IMPLEMENTATION_CLASS_UID, ImplementationVersionName: "RISPRO_CLIN_DOC_2" },
     SpecificCharacterSet: "ISO_IR 192", SOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, SOPInstanceUID: metadata.sopInstanceUid,
     StudyInstanceUID: metadata.studyInstanceUid, SeriesInstanceUID: metadata.seriesInstanceUid, Modality: modality,
-    ImageType: ["DERIVED", "SECONDARY"], ConversionType: "SD", SeriesDescription: metadata.legacySeriesNumber == null ? documentSeriesDescription(metadata.seriesKind) : "RISpro Scanned Documents",
+    ImageType: ["DERIVED", "SECONDARY"], ConversionType: "SD", SeriesDescription: metadata.seriesDescription || (metadata.legacySeriesNumber == null ? documentSeriesDescription(metadata.seriesKind) : "RISpro Scanned Documents"),
     PatientID: cleanText(metadata.patientId, "UNKNOWN"), PatientName: cleanText(metadata.patientName, "UNKNOWN"), PatientBirthDate: dicomDate(metadata.patientBirthDate) || "", PatientSex: cleanText(metadata.patientSex, "").slice(0, 1).toUpperCase(),
     AccessionNumber: cleanText(metadata.accessionNumber, "UNKNOWN"), StudyDate: dicomDate(metadata.studyDate) || "", StudyTime: cleanText(metadata.studyTime, ""),
     SeriesNumber: metadata.legacySeriesNumber == null ? "" : String(metadata.legacySeriesNumber), InstanceNumber: String(metadata.instanceNumber), BurnedInAnnotation: "YES", Manufacturer: "RISpro",

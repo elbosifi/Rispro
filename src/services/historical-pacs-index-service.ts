@@ -791,12 +791,15 @@ async function reconciliationStudiesForProfile(profile: PatientIdentityProfile, 
 
 export async function getHistoricalPacsReconciliationForPatient(patientId: number, studyInstanceUids: string[] = []): Promise<HistoricalPacsReconciliationResult> {
   const profile = await loadPatientProfile(patientId);
-  const [exactStudies, indexState] = await Promise.all([reconciliationStudiesForProfile(profile, studyInstanceUids), getHistoricalPacsIndexState()]);
+  const reconciled = await pool.query<{ study_instance_uid:string; old_patient_id:string|null; orthanc_study_id_after:string|null }>(`select study_instance_uid,old_patient_id,orthanc_study_id_after from patient_identity_reconciliation_jobs where patient_id=$1 and status='completed' and operation_type='reconcile' and reversed_by_job_id is null`,[patientId]);
+  const historicalIds = unique(reconciled.rows.map((row)=>row.old_patient_id).filter((value):value is string=>Boolean(value)));
+  const [exactStudies, historicalStudies, indexState] = await Promise.all([reconciliationStudiesForProfile(profile, [...studyInstanceUids,...reconciled.rows.map((row)=>row.study_instance_uid)]), loadStudiesForPatientIds(historicalIds), getHistoricalPacsIndexState()]);
+  const effectiveByUid=new Map(reconciled.rows.map((row)=>[row.study_instance_uid,row.orthanc_study_id_after]));const combined=new Map(exactStudies.filter((study)=>!effectiveByUid.has(study.studyInstanceUid||"")||effectiveByUid.get(study.studyInstanceUid||"")===study.orthancStudyId).map((study)=>[study.orthancStudyId,study])); for(const studies of historicalStudies.values()) for(const study of studies) if(!effectiveByUid.has(study.studyInstanceUid||"")||effectiveByUid.get(study.studyInstanceUid||"")===study.orthancStudyId) combined.set(study.orthancStudyId,toOrthancStudy(study));
   return {
-    exactStudies,
+    exactStudies:[...combined.values()],
     indexStatus: indexState.status,
     lastSuccessAt: indexState.lastSuccessAt,
-    knownPatientIds: profile.identifiers,
+    knownPatientIds: unique([...profile.identifiers,...historicalIds]),
   };
 }
 

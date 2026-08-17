@@ -23,6 +23,8 @@ Copy [rispro-autoroute.lua](examples/authoritative-orthanc/rispro-autoroute.lua)
 
 Restart or reload Authoritative Orthanc as required by that deployment. Do not add this script to RISpro's internal Orthanc configuration. The Lua callback uses Authoritative Orthanc's internal `RestApiGet` and `RestApiPost` functions. On each `OnStableSeries` event, it discovers every modality whose key begins with `rispro_route_`; it returns without routing when none exist and otherwise submits the series asynchronously to every discovered route.
 
+Patient Identity Reconciliation is suppressed without disabling ordinary routing. RISpro labels the source study before modification. Modified series carry Orthanc's core `ModifiedFrom` metadata, so the callback follows that provenance and suppresses the series when the source has the reconciliation-source label. The resulting study is then labeled before its audit Secondary Capture is uploaded, so the callback suppresses that series from its parent-study label. Label/provenance lookup errors fail closed and do not route. This requires Orthanc 1.12.0 or newer with label support.
+
 ## Manual validation
 
 Use a non-production or otherwise approved deidentified destination and test data.
