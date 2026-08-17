@@ -360,35 +360,81 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
     from scored
     left join lateral (
       with normalized_query_tokens as materialized (
-        select ordinal::int raw_ordinal, token
+        select ordinal::int raw_ordinal, token, lower(trim(raw)) like 'a.%' a_abbreviation
         from unnest(regexp_split_to_array(trim($6), E'\\s+')) with ordinality raw_token(raw, ordinal)
         cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
         where length(token) > 1
       ), query_tokens as materialized (
-        select row_number() over (order by raw_ordinal)::int ordinal, token
+        select row_number() over (order by raw_ordinal)::int ordinal, token, a_abbreviation
         from normalized_query_tokens
       ), normalized_candidate_tokens as materialized (
-        select ordinal::int raw_ordinal, token
+        select ordinal::int raw_ordinal, token, lower(trim(raw)) like 'a.%' a_abbreviation
         from unnest(regexp_split_to_array(trim(scored.english_name), E'\\s+')) with ordinality raw_token(raw, ordinal)
         cross join lateral (select lower(regexp_replace(raw, '[^[:alnum:]]+', '', 'g')) token) normalized
         where length(token) > 1
       ), candidate_tokens as materialized (
-        select row_number() over (order by raw_ordinal)::int ordinal, token
+        select row_number() over (order by raw_ordinal)::int ordinal, token, a_abbreviation
         from normalized_candidate_tokens
-      ), positional_evidence as materialized (
+      ), positional_pairs as materialized (
         select query_token.ordinal,
           query_token.token query_token,
           candidate_token.token candidate_token,
-          query_token.token = candidate_token.token
-            or (patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token)
-              and similarity(query_token.token, candidate_token.token) >= case
-                when least(length(query_token.token), length(candidate_token.token)) <= 4 then ${HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD}
-                else ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD}
-              end)
-            or similarity(query_token.token, candidate_token.token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD} strong_match,
-          patient_english_name_dmetaphone_tokens(query_token.token) && patient_english_name_dmetaphone_tokens(candidate_token.token) phonetic_overlap
+          query_token.a_abbreviation query_a_abbreviation,
+          candidate_token.a_abbreviation candidate_a_abbreviation
         from query_tokens query_token
         join candidate_tokens candidate_token on candidate_token.ordinal = query_token.ordinal
+      ), positional_evidence as materialized (
+        select positional_pair.*,
+          (not positional_pair.query_a_abbreviation and not positional_pair.candidate_a_abbreviation and (
+            positional_pair.query_token = positional_pair.candidate_token
+              or (patient_english_name_dmetaphone_tokens(positional_pair.query_token) && patient_english_name_dmetaphone_tokens(positional_pair.candidate_token)
+                and similarity(positional_pair.query_token, positional_pair.candidate_token) >= case
+                  when least(length(positional_pair.query_token), length(positional_pair.candidate_token)) <= 4 then ${HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD}
+                  else ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD}
+                end)
+              or similarity(positional_pair.query_token, positional_pair.candidate_token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD}
+          ))
+            or abd_abbreviation.abd_abbreviation_match strong_match,
+          not positional_pair.query_a_abbreviation and not positional_pair.candidate_a_abbreviation
+            and patient_english_name_dmetaphone_tokens(positional_pair.query_token) && patient_english_name_dmetaphone_tokens(positional_pair.candidate_token) phonetic_overlap
+        from positional_pairs positional_pair
+        cross join lateral (
+          select exists (
+            select 1
+            from (select case
+                when positional_pair.query_token ~ '^(abdel|abdul|abdal|abd).{3,}$' and positional_pair.candidate_a_abbreviation and positional_pair.candidate_token ~ '^a.{3,}$' then positional_pair.query_token
+                when positional_pair.candidate_token ~ '^(abdel|abdul|abdal|abd).{3,}$' and positional_pair.query_a_abbreviation and positional_pair.query_token ~ '^a.{3,}$' then positional_pair.candidate_token
+              end full_token,
+              case
+                when positional_pair.query_token ~ '^(abdel|abdul|abdal|abd).{3,}$' and positional_pair.candidate_a_abbreviation and positional_pair.candidate_token ~ '^a.{3,}$' then substring(positional_pair.candidate_token from 2)
+                when positional_pair.candidate_token ~ '^(abdel|abdul|abdal|abd).{3,}$' and positional_pair.query_a_abbreviation and positional_pair.query_token ~ '^a.{3,}$' then substring(positional_pair.query_token from 2)
+              end abbreviated_root
+            ) abd_tokens
+            cross join lateral (select regexp_replace(abd_tokens.full_token, '^(abdel|abdul|abdal|abd)', '') full_root) canonical_full
+            cross join lateral (values
+              (abd_tokens.abbreviated_root),
+              (regexp_replace(abd_tokens.abbreviated_root, '^al', ''))
+            ) root_variant(root)
+            cross join lateral (values ('abdel'), ('abdul'), ('abdal'), ('abd')) full_prefix(prefix)
+            cross join lateral (select full_prefix.prefix || root_variant.root expanded_token) expansion
+            where abd_tokens.full_token is not null and length(root_variant.root) >= 3
+              and (
+                canonical_full.full_root = root_variant.root
+                or (patient_english_name_dmetaphone_tokens(canonical_full.full_root) && patient_english_name_dmetaphone_tokens(root_variant.root)
+                  and similarity(canonical_full.full_root, root_variant.root) >= ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD})
+                or similarity(canonical_full.full_root, root_variant.root) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD}
+              )
+              and (
+                abd_tokens.full_token = expansion.expanded_token
+                or (patient_english_name_dmetaphone_tokens(abd_tokens.full_token) && patient_english_name_dmetaphone_tokens(expansion.expanded_token)
+                  and similarity(abd_tokens.full_token, expansion.expanded_token) >= case
+                    when least(length(abd_tokens.full_token), length(expansion.expanded_token)) <= 4 then ${HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD}
+                    else ${HISTORICAL_LONG_PHONETIC_SIMILARITY_THRESHOLD}
+                  end)
+                or similarity(abd_tokens.full_token, expansion.expanded_token) >= ${HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD}
+              )
+          ) abd_abbreviation_match
+        ) abd_abbreviation
       ), positional_kinds as materialized (
         select *, case
           when strong_match then 2

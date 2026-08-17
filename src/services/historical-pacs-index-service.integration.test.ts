@@ -189,7 +189,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
     const fixtures = [
       ["Naeema Mohammed Ibrahim Alkaraghli", "ORDERED-NAEEMA", "NAEEMA MOHAMED IBRAHIM", []],
       ["Rabha Ahmed Hamed Alalwani", "ORDERED-RABHA", "RABHA AHMED HAMAD", []],
-      ["Salwa Nouri Abdelkarim", "ORDERED-SALWA", "SALWA NOURI AALKREM", ["SALAH AWAD ABDULLAH", "SALHA ABED ABDALNE"]],
+      ["Salwa Nouri Abdelkarim", "ORDERED-SALWA", "SALWA NOURI A.ALKREM", ["SALAH AWAD ABDULLAH", "SALHA ABED ABDALNE", "SALWA A.ALKREM NOURI", "SALWA NOURI SOMETHING A.ALKREM"]],
     ] as const;
     const patientIds: number[] = [];
     try {
@@ -206,6 +206,30 @@ test("historical PACS index discovery and synchronization", async (t) => {
       }
     } finally {
       await pool.query(`delete from historical_pacs_studies where patient_id like 'ORDERED-%'`);
+      for (const patientId of patientIds) await removePatient(patientId);
+    }
+  });
+
+  await t.test("ABD-family A. abbreviations are strong positional matches but never a general wildcard", async () => {
+    const fixtures = [
+      ["ABD-ABBREVIATION-FIRST", "Abdelkarim Mohammed Salem", "A.ALKREM MOHAMED SALEM", true],
+      ["ABD-ABBREVIATION-MIDDLE", "Mohammed Abdulrahman Salem", "MOHAMED A.RAHMAN SALEM", true],
+      ["ABD-ABBREVIATION-ALI", "Ali Mohammed Salem", "A.LI MOHAMED SALEM", false],
+      ["ABD-ABBREVIATION-AHMED", "Ahmed Mohammed Salem", "A.HMED MOHAMED SALEM", false],
+      ["ABD-ABBREVIATION-MOHAMMED", "Abdelkarim Mohammed Salem", "A.MOHAMMED MOHAMED SALEM", false],
+      ["ABD-ABBREVIATION-SALEM", "Abdelkarim Mohammed Salem", "A.SALEM MOHAMED SALEM", false],
+    ] as const;
+    const patientIds: number[] = [];
+    try {
+      for (const [historicalId, currentName, historicalName, expected] of fixtures) {
+        const patientId = await createPatient({ englishName: currentName });
+        patientIds.push(patientId);
+        await upsertHistoricalPacsStudies([study({ orthancStudyId: historicalId.toLowerCase(), patientId: historicalId, patientName: historicalName })]);
+        const candidates = (await discoverHistoricalPacsForPatient(patientId)).candidates;
+        assert.equal(candidates.some((candidate) => candidate.historicalPatientId === historicalId), expected, `${historicalId}: ${JSON.stringify(candidates)}`);
+      }
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where patient_id like 'ABD-ABBREVIATION-%'`);
       for (const patientId of patientIds) await removePatient(patientId);
     }
   });
