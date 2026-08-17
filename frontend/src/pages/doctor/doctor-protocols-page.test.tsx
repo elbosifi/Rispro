@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
+import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 
 const appointment: DoctorProtocolingAppointment = {
@@ -38,7 +39,7 @@ const appointment: DoctorProtocolingAppointment = {
 const historicalCandidate = {
   historicalPatientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M",
   classification: "possible", reasons: ["fuzzy_english_name"], authoritative: false, matchRank: 9, nameSimilarity: 0.74,
-  phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
+  phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
 const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
@@ -268,7 +269,7 @@ describe("Doctor protocoling request documents", () => {
     expect(within(row).queryByRole("link", { name: "RadiAnt" })).toBeNull();
   });
 
-  it("labels historical candidates as non-authoritative and performs exact old Patient ID lookup", async () => {
+  it("labels historical candidates as possible matches, opens RadiAnt by old Patient ID, and performs exact old Patient ID lookup", async () => {
     mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
     mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [historicalCandidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
     mockSearchHistoricalPacsPatientId.mockResolvedValue([{ ...historicalCandidate, classification: "exact", reasons: ["exact_patient_id"] }]);
@@ -277,14 +278,19 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
     const history = within(panel);
-    expect(await history.findByText("Possible historical PACS matches")).toBeTruthy();
+    expect(await history.findByText("Possible older PACS studies")).toBeTruthy();
     expect(history.getByText("Search old PACS Patient ID")).toBeTruthy();
-    expect(history.getByText("Non-authoritative candidate")).toBeTruthy();
-    expect(history.queryByRole("button", { name: /Attach|Migrate|Merge/i })).toBeNull();
+    expect(history.getByText("Possible patient match")).toBeTruthy();
+    const openOldStudies = history.getByRole("link", { name: "Open old studies in RadiAnt" });
+    expect(openOldStudies.getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
+    expect(history.queryByRole("button", { name: /Attach|Migrate|Merge|Remap/i })).toBeNull();
+    await userEvent.click(history.getByText("Why this matched"));
+    expect(history.getByText("fuzzy english name")).toBeTruthy();
     await userEvent.type(history.getByRole("textbox", { name: "Old PACS Patient ID" }), "OLD-77");
     await userEvent.click(history.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(mockSearchHistoricalPacsPatientId).toHaveBeenCalledWith(42, "OLD-77"));
-    expect((await history.findAllByText(/Patient ID OLD-77/)).length).toBeGreaterThanOrEqual(2);
+    expect((await history.findAllByText(/Old Patient ID: OLD-77/)).length).toBeGreaterThanOrEqual(2);
+    expect(history.getByText("Exact Patient ID match")).toBeTruthy();
   });
 
   it("renders fast patient history while historical PACS matching is still running", async () => {
@@ -299,13 +305,13 @@ describe("Doctor protocoling request documents", () => {
     const history = within(screen.getByRole("heading", { name: "Patient history" }).closest("aside")!);
 
     expect(await history.findByText(/Fast RISpro PACS history row/)).toBeTruthy();
-    expect(history.getByText("Searching historical PACS matches…")).toBeTruthy();
-    expect(history.getByText("Patient history above is already available independently. Wait here if you want to see possible historical PACS matches.")).toBeTruthy();
-    expect(history.queryByText(/Patient ID OLD-77/)).toBeNull();
+    expect(history.getByText("Searching old PACS records…")).toBeTruthy();
+    expect(history.getByText("Patient history above is already available.")).toBeTruthy();
+    expect(history.queryByText(/Old Patient ID: OLD-77/)).toBeNull();
 
     await act(async () => resolveHistorical({ historicalCandidates: [historicalCandidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }));
-    expect(await history.findByText(/Patient ID OLD-77/)).toBeTruthy();
-    expect(history.queryByText("Searching historical PACS matches…")).toBeNull();
+    expect(await history.findByText(/Old Patient ID: OLD-77/)).toBeTruthy();
+    expect(history.queryByText("Searching old PACS records…")).toBeNull();
     expect(history.getByText(/Fast RISpro PACS history row/)).toBeTruthy();
   });
 
@@ -320,7 +326,7 @@ describe("Doctor protocoling request documents", () => {
     const history = within(screen.getByRole("heading", { name: "Patient history" }).closest("aside")!);
 
     expect(await history.findByText(/History survives fuzzy failure/)).toBeTruthy();
-    expect(await history.findByText("Historical PACS search failed.")).toBeTruthy();
+    expect(await history.findByText("Old PACS search unavailable.")).toBeTruthy();
     expect(history.getByRole("button", { name: "Retry historical search" })).toBeTruthy();
     expect(history.queryByText("Unable to load patient history.")).toBeNull();
   });
@@ -333,11 +339,11 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     const history = within(screen.getByRole("heading", { name: "Patient history" }).closest("aside")!);
 
-    expect(history.getByText("Searching historical PACS matches…")).toBeTruthy();
-    expect(history.queryByText("Historical PACS search complete. No possible matches were found.")).toBeNull();
+    expect(history.getByText("Searching old PACS records…")).toBeTruthy();
+    expect(history.queryByText("No possible older PACS studies found.")).toBeNull();
     await act(async () => resolveHistorical({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }));
-    expect(await history.findByText("Historical PACS search complete. No possible matches were found.")).toBeTruthy();
-    expect(history.queryByText("Searching historical PACS matches…")).toBeNull();
+    expect(await history.findByText("No possible older PACS studies found.")).toBeTruthy();
+    expect(history.queryByText("Searching old PACS records…")).toBeNull();
   });
 
   it("shows the request-document queue policy only when enabled", async () => {
