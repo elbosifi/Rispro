@@ -37,10 +37,10 @@ let summary = fixture();
 let historicalPacsStatus: {
   indexStatus: "ready" | "stale" | "unavailable" | "uninitialized"; runStatus: "idle" | "running" | "failed"; mode: "full" | "incremental" | null;
   indexedStudies: number; historicalPatientIds: number; orthancStudies: number | null; processed: number | null; total: number | null; progressPercent: number | null;
-  startedAt: string | null; progressAt: string | null; lastSuccessAt: string | null; lastFullSyncAt: string | null; lastAttemptAt: string | null; lastChangeSequence: number | null; lastError: string | null;
+  startedAt: string | null; progressAt: string | null; isStalled: boolean; stalledForSeconds: number | null; lastSuccessAt: string | null; lastFullSyncAt: string | null; lastAttemptAt: string | null; lastChangeSequence: number | null; lastError: string | null;
 };
 function historicalPacsFixture() {
-  return { indexStatus: "ready" as const, runStatus: "idle" as const, mode: null, indexedStudies: 31192, historicalPatientIds: 18406, orthancStudies: 31192, processed: null, total: null, progressPercent: null, startedAt: null, progressAt: "2026-08-17T00:32:00.000Z", lastSuccessAt: "2026-08-17T00:32:00.000Z", lastFullSyncAt: "2026-08-17T00:31:00.000Z", lastAttemptAt: "2026-08-17T00:32:00.000Z", lastChangeSequence: 284731, lastError: null };
+  return { indexStatus: "ready" as const, runStatus: "idle" as const, mode: null, indexedStudies: 31192, historicalPatientIds: 18406, orthancStudies: 31192, processed: null, total: null, progressPercent: null, startedAt: null, progressAt: "2026-08-17T00:32:00.000Z", isStalled: false, stalledForSeconds: null, lastSuccessAt: "2026-08-17T00:32:00.000Z", lastFullSyncAt: "2026-08-17T00:31:00.000Z", lastAttemptAt: "2026-08-17T00:32:00.000Z", lastChangeSequence: 284731, lastError: null };
 }
 function installApi() {
   vi.mocked(api).mockImplementation(async (path, options) => {
@@ -92,6 +92,36 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     expect(within(dialog).getByText(/read the complete Authoritative Orthanc study inventory/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Run full reconciliation" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/historical-pacs-index/full-reconciliation", expect.objectContaining({ method: "POST" })));
+  });
+
+  it("recovers a stalled synchronization only through the dedicated confirmed endpoint", async () => {
+    historicalPacsStatus = { ...historicalPacsFixture(), runStatus: "running", mode: "full", processed: 0, total: 31141, startedAt: "2026-08-17T00:00:00.000Z", progressAt: "2026-08-17T00:00:00.000Z", isStalled: true, stalledForSeconds: 240 };
+    renderPage();
+    expect(await screen.findByText(/synchronization appears stalled/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Restart full reconciliation" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/local historical index/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Restart full reconciliation" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/historical-pacs-index/recover-and-full-reconcile", expect.objectContaining({ method: "POST" })));
+    expect(api).not.toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/historical-pacs-index/sync", expect.anything());
+  });
+
+  it("shows a recovery conflict and refetches the authoritative status", async () => {
+    historicalPacsStatus = { ...historicalPacsFixture(), runStatus: "running", mode: "full", isStalled: true, stalledForSeconds: 240 };
+    installApi();
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/recover-and-full-reconcile") throw new Error("A genuinely active Historical PACS synchronization cannot be superseded safely.");
+      if (path === "/integrations/authoritative-orthanc/operations/summary") return summary as never;
+      if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/status") return historicalPacsStatus as never;
+      if (options?.method === "POST") return {} as never;
+      throw new Error(`Unexpected API call ${path}`);
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Restart full reconciliation" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart full reconciliation" }));
+    expect(await screen.findByText(/cannot be superseded safely/)).toBeTruthy();
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/status").length).toBeGreaterThan(1));
   });
 
   it.each(["healthy", "degraded", "offline", "disabled"] as const)("renders the %s state without crashing", async (state) => {

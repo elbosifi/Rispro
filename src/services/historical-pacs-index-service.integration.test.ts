@@ -10,6 +10,7 @@ import {
   getHistoricalPacsIndexState,
   HISTORICAL_PACS_INDEX_FRESHNESS_MS,
   lookupHistoricalPacsByPatientId,
+  recoverStalledHistoricalPacsSync,
   reconcileHistoricalPacsIndex,
   runHistoricalPacsSyncCycle,
   upsertHistoricalPacsStudies,
@@ -592,7 +593,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
     let page = 0;
     const client = {
       async getChanges() { return { changes: [], lastSequence: 78, done: true }; },
-      async listStudiesForIndexPage() { page += 1; if (page === 1) return { studies: [], resourceCount: 1000 }; throw new Error("scan interrupted"); },
+      async listStudiesForIndexPage() { page += 1; if (page === 1) return { studies: [], resourceCount: 100 }; throw new Error("scan interrupted"); },
       async getStudyForIndex() { return null; },
     };
     await assert.rejects(() => reconcileHistoricalPacsIndex(client), /scan interrupted/);
@@ -751,6 +752,55 @@ test("historical PACS index discovery and synchronization", async (t) => {
     await readyIndex();
   });
 
+  await t.test("stalled runs are recoverable without overlapping an active writer, while failed restarts preserve the index", async () => {
+    await upsertHistoricalPacsStudies([study({ orthancStudyId: "recovery-retained", patientId: "RECOVERY-1", patientName: "RECOVERY^PATIENT" })]);
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_started_at=now()-interval '10 minutes',sync_progress_at=now()-interval '10 minutes',sync_processed=0,sync_total=31141,last_error=null where singleton_key=true`);
+    let status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.isStalled, true);
+    assert.ok((status.stalledForSeconds || 0) >= 180);
+    const failed = await recoverStalledHistoricalPacsSync(async () => ({
+      async getChanges() { return { changes: [], lastSequence: 100, done: true }; },
+      async listStudiesForIndexPage() { throw new Error("restarted inventory unavailable"); },
+      async getStudyForIndex() { return null; },
+    }));
+    assert.deepEqual(failed, { accepted: true, mode: "full" });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      status = await getHistoricalPacsAdminStatus();
+      if (status.runStatus === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status.runStatus, "failed");
+    assert.match(status.lastError || "", /restarted inventory unavailable/);
+    assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='recovery-retained'`)).rows[0]?.count), 1);
+
+    await pool.query(`delete from historical_pacs_studies where orthanc_study_id='recovery-retained'`);
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_progress_at=now()-interval '10 minutes',sync_processed=0,sync_total=31141,last_error=null where singleton_key=true`);
+    assert.deepEqual(await recoverStalledHistoricalPacsSync(async () => ({
+      async getChanges() { return { changes: [], lastSequence: 101, done: true }; },
+      async listStudiesForIndexPage() { return { studies: [], resourceCount: 0 }; },
+      async getStudyForIndex() { return null; },
+    })), { accepted: true, mode: "full" });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      status = await getHistoricalPacsAdminStatus();
+      if (status.runStatus === "idle") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status.runStatus, "idle");
+
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_progress_at=now()-interval '10 minutes' where singleton_key=true`);
+    const lockClient = await pool.connect();
+    try {
+      await lockClient.query(`select pg_advisory_lock(712364092)`);
+      assert.deepEqual(await recoverStalledHistoricalPacsSync(), { accepted: false, reason: "active_run" });
+    } finally {
+      await lockClient.query(`select pg_advisory_unlock(712364092)`);
+      lockClient.release();
+    }
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_progress_at=now() where singleton_key=true`);
+    assert.deepEqual(await recoverStalledHistoricalPacsSync(), { accepted: false, reason: "not_stalled" });
+    await readyIndex();
+  });
+
   await t.test("forced full reconciliation records statistics and page progress, then clears active run state", async () => {
     await readyIndex();
     let pages = 0;
@@ -760,8 +810,12 @@ test("historical PACS index discovery and synchronization", async (t) => {
       async getChanges() { return { changes: [], lastSequence: 91, done: true }; },
       async listStudiesForIndexPage() {
         pages += 1;
-        if (pages === 2) progressAfterFirstPage = Number((await pool.query(`select sync_processed from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.sync_processed);
-        return pages === 1 ? { studies: [], resourceCount: 1000 } : { studies: [], resourceCount: 1 };
+        if (pages === 2) {
+          const progress = await pool.query<{ sync_processed: number; advanced: boolean }>(`select sync_processed,sync_progress_at > sync_started_at advanced from historical_pacs_sync_state where singleton_key=true`);
+          progressAfterFirstPage = Number(progress.rows[0]?.sync_processed);
+          assert.equal(progress.rows[0]?.advanced, true);
+        }
+        return pages === 1 ? { studies: [], resourceCount: 100 } : { studies: [], resourceCount: 1 };
       },
       async getStudyForIndex() { return null; },
     };
@@ -776,7 +830,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
       return client;
     }, { forceFull: true });
     assert.equal(result.mode, "full");
-    assert.equal(progressAfterFirstPage, 1000);
+    assert.equal(progressAfterFirstPage, 100);
     const state = await pool.query(`select sync_run_status,sync_mode,sync_processed,sync_total,last_observed_orthanc_study_count,last_change_sequence,last_success_at from historical_pacs_sync_state where singleton_key=true`);
     assert.equal(state.rows[0]?.sync_run_status, "idle");
     assert.equal(state.rows[0]?.sync_mode, null);

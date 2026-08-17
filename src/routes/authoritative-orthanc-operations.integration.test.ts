@@ -51,6 +51,7 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     assert.equal((await request("/operations/summary", modalityStaff)).status, 200);
     assert.equal((await request("/operations/historical-pacs-index/status", modalityStaff)).status, 200);
     assert.equal((await request("/operations/historical-pacs-index/sync", modalityStaff, "POST")).status, 403);
+    assert.equal((await request("/operations/historical-pacs-index/recover-and-full-reconcile", modalityStaff, "POST")).status, 403);
     const lockClient = await pool.connect();
     try {
       await lockClient.query(`select pg_advisory_lock(712364092)`);
@@ -77,6 +78,28 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     const forced = await request("/operations/historical-pacs-index/full-reconciliation", superAdmin, "POST");
     assert.equal(forced.status, 202);
     assert.equal((await forced.json()).mode, "full");
+    await waitForSyncLockRelease();
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_progress_at=now(),sync_processed=0,sync_total=31141,last_error=null where singleton_key=true`);
+    const notStalled = await request("/operations/historical-pacs-index/recover-and-full-reconcile", supervisor, "POST");
+    assert.equal(notStalled.status, 409);
+    assert.equal((await notStalled.json()).error.details.code, "historical_pacs_sync_not_stalled");
+    await pool.query(`update historical_pacs_sync_state set sync_progress_at=now()-interval '10 minutes' where singleton_key=true`);
+    const recoveryLock = await pool.connect();
+    try {
+      await recoveryLock.query(`select pg_advisory_lock(712364092)`);
+      const active = await request("/operations/historical-pacs-index/recover-and-full-reconcile", supervisor, "POST");
+      assert.equal(active.status, 409);
+      assert.equal((await active.json()).error.details.code, "historical_pacs_sync_recovery_active_run");
+    } finally {
+      await recoveryLock.query(`select pg_advisory_unlock(712364092)`);
+      recoveryLock.release();
+    }
+    const supervisorRecovery = await request("/operations/historical-pacs-index/recover-and-full-reconcile", supervisor, "POST");
+    assert.equal(supervisorRecovery.status, 202);
+    await waitForSyncLockRelease();
+    await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_mode='full',sync_progress_at=now()-interval '10 minutes',sync_processed=0,sync_total=31141,last_error=null where singleton_key=true`);
+    const superAdminRecovery = await request("/operations/historical-pacs-index/recover-and-full-reconcile", superAdmin, "POST");
+    assert.equal(superAdminRecovery.status, 202);
     await waitForSyncLockRelease();
     assert.equal((await request("/operations/routes/test-all", modalityStaff, "POST")).status, 403);
     assert.equal((await request("/operations/routes/test-all", supervisor, "POST")).status, 409);

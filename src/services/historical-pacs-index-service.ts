@@ -17,8 +17,9 @@ const SYNC_LOCK_KEY = 712364092;
 const DEFAULT_SYNC_INTERVAL_MS = 60_000;
 const FULL_RECONCILIATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const HISTORICAL_PACS_INDEX_FRESHNESS_MS = 5 * 60 * 1000;
+export const HISTORICAL_PACS_SYNC_STALLED_AFTER_MS = 3 * 60 * 1000;
 const STUDY_BATCH_SIZE = 50;
-const FULL_STUDY_PAGE_SIZE = 1000;
+const FULL_STUDY_PAGE_SIZE = 100;
 const CHANGE_BATCH_SIZE = 500;
 const HISTORICAL_COMPONENT_TRIGRAM_THRESHOLD = 0.55;
 const HISTORICAL_SHORT_PHONETIC_SIMILARITY_THRESHOLD = 0.25;
@@ -726,6 +727,8 @@ export interface HistoricalPacsAdminStatus {
   progressPercent: number | null;
   startedAt: string | null;
   progressAt: string | null;
+  isStalled: boolean;
+  stalledForSeconds: number | null;
   lastSuccessAt: string | null;
   lastFullSyncAt: string | null;
   lastAttemptAt: string | null;
@@ -738,17 +741,19 @@ export async function getHistoricalPacsAdminStatus(): Promise<HistoricalPacsAdmi
     last_full_sync_at: string | null; last_success_at: string | null; last_attempt_at: string | null; last_error: string | null;
     last_change_sequence: string | null; sync_run_status: "idle" | "running" | "failed"; sync_mode: "full" | "incremental" | null;
     sync_started_at: string | null; sync_progress_at: string | null; sync_processed: number; sync_total: number | null;
-    last_observed_orthanc_study_count: number | null; study_count: number; patient_id_count: number; is_fresh: boolean;
+    last_observed_orthanc_study_count: number | null; study_count: number; patient_id_count: number; is_fresh: boolean; stalled_for_seconds: number | null;
   }>(
     `select state.last_full_sync_at::text,state.last_success_at::text,state.last_attempt_at::text,state.last_error,
        state.last_change_sequence::text,state.sync_run_status,state.sync_mode,state.sync_started_at::text,state.sync_progress_at::text,
        state.sync_processed,state.sync_total,state.last_observed_orthanc_study_count,
        state.last_success_at >= clock_timestamp() - ($1::bigint * interval '1 millisecond') is_fresh,
+       case when state.sync_run_status='running' and state.sync_progress_at < clock_timestamp() - ($2::bigint * interval '1 millisecond')
+         then extract(epoch from clock_timestamp() - state.sync_progress_at)::int else null end stalled_for_seconds,
        counts.study_count,counts.patient_id_count
      from historical_pacs_sync_state state
      cross join (select count(*)::int study_count,count(distinct nullif(btrim(patient_id),''))::int patient_id_count from historical_pacs_studies) counts
      where state.singleton_key=true`,
-    [HISTORICAL_PACS_INDEX_FRESHNESS_MS],
+    [HISTORICAL_PACS_INDEX_FRESHNESS_MS, HISTORICAL_PACS_SYNC_STALLED_AFTER_MS],
   );
   const row = result.rows[0];
   if (!row) throw new Error("Historical PACS synchronization state is unavailable.");
@@ -767,6 +772,8 @@ export async function getHistoricalPacsAdminStatus(): Promise<HistoricalPacsAdmi
     progressPercent: runningFull && total != null && total > 0 ? Math.min(100, Math.max(0, Number(((Number(row.sync_processed) / total) * 100).toFixed(1)))) : null,
     startedAt: row.sync_started_at,
     progressAt: row.sync_progress_at,
+    isStalled: row.stalled_for_seconds != null,
+    stalledForSeconds: row.stalled_for_seconds,
     lastSuccessAt: row.last_success_at,
     lastFullSyncAt: row.last_full_sync_at,
     lastAttemptAt: row.last_attempt_at,
@@ -837,6 +844,7 @@ export async function lookupHistoricalPacsByPatientId(patientId: string, lookupC
 async function recordSyncFailure(error: unknown, db: Queryable = pool): Promise<void> {
   const message = redactDiagnosticText(error instanceof Error ? error.message : String(error)).replace(/[\r\n\t]+/g, " ").slice(0, 500);
   await db.query(`update historical_pacs_sync_state set sync_run_status='failed',sync_progress_at=now(),last_attempt_at=now(),last_error=$1,updated_at=now() where singleton_key=true`, [message]);
+  console.warn(JSON.stringify({ type: "historical_pacs_sync_failed", error: message, worker: `${os.hostname()}:${process.pid}` }));
 }
 
 async function readChangesTail(client: HistoricalPacsSyncClient): Promise<number> {
@@ -870,10 +878,14 @@ export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncCli
   let processed = 0;
   let since = 0;
   for (;;) {
+    const pageStartedAt = Date.now();
+    await db.query(`update historical_pacs_sync_state set sync_progress_at=now(),updated_at=now() where singleton_key=true`);
+    console.info(JSON.stringify({ type: "historical_pacs_sync_page_started", mode: "full", processed, pageOffset: since, pageSize: FULL_STUDY_PAGE_SIZE, worker: `${os.hostname()}:${process.pid}` }));
     const page = await client.listStudiesForIndexPage(since, FULL_STUDY_PAGE_SIZE);
     indexed += await upsertHistoricalPacsStudies(page.studies, db, reconciliationMarker);
     processed += page.resourceCount;
     await db.query(`update historical_pacs_sync_state set sync_processed=$1,sync_progress_at=now(),updated_at=now() where singleton_key=true`, [processed]);
+    console.info(JSON.stringify({ type: "historical_pacs_sync_page_completed", mode: "full", processed, pageOffset: since, pageSize: FULL_STUDY_PAGE_SIZE, durationMs: Date.now() - pageStartedAt, worker: `${os.hostname()}:${process.pid}` }));
     if (page.resourceCount < FULL_STUDY_PAGE_SIZE) break;
     if (page.resourceCount <= 0) throw new Error("Authoritative Orthanc study inventory cursor did not advance.");
     since += page.resourceCount;
@@ -996,6 +1008,53 @@ export async function triggerHistoricalPacsSync(options: { forceFull?: boolean }
         });
     });
     return { accepted: true, mode };
+  } finally {
+    if (!retained) db.release();
+  }
+}
+
+type HistoricalPacsRecoveryResult =
+  | { accepted: true; mode: "full" }
+  | { accepted: false; reason: "not_stalled" | "active_run" };
+
+export async function recoverStalledHistoricalPacsSync(clientFactory: () => Promise<HistoricalPacsSyncClient> = createAuthoritativeOrthancClient): Promise<HistoricalPacsRecoveryResult> {
+  const status = await getHistoricalPacsAdminStatus();
+  console.info(JSON.stringify({ type: "historical_pacs_sync_recovery_requested", mode: status.mode, processed: status.processed, total: status.total, stalledForSeconds: status.stalledForSeconds, worker: `${os.hostname()}:${process.pid}` }));
+  if (!status.isStalled) {
+    console.info(JSON.stringify({ type: "historical_pacs_sync_recovery_rejected", reason: "not_stalled", mode: status.mode, processed: status.processed, worker: `${os.hostname()}:${process.pid}` }));
+    return { accepted: false, reason: "not_stalled" };
+  }
+  const db = await pool.connect();
+  let retained = false;
+  try {
+    const lock = await db.query<{ acquired: boolean }>(`select pg_try_advisory_lock($1) acquired`, [SYNC_LOCK_KEY]);
+    if (!lock.rows[0]?.acquired) {
+      console.warn(JSON.stringify({ type: "historical_pacs_sync_recovery_rejected", reason: "active_run", mode: status.mode, processed: status.processed, worker: `${os.hostname()}:${process.pid}` }));
+      return { accepted: false, reason: "active_run" };
+    }
+    const current = await db.query<{ sync_run_status: string; sync_progress_at: string | null; sync_processed: number }>(
+      `select sync_run_status,sync_progress_at::text,sync_processed from historical_pacs_sync_state where singleton_key=true`,
+    );
+    const progressAt = current.rows[0]?.sync_progress_at ? new Date(current.rows[0].sync_progress_at).getTime() : NaN;
+    const stillStalled = current.rows[0]?.sync_run_status === "running" && Number.isFinite(progressAt) && Date.now() - progressAt >= HISTORICAL_PACS_SYNC_STALLED_AFTER_MS;
+    if (!stillStalled) {
+      await db.query(`select pg_advisory_unlock($1)`, [SYNC_LOCK_KEY]);
+      console.info(JSON.stringify({ type: "historical_pacs_sync_recovery_rejected", reason: "not_stalled", worker: `${os.hostname()}:${process.pid}` }));
+      return { accepted: false, reason: "not_stalled" };
+    }
+    const diagnostic = "Recovered stalled Historical PACS synchronization before restarting full reconciliation.";
+    await db.query(`update historical_pacs_sync_state set sync_run_status='failed',sync_progress_at=now(),last_attempt_at=now(),last_error=$1,updated_at=now() where singleton_key=true`, [diagnostic]);
+    const mode = await prepareHistoricalPacsSync(db, true);
+    retained = true;
+    console.info(JSON.stringify({ type: "historical_pacs_sync_recovery_started", mode, processed: current.rows[0]?.sync_processed ?? 0, worker: `${os.hostname()}:${process.pid}` }));
+    setImmediate(() => {
+      void executePreparedHistoricalPacsSync(db, mode, clientFactory)
+        .finally(async () => {
+          await db.query(`select pg_advisory_unlock($1)`, [SYNC_LOCK_KEY]).catch(() => null);
+          db.release();
+        });
+    });
+    return { accepted: true, mode: "full" };
   } finally {
     if (!retained) db.release();
   }
