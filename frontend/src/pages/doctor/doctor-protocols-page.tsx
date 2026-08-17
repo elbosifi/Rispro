@@ -82,6 +82,15 @@ function protocolingPatientName(appointment: DoctorProtocolingAppointment): stri
   return appointment.patientEnglishName || appointment.patientArabicName || appointment.patientMrn || `Patient ${appointment.patientId}`;
 }
 
+function historicalDicomDateToIso(value: string | null | undefined): string | null {
+  const match = value?.trim().match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) return null;
+  return `${year}-${month}-${day}`;
+}
+
 function HistoricalPacsCandidates({ candidates }: { candidates: HistoricalPacsCandidate[] }) {
   if (!candidates.length) return <p className="text-xs text-muted-foreground">No historical PACS candidates found.</p>;
   return <div className="space-y-2">{candidates.map((candidate) => {
@@ -95,10 +104,13 @@ function HistoricalPacsCandidates({ candidates }: { candidates: HistoricalPacsCa
         <p>{candidate.studyCount} possible {candidate.studyCount === 1 ? "study" : "studies"}</p>
         <p>DOB: {candidate.patientBirthDate || "Unavailable"} · Sex: {candidate.patientSex || "Unavailable"}</p>
         <details className="mt-2"><summary className="cursor-pointer font-semibold">Why this matched</summary><p className="mt-1">{candidate.reasons.join(", ").replaceAll("_", " ")}</p></details>
-        <div className="mt-2 space-y-2 border-t border-amber-200 pt-2">{candidate.studies.map((study) => <div key={study.orthancStudyId} className="rounded border border-amber-200 bg-white/70 p-2">
-          <p className="text-sm font-semibold">{study.studyDate || "Unknown date"} · {study.studyDescription || "Study"}</p>
-          <p className="mt-1 text-xs text-amber-950/80">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>
-        </div>)}</div>
+        <div className="mt-2 space-y-2 border-t border-amber-200 pt-2">{candidate.studies.map((study) => {
+          const studyDate = historicalDicomDateToIso(study.studyDate);
+          return <div key={study.orthancStudyId} className="rounded border border-amber-200 bg-white/70 p-2">
+            <p className="text-sm font-semibold">{studyDate ? formatDateLy(studyDate) : "Unknown date"} · {study.studyDescription || "Study"}</p>
+            <p className="mt-1 text-xs text-amber-950/80">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>
+          </div>;
+        })}</div>
       </div>
     </section>;
   })}</div>;

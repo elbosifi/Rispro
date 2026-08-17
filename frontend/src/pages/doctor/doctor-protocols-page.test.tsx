@@ -281,6 +281,8 @@ describe("Doctor protocoling request documents", () => {
     expect(await history.findByText("Possible older PACS studies")).toBeTruthy();
     expect(history.getByText("Search old PACS Patient ID")).toBeTruthy();
     expect(history.getByText("Possible patient match")).toBeTruthy();
+    expect(history.getByText(/02\/01\/2024/)).toBeTruthy();
+    expect(history.queryByText("20240102")).toBeNull();
     const openOldStudies = history.getByRole("link", { name: "Open old studies in RadiAnt" });
     expect(openOldStudies.getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
     expect(history.queryByRole("button", { name: /Attach|Migrate|Merge|Remap/i })).toBeNull();
