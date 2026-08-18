@@ -555,6 +555,81 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("shows the Voided filter to supervisors and super admins only", async () => {
+    mockAuthRole = "supervisor";
+    const { unmount } = renderRegistrationsPage();
+    expect(await screen.findByRole("button", { name: "Voided" })).toBeTruthy();
+    unmount();
+
+    mockAuthRole = "super_admin";
+    renderRegistrationsPage();
+    expect(await screen.findByRole("button", { name: "Voided" })).toBeTruthy();
+  });
+
+  it("does not show Voided or request it from a receptionist URL state", async () => {
+    mockAuthRole = "receptionist";
+    renderRegistrationsPage(["/registrations?status=voided"]);
+
+    expect(screen.queryByRole("button", { name: "Voided" })).toBeNull();
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: ["scheduled", "arrived", "waiting"] }),
+      );
+    });
+  });
+
+  it("includes voided in the supervisor Registration query when selected", async () => {
+    mockAuthRole = "supervisor";
+    renderRegistrationsPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Voided" }));
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: expect.arrayContaining(["voided"]) }),
+      );
+    });
+  });
+
+  it("shows void audit rows in the existing Administrative and audit details disclosure", async () => {
+    const voidedAppointment = registrationAppointment({
+      status: "voided",
+      voidedAt: "2027-01-03T10:15:00.000Z",
+      voidedByUserId: 91,
+      voidedByName: "Void Supervisor",
+      voidedByUsername: "void-supervisor",
+      voidReason: "Duplicate entry",
+    });
+    fetchAppointmentsMock.mockResolvedValueOnce([voidedAppointment]);
+    getAppointmentByIdMock.mockResolvedValueOnce(voidedAppointment);
+    renderRegistrationsPage();
+
+    await waitFor(() => expect(getFirstText("ACC-7")).toBeTruthy());
+    await userEvent.click(getAppointmentRow("ACC-7"));
+    const dialog = await screen.findByRole("dialog", { name: "Manage" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Administrative and audit details" }));
+
+    expect(within(dialog).getByText("Voided by")).toBeTruthy();
+    expect(within(dialog).getByText("Void Supervisor")).toBeTruthy();
+    expect(within(dialog).getByText("Voided date/time")).toBeTruthy();
+    expect(within(dialog).getByText("Void reason")).toBeTruthy();
+    expect(within(dialog).getByText("Duplicate entry")).toBeTruthy();
+  });
+
+  it("does not show void audit rows for a normal appointment", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => expect(getFirstText("ACC-7")).toBeTruthy());
+    await userEvent.click(getAppointmentRow("ACC-7"));
+    const dialog = await screen.findByRole("dialog", { name: "Manage" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Administrative and audit details" }));
+
+    expect(within(dialog).queryByText("Voided by")).toBeNull();
+    expect(within(dialog).queryByText("Voided date/time")).toBeNull();
+    expect(within(dialog).queryByText("Void reason")).toBeNull();
+  });
+
   it("uses the same direct-print handler for both list buttons with the exact loaded rows", async () => {
     renderRegistrationsPage();
     await screen.findAllByText("ACC-7");

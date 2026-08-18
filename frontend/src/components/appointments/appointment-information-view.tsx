@@ -148,6 +148,13 @@ export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, 
     { label: text(language, "سبب عدم الحضور", "No-show reason"), value: valueOrDash(appointment.noShowReason) },
     { label: text(language, "سبب الإيقاف أو الإلغاء", "Discontinued / cancellation reason"), value: valueOrDash(appointment.cancelReason) },
   ];
+  if (appointment.status === "voided" || appointment.voidedAt || appointment.voidedByUserId || appointment.voidedByName || appointment.voidedByUsername || appointment.voidReason) {
+    auditRows.push(
+      { label: text(language, "أُلغي بواسطة", "Voided by"), value: valueOrDash(appointment.voidedByName ?? appointment.voidedByUsername ?? appointment.voidedByUserId) },
+      { label: text(language, "تاريخ ووقت الإلغاء", "Voided date/time"), value: formatDateTimeLy(appointment.voidedAt), dir: "ltr" },
+      { label: text(language, "سبب الإلغاء", "Void reason"), value: valueOrDash(appointment.voidReason) },
+    );
+  }
   const technicalRows: DefinitionRow[] = [
     { label: text(language, "الدراسة", "Study"), value: appointment.studyInstanceUid ? text(language, "مرتبطة", "Linked") : text(language, "غير مرتبطة", "Unlinked") },
     { label: "Study Instance UID", value: <CopyableValue value={appointment.studyInstanceUid} label="Study Instance UID" />, dir: "ltr" },

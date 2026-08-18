@@ -42,6 +42,10 @@ interface AuthedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
 
+function canReviewVoidedAppointments(role: string | undefined): boolean {
+  return role === "supervisor" || role === "super_admin";
+}
+
 type AppointmentReadRow = Record<string, unknown> & {
   id: number | string;
   accession_number?: string | null;
@@ -286,7 +290,7 @@ router.post(
 
 router.get(
   "/appointments",
-  asyncRoute(async (req: Request, res: Response) => {
+  asyncRoute(async (req: AuthedRequest, res: Response) => {
     const patientQrSettings = await readPatientQrSettings();
     const query = req.query as Record<string, unknown>;
     const date = typeof query.date === "string" ? query.date : "";
@@ -304,6 +308,10 @@ router.get(
     const sort = typeof query.sort === "string" ? query.sort.trim() : "";
 
     const status = parseStatuses(query["status[]"] ?? query.status);
+    if (status.includes("voided") && !canReviewVoidedAppointments(req.user?.role)) {
+      res.status(403).json({ error: "Voided appointment review is not authorized", code: "VOIDED_APPOINTMENT_REVIEW_FORBIDDEN" });
+      return;
+    }
 
     const params: unknown[] = [];
     params.push(await isRequestDocumentRequiredForProtocolQueue());
@@ -415,6 +423,11 @@ router.get(
           b.created_by_user_id,
           created_by_user.full_name as created_by_full_name,
           created_by_user.username as created_by_username,
+          b.voided_at,
+          b.voided_by_user_id,
+          voided_by_user.full_name as voided_by_full_name,
+          voided_by_user.username as voided_by_username,
+          b.void_reason,
           b.updated_at,
           p.arabic_full_name,
           p.english_full_name,
@@ -465,6 +478,7 @@ router.get(
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
+        left join users voided_by_user on voided_by_user.id = b.voided_by_user_id
         ${PROTOCOL_ASSIGNMENT_JOIN}
         ${whereClause}
       )
@@ -501,7 +515,7 @@ router.get(
 
 router.get(
   "/appointments/:id",
-  asyncRoute(async (req: Request, res: Response) => {
+  asyncRoute(async (req: AuthedRequest, res: Response) => {
     const patientQrSettings = await readPatientQrSettings();
     const bookingId = Number(req.params.id);
     if (!Number.isInteger(bookingId) || bookingId <= 0) {
@@ -539,6 +553,11 @@ router.get(
           b.created_by_user_id,
           created_by_user.full_name as created_by_full_name,
           created_by_user.username as created_by_username,
+          b.voided_at,
+          b.voided_by_user_id,
+          voided_by_user.full_name as voided_by_full_name,
+          voided_by_user.username as voided_by_username,
+          b.void_reason,
           b.updated_at,
           p.arabic_full_name,
           p.english_full_name,
@@ -576,6 +595,7 @@ router.get(
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
+        left join users voided_by_user on voided_by_user.id = b.voided_by_user_id
         ${PROTOCOL_ASSIGNMENT_JOIN}
         where b.id = $1
         limit 1
@@ -586,6 +606,10 @@ router.get(
     const appointment = result.rows[0];
     if (!appointment) {
       res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+    if (appointment.status === "voided" && !canReviewVoidedAppointments(req.user?.role)) {
+      res.status(403).json({ error: "Voided appointment review is not authorized", code: "VOIDED_APPOINTMENT_REVIEW_FORBIDDEN" });
       return;
     }
 

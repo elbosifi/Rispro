@@ -127,6 +127,11 @@ export interface AppointmentWithDetails extends Appointment {
   createdByUserId?: number | null;
   createdByName?: string | null;
   createdByUsername?: string | null;
+  voidedAt?: string | null;
+  voidedByUserId?: number | null;
+  voidedByName?: string | null;
+  voidedByUsername?: string | null;
+  voidReason?: string | null;
   protocolAssignmentSummary?: {
     assignmentId: number;
     protocolId?: number | null;
@@ -400,6 +405,11 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     createdByUserId: numOrNull(raw, "created_by_user_id") ?? numOrNull(raw, "createdByUserId"),
     createdByName: strOrNull(raw, "created_by_full_name") ?? strOrNull(raw, "createdByName"),
     createdByUsername: strOrNull(raw, "created_by_username") ?? strOrNull(raw, "createdByUsername"),
+    voidedAt: strOrNull(raw, "voided_at") ?? strOrNull(raw, "voidedAt"),
+    voidedByUserId: numOrNull(raw, "voided_by_user_id") ?? numOrNull(raw, "voidedByUserId"),
+    voidedByName: strOrNull(raw, "voided_by_full_name") ?? strOrNull(raw, "voidedByName"),
+    voidedByUsername: strOrNull(raw, "voided_by_username") ?? strOrNull(raw, "voidedByUsername"),
+    voidReason: strOrNull(raw, "void_reason") ?? strOrNull(raw, "voidReason"),
     protocolAssignmentSummary: protocolAssignmentId != null
       ? {
           assignmentId: protocolAssignmentId,

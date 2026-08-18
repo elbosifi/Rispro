@@ -14,6 +14,7 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
+import { useAuth } from "@/providers/auth-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { normalizeAppointmentId } from "@/lib/appointment-id";
 import { AppointmentManageModal, type AppointmentManageTab } from "@/components/appointments/appointment-manage-modal";
@@ -98,6 +99,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
+  const { user } = useAuth();
+  const canReviewVoided = user?.role === "supervisor" || user?.role === "super_admin";
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const appointmentIdParam = searchParams.get("appointmentId");
@@ -137,9 +140,13 @@ export default function RegistrationsPage() {
         dateTo: "",
       }
     : DEFAULT_FILTERS;
-  const [storedFilters, setFilters] = useState<RegistrationsFilters>(() =>
-    parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters)
-  );
+  const [storedFilters, setFilters] = useState<RegistrationsFilters>(() => {
+    const parsedFilters = parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters);
+    if (canReviewVoided) return parsedFilters;
+
+    const statuses = parsedFilters.statuses.filter((status) => status !== "voided");
+    return { ...parsedFilters, statuses: statuses.length > 0 ? statuses : DEFAULT_FILTERS.statuses };
+  });
   const filters = patientIdParam
     ? { ...storedFilters, dateMode: "all" as const, date: "", dateFrom: "", dateTo: "" }
     : storedFilters;
@@ -895,7 +902,7 @@ export default function RegistrationsPage() {
               </span>
             </div>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"].map(
+              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued", ...(canReviewVoided ? ["voided"] : [])].map(
                 (status) => (
                   <button
                     key={status}

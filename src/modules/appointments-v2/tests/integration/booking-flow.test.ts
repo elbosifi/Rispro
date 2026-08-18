@@ -1078,6 +1078,85 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const modalityRows = (modalityRes.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
       assert.equal(modalityRows.some((row) => Number(row.id) === bookingId), false);
     });
+
+    it("restricts controlled voided appointment review to supervisors and super admins", async () => {
+      guard();
+      const scenarioPrefix = `VOIDED_REVIEW_${randomUUID()}`;
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2028-11-14",
+          caseCategory: "non_oncology",
+          notes: `${scenarioPrefix} voided review booking`,
+        },
+      });
+      assert.equal(createResult.status, 201);
+      const voidedBookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const voidReason = `${scenarioPrefix} duplicate entry`;
+      const voidResult = await fetch(`/api/v2/appointments/${voidedBookingId}/void`, {
+        method: "POST",
+        body: { voidReason },
+      });
+      assert.equal(voidResult.status, 200);
+
+      const supervisorList = await fetch(`/api/v2/read/appointments?dateFrom=2028-11-14&dateTo=2028-11-14&status[]=voided`, {
+        cookie: createTestAuthCookie(testData.userId, "supervisor"),
+      });
+      assert.equal(supervisorList.status, 200);
+      const supervisorRows = (supervisorList.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      const voidedRow = supervisorRows.find((row) => Number(row.id) === voidedBookingId);
+      assert.ok(voidedRow);
+      assert.ok(voidedRow.voided_at);
+      assert.equal(Number(voidedRow.voided_by_user_id), testData.userId);
+      assert.equal(voidedRow.void_reason, voidReason);
+      assert.ok(voidedRow.voided_by_full_name || voidedRow.voided_by_username);
+
+      const superAdminList = await fetch(`/api/v2/read/appointments?dateFrom=2028-11-14&dateTo=2028-11-14&status[]=voided`, {
+        cookie: createTestAuthCookie(testData.userId, "super_admin"),
+      });
+      assert.equal(superAdminList.status, 200);
+
+      const receptionistList = await fetch(`/api/v2/read/appointments?dateFrom=2028-11-14&dateTo=2028-11-14&status[]=voided`, {
+        cookie: createTestAuthCookie(testData.userId, "receptionist"),
+      });
+      assert.equal(receptionistList.status, 403);
+
+      const supervisorDetails = await fetch(`/api/v2/read/appointments/${voidedBookingId}`, {
+        cookie: createTestAuthCookie(testData.userId, "supervisor"),
+      });
+      assert.equal(supervisorDetails.status, 200);
+      const detailedVoidedAppointment = (supervisorDetails.data as Record<string, unknown>).appointment as Record<string, unknown>;
+      assert.ok(detailedVoidedAppointment.voided_at);
+      assert.equal(Number(detailedVoidedAppointment.voided_by_user_id), testData.userId);
+      assert.equal(detailedVoidedAppointment.void_reason, voidReason);
+      assert.ok(detailedVoidedAppointment.voided_by_full_name || detailedVoidedAppointment.voided_by_username);
+
+      const receptionistDetails = await fetch(`/api/v2/read/appointments/${voidedBookingId}`, {
+        cookie: createTestAuthCookie(testData.userId, "receptionist"),
+      });
+      assert.equal(receptionistDetails.status, 403);
+
+      const normalBookingResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2028-11-15",
+          caseCategory: "non_oncology",
+          notes: `${scenarioPrefix} normal booking`,
+        },
+      });
+      assert.equal(normalBookingResult.status, 201);
+      const normalBookingId = Number(((normalBookingResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const receptionistNormalDetails = await fetch(`/api/v2/read/appointments/${normalBookingId}`, {
+        cookie: createTestAuthCookie(testData.userId, "receptionist"),
+      });
+      assert.equal(receptionistNormalDetails.status, 200);
+    });
   });
 
   describe("Public appointment URL resilience", () => {
