@@ -57,12 +57,11 @@ import {
   type ProtocolLibraryProtocolPayload,
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
-import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, HistoricalPacsCandidate, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
+import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, HistoricalPacsCandidate, ImagingScanner, MriSequencePreset, PatientIdentityReconciliationSummary, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy } from "@/lib/date-format";
 import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from "@/components/shared";
-import type { ProtocolingPatientHistoryItem } from "@/types/api";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
@@ -93,7 +92,38 @@ function historicalDicomDateToIso(value: string | null | undefined): string | nu
   return `${year}-${month}-${day}`;
 }
 
-function HistoricalPacsCandidates({ candidates }: { candidates: HistoricalPacsCandidate[] }) {
+type PatientIdentityReconciliationTarget = {
+  studyInstanceUid: string;
+  accessionNumber: string | null;
+  date: string | null;
+  description: string | null;
+  historicalPatientId: string | null;
+  historicalPatientName: string | null;
+  historicalPatientBirthDate: string | null;
+  source: "history" | "automatic_candidate" | "manual_candidate";
+  manualSearchPatientId?: string;
+};
+
+function patientIdentityReconciliationUiState(reconciliation: PatientIdentityReconciliationSummary | null | undefined) {
+  if (!reconciliation) return { status: null, statusClassName: "", action: "Reconcile patient identity" as const };
+  if (reconciliation.operationType === "reconcile") {
+    if (reconciliation.status === "queued" || reconciliation.status === "processing") return { status: "Reconciliation pending", statusClassName: "text-amber-700", action: null };
+    if (reconciliation.status === "completed") return { status: `Reconciled${reconciliation.oldPatientId ? ` · Previous ID: ${reconciliation.oldPatientId}` : ""}`, statusClassName: "text-emerald-700", action: null };
+    if (reconciliation.status === "failed") return { status: "Reconciliation failed", statusClassName: "text-red-700", action: "Retry reconciliation" as const };
+  }
+  if (reconciliation.operationType === "reverse") {
+    if (reconciliation.status === "queued" || reconciliation.status === "processing") return { status: "Reversal pending", statusClassName: "text-amber-700", action: null };
+    if (reconciliation.status === "failed") return { status: "Reversal failed", statusClassName: "text-red-700", action: null };
+    if (reconciliation.status === "completed") return { status: null, statusClassName: "", action: "Reconcile patient identity" as const };
+  }
+  return { status: null, statusClassName: "", action: null };
+}
+
+function hasActivePatientIdentityReconciliation(candidates: HistoricalPacsCandidate[] | undefined): boolean {
+  return Boolean(candidates?.some((candidate) => candidate.studies.some((study) => study.reconciliation?.status === "queued" || study.reconciliation?.status === "processing")));
+}
+
+function HistoricalPacsCandidates({ candidates, canReconcilePatientIdentity, currentPatientId, source, manualSearchPatientId, onReconcile }: { candidates: HistoricalPacsCandidate[]; canReconcilePatientIdentity: boolean; currentPatientId: string | null; source: "automatic_candidate" | "manual_candidate"; manualSearchPatientId?: string; onReconcile: (target: PatientIdentityReconciliationTarget) => void }) {
   if (!candidates.length) return <p className="text-xs text-muted-foreground">No historical PACS candidates found.</p>;
   return <div className="space-y-2">{candidates.map((candidate) => {
     const classificationLabel = candidate.classification === "exact" ? "Exact Patient ID match" : candidate.classification === "strong_demographic" ? "Strong demographic match" : candidate.classification === "ambiguous" ? "Ambiguous candidate" : "Possible patient match";
@@ -108,9 +138,17 @@ function HistoricalPacsCandidates({ candidates }: { candidates: HistoricalPacsCa
         <details className="mt-2"><summary className="cursor-pointer font-semibold">Why this matched</summary><p className="mt-1">{candidate.reasons.join(", ").replaceAll("_", " ")}</p></details>
         <div className="mt-2 space-y-2 border-t border-amber-200 pt-2">{candidate.studies.map((study) => {
           const studyDate = historicalDicomDateToIso(study.studyDate);
+          const reconciliationUi = patientIdentityReconciliationUiState(study.reconciliation);
+          const studyInstanceUid = study.studyInstanceUid?.trim() || "";
+          const historicalPatientId = study.patientId?.trim() || "";
+          const canReconcile = Boolean(canReconcilePatientIdentity && studyInstanceUid && historicalPatientId && currentPatientId?.trim() && historicalPatientId !== currentPatientId.trim() && reconciliationUi.action);
           return <div key={study.orthancStudyId} className="rounded border border-amber-200 bg-white/70 p-2">
             <p className="text-sm font-semibold">{studyDate ? formatDateLy(studyDate) : "Unknown date"} · {study.studyDescription || "Study"}</p>
             <p className="mt-1 text-xs text-amber-950/80">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>
+            {studyInstanceUid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">Study UID: {studyInstanceUid}</p> : null}
+            <p className="mt-1 text-[11px] text-muted-foreground">{study.seriesCount} series · {study.instanceCount} {study.instanceCount === 1 ? "image" : "images"}</p>
+            {reconciliationUi.status ? <p className={`mt-1 font-semibold ${reconciliationUi.statusClassName}`}>{reconciliationUi.status}</p> : null}
+            {canReconcile ? <Button size="sm" variant="secondary" className="mt-2" onClick={() => onReconcile({ studyInstanceUid, accessionNumber: study.accessionNumber, date: studyDate, description: study.studyDescription, historicalPatientId: study.patientId, historicalPatientName: study.patientName, historicalPatientBirthDate: study.patientBirthDate, source, manualSearchPatientId })}>{reconciliationUi.action}</Button> : null}
           </div>;
         })}</div>
       </div>
@@ -1295,7 +1333,7 @@ function ProtocolAssignmentModal({
   const [historyLimit, setHistoryLimit] = useState(5);
   const [selectedHistoryModalities, setSelectedHistoryModalities] = useState<string[]>([]);
   const [oldPacsPatientId, setOldPacsPatientId] = useState("");
-  const [reconciliationStudy,setReconciliationStudy]=useState<ProtocolingPatientHistoryItem|null>(null);
+  const [reconciliationStudy,setReconciliationStudy]=useState<PatientIdentityReconciliationTarget|null>(null);
   const [reconciliationConfirmed,setReconciliationConfirmed]=useState(false);
   const [annotationDirty, setAnnotationDirty] = useState(false);
   const [documentExpanded, setDocumentExpanded] = useState(false);
@@ -1384,17 +1422,18 @@ function ProtocolAssignmentModal({
     enabled: historyOpen,
     refetchInterval: (query) => query.state.data?.items.some((item) => item.reconciliation?.status === "queued" || item.reconciliation?.status === "processing") ? 3_000 : false,
   });
-  const reconciliationMutation=useMutation({mutationFn:()=>requestProtocolingPatientIdentityReconciliation(appointment.appointmentId,reconciliationStudy!.studyInstanceUid!,reconciliationStudy!.accessionNumber),onSuccess:async()=>{setReconciliationStudy(null);setReconciliationConfirmed(false);await queryClient.invalidateQueries({queryKey:["doctor","protocoling","history",appointment.patientId,appointment.appointmentId]});},});
   const historicalCandidatesQuery = useQuery({
     queryKey: ["doctor", "protocoling", "historical-pacs-candidates", appointment.patientId],
     queryFn: () => fetchProtocolingHistoricalPacsCandidates(appointment.appointmentId),
     enabled: historyOpen,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) => hasActivePatientIdentityReconciliation(query.state.data?.historicalCandidates) ? 3_000 : false,
   });
   const oldPacsPatientIdMutation = useMutation({
-    mutationFn: () => searchProtocolingHistoricalPacsPatientId(appointment.appointmentId, oldPacsPatientId),
+    mutationFn: (patientId: string) => searchProtocolingHistoricalPacsPatientId(appointment.appointmentId, patientId),
   });
+  const reconciliationMutation=useMutation({mutationFn:()=>requestProtocolingPatientIdentityReconciliation(appointment.appointmentId,reconciliationStudy!.studyInstanceUid,reconciliationStudy!.accessionNumber),onSuccess:async()=>{const manualSearchPatientId=reconciliationStudy?.source==="manual_candidate"?reconciliationStudy.manualSearchPatientId:undefined;setReconciliationStudy(null);setReconciliationConfirmed(false);await Promise.all([queryClient.invalidateQueries({queryKey:["doctor","protocoling","history",appointment.patientId,appointment.appointmentId]}),queryClient.invalidateQueries({queryKey:["doctor","protocoling","historical-pacs-candidates",appointment.patientId]})]);if(manualSearchPatientId)oldPacsPatientIdMutation.mutate(manualSearchPatientId);},});
   const historyItems = historyQuery.data?.items ?? [];
   const historicalPacsIndexStatus = historicalCandidatesQuery.data?.historicalPacsIndexStatus ?? historyQuery.data?.historicalPacsIndexStatus;
   const historyModalities = useMemo(() => [...new Set(historyItems.flatMap((item) => item.modalities))].sort(), [historyItems]);
@@ -1546,7 +1585,17 @@ function ProtocolAssignmentModal({
                   {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
                   {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
                   <div className="mt-3 flex flex-wrap gap-1" aria-label="History modality filters"><button type="button" onClick={() => setSelectedHistoryModalities([])} aria-pressed={selectedHistoryModalities.length === 0} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.length === 0 ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>All</button>{historyModalities.map((modality) => <button key={modality} type="button" onClick={() => setSelectedHistoryModalities((current) => current.includes(modality) ? current.filter((entry) => entry !== modality) : [...current, modality])} aria-pressed={selectedHistoryModalities.includes(modality)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.includes(modality) ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>{modality}</button>)}</div>
-                  <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => { const firstModality = history.modalities[0]; const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200"; const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700"; const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only"; const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only"; const hasPacsStudy = history.source === "rispro_pacs" || history.source === "pacs_only"; const reconciliation=history.reconciliation; return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-border border-l-2 p-2 text-xs ${accent}`}><p className="text-sm font-semibold">{history.date ? formatDateLy(history.date) : "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}{history.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 font-semibold text-amber-700">Study UID matches, but the PACS Patient ID differs from this RISpro patient.</p> : null}{reconciliation?.status==="completed"?<p className="mt-1 font-semibold text-emerald-700">Reconciled · Previous ID: {reconciliation.oldPatientId}</p>:reconciliation?.status==="queued"||reconciliation?.status==="processing"?<p className="mt-1 font-semibold text-amber-700">Reconciliation pending</p>:reconciliation?.status==="failed"?<p className="mt-1 font-semibold text-red-700">Reconciliation failed</p>:null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-xs ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-xs ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{hasPacsStudy && history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">SonicDICOM</a> : null}{hasPacsStudy && history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">Open report</a> : null}{historyQuery.data?.canReconcilePatientIdentity&&hasPacsStudy&&history.studyInstanceUid&&history.historicalPatientId&&history.historicalPatientId!==historyQuery.data.currentPatient?.patientId&&!reconciliation?<Button size="sm" variant="secondary" onClick={()=>setReconciliationStudy(history)}>Reconcile patient identity</Button>:null}</div></div>; })}</div>
+                  <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => {
+                    const firstModality = history.modalities[0];
+                    const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200";
+                    const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700";
+                    const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only";
+                    const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only";
+                    const hasPacsStudy = history.source === "rispro_pacs" || history.source === "pacs_only";
+                    const reconciliationUi = patientIdentityReconciliationUiState(history.reconciliation);
+                    const canReconcile = Boolean(historyQuery.data?.canReconcilePatientIdentity && hasPacsStudy && history.studyInstanceUid?.trim() && history.historicalPatientId?.trim() && historyQuery.data.currentPatient?.patientId?.trim() && history.historicalPatientId.trim() !== historyQuery.data.currentPatient.patientId.trim() && reconciliationUi.action);
+                    return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-border border-l-2 p-2 text-xs ${accent}`}><p className="text-sm font-semibold">{history.date ? formatDateLy(history.date) : "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}{history.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 font-semibold text-amber-700">Study UID matches, but the PACS Patient ID differs from this RISpro patient.</p> : null}{reconciliationUi.status ? <p className={`mt-1 font-semibold ${reconciliationUi.statusClassName}`}>{reconciliationUi.status}</p> : null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-xs ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-xs ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{hasPacsStudy && history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">SonicDICOM</a> : null}{hasPacsStudy && history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">Open report</a> : null}{canReconcile ? <Button size="sm" variant="secondary" onClick={() => setReconciliationStudy({ studyInstanceUid: history.studyInstanceUid!.trim(), accessionNumber: history.accessionNumber, date: history.date, description: history.description, historicalPatientId: history.historicalPatientId ?? null, historicalPatientName: history.historicalPatientName ?? null, historicalPatientBirthDate: history.historicalPatientBirthDate ?? null, source: "history" })}>{reconciliationUi.action}</Button> : null}</div></div>;
+                  })}</div>
                 </>}
                  {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
                   <section className="mt-4 border-t border-border pt-3" aria-label="Possible older PACS studies">
@@ -1555,14 +1604,14 @@ function ProtocolAssignmentModal({
                    {historicalPacsIndexStatus === "stale" || historicalPacsIndexStatus === "unavailable" ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">The local PACS index is not current. Existing candidates are shown, but absence is not proof that a study is missing from PACS.</p> : null}
                     {historicalCandidatesQuery.isLoading && !historicalCandidatesQuery.data ? <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950" role="status" aria-live="polite"><div className="flex items-center gap-2 font-semibold"><span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Searching old PACS records…</div><p className="mt-1 text-xs font-medium">Patient history above is already available.</p></div> : null}
                     {historicalCandidatesQuery.isError ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Old PACS search unavailable.</p><p className="mt-1">Patient history above is still available.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historicalCandidatesQuery.refetch()}>Retry historical search</Button></div> : null}
-                   {historicalCandidatesQuery.data?.historicalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={historicalCandidatesQuery.data.historicalCandidates} /></div> : null}
+                   {historicalCandidatesQuery.data?.historicalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={historicalCandidatesQuery.data.historicalCandidates} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="automatic_candidate" onReconcile={setReconciliationStudy} /></div> : null}
                     {historicalCandidatesQuery.data && historicalCandidatesQuery.data.historicalCandidates.length === 0 && !historicalCandidatesQuery.isError ? <p className="mt-3 text-xs text-muted-foreground">No possible older PACS studies found.</p> : null}
-                  <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(); }}>
+                  <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(oldPacsPatientId.trim()); }}>
                     <label className="min-w-0 flex-1 text-xs font-semibold">Search old PACS Patient ID<Input aria-label="Old PACS Patient ID" className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
                     <Button type="submit" variant="outline" size="sm" disabled={!oldPacsPatientId.trim() || oldPacsPatientIdMutation.isPending}>{oldPacsPatientIdMutation.isPending ? "Searching..." : "Search"}</Button>
                   </form>
-                  {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search the local PACS index.</p> : null}
-                  {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} /></div> : null}
+                  {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search Authoritative Orthanc for that Patient ID.</p> : null}
+                  {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="manual_candidate" manualSearchPatientId={oldPacsPatientIdMutation.variables} onReconcile={setReconciliationStudy} /></div> : null}
                 </section>
                </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                  <div className="min-h-0 flex-1 overflow-y-auto p-3">

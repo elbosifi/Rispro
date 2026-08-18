@@ -125,6 +125,44 @@ describe("Doctor protocoling request documents", () => {
 
   it("requires explicit confirmation before requesting Patient Identity Reconciliation",async()=>{mockFetchProtocolingPatientHistory.mockResolvedValue({pacsStatus:"available",historicalPacsIndexStatus:"ready",historicalPacsLastSuccessAt:null,canReconcilePatientIdentity:true,currentPatient:{id:9,patientId:"NEW-9",name:"Current Patient",birthDate:"1990-01-02"},items:[{appointmentId:null,orthancStudyId:"study-old",studyInstanceUid:"1.2.3.4",accessionNumber:"OLD-ACC",date:"2024-01-02",time:null,modalities:["CT"],description:"Historical CT",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"OLD-9",historicalPatientName:"Old^Patient",historicalPatientBirthDate:"19800102",reconciliation:null}]});render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><DoctorProtocolsPage me={me}/></QueryClientProvider>);await userEvent.click(await screen.findByRole("button",{name:"Assign"}));await userEvent.click(screen.getByRole("button",{name:"Patient history"}));await userEvent.click(await screen.findByRole("button",{name:"Reconcile patient identity"}));const dialog=screen.getByRole("heading",{name:"Patient Identity Reconciliation"}).closest<HTMLElement>('[role="dialog"]')!;expect(within(dialog).getByText(/Old\^Patient/)).toBeTruthy();expect(within(dialog).getByText(/Current Patient/)).toBeTruthy();const submit=within(dialog).getByRole("button",{name:"Reconcile patient identity"});expect(submit.hasAttribute("disabled")).toBe(true);await userEvent.click(within(dialog).getByRole("checkbox"));await userEvent.click(submit);await waitFor(()=>expect(mockRequestReconciliation).toHaveBeenCalledWith(42,"1.2.3.4","OLD-ACC"));expect(mockRequestReconciliation).toHaveBeenCalledTimes(1);});
 
+  it("reconciles an automatic historical candidate using the selected study identity", async () => {
+    const candidate = { ...historicalCandidate, patientName: "GROUP^NAME", patientBirthDate: "19700101", studies: [{ ...historicalCandidate.studies[0], studyInstanceUid: "1.2.auto", accessionNumber: "AUTO-ACC", patientId: "OLD-AUTO", patientName: "STUDY^LEVEL", patientBirthDate: "19881231" }] };
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: "1990-01-02" }, items: [{ appointmentId: 7, orthancStudyId: null, studyInstanceUid: null, accessionNumber: "RIS-ONLY", date: "2024-01-01", time: null, modalities: ["CT"], description: "RISpro only", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only", identityDiscrepancy: null }] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    await userEvent.click(await within(section).findByRole("button", { name: "Reconcile patient identity" }));
+    const dialog = screen.getByRole("heading", { name: "Patient Identity Reconciliation" }).closest<HTMLElement>('[role="dialog"]')!;
+    expect(within(dialog).getByText(/Patient ID: OLD-AUTO/)).toBeTruthy();
+    expect(within(dialog).getByText(/Patient name: STUDY\^LEVEL/)).toBeTruthy();
+    expect(within(dialog).getByText(/DOB: 19881231/)).toBeTruthy();
+    const submit = within(dialog).getByRole("button", { name: "Reconcile patient identity" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    await userEvent.click(within(dialog).getByRole("checkbox"));
+    await userEvent.click(submit);
+    await waitFor(() => expect(mockRequestReconciliation).toHaveBeenCalledWith(42, "1.2.auto", "AUTO-ACC"));
+  });
+
+  it("uses the same reconciliation dialog and endpoint for manual old Patient ID results", async () => {
+    const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], studyInstanceUid: "1.2.manual", accessionNumber: "MANUAL-ACC" }] };
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: "1990-01-02" }, items: [] });
+    mockSearchHistoricalPacsPatientId.mockResolvedValue([candidate]);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Old PACS Patient ID" }), "OLD-77");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reconcile patient identity" }));
+    const dialog = screen.getByRole("heading", { name: "Patient Identity Reconciliation" }).closest<HTMLElement>('[role="dialog"]')!;
+    expect(within(dialog).getByText(/StudyInstanceUID: 1.2.manual/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("checkbox"));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reconcile patient identity" }));
+    await waitFor(() => expect(mockRequestReconciliation).toHaveBeenCalledWith(42, "1.2.manual", "MANUAL-ACC"));
+    await waitFor(() => expect(mockSearchHistoricalPacsPatientId).toHaveBeenCalledTimes(2));
+  });
+
   it("shows queued, completed, and failed reconciliation states without hiding history or offering unnecessary actions", async () => {
     mockFetchProtocolingPatientHistory.mockResolvedValue({pacsStatus:"available",historicalPacsIndexStatus:"ready",historicalPacsLastSuccessAt:null,canReconcilePatientIdentity:true,currentPatient:{id:9,patientId:"NEW-9",name:"Current Patient",birthDate:"1990-01-02"},items:[
       {appointmentId:null,orthancStudyId:"current",studyInstanceUid:"1.current",accessionNumber:"CURRENT",date:"2024-01-01",time:null,modalities:["CT"],description:"Already current",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"NEW-9",reconciliation:null},
@@ -139,7 +177,7 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByText(/Reconciled · Previous ID: OLD-2/)).toBeTruthy();
     expect(screen.getByText("Reconciliation failed")).toBeTruthy();
     expect(screen.getByText(/Already current/)).toBeTruthy();
-    expect(screen.queryByRole("button",{name:"Reconcile patient identity"})).toBeNull();
+    expect(screen.getByRole("button",{name:"Retry reconciliation"})).toBeTruthy();
   });
 
   it("renders reconciled history with client-side modality filtering", async () => {
@@ -304,6 +342,7 @@ describe("Doctor protocoling request documents", () => {
     expect(history.getByText("Possible patient match")).toBeTruthy();
     expect(history.getByText(/02\/01\/2024/)).toBeTruthy();
     expect(history.queryByText("20240102")).toBeNull();
+    expect(history.getByText("2 series · 20 images")).toBeTruthy();
     const openOldStudies = history.getByRole("link", { name: "Open old studies in RadiAnt" });
     expect(openOldStudies.getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
     expect(history.queryByRole("button", { name: /Attach|Migrate|Merge|Remap/i })).toBeNull();
@@ -314,6 +353,54 @@ describe("Doctor protocoling request documents", () => {
     await waitFor(() => expect(mockSearchHistoricalPacsPatientId).toHaveBeenCalledWith(42, "OLD-77"));
     expect((await history.findAllByText(/Old Patient ID: OLD-77/)).length).toBeGreaterThanOrEqual(2);
     expect(history.getByText("Exact Patient ID match")).toBeTruthy();
+  });
+
+  it("hides historical candidate reconciliation without permission", async () => {
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: false, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: null }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [historicalCandidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    expect(await within(section).findByText("Study UID: 1.2.3")).toBeTruthy();
+    expect(within(section).queryByRole("button", { name: "Reconcile patient identity" })).toBeNull();
+  });
+
+  it("distinguishes duplicate-looking historical studies and targets each Study UID", async () => {
+    const studies = ["1.2.duplicate.one", "1.2.duplicate.two"].map((studyInstanceUid, index) => ({ ...historicalCandidate.studies[0], orthancStudyId: `resource-${index}`, studyInstanceUid, accessionNumber: "SAME-ACC", studyDate: "20240102", studyDescription: "Same study" }));
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: null }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [{ ...historicalCandidate, studyCount: 2, studies }], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    for (const studyInstanceUid of ["1.2.duplicate.one", "1.2.duplicate.two"]) expect(within(section).getByText(`Study UID: ${studyInstanceUid}`)).toBeTruthy();
+    const buttons = within(section).getAllByRole("button", { name: "Reconcile patient identity" });
+    await userEvent.click(buttons[0]!);
+    const firstDialog = screen.getByRole("heading", { name: "Patient Identity Reconciliation" }).closest<HTMLElement>('[role="dialog"]')!;
+    expect(within(firstDialog).getByText(/StudyInstanceUID: 1.2.duplicate.one/)).toBeTruthy();
+    await userEvent.click(within(firstDialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(buttons[1]!);
+    const secondDialog = screen.getByRole("heading", { name: "Patient Identity Reconciliation" }).closest<HTMLElement>('[role="dialog"]')!;
+    expect(within(secondDialog).getByText(/StudyInstanceUID: 1.2.duplicate.two/)).toBeTruthy();
+  });
+
+  it("applies forward and reversal state semantics to historical candidate studies", async () => {
+    const stateStudy = (suffix: string, operationType: "reconcile" | "reverse", status: "queued" | "completed" | "failed") => ({ ...historicalCandidate.studies[0], orthancStudyId: suffix, studyInstanceUid: `1.${suffix}`, studyDescription: suffix, reconciliation: { id: suffix.length, status, oldPatientId: `OLD-${suffix}`, operationType, failureCode: status === "failed" ? "SAFE_FAILURE" : null } });
+    const studies = [stateStudy("forward-queued", "reconcile", "queued"), stateStudy("forward-completed", "reconcile", "completed"), stateStudy("forward-failed", "reconcile", "failed"), stateStudy("reverse-queued", "reverse", "queued"), stateStudy("reverse-failed", "reverse", "failed"), stateStudy("reverse-completed", "reverse", "completed")];
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: null }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [{ ...historicalCandidate, studyCount: studies.length, studies }], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    expect(await within(section).findByText("Reconciliation pending")).toBeTruthy();
+    expect(within(section).getByText(/Reconciled · Previous ID: OLD-forward-completed/)).toBeTruthy();
+    expect(within(section).getByText("Reconciliation failed")).toBeTruthy();
+    expect(within(section).getByText("Reversal pending")).toBeTruthy();
+    expect(within(section).getByText("Reversal failed")).toBeTruthy();
+    expect(within(section).getAllByRole("button", { name: "Retry reconciliation" })).toHaveLength(1);
+    expect(within(section).getAllByRole("button", { name: "Reconcile patient identity" })).toHaveLength(1);
   });
 
   it("renders fast patient history while historical PACS matching is still running", async () => {

@@ -5,7 +5,7 @@ import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSo
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
-import { discoverHistoricalPacsCandidatesForPatient, getHistoricalPacsReconciliationForPatient, lookupHistoricalPacsByPatientId } from "../../services/historical-pacs-index-service.js";
+import { discoverHistoricalPacsCandidatesForPatient, getHistoricalPacsReconciliationForPatient, lookupHistoricalPacsByPatientId, type HistoricalPacsCandidate } from "../../services/historical-pacs-index-service.js";
 import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
 import { getPatientIdentityReconciliationForStudies, requestPatientIdentityReconciliation } from "../../services/patient-identity-reconciliation-service.js";
 import {
@@ -29,6 +29,29 @@ import type {
 } from "./protocoling-types.js";
 
 type RawRecord = Record<string, unknown>;
+
+type HistoricalPacsCandidateWithReconciliation = Omit<HistoricalPacsCandidate, "studies"> & {
+  studies: Array<HistoricalPacsCandidate["studies"][number] & {
+    reconciliation: { id: number; status: string; oldPatientId: string | null; operationType: string; failureCode: string | null } | null;
+  }>;
+};
+
+async function attachPatientIdentityReconciliationToHistoricalCandidates(
+  candidates: HistoricalPacsCandidate[],
+  loadJobs = getPatientIdentityReconciliationForStudies,
+): Promise<HistoricalPacsCandidateWithReconciliation[]> {
+  const studyInstanceUids = [...new Set(candidates.flatMap((candidate) => candidate.studies.map((study) => study.studyInstanceUid?.trim()).filter((value): value is string => Boolean(value))))];
+  const jobs = await loadJobs(studyInstanceUids);
+  const latest = new Map<string, typeof jobs[number]>();
+  for (const job of jobs) if (!latest.has(job.study_instance_uid.trim())) latest.set(job.study_instance_uid.trim(), job);
+  return candidates.map((candidate) => ({
+    ...candidate,
+    studies: candidate.studies.map((study) => {
+      const job = study.studyInstanceUid ? latest.get(study.studyInstanceUid.trim()) : undefined;
+      return { ...study, reconciliation: job ? { id: job.id, status: job.status, oldPatientId: job.old_patient_id, operationType: job.operation_type, failureCode: job.failure_code } : null };
+    }),
+  }));
+}
 
 function stringOrNull(value: unknown): string | null {
   return value == null ? null : String(value);
@@ -536,7 +559,7 @@ export async function getProtocolingHistoricalPacsCandidates(appointmentId: numb
   if (!current) throw new HttpError(404, "Appointment not found.");
   const discovery = await discoverHistoricalPacsCandidatesForPatient(current.patientId);
   return {
-    historicalCandidates: discovery.candidates,
+    historicalCandidates: await attachPatientIdentityReconciliationToHistoricalCandidates(discovery.candidates),
     historicalPacsIndexStatus: discovery.indexStatus,
     historicalPacsLastSuccessAt: discovery.lastSuccessAt,
   };
@@ -544,8 +567,10 @@ export async function getProtocolingHistoricalPacsCandidates(appointmentId: numb
 
 export async function searchProtocolingHistoricalPacsPatientId(appointmentId: number, oldPatientId: string) {
   if (!(await getProtocolingAppointment(appointmentId))) throw new HttpError(404, "Appointment not found.");
-  return { candidates: await lookupHistoricalPacsByPatientId(oldPatientId) };
+  return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId)) };
 }
+
+export const __protocolingRepositoryTestables = { attachPatientIdentityReconciliationToHistoricalCandidates };
 
 async function assertProtocolingDocument(documentId: number): Promise<void> {
   const result = await pool.query(

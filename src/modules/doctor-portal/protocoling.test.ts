@@ -49,6 +49,30 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.doesNotMatch(routes, /doctor_portal\.appointment_protocols/);
   });
 
+  it("attaches the latest reconciliation to historical candidate studies with one batched lookup", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const { __protocolingRepositoryTestables } = await import("./protocoling-repository.js");
+    const calls: string[][] = [];
+    const candidates = [{ historicalPatientId: "OLD", patientName: null, patientBirthDate: null, patientSex: null, classification: "exact", reasons: ["exact_patient_id"], authoritative: true, matchRank: 1, nameSimilarity: 1, phoneticMatchCount: 0, studyCount: 3, studies: [
+      { orthancStudyId: "resource-1", studyInstanceUid: "1.2.1", accessionNumber: "A", patientId: "OLD", patientName: null, patientBirthDate: null, patientSex: null, studyDate: null, studyDescription: null, modalitiesInStudy: ["CT"], seriesCount: 1, instanceCount: 1 },
+      { orthancStudyId: "resource-2", studyInstanceUid: "1.2.2", accessionNumber: "B", patientId: "OLD", patientName: null, patientBirthDate: null, patientSex: null, studyDate: null, studyDescription: null, modalitiesInStudy: ["MR"], seriesCount: 1, instanceCount: 1 },
+      { orthancStudyId: "resource-3", studyInstanceUid: "1.2.1", accessionNumber: "C", patientId: "OLD", patientName: null, patientBirthDate: null, patientSex: null, studyDate: null, studyDescription: null, modalitiesInStudy: ["CT"], seriesCount: 1, instanceCount: 1 },
+    ] }];
+    const result = await __protocolingRepositoryTestables.attachPatientIdentityReconciliationToHistoricalCandidates(candidates as any, async (uids) => {
+      calls.push(uids);
+      return [
+        { id: 9, study_instance_uid: "1.2.1", status: "failed", old_patient_id: "OLD", operation_type: "reconcile", failure_code: "LATEST" },
+        { id: 4, study_instance_uid: "1.2.1", status: "completed", old_patient_id: "OLDER", operation_type: "reconcile", failure_code: null },
+        { id: 5, study_instance_uid: "1.2.2", status: "processing", old_patient_id: "OLD", operation_type: "reverse", failure_code: null },
+      ] as any;
+    });
+    assert.deepEqual(calls, [["1.2.1", "1.2.2"]]);
+    assert.deepEqual(result[0]!.studies.map((study) => study.reconciliation?.id), [9, 5, 9]);
+    assert.equal(result[0]!.studies[0]!.reconciliation?.failureCode, "LATEST");
+    assert.equal(result[0]!.studies[1]!.reconciliation?.operationType, "reverse");
+  });
+
   it("lists CT and MRI appointments with assignment state from protocol library tables", () => {
     const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
     const modalityPolicy = readFileSync(`${root}/src/services/protocoling-modality.ts`, "utf8");
