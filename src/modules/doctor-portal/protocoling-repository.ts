@@ -36,14 +36,24 @@ type HistoricalPacsCandidateWithReconciliation = Omit<HistoricalPacsCandidate, "
   }>;
 };
 
+function latestPatientIdentityReconciliationJobs<T extends { id: number; study_instance_uid: string }>(jobs: T[]): Map<string, T> {
+  const latest = new Map<string, T>();
+  for (const job of jobs) {
+    const studyInstanceUid = job.study_instance_uid.trim();
+    if (!studyInstanceUid) continue;
+    const existing = latest.get(studyInstanceUid);
+    if (!existing || job.id > existing.id) latest.set(studyInstanceUid, job);
+  }
+  return latest;
+}
+
 async function attachPatientIdentityReconciliationToHistoricalCandidates(
   candidates: HistoricalPacsCandidate[],
   loadJobs = getPatientIdentityReconciliationForStudies,
 ): Promise<HistoricalPacsCandidateWithReconciliation[]> {
   const studyInstanceUids = [...new Set(candidates.flatMap((candidate) => candidate.studies.map((study) => study.studyInstanceUid?.trim()).filter((value): value is string => Boolean(value))))];
   const jobs = await loadJobs(studyInstanceUids);
-  const latest = new Map<string, typeof jobs[number]>();
-  for (const job of jobs) if (!latest.has(job.study_instance_uid.trim())) latest.set(job.study_instance_uid.trim(), job);
+  const latest = latestPatientIdentityReconciliationJobs(jobs);
   return candidates.map((candidate) => ({
     ...candidate,
     studies: candidate.studies.map((study) => {
@@ -532,23 +542,24 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
     appointmentStatus: String(value.appointment_status),
     reportAvailable: Boolean(value.report_available),
   }));
+  const patientRow=(await pool.query<{patient_id:string|null;name:string|null;birth_date:string|null}>(`select coalesce(nullif(trim(pi.value),''),nullif(trim(p.identifier_value),''),nullif(trim(p.national_id),'')) patient_id,coalesce(nullif(trim(p.english_full_name),''),p.arabic_full_name) name,p.estimated_date_of_birth::text birth_date from patients p left join lateral(select value from patient_identifiers where patient_id=p.id and is_primary=true order by id limit 1) pi on true where p.id=$1`,[current.patientId])).rows[0];
+  const currentPatient={id:current.patientId,patientId:patientRow?.patient_id||current.patientDicomId,name:patientRow?.name||current.patientEnglishName||current.patientArabicName,birthDate:patientRow?.birth_date||null};
   try {
     const discovery = await getHistoricalPacsReconciliationForPatient(current.patientId, rispro.map((row) => row.studyInstanceUid).filter((value): value is string => Boolean(value)));
     const pacsStatus = discovery.knownPatientIds.length === 0
       ? "patient_id_unavailable" as const
       : discovery.indexStatus === "ready" ? "available" as const : "unavailable" as const;
     const baseItems=reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber, current.studyInstanceUid, discovery.knownPatientIds);
-    const jobs=await getPatientIdentityReconciliationForStudies(baseItems.map((item)=>item.studyInstanceUid).filter((value):value is string=>Boolean(value))); const latest=new Map<string,typeof jobs[number]>(); for(const job of jobs) if(!latest.has(job.study_instance_uid)) latest.set(job.study_instance_uid,job);
-    const patientRow=(await pool.query<{patient_id:string|null;name:string|null;birth_date:string|null}>(`select coalesce(nullif(trim(pi.value),''),nullif(trim(p.identifier_value),''),nullif(trim(p.national_id),'')) patient_id,coalesce(nullif(trim(p.english_full_name),''),p.arabic_full_name) name,p.estimated_date_of_birth::text birth_date from patients p left join lateral(select value from patient_identifiers where patient_id=p.id and is_primary=true order by id limit 1) pi on true where p.id=$1`,[current.patientId])).rows[0];
+    const jobs=await getPatientIdentityReconciliationForStudies(baseItems.map((item)=>item.studyInstanceUid?.trim()).filter((value):value is string=>Boolean(value))); const latest=latestPatientIdentityReconciliationJobs(jobs);
     return {
-      items: baseItems.map((item)=>{const job=item.studyInstanceUid?latest.get(item.studyInstanceUid):undefined;return {...item,reconciliation:job?{id:job.id,status:job.status,oldPatientId:job.old_patient_id,operationType:job.operation_type,failureCode:job.failure_code}:null};}),
+      items: baseItems.map((item)=>{const job=item.studyInstanceUid?latest.get(item.studyInstanceUid.trim()):undefined;return {...item,reconciliation:job?{id:job.id,status:job.status,oldPatientId:job.old_patient_id,operationType:job.operation_type,failureCode:job.failure_code}:null};}),
       pacsStatus,
       historicalPacsIndexStatus: discovery.indexStatus,
       historicalPacsLastSuccessAt: discovery.lastSuccessAt,
-      currentPatient:{id:current.patientId,patientId:patientRow?.patient_id||current.patientDicomId,name:patientRow?.name||current.patientEnglishName||current.patientArabicName,birthDate:patientRow?.birth_date||null},
+      currentPatient,
     };
   } catch {
-    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber, current.studyInstanceUid), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalPacsLastSuccessAt: null };
+    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber, current.studyInstanceUid), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalPacsLastSuccessAt: null, currentPatient };
   }
 }
 
@@ -570,7 +581,7 @@ export async function searchProtocolingHistoricalPacsPatientId(appointmentId: nu
   return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId)) };
 }
 
-export const __protocolingRepositoryTestables = { attachPatientIdentityReconciliationToHistoricalCandidates };
+export const __protocolingRepositoryTestables = { attachPatientIdentityReconciliationToHistoricalCandidates, latestPatientIdentityReconciliationJobs };
 
 async function assertProtocolingDocument(documentId: number): Promise<void> {
   const result = await pool.query(

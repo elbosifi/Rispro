@@ -62,15 +62,34 @@ describe("Doctor Portal protocoling worklist backend", () => {
     const result = await __protocolingRepositoryTestables.attachPatientIdentityReconciliationToHistoricalCandidates(candidates as any, async (uids) => {
       calls.push(uids);
       return [
-        { id: 9, study_instance_uid: "1.2.1", status: "failed", old_patient_id: "OLD", operation_type: "reconcile", failure_code: "LATEST" },
         { id: 4, study_instance_uid: "1.2.1", status: "completed", old_patient_id: "OLDER", operation_type: "reconcile", failure_code: null },
-        { id: 5, study_instance_uid: "1.2.2", status: "processing", old_patient_id: "OLD", operation_type: "reverse", failure_code: null },
+        { id: 12, study_instance_uid: " 1.2.1 ", status: "failed", old_patient_id: "OLD", operation_type: "reconcile", failure_code: "LATEST" },
+        { id: 7, study_instance_uid: "1.2.1", status: "processing", old_patient_id: "OLD", operation_type: "reconcile", failure_code: null },
+        { id: 6, study_instance_uid: "1.2.2", status: "processing", old_patient_id: "OLD", operation_type: "reverse", failure_code: null },
       ] as any;
     });
     assert.deepEqual(calls, [["1.2.1", "1.2.2"]]);
-    assert.deepEqual(result[0]!.studies.map((study) => study.reconciliation?.id), [9, 5, 9]);
+    assert.deepEqual(result[0]!.studies.map((study) => study.reconciliation?.id), [12, 6, 12]);
     assert.equal(result[0]!.studies[0]!.reconciliation?.failureCode, "LATEST");
     assert.equal(result[0]!.studies[1]!.reconciliation?.operationType, "reverse");
+  });
+
+  it("preserves canonical currentPatient identity in degraded Patient History", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    const historyStart = repo.indexOf("export async function getProtocolingPatientHistory");
+    const historyEnd = repo.indexOf("export async function requestProtocolingPatientIdentityReconciliation", historyStart);
+    const history = repo.slice(historyStart, historyEnd);
+    const patientRowIndex = history.indexOf("const patientRow=");
+    const currentPatientIndex = history.indexOf("const currentPatient=");
+    const tryIndex = history.indexOf("  try {");
+    const catchIndex = history.indexOf("  } catch {");
+
+    assert.ok(patientRowIndex >= 0 && patientRowIndex < tryIndex);
+    assert.ok(currentPatientIndex > patientRowIndex && currentPatientIndex < tryIndex);
+    assert.match(history.slice(tryIndex, catchIndex), /currentPatient,/);
+    assert.match(history.slice(catchIndex), /historicalPacsLastSuccessAt: null, currentPatient/);
+    assert.match(history, /coalesce\(nullif\(trim\(pi\.value\),''\),nullif\(trim\(p\.identifier_value\),''\),nullif\(trim\(p\.national_id\),''\)\)/);
+    assert.doesNotMatch(history, /patientRow[\s\S]*?mrn/i);
   });
 
   it("lists CT and MRI appointments with assignment state from protocol library tables", () => {
