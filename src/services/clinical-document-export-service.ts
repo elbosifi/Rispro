@@ -387,6 +387,9 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
     return;
   }
   try {
+    if (isOrthancRemoteClinicalDocumentExportDestination(row.destination_key) && row.representation_type !== "secondary_capture") {
+      throw new ClinicalDocumentExportBlockedError("unsupported_remote_representation", "Selected-PACS clinical document export supports Secondary Capture only.");
+    }
     const study = await resolveTargetStudy(appointmentContext(row), row, row.destination_key, dependencies);
     if (row.study_instance_uid && row.study_instance_uid !== study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The resolved Orthanc study differs from the study persisted for this export.");
     if (row.representation_type === "secondary_capture") { await processSecondaryCaptureExport(row, study, dependencies); return; }

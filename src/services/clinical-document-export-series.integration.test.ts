@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import dcmjs from "dcmjs";
 import { pool } from "../db/pool.js";
+import { HttpError } from "../utils/http-error.js";
 import type { OrthancInstanceDetails, OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { enqueueClinicalDocumentExportsForAppointment } from "./clinical-document-export-queue-service.js";
 import { claimNextClinicalDocumentExport, processClaimedClinicalDocumentExport, retryClinicalDocumentExport, type ClinicalDocumentProcessorDependencies } from "./clinical-document-export-service.js";
@@ -220,9 +221,73 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.equal(remoteRetry.study_instance_uid, stable.study);
       assert.equal(remoteRetry.series_instance_uid, stable.series);
       assert.equal(remoteRetry.sop_instance_uid, `${stable.sop}.2`);
+      await pool.query("update clinical_document_exports set status='blocked', next_retry_at=null where id=$1", [remoteRetryId]);
 
       await assert.rejects(() => retryClinicalDocumentExport(exhaustedExportId, created.userId));
       assert.equal((await pool.query<{ status: string }>("select status from clinical_document_exports where id=$1", [exhaustedExportId])).rows[0]?.status, "blocked");
+    });
+
+    await t.test("processes selected-PACS SC exports with persisted retry identifiers and SOP acknowledgement", async () => {
+      await pool.query("update appointments_v2.bookings set study_instance_uid=null where id=$1", [created.bookingId]);
+      const remoteStudyUid = `2.25.${uidSuffix}9400`;
+      const lookupCriteria: Array<Record<string, string>> = [];
+      const captured: Record<string, unknown>[] = [];
+      let failNextStore = false;
+      let mismatchNextStore = false;
+      const remoteDependencies: ClinicalDocumentProcessorDependencies = {
+        ...dependencies,
+        createOrthancClient: async () => { throw new Error("remote export must not create an authoritative Orthanc client"); },
+        searchRemoteStudies: async ({ criteria }) => {
+          lookupCriteria.push(criteria as Record<string, string>);
+          return { target: { type: "remote_modality" as const, key: "TEST_PACS", name: "TEST_PACS", isDefault: false }, studies: [{ patientId: patientPrimaryId, patientName: "Series^Patient", accessionNumber: accession, modality: "CT", description: "", studyDescription: "", studyDate: new Date().toISOString().slice(0, 10).replaceAll("-", ""), studyInstanceUid: remoteStudyUid }] };
+        },
+        storeDicomStraight: async ({ dicomBytes }) => {
+          const dataset = parseDicom(dicomBytes); captured.push(dataset);
+          if (failNextStore) { failNextStore = false; throw new HttpError(502, "temporary store failure", { code: "orthanc_store_failed" }); }
+          return { sopClassUid: String(dataset.SOPClassUID), sopInstanceUid: mismatchNextStore ? "1.2.3.999" : String(dataset.SOPInstanceUID) };
+        },
+      };
+      const createRemoteExport = async (name: string, representationType = "secondary_capture") => {
+        const documentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','manual_upload',$2,$3,'image/png',3,$4) returning id", [created.patientId, `${name}-${suffix}.png`, `documents/export-test/${name}-${suffix}.png`, created.bookingId])).rows[0]!.id);
+        documentIds.push(documentId);
+        const exportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,representation_type,next_retry_at) values($1,$2,'orthanc_remote:TEST_PACS','pending',$3,now()) returning id", [documentId, created.bookingId, representationType])).rows[0]!.id);
+        exportIds.push(exportId); return exportId;
+      };
+      const firstId = await createRemoteExport("remote-first");
+      const firstRow = await claimNextClinicalDocumentExport(`remote-first-${suffix}`, 300, "orthanc_remote:");
+      assert.equal(Number(firstRow?.id), firstId);
+      await processClaimedClinicalDocumentExport(firstRow!, remoteDependencies);
+      assert.deepEqual(lookupCriteria[0], { accessionNumber: accession });
+      const first = (await pool.query<{ status: string; study_instance_uid: string; series_instance_uid: string; sop_instance_uid: string; orthanc_instance_id: string | null; orthanc_series_id: string | null }>("select status,study_instance_uid,series_instance_uid,sop_instance_uid,orthanc_instance_id,orthanc_series_id from clinical_document_exports where id=$1", [firstId])).rows[0]!;
+      assert.equal(first.status, "exported"); assert.equal(first.study_instance_uid, remoteStudyUid);
+      const firstPage = (await pool.query<{ series_instance_uid: string; sop_instance_uid: string }>("select series_instance_uid,sop_instance_uid from clinical_document_export_instances where export_id=$1", [firstId])).rows[0]!;
+      assert.equal(captured[0]?.StudyInstanceUID, remoteStudyUid); assert.equal(captured[0]?.SeriesInstanceUID, firstPage.series_instance_uid); assert.equal(captured[0]?.SOPInstanceUID, firstPage.sop_instance_uid); assert.equal(captured[0]?.AccessionNumber, accession);
+      assert.ok(captured[0]?.StudyDate == null || captured[0]?.StudyDate === ""); assert.ok(captured[0]?.StudyTime == null || captured[0]?.StudyTime === ""); assert.ok(captured[0]?.StudyDescription == null || captured[0]?.StudyDescription === "");
+      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_export_instances where export_id=$1", [firstId])).rows[0]?.status, "verified");
+
+      const retryId = await createRemoteExport("remote-retry"); failNextStore = true;
+      const failedRow = await claimNextClinicalDocumentExport(`remote-failed-${suffix}`, 300, "orthanc_remote:");
+      assert.equal(Number(failedRow?.id), retryId); await processClaimedClinicalDocumentExport(failedRow!, remoteDependencies);
+      const failed = (await pool.query<{ status: string; next_retry_at: string | null; study_instance_uid: string; series_instance_uid: string }>("select status,next_retry_at,study_instance_uid,series_instance_uid from clinical_document_exports where id=$1", [retryId])).rows[0]!;
+      assert.equal(failed.status, "failed"); assert.ok(failed.next_retry_at); assert.equal(failed.study_instance_uid, remoteStudyUid);
+      const failedPage = (await pool.query<{ series_instance_uid: string; sop_instance_uid: string }>("select series_instance_uid,sop_instance_uid from clinical_document_export_instances where export_id=$1", [retryId])).rows[0]!;
+      await pool.query("update clinical_document_exports set next_retry_at=now() where id=$1", [retryId]);
+      const retriedRow = await claimNextClinicalDocumentExport(`remote-retry-${suffix}`, 300, "orthanc_remote:");
+      await processClaimedClinicalDocumentExport(retriedRow!, remoteDependencies);
+      assert.deepEqual(lookupCriteria.at(-1), { studyInstanceUid: remoteStudyUid });
+      const retried = (await pool.query<{ status: string; series_instance_uid: string }>("select status,series_instance_uid from clinical_document_exports where id=$1", [retryId])).rows[0]!;
+      const retriedPage = (await pool.query<{ series_instance_uid: string; sop_instance_uid: string }>("select series_instance_uid,sop_instance_uid from clinical_document_export_instances where export_id=$1", [retryId])).rows[0]!;
+      assert.equal(retried.status, "exported"); assert.equal(retried.series_instance_uid, failed.series_instance_uid); assert.equal(retriedPage.series_instance_uid, failedPage.series_instance_uid); assert.equal(retriedPage.sop_instance_uid, failedPage.sop_instance_uid);
+
+      const mismatchId = await createRemoteExport("remote-mismatch"); mismatchNextStore = true;
+      const mismatchRow = await claimNextClinicalDocumentExport(`remote-mismatch-${suffix}`, 300, "orthanc_remote:"); await processClaimedClinicalDocumentExport(mismatchRow!, remoteDependencies); mismatchNextStore = false;
+      assert.equal((await pool.query<{ status: string; last_error: string }>("select status,last_error from clinical_document_exports where id=$1", [mismatchId])).rows[0]?.status, "blocked");
+      assert.match((await pool.query<{ last_error: string }>("select last_error from clinical_document_exports where id=$1", [mismatchId])).rows[0]?.last_error || "", /different SOPInstanceUID/i);
+      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_export_instances where export_id=$1", [mismatchId])).rows[0]?.status, "blocked");
+
+      const unsupportedId = await createRemoteExport("remote-unsupported", "encapsulated_pdf");
+      const unsupportedRow = await claimNextClinicalDocumentExport(`remote-unsupported-${suffix}`, 300, "orthanc_remote:"); await processClaimedClinicalDocumentExport(unsupportedRow!, remoteDependencies);
+      assert.match((await pool.query<{ last_error: string }>("select last_error from clinical_document_exports where id=$1", [unsupportedId])).rows[0]?.last_error || "", /Secondary Capture only/i);
     });
   } finally {
     if (exportIds.length) await pool.query("delete from audit_log where entity_type='clinical_document_export' and entity_id=any($1::bigint[])", [exportIds]);
