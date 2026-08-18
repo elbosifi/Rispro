@@ -49,6 +49,21 @@ describe("AuthoritativeOrthancSection", () => {
     expect(screen.queryByRole("button",{name:"Reverse"})).toBeNull();
   });
 
+  it("shows a failed reconciliation code in the Status cell", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.endsWith("/settings")) return { settings };
+      if (path.endsWith("/pacs/orthanc-modalities")) return { modalities };
+      if (path.includes("patient-identity-reconciliations")) return {jobs:[
+        {id:1,requested_at:"2026-08-18T10:00:00Z",study_date:null,accession_number:"FAILED",study_instance_uid:"1.failed",old_patient_id:null,new_patient_id:null,operator_name:"Supervisor",operation_type:"reconcile",status:"failed",failure_code:"orthanc_timeout",reversed_by_job_id:null},
+      ],total:1};
+      throw new Error(`Unexpected ${path}`);
+    });
+    const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));
+    const statusCell = (await screen.findByText("orthanc_timeout")).closest("td");
+    expect(statusCell?.textContent).toContain("Failed");
+    expect(statusCell?.textContent).toContain("orthanc_timeout");
+  });
+
   it("submits a confirmed reversal and refreshes reconciliation history", async () => {
     const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));
     await user.click(await screen.findByRole("button",{name:"Reverse"}));

@@ -22,6 +22,22 @@ function installStudyFetch(ids: string[], payloads: Record<string, Record<string
   });
 }
 
+function installPatientIdentityReconciliationInventoryFetch(instances: unknown[], sharedTags: Record<string, unknown> = {}) {
+  const urls: URL[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const requestedUrl = new URL(String(url));
+    const path = requestedUrl.pathname;
+    urls.push(requestedUrl);
+    if (path === "/tools/find") return json(["study-1"]);
+    if (path === "/studies/study-1/statistics") return json({ CountSeries: 2, CountInstances: instances.length });
+    if (path === "/studies/study-1/shared-tags") return json({ MainDicomTags: sharedTags });
+    if (path === "/studies/study-1/instances") return json(instances);
+    if (path === "/studies/study-1") return json(study());
+    throw new Error(`Unexpected ${init?.method || "GET"} ${path}`);
+  });
+  return urls;
+}
+
 test("connects without authentication and validates the compact system response", async () => {
   service.__setAuthoritativeOrthancFetchForTests(async (_url, init) => { assert.equal(new Headers(init?.headers).has("authorization"), false); return json({ Name: "Authoritative", Version: "1.12.4", ApiVersion: "19" }); });
   assert.deepEqual(await new service.AuthoritativeOrthancClient(enabled).getSystem(), { name: "Authoritative", version: "1.12.4", apiVersion: "19" });
@@ -198,6 +214,60 @@ test("uses an exact StudyInstanceUID before accession and returns study metadata
 });
 
 test("Patient Identity Reconciliation explicitly preserves UIDs, changes only identity fields, labels resources, and never C-STOREs",async()=>{const calls:Array<{path:string;method:string;body:unknown}>=[];service.__setAuthoritativeOrthancFetchForTests(async(url,init)=>{const path=new URL(String(url)).pathname;const body=init?.body&&typeof init.body==="string"&&init.body?JSON.parse(init.body):null;calls.push({path,method:init?.method||"GET",body});if(path.endsWith("/modify"))return json({ID:"job-1"});return new Response(null,{status:200});});const client=new service.AuthoritativeOrthancClient(enabled);await client.markPatientIdentityReconciliationSourceNoRoute("source-study");const started=await client.startPatientIdentityReconciliation({orthancStudyId:"source-study",patientId:"NEW",otherPatientIdsSequence:[{PatientID:"EARLIER"},{PatientID:"OLD"}]});await client.markPatientIdentityReconciliationResourceNoRoute("target-study");assert.equal(started.jobId,"job-1");const modify=calls.find((call)=>call.path.endsWith("/modify"))!;assert.deepEqual(modify.body,{Replace:{PatientID:"NEW",OtherPatientIDsSequence:[{PatientID:"EARLIER"},{PatientID:"OLD"}]},Keep:["StudyInstanceUID","SeriesInstanceUID","SOPInstanceUID"],Force:true,KeepSource:false,Asynchronous:true});assert.equal(JSON.stringify(modify.body).includes("PatientName"),false);assert.equal(JSON.stringify(modify.body).includes("PatientBirthDate"),false);assert.equal(JSON.stringify(modify.body).includes("PatientSex"),false);assert.ok(calls.some((call)=>call.path.includes("rispro_patient_identity_reconciliation_source")));assert.ok(calls.some((call)=>call.path.includes("rispro_patient_identity_reconciliation")));assert.ok(calls.every((call)=>!call.path.includes("/modalities/")));});
+
+test("Patient Identity Reconciliation uses one expanded instance inventory without per-instance requests", async () => {
+  const urls = installPatientIdentityReconciliationInventoryFetch([
+    { ID: "instance-1", MainDicomTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.2", SOPInstanceUID: "2.25.20" } },
+    { ID: "instance-2", MainDicomTags: { StudyInstanceUID: "1.2.3" }, RequestedTags: { SeriesInstanceUID: "2.25.1", SOPInstanceUID: "2.25.10" } },
+    { ID: "instance-3", RequestedTags: { "0020000D": { Value: "1.2.3" }, "0020000E": { Value: "2.25.1" }, "00080018": { Value: "2.25.30" } } },
+  ], { OtherPatientIDsSequence: [{ PatientID: "EARLIER" }, { PatientID: "OLD" }] });
+
+  const [snapshot] = await new service.AuthoritativeOrthancClient(enabled).listPatientIdentityReconciliationStudies("1.2.3");
+
+  assert.deepEqual(snapshot?.seriesInstanceUids, ["2.25.1", "2.25.2"]);
+  assert.deepEqual(snapshot?.sopInstanceUids, ["2.25.10", "2.25.20", "2.25.30"]);
+  assert.deepEqual(snapshot?.otherPatientIdsSequence, [{ PatientID: "EARLIER" }, { PatientID: "OLD" }]);
+  const inventoryUrl = urls.find((url) => url.pathname === "/studies/study-1/instances");
+  assert.equal(inventoryUrl?.searchParams.has("expand"), true);
+  assert.deepEqual(inventoryUrl?.searchParams.get("requestedTags")?.split(";").sort(), ["SOPInstanceUID", "SeriesInstanceUID", "StudyInstanceUID"]);
+  assert.equal(urls.some((url) => /^\/instances\/instance-/.test(url.pathname)), false);
+});
+
+test("Patient Identity Reconciliation request count stays fixed for 1000 instances", async () => {
+  const instances = Array.from({ length: 1000 }, (_, index) => ({
+    ID: `instance-${index}`,
+    RequestedTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: `2.25.${index % 10}`, SOPInstanceUID: `2.25.1000.${index}` },
+  }));
+  const urls = installPatientIdentityReconciliationInventoryFetch(instances);
+
+  const snapshot = await new service.AuthoritativeOrthancClient(enabled).getStudyForPatientIdentityReconciliation({ studyInstanceUid: "1.2.3" });
+
+  assert.equal(snapshot.sopInstanceUids.length, 1000);
+  assert.equal(urls.length, 5);
+  assert.equal(urls.filter((url) => /^\/instances\/instance-/.test(url.pathname)).length, 0);
+});
+
+test("Patient Identity Reconciliation rejects malformed expanded instance inventory", async () => {
+  installPatientIdentityReconciliationInventoryFetch([
+    { ID: "instance-1", RequestedTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.1" } },
+  ]);
+
+  await assert.rejects(
+    () => new service.AuthoritativeOrthancClient(enabled).listPatientIdentityReconciliationStudies("1.2.3"),
+    /invalid study inventory/i,
+  );
+});
+
+test("Patient Identity Reconciliation rejects conflicting instance StudyInstanceUID inventory", async () => {
+  installPatientIdentityReconciliationInventoryFetch([
+    { ID: "instance-1", RequestedTags: { StudyInstanceUID: "9.9.9", SeriesInstanceUID: "2.25.1", SOPInstanceUID: "2.25.10" } },
+  ]);
+
+  await assert.rejects(
+    () => new service.AuthoritativeOrthancClient(enabled).listPatientIdentityReconciliationStudies("1.2.3"),
+    /conflicting study identity/i,
+  );
+});
 
 test("requests and parses computed ModalitiesInStudy from study details", async () => {
   const urls: URL[] = [];
