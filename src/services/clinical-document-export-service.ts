@@ -302,14 +302,13 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
   try {
     await renewLease(row); const source = await dependencies.readDocumentBytes(row.document_stored_path); rendered = await dependencies.renderDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
     const prepared = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = await dependencies.createOrthancClient();
-    const seriesKind = documentSeriesKind(row.document_type);
     const pages = prepared.pages;
     for (const page of pages) {
       activePage = page;
       await renewLease(row); let instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid);
       if (!instance) {
         const renderedPage = rendered.pages[page.page_number - 1]!; const pixels = await dependencies.readRenderedPage(renderedPage.path);
-        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, seriesKind, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number });
+        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number });
         try { instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!); } catch (error) { instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid).catch(() => null); if (!instance) throw error; }
       }
       verifySecondaryCaptureInstance(instance, row, study, page, modality);

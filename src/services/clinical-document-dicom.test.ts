@@ -49,6 +49,21 @@ function assertUnnumberedSeries(buffer: Buffer, dataset: Record<string, unknown>
   assert.ok(rawValue == null || rawValue.length === 0 || rawValue.every((value) => String(value ?? "").trim() === ""));
 }
 
+function assertAbsentOrEmptySecondaryCaptureMetadata(buffer: Buffer, dataset: Record<string, unknown>): void {
+  const raw = parseRaw(buffer);
+  const tags: Record<string, string> = {
+    StudyDate: "00080020", StudyTime: "00080030", SeriesDescription: "0008103E", StudyDescription: "00081030",
+    ContentDate: "00080023", ContentTime: "00080033", InstanceCreationDate: "00080012", InstanceCreationTime: "00080013",
+    AcquisitionDate: "00080022", AcquisitionTime: "00080032", AcquisitionDateTime: "0008002A", SeriesDate: "00080021", SeriesTime: "00080031",
+    ProtocolName: "00181030", RequestedProcedureDescription: "00321060", Manufacturer: "00080070",
+  };
+  for (const [name, tag] of Object.entries(tags)) {
+    const value = raw[tag]?.Value;
+    assert.ok(value == null || value.length === 0 || value.every((item) => String(item ?? "").trim() === ""), `${name} must be absent or empty`);
+    assert.ok(dataset[name] == null || String(dataset[name]).trim() === "", `${name} must be absent or empty when naturalized`);
+  }
+}
+
 test("creates a valid Encapsulated PDF DICOM instance with stable supplied UIDs", async () => {
   const pdf = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii");
   const dicom = await createClinicalDocumentDicom(pdf, "application/pdf", metadata);
@@ -90,18 +105,17 @@ test("converts JPEG and PNG input to PDF before encapsulation", async () => {
   }
 });
 
-test("creates parseable RGB Secondary Capture MR and CT pages with native PixelData", async () => {
+test("creates minimal RGB Secondary Capture MR and CT pages with native PixelData", async () => {
   const pixels = Buffer.from([255, 0, 0, 0, 255, 0]);
-  for (const [modality, expectedModality, sopInstanceUid, instanceNumber, seriesKind, description] of [["MRI", "MR", "2.25.457", 4, "request", "Request Documents"], ["CT", "CT", "2.25.458", 5, "clinical", "Clinical Documents"]] as const) {
-    const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, { ...metadata, sopInstanceUid, modality, seriesKind, instanceNumber });
+  for (const [modality, expectedModality, sopInstanceUid, instanceNumber] of [["MRI", "MR", "2.25.457", 4], ["CT", "CT", "2.25.458", 5]] as const) {
+    const suppliedDateMetadata = { ...metadata, sopInstanceUid, modality, instanceNumber, studyDate: "19991231", studyTime: "120000", contentDate: "19991231", contentTime: "120000" };
+    const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, suppliedDateMetadata);
     const dataset = parse(dicom);
     assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
     assert.match(dicom.toString("latin1"), /1\.2\.840\.10008\.1\.2\.1/);
     assert.equal(dataset.StudyInstanceUID, metadata.studyInstanceUid); assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
-    assert.equal(dataset.SOPInstanceUID, sopInstanceUid); assert.equal(dataset.PatientID, metadata.patientId); assert.equal(dataset.AccessionNumber, metadata.accessionNumber);
-    assert.equal(dataset.Modality, expectedModality); assert.equal(dataset.SeriesDescription, description);
-    assert.doesNotMatch(String(dataset.SeriesDescription), /RISpro|Scanned/);
-    assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]); assert.equal(dataset.ConversionType, "SD");
+    assert.equal(dataset.SOPInstanceUID, sopInstanceUid); assert.equal(dataset.PatientID, metadata.patientId); assert.deepEqual(dataset.PatientName, [{ Alphabetic: metadata.patientName }]); assert.equal(dataset.AccessionNumber, metadata.accessionNumber);
+    assert.equal(dataset.Modality, expectedModality); assert.equal(dataset.ConversionType, "SD");
     assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3); assert.equal(dataset.PlanarConfiguration, 0);
     assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.BitsStored, 8); assert.equal(dataset.HighBit, 7); assert.equal(dataset.PixelRepresentation, 0);
     assert.equal(pixelBytes(dataset.PixelData).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
@@ -110,6 +124,7 @@ test("creates parseable RGB Secondary Capture MR and CT pages with native PixelD
     assert.equal(rawPixelData?.vr, "OW");
     assert.equal(pixelBytes(rawPixelData?.Value).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
     assert.equal(dataset.InstanceNumber, instanceNumber); assert.equal(dataset.BurnedInAnnotation, "YES");
+    assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset);
     for (const tag of ["SliceThickness", "ImagePositionPatient", "ImageOrientationPatient", "MagneticFieldStrength", "EchoTime", "RepetitionTime"]) assert.equal(dataset[tag], undefined);
   }
 });
@@ -128,7 +143,7 @@ test("maps only supported semantic document series kinds", () => {
   assert.throws(() => documentSeriesKind("other"), /Unsupported document type/);
 });
 
-test("preserves historical names and numbers only for explicit legacy recovery", async () => {
+test("preserves a historical series number only for explicit legacy recovery", async () => {
   const pixels = Buffer.from([255, 255, 255]);
   const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 1, {
     ...metadata,
@@ -137,7 +152,7 @@ test("preserves historical names and numbers only for explicit legacy recovery",
     legacySeriesNumber: 9000,
   });
   const dataset = parse(dicom);
-  assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
+  assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset);
   assert.equal(dataset.SeriesNumber, 9000);
 });
 

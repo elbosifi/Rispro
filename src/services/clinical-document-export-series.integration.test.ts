@@ -104,11 +104,11 @@ test("request and clinical documents export into separate exact-name unnumbered 
     assert.equal(clinicalSeries.size, 1);
     assert.notEqual([...requestSeries][0], [...clinicalSeries][0]);
     assert.notEqual([...clinicalSeries][0], legacySeriesUid);
-    assert.deepEqual(datasets.map((dataset) => dataset.SeriesDescription).sort(), ["Clinical Documents", "Clinical Documents", "Request Documents", "Request Documents"]);
     assert.ok(datasets.every((dataset) => dataset.StudyInstanceUID === studyUid));
     assert.ok(datasets.every((dataset) => dataset.SeriesNumber == null || dataset.SeriesNumber === ""));
-    assert.deepEqual(datasets.filter((dataset) => dataset.SeriesDescription === "Request Documents").map((dataset) => dataset.InstanceNumber), [1, 2]);
-    assert.deepEqual(datasets.filter((dataset) => dataset.SeriesDescription === "Clinical Documents").map((dataset) => dataset.InstanceNumber), [1, 2]);
+    assert.ok(datasets.every((dataset) => dataset.SeriesDescription == null || dataset.SeriesDescription === ""));
+    assert.deepEqual(datasets.filter((dataset) => dataset.SeriesInstanceUID === [...requestSeries][0]).map((dataset) => dataset.InstanceNumber), [1, 2]);
+    assert.deepEqual(datasets.filter((dataset) => dataset.SeriesInstanceUID === [...clinicalSeries][0]).map((dataset) => dataset.InstanceNumber), [1, 2]);
 
     const partialDocumentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','manual_upload',$2,$3,'image/png',3) returning id", [created.patientId, `partial-${suffix}.png`, `documents/export-test/${suffix}-partial.png`])).rows[0]!.id);
     documentIds.push(partialDocumentId);
@@ -127,7 +127,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
     });
     const partialResult = await pool.query<{ status: string; series_number: number | null; series_instance_uid: string; verified_page_count: number }>("select status,series_number,series_instance_uid,verified_page_count from clinical_document_exports where id=$1", [partialExportId]);
     assert.deepEqual(partialResult.rows[0], { status: "exported", series_number: 9001, series_instance_uid: partialSeriesUid, verified_page_count: 2 });
-    assert.equal(datasets.at(-1)?.SeriesDescription, "RISpro Scanned Documents");
+    assert.ok(datasets.at(-1)?.SeriesDescription == null || datasets.at(-1)?.SeriesDescription === "");
     assert.equal(datasets.at(-1)?.SeriesNumber, 9001);
 
     await t.test("recovers an Orthanc-uploaded legacy SOP whose local page is still pending", async () => {
@@ -176,7 +176,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.equal(untouchedResult.rows[0]?.status, "exported");
       assert.equal(untouchedResult.rows[0]?.series_number, null);
       assert.notEqual(untouchedResult.rows[0]?.series_instance_uid, untouchedSeriesUid);
-      assert.equal(datasets.at(-1)?.SeriesDescription, "Clinical Documents");
+      assert.ok(datasets.at(-1)?.SeriesDescription == null || datasets.at(-1)?.SeriesDescription === "");
       assert.ok(datasets.at(-1)?.SeriesNumber == null || datasets.at(-1)?.SeriesNumber === "");
     });
 

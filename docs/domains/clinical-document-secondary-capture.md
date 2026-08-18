@@ -4,6 +4,8 @@ RISpro queues a `secondary_capture` clinical-document export for documents creat
 
 The worker finds an existing matched Orthanc study; it never creates a replacement study. It renders the document into RGB pages and writes one DICOM Secondary Capture instance per page. All scanned clinical documents for one appointment currently share a single Secondary Capture series, with sequential instance numbers. This is the implemented behavior and requires product/clinical governance before it is changed.
 
+Secondary Capture instances intentionally use a minimal metadata profile: they do not populate study or series descriptions or real date/time values. The existing authoritative PACS study supplies study-level metadata.
+
 ## Current policy boundaries
 
 - Deleting a RISpro document does not remove an already-exported DICOM object from Orthanc.
