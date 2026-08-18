@@ -1,9 +1,13 @@
 import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { OptionalUserId } from "../types/http.js";
-import { isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings } from "./authoritative-orthanc-service.js";
+import { readClinicalDocumentExportSettings } from "./clinical-document-export-settings-service.js";
 
 export const CLINICAL_DOCUMENT_EXPORT_DESTINATION = "authoritative_orthanc";
+export const ORTHANC_REMOTE_DESTINATION_PREFIX = "orthanc_remote:";
+export const clinicalDocumentExportDestinationKey = (remoteKey: string) => `${ORTHANC_REMOTE_DESTINATION_PREFIX}${remoteKey}`;
+export const isOrthancRemoteClinicalDocumentExportDestination = (key: string) => key.startsWith(ORTHANC_REMOTE_DESTINATION_PREFIX) && key.length > ORTHANC_REMOTE_DESTINATION_PREFIX.length;
+export const remoteKeyFromClinicalDocumentExportDestination = (key: string) => isOrthancRemoteClinicalDocumentExportDestination(key) ? key.slice(ORTHANC_REMOTE_DESTINATION_PREFIX.length) : null;
 const EXPORTABLE_DOCUMENT_TYPES = ["appointment_request", "clinical_document"] as const;
 
 export function isClinicalDocumentExportDocumentType(documentType: unknown): boolean {
@@ -55,8 +59,17 @@ export async function enqueueClinicalDocumentExportsForAppointmentAutomatically(
   appointmentId: number,
   changedByUserId: OptionalUserId = null,
 ): Promise<number[]> {
-  if (!isClinicalDocumentAutoExportEnabled(await readAuthoritativeOrthancSettings())) return [];
-  return enqueueClinicalDocumentExportsForAppointment(appointmentId, changedByUserId);
+  const settings = await readClinicalDocumentExportSettings();
+  if (!settings.enabled || !settings.destinationKey) return [];
+  const destinationKey = clinicalDocumentExportDestinationKey(settings.destinationKey);
+  const result = await pool.query<{ id: number }>(`
+    insert into clinical_document_exports (document_id, appointment_id, destination_key, representation_type, next_retry_at)
+    select distinct d.id, b.id, $2, 'secondary_capture', now()
+    from appointments_v2.bookings b join documents d on d.document_type in ('appointment_request', 'clinical_document') and (d.v2_booking_id=b.id or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=b.id))
+    where b.id=$1 on conflict (document_id, appointment_id, destination_key) do nothing returning id
+  `, [appointmentId, destinationKey]);
+  for (const row of result.rows) await logAuditEntry({ entityType: "clinical_document_export", entityId: Number(row.id), actionType: "clinical_document_export_queued", oldValues: null, newValues: { destinationKey, appointmentId }, changedByUserId });
+  return result.rows.map((row) => Number(row.id));
 }
 
 export async function reconcileClinicalDocumentExports(changedByUserId: OptionalUserId = null): Promise<number> {

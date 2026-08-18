@@ -68,6 +68,8 @@ interface PacsAutoCompletionTestDiagnostics {
   lastError: string | null;
 }
 
+type ClinicalDocumentExportSettings = { enabled: boolean; destinationKey: string };
+
 interface PacsAutoCompletionTestResponse {
   result: { status: string; lastError?: string | null };
   history: unknown;
@@ -127,6 +129,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     queryKey: ["pacs", "auto-completion-settings"],
     queryFn: () => api<{ settings: PacsAutoCompletionSetting[] }>("/pacs/auto-completion-settings", {}, SETTINGS_LOAD_TIMEOUT_MS)
   });
+  const clinicalExportQuery = useQuery<{ settings: ClinicalDocumentExportSettings }>({
+    queryKey: ["pacs", "clinical-document-export"],
+    queryFn: () => api<{ settings: ClinicalDocumentExportSettings }>("/pacs/clinical-document-export", {}, SETTINGS_LOAD_TIMEOUT_MS)
+  });
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -137,6 +143,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [autoTestingId, setAutoTestingId] = useState<number | null>(null);
   const [autoTestBookingIds, setAutoTestBookingIds] = useState<Record<number, string>>({});
   const [autoTestResults, setAutoTestResults] = useState<Record<number, PacsAutoCompletionTestResponse>>({});
+  const [clinicalDraft, setClinicalDraft] = useState<ClinicalDocumentExportSettings | null>(null);
+  const [clinicalMessage, setClinicalMessage] = useState<string | null>(null);
 
   const emptyForm: OrthancModalityFormState = {
     key: "",
@@ -234,6 +242,16 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       setTestResult({ key: targetKey as string, ok: false, message: err.message });
       setTestingKey(null);
     }
+  });
+  const saveClinicalExportMutation = useMutation({
+    mutationFn: (draft: ClinicalDocumentExportSettings) => api<{ settings: ClinicalDocumentExportSettings }>("/pacs/clinical-document-export", { method: "PUT", body: JSON.stringify(draft) }),
+    onSuccess: async () => { setClinicalMessage("Clinical document export settings saved."); setClinicalDraft(null); await queryClient.invalidateQueries({ queryKey: ["pacs", "clinical-document-export"] }); },
+    onError: (err: Error) => setClinicalMessage(err.message)
+  });
+  const testClinicalExportMutation = useMutation({
+    mutationFn: (targetKey: string) => api("/pacs/test", { method: "POST", body: JSON.stringify({ targetKey }) }),
+    onSuccess: () => setClinicalMessage("DICOM C-ECHO successful."),
+    onError: (err: Error) => setClinicalMessage(err.message)
   });
 
   const saveAutoMutation = useMutation({
@@ -412,6 +430,20 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           {t(language, "settings.pacs.noRemoteModalities")}
         </p>
       )}
+      {(() => {
+        const draft = clinicalDraft || clinicalExportQuery.data?.settings || { enabled: false, destinationKey: "" };
+        const selected = data?.modalities.find((item) => item.key === draft.destinationKey);
+        const valid = Boolean(selected?.aet && selected.host && selected.port != null && !selected.configurationError);
+        return <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3" data-testid="clinical-document-export-settings">
+          <div><h4 className="font-semibold text-stone-900 dark:text-white">Clinical document export</h4><p className="text-xs text-stone-500 dark:text-stone-400 mt-1">RISpro sends generated clinical-document DICOM through the internal Orthanc gateway to this PACS.</p></div>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(event) => setClinicalDraft({ ...draft, enabled: event.target.checked })} /> Automatically send approved scanned documents to PACS</label>
+          <label className="block text-sm">Destination<select aria-label="Clinical document export destination" className="input mt-1 w-full" value={draft.destinationKey} onChange={(event) => setClinicalDraft({ ...draft, destinationKey: event.target.value })}><option value="">Select a configured modality</option>{data?.modalities.map((item) => <option key={item.key} value={item.key} disabled={!item.aet || !item.host || item.port == null || Boolean(item.configurationError)}>{item.key} — {item.aet || "missing AET"} — {item.host || "missing host"}:{item.port ?? "missing port"}</option>)}</select></label>
+          {selected && <p className="text-xs text-muted-foreground">{selected.aet} — {selected.host}:{selected.port}</p>}
+          {clinicalMessage && <p className="text-sm">{clinicalMessage}</p>}
+          <div className="flex gap-2"><button type="button" className="btn-secondary" disabled={!draft.destinationKey || testClinicalExportMutation.isPending} onClick={() => testClinicalExportMutation.mutate(draft.destinationKey)}>Test destination</button><button type="button" className="btn-primary" disabled={saveClinicalExportMutation.isPending || (draft.enabled && !valid)} onClick={() => { if (draft.enabled && !valid) { setClinicalMessage("Select a valid PACS destination before enabling export."); return; } saveClinicalExportMutation.mutate(draft); }}>Save</button></div>
+          <p className="text-xs text-muted-foreground">Test destination checks DICOM connectivity (C-ECHO). It does not create a test study.</p>
+        </div>;
+      })()}
       <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3">
         <div>
           <h4 className="font-semibold text-stone-900 dark:text-white">{t(language, "settings.pacs.autoCompletion")}</h4>

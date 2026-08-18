@@ -40,6 +40,7 @@ export interface OrthancPacsSearchCriteria {
   accessionNumber?: string;
   studyDate?: string;
   modality?: string;
+  studyInstanceUid?: string;
 }
 
 type OrthancFetchResponse = {
@@ -100,6 +101,7 @@ async function orthancFetch(
   options: {
     method?: string;
     body?: unknown;
+    contentType?: string;
     settings?: ResolvedOrthancSettings;
     timeoutSeconds?: number;
   } = {}
@@ -122,8 +124,8 @@ async function orthancFetch(
     };
 
     if (options.body !== undefined) {
-      headers["Content-Type"] = "application/json";
-      init.body = JSON.stringify(options.body);
+      headers["Content-Type"] = options.contentType || "application/json";
+      init.body = (Buffer.isBuffer(options.body) ? options.body : JSON.stringify(options.body)) as unknown as BodyInit;
     }
 
     if (!settings.verifyTls && settings.baseUrl.toLowerCase().startsWith("https://")) {
@@ -248,9 +250,10 @@ function normalizeCriteria(payload: OrthancPacsSearchCriteria | UnknownRecord): 
     accessionNumber: firstString(payload.accessionNumber),
     studyDate: dicomDate(payload.studyDate),
     modality: firstString(payload.modality).toUpperCase(),
+    studyInstanceUid: firstString(payload.studyInstanceUid),
   };
 
-  if (!criteria.patientId && !criteria.patientName && !criteria.accessionNumber && !criteria.studyDate && !criteria.modality) {
+  if (!criteria.patientId && !criteria.patientName && !criteria.accessionNumber && !criteria.studyDate && !criteria.modality && !criteria.studyInstanceUid) {
     throw new HttpError(400, "At least one PACS search field is required.");
   }
 
@@ -266,10 +269,17 @@ function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
       AccessionNumber: criteria.accessionNumber || "",
       StudyDate: criteria.studyDate || "",
       ModalitiesInStudy: criteria.modality || "",
-      StudyInstanceUID: "",
+      StudyInstanceUID: criteria.studyInstanceUid || "",
       StudyDescription: "",
     },
   };
+}
+
+export async function storeDicomStraightToOrthancPacs({ targetKey, dicomBytes }: { targetKey: string; dicomBytes: Buffer }): Promise<void> {
+  if (!targetKey || !dicomBytes.length) throw new HttpError(400, "A PACS destination and DICOM instance are required.");
+  const settings = await resolveSettings();
+  const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(targetKey)}/store-straight`, { method: "POST", body: dicomBytes, contentType: "application/dicom", settings });
+  if (!response.ok) throw new HttpError(502, `Orthanc PACS store failed (status=${response.status}).`);
 }
 
 function extractTags(payload: unknown): UnknownRecord {

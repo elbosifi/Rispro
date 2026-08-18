@@ -75,3 +75,22 @@ test("remote PACS search maps Orthanc DICOM tag JSON into study details", async 
     studyInstanceUid: "1.2.3.4",
   });
 });
+
+test("remote PACS search preserves StudyInstanceUID and straight store sends raw DICOM", async () => {
+  const calls: Array<{ path: string; options?: { body?: unknown; contentType?: string } }> = [];
+  const bytes = Buffer.from([0, 1, 2, 3]);
+  service.__setOrthancPacsFetchForTests(async (path, options) => {
+    calls.push({ path, options });
+    if (path === "/modalities/OSIRIX_IMAC/query") return orthancResponse({ ID: "query-uid" });
+    if (path === "/queries/query-uid/answers") return orthancResponse([]);
+    if (path === "/modalities/OSIRIX_IMAC/store-straight") return orthancResponse({});
+    throw new Error(`Unexpected path ${path}`);
+  });
+  await service.searchOrthancPacsStudies({ targetKey: "OSIRIX_IMAC", criteria: { studyInstanceUid: "1.2.840.7" }, currentUserId: null });
+  await service.storeDicomStraightToOrthancPacs({ targetKey: "OSIRIX_IMAC", dicomBytes: bytes });
+  const query = calls.find((call) => call.path.endsWith("/query"));
+  assert.equal((query?.options?.body as { Query: { StudyInstanceUID: string } }).Query.StudyInstanceUID, "1.2.840.7");
+  const store = calls.find((call) => call.path.endsWith("/store-straight"));
+  assert.equal(store?.options?.body, bytes);
+  assert.equal(store?.options?.contentType, "application/dicom");
+});

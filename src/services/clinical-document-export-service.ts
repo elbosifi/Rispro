@@ -10,6 +10,9 @@ import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, cr
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
 import { createAuthoritativeOrthancClient, isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { CLINICAL_DOCUMENT_EXPORT_DESTINATION, enqueueClinicalDocumentExportsForAppointmentAutomatically, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
+import { isOrthancRemoteClinicalDocumentExportDestination, remoteKeyFromClinicalDocumentExportDestination } from "./clinical-document-export-queue-service.js";
+import { searchOrthancPacsStudies, storeDicomStraightToOrthancPacs } from "./orthanc-pacs-service.js";
+import { readClinicalDocumentExportSettings } from "./clinical-document-export-settings-service.js";
 
 const EXPORT_LEASE_SECONDS = 300;
 const DEFAULT_BATCH_SIZE = 10;
@@ -74,6 +77,8 @@ export type ClinicalDocumentProcessorDependencies = Readonly<{
   renderDocument: typeof renderClinicalDocument;
   readRenderedPage: typeof readRenderedRgbPage;
   cleanupRenderedDocument: typeof cleanupRenderedClinicalDocument;
+  searchRemoteStudies?: typeof searchOrthancPacsStudies;
+  storeDicomStraight?: typeof storeDicomStraightToOrthancPacs;
 }>;
 
 const productionClinicalDocumentProcessorDependencies: ClinicalDocumentProcessorDependencies = Object.freeze({
@@ -82,6 +87,8 @@ const productionClinicalDocumentProcessorDependencies: ClinicalDocumentProcessor
   renderDocument: renderClinicalDocument,
   readRenderedPage: readRenderedRgbPage,
   cleanupRenderedDocument: cleanupRenderedClinicalDocument,
+  searchRemoteStudies: searchOrthancPacsStudies,
+  storeDicomStraight: storeDicomStraightToOrthancPacs,
 });
 
 type AppointmentExportContext = Pick<ClinicalDocumentExportWorkRow, "appointment_id" | "appointment_status" | "appointment_study_instance_uid" | "appointment_accession_number" | "appointment_booking_date" | "patient_primary_id" | "patient_national_id" | "patient_mrn" | "patient_name" | "patient_birth_date" | "patient_sex" | "modality_code">;
@@ -179,7 +186,28 @@ async function loadExportWork(id: number): Promise<ClinicalDocumentExportWorkRow
   return rows[0] || null;
 }
 
-async function resolveTargetStudy(context: AppointmentExportContext, dependencies: ClinicalDocumentProcessorDependencies): Promise<OrthancStudyDetails> {
+async function resolveTargetStudy(context: AppointmentExportContext, destinationKey: string, dependencies: ClinicalDocumentProcessorDependencies): Promise<OrthancStudyDetails> {
+  const remoteKey = remoteKeyFromClinicalDocumentExportDestination(destinationKey);
+  if (remoteKey) {
+    const modality = normalizeRisproModalityCode(context.modality_code);
+    if (!modality) throw new ClinicalDocumentExportBlockedError("unmapped_modality", "The RISpro modality code cannot be mapped to a DICOM modality.");
+    const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
+    const criteria = context.appointment_study_instance_uid ? { studyInstanceUid: context.appointment_study_instance_uid } : { accessionNumber: context.appointment_accession_number };
+    const result = await (dependencies.searchRemoteStudies || searchOrthancPacsStudies)({ criteria, targetKey: remoteKey, currentUserId: null, audit: false });
+    const matches = result.studies.filter((study) => {
+      if (!study.studyInstanceUid) return false;
+      if (context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) return false;
+      if (study.accessionNumber && study.accessionNumber !== context.appointment_accession_number) return false;
+      if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) return false;
+      if (study.modality && study.modality.toUpperCase() !== modality) return false;
+      if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) return false;
+      return true;
+    });
+    if (matches.length === 0) throw new Error("Orthanc study was not found yet.");
+    if (matches.length !== 1) throw new ClinicalDocumentExportBlockedError("ambiguous_study_match", "PACS study matching is ambiguous and needs review.");
+    const study = matches[0]!;
+    return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyDescription: study.studyDescription || null, modalitiesInStudy: study.modality ? [study.modality] : [], seriesCount: 0, instanceCount: 0 };
+  }
   const client = await dependencies.createOrthancClient();
   const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
   const uidResult = context.appointment_study_instance_uid
@@ -211,7 +239,7 @@ async function ensureStableIdentifiers(row: ClinicalDocumentExportWorkRow, targe
     const sopInstanceUid = row.sop_instance_uid || createClinicalDocumentUid();
     const duplicate = await client.query<{ id: number }>(
       `select id from clinical_document_exports where appointment_id=$1 and destination_key=$2 and sop_instance_uid=$3 and id<>$4 limit 1`,
-      [row.appointment_id, CLINICAL_DOCUMENT_EXPORT_DESTINATION, sopInstanceUid, row.id],
+      [row.appointment_id, row.destination_key, sopInstanceUid, row.id],
     );
     if (duplicate.rowCount) throw new ClinicalDocumentExportBlockedError("sop_uid_conflict", "The generated SOPInstanceUID is already assigned to another export.");
     const updated = await client.query(
@@ -263,7 +291,7 @@ async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, 
         persistedSeriesNumber = null;
       }
     }
-    const existing = await client.query<{ series_instance_uid: string | null }>("select distinct e.series_instance_uid from clinical_document_exports e join documents d on d.id=e.document_id where e.appointment_id=$1 and e.destination_key=$2 and e.representation_type='secondary_capture' and d.document_type=$3 and e.series_number is null and e.series_instance_uid is not null", [row.appointment_id, CLINICAL_DOCUMENT_EXPORT_DESTINATION, row.document_type]);
+    const existing = await client.query<{ series_instance_uid: string | null }>("select distinct e.series_instance_uid from clinical_document_exports e join documents d on d.id=e.document_id where e.appointment_id=$1 and e.destination_key=$2 and e.representation_type='secondary_capture' and d.document_type=$3 and e.series_number is null and e.series_instance_uid is not null", [row.appointment_id, row.destination_key, row.document_type]);
     const series = [...new Set(existing.rows.map((value) => value.series_instance_uid).filter(Boolean))]; if (series.length > 1) throw new ClinicalDocumentExportBlockedError("series_uid_conflict", "Multiple RISpro scanned-document series identifiers exist for this appointment.");
     const seriesUid = persistedSeriesUid || series[0] || createClinicalDocumentUid();
     const max = await client.query<{ max: number | null }>("select max(i.instance_number) from clinical_document_export_instances i join clinical_document_exports e on e.id=i.export_id where e.appointment_id=$1 and i.series_instance_uid=$2", [row.appointment_id, seriesUid]);
@@ -290,7 +318,7 @@ async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, 
 async function markSecondaryCaptureComplete(row: ClinicalDocumentExportWorkRow, study: OrthancStudyDetails): Promise<void> {
   const counts = await pool.query<{ expected: number | null; total: number; verified: number; series_id: string | null }>("select e.expected_page_count expected,count(i.*)::int total,count(i.*) filter(where i.status='verified')::int verified,max(i.orthanc_series_id) series_id from clinical_document_exports e left join clinical_document_export_instances i on i.export_id=e.id where e.id=$1 and e.status='exporting' and e.export_lease_owner=$2 group by e.expected_page_count", [row.id, row.export_lease_owner]);
   const count = counts.rows[0]; if (!count) throw new Error("Clinical document export lease was lost before completion."); if (!count.expected || count.total !== count.expected || count.verified !== count.total) throw new Error("Not every clinical document page has been verified.");
-  const updated = await pool.query("update clinical_document_exports set status='exported',exported_page_count=$2,verified_page_count=$2,orthanc_study_id=$3,orthanc_series_id=$4,exported_at=coalesce(exported_at,now()),verified_at=now(),last_error=null,next_retry_at=null,export_lease_owner=null,export_lease_expires_at=null,updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$5", [row.id, count.total, study.orthancStudyId, count.series_id, row.export_lease_owner]);
+  const updated = await pool.query("update clinical_document_exports set status='exported',exported_page_count=$2,verified_page_count=$2,orthanc_study_id=$3,orthanc_series_id=$4,exported_at=coalesce(exported_at,now()),verified_at=now(),last_error=null,next_retry_at=null,export_lease_owner=null,export_lease_expires_at=null,updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$5", [row.id, count.total, isOrthancRemoteClinicalDocumentExportDestination(row.destination_key) ? null : study.orthancStudyId, count.series_id, row.export_lease_owner]);
   if (updated.rowCount !== 1) throw new Error("Clinical document export lease was lost during completion.");
   await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_succeeded", oldValues: { status: "exporting" }, newValues: { status: "exported", representationType: "secondary_capture", pageCount: count.total, orthancSeriesId: count.series_id }, changedByUserId: null });
 }
@@ -301,18 +329,19 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
   let activePage: ClinicalDocumentExportInstanceRow | null = null;
   try {
     await renewLease(row); const source = await dependencies.readDocumentBytes(row.document_stored_path); rendered = await dependencies.renderDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
-    const prepared = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = await dependencies.createOrthancClient();
+    const prepared = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = isOrthancRemoteClinicalDocumentExportDestination(row.destination_key) ? null : await dependencies.createOrthancClient();
     const pages = prepared.pages;
     for (const page of pages) {
       activePage = page;
-      await renewLease(row); let instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid);
+      await renewLease(row); if (page.status === "verified") { activePage = null; continue; } let instance = client ? await client.findInstanceBySopInstanceUid(page.sop_instance_uid) : null;
       if (!instance) {
         const renderedPage = rendered.pages[page.page_number - 1]!; const pixels = await dependencies.readRenderedPage(renderedPage.path);
         const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number });
-        try { instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!); } catch (error) { instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid).catch(() => null); if (!instance) throw error; }
+        if (!client) await (dependencies.storeDicomStraight || storeDicomStraightToOrthancPacs)({ targetKey: remoteKeyFromClinicalDocumentExportDestination(row.destination_key)!, dicomBytes: dicom });
+        else try { instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!); } catch (error) { instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid).catch(() => null); if (!instance) throw error; }
       }
-      verifySecondaryCaptureInstance(instance, row, study, page, modality);
-      const verified = await pool.query("update clinical_document_export_instances i set status='verified',orthanc_instance_id=$2,orthanc_series_id=$3,exported_at=coalesce(exported_at,now()),verified_at=now(),last_error=null,updated_at=now() where i.id=$1 and exists(select 1 from clinical_document_exports e where e.id=i.export_id and e.status='exporting' and e.export_lease_owner=$4)", [page.id, instance.orthancInstanceId, instance.orthancSeriesId, row.export_lease_owner]);
+      if (instance) verifySecondaryCaptureInstance(instance, row, study, page, modality);
+      const verified = await pool.query("update clinical_document_export_instances i set status='verified',orthanc_instance_id=$2,orthanc_series_id=$3,exported_at=coalesce(exported_at,now()),verified_at=now(),last_error=null,updated_at=now() where i.id=$1 and exists(select 1 from clinical_document_exports e where e.id=i.export_id and e.status='exporting' and e.export_lease_owner=$4)", [page.id, instance?.orthancInstanceId || null, instance?.orthancSeriesId || null, row.export_lease_owner]);
       if (verified.rowCount !== 1) throw new Error("Clinical document export lease was lost after page upload; the next worker will reconcile the persisted SOPInstanceUID.");
       await pool.query("update clinical_document_exports set exported_page_count=(select count(*) from clinical_document_export_instances where export_id=$1 and exported_at is not null),verified_page_count=(select count(*) from clinical_document_export_instances where export_id=$1 and status='verified'),updated_at=now() where id=$1", [row.id]);
       activePage = null;
@@ -355,7 +384,7 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
     return;
   }
   try {
-    const study = await resolveTargetStudy(appointmentContext(row), dependencies);
+    const study = await resolveTargetStudy(appointmentContext(row), row.destination_key, dependencies);
     if (row.study_instance_uid && row.study_instance_uid !== study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The resolved Orthanc study differs from the study persisted for this export.");
     if (row.representation_type === "secondary_capture") { await processSecondaryCaptureExport(row, study, dependencies); return; }
     const identifiers = await ensureStableIdentifiers(row, study.studyInstanceUid!);
@@ -381,7 +410,7 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
   }
 }
 
-export async function claimNextClinicalDocumentExport(workerId: string, leaseSeconds = EXPORT_LEASE_SECONDS): Promise<ClinicalDocumentExportWorkRow | null> {
+export async function claimNextClinicalDocumentExport(workerId: string, leaseSeconds = EXPORT_LEASE_SECONDS, destinationPrefix?: string): Promise<ClinicalDocumentExportWorkRow | null> {
   const safeLeaseSeconds = Math.max(30, Math.min(Math.floor(leaseSeconds), 3600));
   const { rows } = await pool.query<ClinicalDocumentExportWorkRow>(
     `
@@ -390,6 +419,7 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
         from clinical_document_exports e
         join appointments_v2.bookings b on b.id=e.appointment_id
         where b.status='completed'
+          and ($3::text is null or e.destination_key like $3::text || '%')
           and (
             (e.status='pending' and (e.next_retry_at is null or e.next_retry_at <= now()))
             or (e.status='failed' and e.next_retry_at is not null and e.next_retry_at <= now())
@@ -405,7 +435,7 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
       where e.id=candidate.id
       returning e.*
     `,
-    [workerId, safeLeaseSeconds],
+    [workerId, safeLeaseSeconds, destinationPrefix ?? null],
   );
   const row = rows[0] || null;
   if (row) await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_started", oldValues: { status: "pending" }, newValues: { status: "exporting", attemptCount: row.attempt_count }, changedByUserId: null });
@@ -413,18 +443,16 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
 }
 
 export async function runClinicalDocumentExportTick(options: { batchSize?: number; shouldStop?: () => boolean } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
-  const settings = await readAuthoritativeOrthancSettings();
-  if (!isClinicalDocumentAutoExportEnabled(settings)) return { reconciled: 0, processed: 0, exported: 0, failed: 0 };
-  let reconciled: number;
-  try { reconciled = await reconcileClinicalDocumentExports(); }
-  catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_reconciliation_failed", error: sanitizeClinicalDocumentExportError(error) })); throw error; }
+  const settings = await readClinicalDocumentExportSettings();
+  if (!settings.enabled || !settings.destinationKey) return { reconciled: 0, processed: 0, exported: 0, failed: 0 };
+  const reconciled = 0;
   const workerId = `clinical-document-export-${randomUUID()}`;
   let processed = 0;
   let exported = 0;
   let failed = 0;
   for (let index = 0; index < Math.max(1, options.batchSize ?? DEFAULT_BATCH_SIZE); index += 1) {
     if (options.shouldStop?.()) break;
-    const row = await claimNextClinicalDocumentExport(workerId);
+    const row = await claimNextClinicalDocumentExport(workerId, EXPORT_LEASE_SECONDS, "orthanc_remote:");
     if (!row) break;
     logClinicalDocumentExportWorker("export_claimed", { exportId: row.id, appointmentId: row.appointment_id, documentId: row.document_id });
     processed += 1;

@@ -72,15 +72,10 @@ describe("AuthoritativeOrthancSection", () => {
     await waitFor(()=>expect(vi.mocked(api).mock.calls.filter(([path])=>String(path).includes("patient-identity-reconciliations")).length).toBeGreaterThanOrEqual(3));
   });
 
-  it("saves the automatic PACS export setting and retains it while the connection is disabled", async () => {
-    const user = userEvent.setup(); renderSection();
-    const autoExport = await screen.findByRole("checkbox", { name: "Automatically send approved scanned documents to PACS" });
-    expect((autoExport as HTMLInputElement).checked).toBe(true);
-    await user.click(screen.getByRole("checkbox", { name: "Enable Orthanc connection" }));
-    expect((autoExport as HTMLInputElement).disabled).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    const saveCall = await waitFor(() => vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith("/settings") && options?.method === "PUT"));
-    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ enabled: false, autoExportClinicalDocuments: true }));
+  it("moves clinical document export configuration to PACS Connection", async () => {
+    renderSection();
+    expect(await screen.findByText("Clinical document export is configured under PACS Connection.")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Automatically send approved scanned documents to PACS" })).toBeNull();
   });
 
   it("renders safe settings, retains an empty password field, and shows compact connection details", async () => {

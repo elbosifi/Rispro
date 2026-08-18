@@ -196,7 +196,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
 
     expect(await screen.findByText("Orthanc remote modalities")).toBeTruthy();
     expect(screen.getAllByText("CT_REMOTE").length).toBeGreaterThan(0);
-    expect(screen.getByText(/10\.0\.0\.5:104/)).toBeTruthy();
+    expect(screen.getAllByText(/10\.0\.0\.5:104/).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Add Orthanc modality" }));
     await user.type(screen.getByPlaceholderText("Orthanc key (e.g. CT_REMOTE)"), "MR_REMOTE");
@@ -205,7 +205,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     await user.type(screen.getByPlaceholderText("Port"), "104");
     await user.type(screen.getByPlaceholderText("Remote AET"), "MRPACS");
     await user.click(screen.getByRole("checkbox", { name: "Default destination" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getAllByRole("button", { name: "Save" })[0]!);
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith(

@@ -26,6 +26,7 @@ import {
   upsertOrthancRemoteModality,
 } from "../services/orthanc-pacs-service.js";
 import { synchronizeAuthoritativeOrthancCdRobots } from "../services/authoritative-orthanc-service.js";
+import { readClinicalDocumentExportSettings, saveClinicalDocumentExportSettings } from "../services/clinical-document-export-settings-service.js";
 import {
   listPacsAutoCompletionSettings,
   listPacsAutoCompletionTargets,
@@ -533,6 +534,25 @@ export const __pacsRouteTestables = {
 // ---------------------------------------------------------------------------
 // Orthanc-backed V2 PACS auto-completion settings
 // ---------------------------------------------------------------------------
+
+pacsRouter.get(
+  "/clinical-document-export",
+  ...supervisorMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json({ settings: await readClinicalDocumentExportSettings() });
+  })
+);
+
+pacsRouter.put(
+  "/clinical-document-export",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext };
+    const body = asUnknownRecord(request.body ?? {});
+    const settings = await saveClinicalDocumentExportSettings({ enabled: Boolean(body.enabled), destinationKey: asOptionalString(body.destinationKey) || "" }, request.user.sub as UserId);
+    res.json({ settings });
+  })
+);
 
 pacsRouter.get(
   "/orthanc-verification-targets",
