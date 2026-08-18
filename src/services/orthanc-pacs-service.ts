@@ -280,12 +280,16 @@ function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
   };
 }
 
-export async function storeDicomStraightToOrthancPacs({ targetKey, dicomBytes }: { targetKey: string; dicomBytes: Buffer }): Promise<void> {
+export async function storeDicomStraightToOrthancPacs({ targetKey, dicomBytes }: { targetKey: string; dicomBytes: Buffer }): Promise<{ sopClassUid: string; sopInstanceUid: string }> {
   if (!targetKey) throw new HttpError(400, "A PACS destination is required.", { code: "orthanc_remote_modality_missing" });
   if (!dicomBytes.length) throw new HttpError(400, "Generated DICOM instance is empty.", { code: "orthanc_invalid_dicom" });
   const settings = await resolveSettings();
   const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(targetKey)}/store-straight`, { method: "POST", body: dicomBytes, contentType: "application/dicom", settings });
   if (!response.ok) throw operationalError(response.status, `Orthanc PACS store failed (status=${response.status}).`, "orthanc_store_failed");
+  const payload = record(response.json);
+  const sopInstanceUid = firstString(payload.SOPInstanceUID, payload.sopInstanceUid);
+  if (!sopInstanceUid) throw new HttpError(502, "Orthanc PACS store returned an invalid response.", { code: "orthanc_invalid_response" });
+  return { sopClassUid: firstString(payload.SOPClassUID, payload.sopClassUid), sopInstanceUid };
 }
 
 function extractTags(payload: unknown): UnknownRecord {

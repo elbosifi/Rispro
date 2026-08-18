@@ -83,14 +83,27 @@ test("remote PACS search preserves StudyInstanceUID and straight store sends raw
     calls.push({ path, options });
     if (path === "/modalities/OSIRIX_IMAC/query") return orthancResponse({ ID: "query-uid" });
     if (path === "/queries/query-uid/answers") return orthancResponse([]);
-    if (path === "/modalities/OSIRIX_IMAC/store-straight") return orthancResponse({});
+    if (path === "/modalities/OSIRIX_IMAC/store-straight") return orthancResponse({ SOPClassUID: "1.2.840.10008.5.1.4.1.1.7", SOPInstanceUID: "1.2.3.4" });
     throw new Error(`Unexpected path ${path}`);
   });
   await service.searchOrthancPacsStudies({ targetKey: "OSIRIX_IMAC", criteria: { studyInstanceUid: "1.2.840.7" }, currentUserId: null });
-  await service.storeDicomStraightToOrthancPacs({ targetKey: "OSIRIX_IMAC", dicomBytes: bytes });
+  const acknowledgement = await service.storeDicomStraightToOrthancPacs({ targetKey: "OSIRIX_IMAC", dicomBytes: bytes });
+  assert.equal(acknowledgement.sopInstanceUid, "1.2.3.4");
   const query = calls.find((call) => call.path.endsWith("/query"));
   assert.equal((query?.options?.body as { Query: { StudyInstanceUID: string } }).Query.StudyInstanceUID, "1.2.840.7");
   const store = calls.find((call) => call.path.endsWith("/store-straight"));
   assert.equal(store?.options?.body, bytes);
   assert.equal(store?.options?.contentType, "application/dicom");
+});
+
+test("straight store classifies failures and rejects malformed success", async () => {
+  service.__setOrthancPacsFetchForTests(async () => orthancResponse({}, 503));
+  await assert.rejects(() => service.storeDicomStraightToOrthancPacs({ targetKey: "PACS", dicomBytes: Buffer.from([1]) }), (error: { details?: { code?: string } }) => error.details?.code === "orthanc_store_failed");
+  service.__setOrthancPacsFetchForTests(async () => orthancResponse({}));
+  await assert.rejects(() => service.storeDicomStraightToOrthancPacs({ targetKey: "PACS", dicomBytes: Buffer.from([1]) }), (error: { details?: { code?: string } }) => error.details?.code === "orthanc_invalid_response");
+});
+
+test("remote C-FIND classifies a server failure", async () => {
+  service.__setOrthancPacsFetchForTests(async () => orthancResponse({}, 503));
+  await assert.rejects(() => service.searchOrthancPacsStudies({ targetKey: "PACS", criteria: { accessionNumber: "V2-1" }, currentUserId: null }), (error: { details?: { code?: string } }) => error.details?.code === "orthanc_remote_query_failed");
 });

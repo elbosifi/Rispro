@@ -212,18 +212,17 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.match(exhausted.rows[0]?.last_error || "", /Automatic retry limit reached/);
       assert.equal(await claimNextClinicalDocumentExport(`series-test-exhausted-auto-${suffix}`), null);
 
-      const manualRetry = await retryClinicalDocumentExport(exhaustedExportId, created.userId);
-      assert.equal(manualRetry.status, "pending");
-      assert.equal(manualRetry.attempt_count, 0);
-      assert.equal(manualRetry.study_instance_uid, stable.study);
-      assert.equal(manualRetry.series_instance_uid, stable.series);
-      assert.equal(manualRetry.sop_instance_uid, stable.sop);
-      assert.equal((await pool.query<{ sop_instance_uid: string }>("select sop_instance_uid from clinical_document_export_instances where export_id=$1", [exhaustedExportId])).rows[0]?.sop_instance_uid, stable.sop);
-      const retriedRow = await claimNextClinicalDocumentExport(`series-test-manual-${suffix}`);
-      assert.equal(Number(retriedRow?.id), exhaustedExportId);
-      await processClaimedClinicalDocumentExport(retriedRow!, dependencies);
-      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_exports where id=$1", [exhaustedExportId])).rows[0]?.status, "exported");
-      assert.equal((await pool.query<{ sop_instance_uid: string; status: string }>("select sop_instance_uid,status from clinical_document_export_instances where export_id=$1", [exhaustedExportId])).rows[0]?.sop_instance_uid, stable.sop);
+      const remoteRetryId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,attempt_count,representation_type,study_instance_uid,series_instance_uid,sop_instance_uid,next_retry_at) values($1,$2,'orthanc_remote:TEST_PACS','failed',3,'secondary_capture',$3,$4,$5,now()) returning id", [exhaustedDocumentId, created.bookingId, stable.study, stable.series, `${stable.sop}.2`])).rows[0]!.id);
+      exportIds.push(remoteRetryId);
+      const remoteRetry = await retryClinicalDocumentExport(remoteRetryId, created.userId);
+      assert.equal(remoteRetry.status, "pending");
+      assert.equal(remoteRetry.attempt_count, 0);
+      assert.equal(remoteRetry.study_instance_uid, stable.study);
+      assert.equal(remoteRetry.series_instance_uid, stable.series);
+      assert.equal(remoteRetry.sop_instance_uid, `${stable.sop}.2`);
+
+      await assert.rejects(() => retryClinicalDocumentExport(exhaustedExportId, created.userId));
+      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_exports where id=$1", [exhaustedExportId])).rows[0]?.status, "blocked");
     });
   } finally {
     if (exportIds.length) await pool.query("delete from audit_log where entity_type='clinical_document_export' and entity_id=any($1::bigint[])", [exportIds]);

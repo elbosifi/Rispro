@@ -186,13 +186,15 @@ async function loadExportWork(id: number): Promise<ClinicalDocumentExportWorkRow
   return rows[0] || null;
 }
 
-async function resolveTargetStudy(context: AppointmentExportContext, destinationKey: string, dependencies: ClinicalDocumentProcessorDependencies): Promise<OrthancStudyDetails> {
+async function resolveTargetStudy(context: AppointmentExportContext, row: ClinicalDocumentExportWorkRow, destinationKey: string, dependencies: ClinicalDocumentProcessorDependencies): Promise<OrthancStudyDetails> {
   const remoteKey = remoteKeyFromClinicalDocumentExportDestination(destinationKey);
   if (remoteKey) {
     const modality = normalizeRisproModalityCode(context.modality_code);
     if (!modality) throw new ClinicalDocumentExportBlockedError("unmapped_modality", "The RISpro modality code cannot be mapped to a DICOM modality.");
     const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
-    const criteria = context.appointment_study_instance_uid ? { studyInstanceUid: context.appointment_study_instance_uid } : { accessionNumber: context.appointment_accession_number };
+    if (row.study_instance_uid && context.appointment_study_instance_uid && row.study_instance_uid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The persisted export StudyInstanceUID differs from the booking StudyInstanceUID.");
+    const studyInstanceUid = row.study_instance_uid || context.appointment_study_instance_uid;
+    const criteria = studyInstanceUid ? { studyInstanceUid } : { accessionNumber: context.appointment_accession_number };
     const result = await (dependencies.searchRemoteStudies || searchOrthancPacsStudies)({ criteria, targetKey: remoteKey, currentUserId: null, audit: false });
     if (result.studies.length === 0) throw new Error("Orthanc study was not found yet.");
     const distinctUids = new Set(result.studies.map((study) => study.studyInstanceUid).filter(Boolean));
@@ -335,7 +337,10 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
       if (!instance) {
         const renderedPage = rendered.pages[page.page_number - 1]!; const pixels = await dependencies.readRenderedPage(renderedPage.path);
         const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number });
-        if (!client) await (dependencies.storeDicomStraight || storeDicomStraightToOrthancPacs)({ targetKey: remoteKeyFromClinicalDocumentExportDestination(row.destination_key)!, dicomBytes: dicom });
+        if (!client) {
+          const acknowledgement = await (dependencies.storeDicomStraight || storeDicomStraightToOrthancPacs)({ targetKey: remoteKeyFromClinicalDocumentExportDestination(row.destination_key)!, dicomBytes: dicom });
+          if (acknowledgement.sopInstanceUid !== page.sop_instance_uid) throw new ClinicalDocumentExportBlockedError("sop_instance_uid_conflict", "PACS acknowledged a different SOPInstanceUID.");
+        }
         else try { instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!); } catch (error) { instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid).catch(() => null); if (!instance) throw error; }
       }
       if (instance) verifySecondaryCaptureInstance(instance, row, study, page, modality);
@@ -382,7 +387,7 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
     return;
   }
   try {
-    const study = await resolveTargetStudy(appointmentContext(row), row.destination_key, dependencies);
+    const study = await resolveTargetStudy(appointmentContext(row), row, row.destination_key, dependencies);
     if (row.study_instance_uid && row.study_instance_uid !== study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The resolved Orthanc study differs from the study persisted for this export.");
     if (row.representation_type === "secondary_capture") { await processSecondaryCaptureExport(row, study, dependencies); return; }
     const identifiers = await ensureStableIdentifiers(row, study.studyInstanceUid!);
@@ -555,7 +560,7 @@ export async function retryClinicalDocumentExport(exportId: UserId, changedByUse
     with target as (
       select id, status as previous_status
       from clinical_document_exports
-      where id=$1 and status in ('failed','blocked')
+      where id=$1 and status in ('failed','blocked') and destination_key like 'orthanc_remote:%'
       for update
     )
     update clinical_document_exports e
@@ -565,7 +570,7 @@ export async function retryClinicalDocumentExport(exportId: UserId, changedByUse
     returning e.*, target.previous_status
   `, [id]);
   const row = rows[0];
-  if (!row) throw new HttpError(409, "Only failed or blocked clinical document exports can be retried.");
+  if (!row) throw new HttpError(409, "Only failed or blocked selected-PACS clinical document exports can be retried.");
   await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_manual_retry_requested", oldValues: { status: row.previous_status }, newValues: { status: "pending" }, changedByUserId });
   return row;
 }
