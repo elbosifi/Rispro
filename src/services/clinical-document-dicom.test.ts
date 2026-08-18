@@ -49,7 +49,7 @@ function assertUnnumberedSeries(buffer: Buffer, dataset: Record<string, unknown>
   assert.ok(rawValue == null || rawValue.length === 0 || rawValue.every((value) => String(value ?? "").trim() === ""));
 }
 
-function assertAbsentOrEmptySecondaryCaptureMetadata(buffer: Buffer, dataset: Record<string, unknown>): void {
+function assertAbsentOrEmptySecondaryCaptureMetadata(buffer: Buffer, dataset: Record<string, unknown>, allowSeriesDescription = false): void {
   const raw = parseRaw(buffer);
   const tags: Record<string, string> = {
     StudyDate: "00080020", StudyTime: "00080030", SeriesDescription: "0008103E", StudyDescription: "00081030",
@@ -58,6 +58,7 @@ function assertAbsentOrEmptySecondaryCaptureMetadata(buffer: Buffer, dataset: Re
     ProtocolName: "00181030", RequestedProcedureDescription: "00321060", Manufacturer: "00080070",
   };
   for (const [name, tag] of Object.entries(tags)) {
+    if (allowSeriesDescription && name === "SeriesDescription") continue;
     const value = raw[tag]?.Value;
     assert.ok(value == null || value.length === 0 || value.every((item) => String(item ?? "").trim() === ""), `${name} must be absent or empty`);
     assert.ok(dataset[name] == null || String(dataset[name]).trim() === "", `${name} must be absent or empty when naturalized`);
@@ -127,6 +128,18 @@ test("creates minimal RGB Secondary Capture MR and CT pages with native PixelDat
     assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset);
     for (const tag of ["SliceThickness", "ImagePositionPatient", "ImageOrientationPatient", "MagneticFieldStrength", "EchoTime", "RepetitionTime"]) assert.equal(dataset[tag], undefined);
   }
+});
+
+test("emits an explicit reconciliation SeriesDescription without DICOM date or time values", async () => {
+  const dicom = await createClinicalDocumentSecondaryCapture(Buffer.from([255, 255, 255]), 1, 1, {
+    ...metadata,
+    modality: "CT",
+    instanceNumber: 1,
+    seriesDescription: "RISpro Patient Identity Reconciliation",
+  });
+  const dataset = parse(dicom);
+  assert.equal(dataset.SeriesDescription, "RISpro Patient Identity Reconciliation");
+  assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset, true);
 });
 
 test("maps only supported RISpro modality aliases", () => {

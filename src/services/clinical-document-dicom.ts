@@ -52,6 +52,7 @@ export type SecondaryCaptureMetadata = {
   modality: string;
   instanceNumber: number;
   legacySeriesNumber?: number | null;
+  seriesDescription?: string | null;
 };
 
 const MODALITY_ALIASES: Record<string, string> = {
@@ -192,11 +193,13 @@ export async function createClinicalDocumentSecondaryCapture(rgbPixels: Buffer, 
   if (!Number.isInteger(rows) || !Number.isInteger(columns) || rows < 1 || columns < 1 || rgbPixels.length !== rows * columns * 3) throw new Error("Secondary Capture pixel data is invalid.");
   const modality = normalizeRisproModalityCode(metadata.modality);
   if (!modality) throw new Error("The RISpro modality code cannot be mapped to a DICOM modality.");
+  const seriesDescription = cleanText(metadata.seriesDescription, "");
   const dataset = {
     _meta: { FileMetaInformationVersion: new Uint8Array([0, 1]), MediaStorageSOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, MediaStorageSOPInstanceUID: metadata.sopInstanceUid, TransferSyntaxUID: "1.2.840.10008.1.2.1", ImplementationClassUID: IMPLEMENTATION_CLASS_UID, ImplementationVersionName: "RISPRO_CLIN_DOC_2" },
     SpecificCharacterSet: "ISO_IR 192", SOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, SOPInstanceUID: metadata.sopInstanceUid,
     StudyInstanceUID: metadata.studyInstanceUid, SeriesInstanceUID: metadata.seriesInstanceUid, Modality: modality,
     ConversionType: "SD",
+    ...(seriesDescription ? { SeriesDescription: seriesDescription } : {}),
     PatientID: cleanText(metadata.patientId, "UNKNOWN"), PatientName: cleanText(metadata.patientName, "UNKNOWN"), PatientBirthDate: dicomDate(metadata.patientBirthDate) || "", PatientSex: cleanText(metadata.patientSex, "").slice(0, 1).toUpperCase(),
     AccessionNumber: cleanText(metadata.accessionNumber, "UNKNOWN"), StudyDate: "", StudyTime: "",
     SeriesNumber: metadata.legacySeriesNumber == null ? "" : String(metadata.legacySeriesNumber), InstanceNumber: String(metadata.instanceNumber), BurnedInAnnotation: "YES",
