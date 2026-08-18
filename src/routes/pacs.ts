@@ -549,7 +549,8 @@ pacsRouter.put(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});
-    const settings = await saveClinicalDocumentExportSettings({ enabled: Boolean(body.enabled), destinationKey: asOptionalString(body.destinationKey) || "" }, request.user.sub as UserId);
+    if (typeof body.enabled !== "boolean") throw new HttpError(400, "enabled must be a boolean.");
+    const settings = await saveClinicalDocumentExportSettings({ enabled: body.enabled, destinationKey: asOptionalString(body.destinationKey) || "" }, request.user.sub as UserId);
     res.json({ settings });
   })
 );

@@ -8,8 +8,8 @@ import { logAuditEntry } from "./audit-service.js";
 import { getDocumentAbsolutePath } from "./document-service.js";
 import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesKind, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
-import { createAuthoritativeOrthancClient, isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
-import { CLINICAL_DOCUMENT_EXPORT_DESTINATION, enqueueClinicalDocumentExportsForAppointmentAutomatically, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
+import { createAuthoritativeOrthancClient, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
+import { enqueueClinicalDocumentExportsForAppointmentAutomatically } from "./clinical-document-export-queue-service.js";
 import { isOrthancRemoteClinicalDocumentExportDestination, remoteKeyFromClinicalDocumentExportDestination } from "./clinical-document-export-queue-service.js";
 import { searchOrthancPacsStudies, storeDicomStraightToOrthancPacs } from "./orthanc-pacs-service.js";
 import { readClinicalDocumentExportSettings } from "./clinical-document-export-settings-service.js";
@@ -127,8 +127,8 @@ function logClinicalDocumentExportWorker(event: string, fields: Record<string, u
 
 function isRetryableError(error: unknown): boolean {
   const code = errorCode(error);
-  if (["orthanc_unavailable", "orthanc_timeout"].includes(code)) return true;
-  if (code === "orthanc_auth_failed" || code === "orthanc_invalid_response" || code === "orthanc_study_mismatch" || code === "orthanc_invalid_dicom") return false;
+  if (["orthanc_unavailable", "orthanc_timeout", "orthanc_remote_query_failed", "orthanc_store_failed"].includes(code)) return true;
+  if (code === "orthanc_auth_failed" || code === "orthanc_invalid_response" || code === "orthanc_study_mismatch" || code === "orthanc_invalid_dicom" || code === "orthanc_remote_modality_missing") return false;
   return /study was not found|not available|temporarily|connection refused|timeout|fetch failed|econnrefused|enotfound/i.test(sanitizeClinicalDocumentExportError(error));
 }
 
@@ -194,18 +194,16 @@ async function resolveTargetStudy(context: AppointmentExportContext, destination
     const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
     const criteria = context.appointment_study_instance_uid ? { studyInstanceUid: context.appointment_study_instance_uid } : { accessionNumber: context.appointment_accession_number };
     const result = await (dependencies.searchRemoteStudies || searchOrthancPacsStudies)({ criteria, targetKey: remoteKey, currentUserId: null, audit: false });
-    const matches = result.studies.filter((study) => {
-      if (!study.studyInstanceUid) return false;
-      if (context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) return false;
-      if (study.accessionNumber && study.accessionNumber !== context.appointment_accession_number) return false;
-      if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) return false;
-      if (study.modality && study.modality.toUpperCase() !== modality) return false;
-      if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) return false;
-      return true;
-    });
-    if (matches.length === 0) throw new Error("Orthanc study was not found yet.");
-    if (matches.length !== 1) throw new ClinicalDocumentExportBlockedError("ambiguous_study_match", "PACS study matching is ambiguous and needs review.");
-    const study = matches[0]!;
+    if (result.studies.length === 0) throw new Error("Orthanc study was not found yet.");
+    const distinctUids = new Set(result.studies.map((study) => study.studyInstanceUid).filter(Boolean));
+    if (result.studies.length > 1 && distinctUids.size !== 1) throw new ClinicalDocumentExportBlockedError("ambiguous_study_match", "PACS study matching is ambiguous and needs review.");
+    const study = result.studies[0]!;
+    if (!study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("missing_study_instance_uid", "The matched PACS study has no StudyInstanceUID.");
+    if (context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The matched PACS study does not match the booking StudyInstanceUID.");
+    if (study.accessionNumber && study.accessionNumber !== context.appointment_accession_number) throw new ClinicalDocumentExportBlockedError("accession_conflict", "The matched PACS study accession does not match the appointment.");
+    if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) throw new ClinicalDocumentExportBlockedError("patient_identity_conflict", "The matched PACS study patient identity does not match the appointment.");
+    if (study.modality && study.modality.toUpperCase() !== modality) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
+    if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) throw new ClinicalDocumentExportBlockedError("study_date_conflict", "The matched PACS study date does not match the appointment.");
     return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyDescription: study.studyDescription || null, modalitiesInStudy: study.modality ? [study.modality] : [], seriesCount: 0, instanceCount: 0 };
   }
   const client = await dependencies.createOrthancClient();
@@ -515,15 +513,15 @@ export async function getClinicalDocumentExportOperationsSummary(): Promise<Clin
         count(*) filter (where status='exported')::int completed,
         min(created_at) filter (where status in ('pending','failed')) oldest_pending_or_retryable_at
       from clinical_document_exports
-      where destination_key=$1
-    `, [CLINICAL_DOCUMENT_EXPORT_DESTINATION]),
+      where destination_key like 'orthanc_remote:%'
+    `),
     pool.query<Pick<ClinicalDocumentExportRow, "id" | "appointment_id" | "status" | "last_attempt_at" | "updated_at" | "last_error">>(`
       select id, appointment_id, status, last_attempt_at, updated_at, last_error
       from clinical_document_exports
-      where destination_key=$1 and status in ('failed','blocked')
+      where destination_key like 'orthanc_remote:%' and status in ('failed','blocked')
       order by updated_at desc, id desc
       limit 10
-    `, [CLINICAL_DOCUMENT_EXPORT_DESTINATION]),
+    `),
   ]);
   const counts = countsResult.rows[0] ?? { pending: 0, processing: 0, retryable: 0, failed: 0, completed: 0, oldest_pending_or_retryable_at: null };
   return {
@@ -572,11 +570,6 @@ export async function retryClinicalDocumentExport(exportId: UserId, changedByUse
   return row;
 }
 
-export async function reconcileClinicalDocumentExportsManually(changedByUserId: OptionalUserId): Promise<{ queued: number }> {
-  const queued = await reconcileClinicalDocumentExports(changedByUserId);
-  await logAuditEntry({ entityType: "integration", entityId: null, actionType: "clinical_document_exports_reconciled_manually", oldValues: null, newValues: { outcome: "success", queued }, changedByUserId });
-  return { queued };
-}
 
 export async function queueClinicalDocumentExportForCompletedAppointment(appointmentId: number, changedByUserId: OptionalUserId = null): Promise<number[]> {
   return enqueueClinicalDocumentExportsForAppointmentAutomatically(appointmentId, changedByUserId);

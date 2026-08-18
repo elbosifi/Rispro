@@ -81,7 +81,7 @@ describe("AuthoritativeOrthancSection", () => {
   it("renders safe settings, retains an empty password field, and shows compact connection details", async () => {
     const user = userEvent.setup(); renderSection();
     expect(await screen.findByText("Authoritative Orthanc")).toBeTruthy();
-    expect(screen.getByText(/export approved scanned clinical documents as DICOM Secondary Capture series/i)).toBeTruthy();
+    expect(screen.getByText(/historical indexing, patient identity reconciliation, and configured DICOM auto-routing/i)).toBeTruthy();
     expect(screen.getByText(/does not upload original modality images or create a replacement study/i)).toBeTruthy();
     expect(screen.queryByText(/Read-only connection foundation/i)).toBeNull();
     expect((screen.getByPlaceholderText("Configured - leave empty to retain") as HTMLInputElement).value).toBe("");

@@ -82,6 +82,11 @@ export function __resetOrthancPacsAuditLoggerForTests(): void {
   logOrthancPacsAuditEntry = logAuditEntry;
 }
 
+function operationalError(status: number, message: string, transientCode: string): HttpError {
+  const code = status === 401 || status === 403 ? "orthanc_auth_failed" : (status === 408 || status === 429 || status >= 500 ? transientCode : "orthanc_remote_modality_missing");
+  return new HttpError(502, message, { code });
+}
+
 function joinUrl(baseUrl: string, suffix: string): string {
   const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   const cleanSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
@@ -145,9 +150,9 @@ async function orthancFetch(
     return { status: response.status, ok: response.ok, text, json };
   } catch (error) {
     if ((error as Error).name === "AbortError") {
-      throw new HttpError(502, `Orthanc request timed out after ${Math.max(1, timeoutSeconds)}s.`);
+      throw new HttpError(502, `Orthanc request timed out after ${Math.max(1, timeoutSeconds)}s.`, { code: "orthanc_timeout" });
     }
-    throw error;
+    throw new HttpError(502, "Orthanc request is unavailable.", { code: "orthanc_unavailable" });
   } finally {
     clearTimeout(timeout);
   }
@@ -276,10 +281,11 @@ function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
 }
 
 export async function storeDicomStraightToOrthancPacs({ targetKey, dicomBytes }: { targetKey: string; dicomBytes: Buffer }): Promise<void> {
-  if (!targetKey || !dicomBytes.length) throw new HttpError(400, "A PACS destination and DICOM instance are required.");
+  if (!targetKey) throw new HttpError(400, "A PACS destination is required.", { code: "orthanc_remote_modality_missing" });
+  if (!dicomBytes.length) throw new HttpError(400, "Generated DICOM instance is empty.", { code: "orthanc_invalid_dicom" });
   const settings = await resolveSettings();
   const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(targetKey)}/store-straight`, { method: "POST", body: dicomBytes, contentType: "application/dicom", settings });
-  if (!response.ok) throw new HttpError(502, `Orthanc PACS store failed (status=${response.status}).`);
+  if (!response.ok) throw operationalError(response.status, `Orthanc PACS store failed (status=${response.status}).`, "orthanc_store_failed");
 }
 
 function extractTags(payload: unknown): UnknownRecord {
@@ -557,6 +563,10 @@ export async function deleteOrthancRemoteModality({
   currentUserId: OptionalUserId;
 }): Promise<{ ok: true }> {
   const cleanKey = normalizeModalityKey(key);
+  const active = await pool.query(`select 1 from system_settings where category='clinical_document_export' and setting_key='enabled' and setting_value->>'value'='enabled' limit 1`);
+  const destination = await pool.query(`select 1 from system_settings where category='clinical_document_export' and setting_key='destination_key' and setting_value->>'value'=$1 limit 1`, [cleanKey]);
+  const unfinished = await pool.query(`select 1 from clinical_document_exports where destination_key=$1 and status in ('pending','exporting','failed','blocked') limit 1`, [`orthanc_remote:${cleanKey}`]);
+  if ((active.rowCount && destination.rowCount) || unfinished.rowCount) throw new HttpError(409, "Change or disable the clinical-document export destination, or resolve outstanding exports, before deleting this PACS destination.");
   const settings = await resolveSettings();
   const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(cleanKey)}`, {
     method: "DELETE",
@@ -628,7 +638,7 @@ async function searchRemote(targetKey: string, criteria: OrthancPacsSearchCriter
     settings,
   });
   if (!query.ok) {
-    throw new HttpError(502, `Orthanc remote query failed (status=${query.status}).`);
+    throw operationalError(query.status, `Orthanc remote query failed (status=${query.status}).`, "orthanc_remote_query_failed");
   }
 
   const queryId = firstString(record(query.json).ID, record(query.json).Id, record(query.json).id);
@@ -638,14 +648,14 @@ async function searchRemote(targetKey: string, criteria: OrthancPacsSearchCriter
 
   const answers = await orthancFetchForPacs(`/queries/${encodeURIComponent(queryId)}/answers`, { settings });
   if (!answers.ok || !Array.isArray(answers.json)) {
-    throw new HttpError(502, `Orthanc remote query answers failed (status=${answers.status}).`);
+    throw operationalError(answers.status, `Orthanc remote query answers failed (status=${answers.status}).`, "orthanc_remote_query_failed");
   }
 
   const answerIds = answers.json.map((value) => firstString(value)).filter(Boolean);
   return Promise.all(answerIds.map(async (answerId) => {
     const answer = await orthancFetchForPacs(`/queries/${encodeURIComponent(queryId)}/answers/${encodeURIComponent(answerId)}/content`, { settings });
     if (!answer.ok) {
-      throw new HttpError(502, `Orthanc remote answer read failed (status=${answer.status}).`);
+      throw operationalError(answer.status, `Orthanc remote answer read failed (status=${answer.status}).`, "orthanc_remote_query_failed");
     }
     return studyFromPayload(answer.json);
   }));

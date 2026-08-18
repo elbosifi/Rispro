@@ -203,10 +203,8 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     view.unmount();
     role = "super_admin";
     renderPage();
-    await screen.findByText("Clinical-document export health");
-    await userEvent.click(screen.getByRole("button", { name: "Reconcile exports" }));
-    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm" }));
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/document-exports/reconcile", expect.objectContaining({ method: "POST" })));
+    await screen.findByText("Selected-PACS clinical-document export health");
+    expect(screen.queryByRole("button", { name: "Reconcile exports" })).toBeNull();
   });
 
   it("keeps other sections useful when the jobs section fails", async () => {

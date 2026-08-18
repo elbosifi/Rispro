@@ -430,20 +430,22 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           {t(language, "settings.pacs.noRemoteModalities")}
         </p>
       )}
-      {(() => {
+      {clinicalExportQuery.isLoading ? <div className="border-t border-stone-200 dark:border-stone-700 pt-4 text-sm text-muted-foreground">Loading clinical document export settings…</div> : clinicalExportQuery.error ? <div className="border-t border-stone-200 dark:border-stone-700 pt-4 text-sm text-red-600">Could not load clinical document export settings: {(clinicalExportQuery.error as Error).message}</div> : (
+      (() => {
         const draft = clinicalDraft || clinicalExportQuery.data?.settings || { enabled: false, destinationKey: "" };
         const selected = data?.modalities.find((item) => item.key === draft.destinationKey);
         const valid = Boolean(selected?.aet && selected.host && selected.port != null && !selected.configurationError);
         return <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3" data-testid="clinical-document-export-settings">
           <div><h4 className="font-semibold text-stone-900 dark:text-white">Clinical document export</h4><p className="text-xs text-stone-500 dark:text-stone-400 mt-1">RISpro sends generated clinical-document DICOM through the internal Orthanc gateway to this PACS.</p></div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(event) => setClinicalDraft({ ...draft, enabled: event.target.checked })} /> Automatically send approved scanned documents to PACS</label>
-          <label className="block text-sm">Destination<select aria-label="Clinical document export destination" className="input mt-1 w-full" value={draft.destinationKey} onChange={(event) => setClinicalDraft({ ...draft, destinationKey: event.target.value })}><option value="">Select a configured modality</option>{data?.modalities.map((item) => <option key={item.key} value={item.key} disabled={!item.aet || !item.host || item.port == null || Boolean(item.configurationError)}>{item.key} — {item.aet || "missing AET"} — {item.host || "missing host"}:{item.port ?? "missing port"}</option>)}</select></label>
+          <label className="block text-sm">Destination<select aria-label="Clinical document export destination" className="input mt-1 w-full" value={draft.destinationKey} onChange={(event) => { setClinicalDraft({ ...draft, destinationKey: event.target.value }); setClinicalMessage(null); }}><option value="">Select a configured modality</option>{data?.modalities.map((item) => <option key={item.key} value={item.key} disabled={!item.aet || !item.host || item.port == null || Boolean(item.configurationError)}>{item.key} — {item.aet || "missing AET"} — {item.host || "missing host"}:{item.port ?? "missing port"}</option>)}</select></label>
           {selected && <p className="text-xs text-muted-foreground">{selected.aet} — {selected.host}:{selected.port}</p>}
           {clinicalMessage && <p className="text-sm">{clinicalMessage}</p>}
-          <div className="flex gap-2"><button type="button" className="btn-secondary" disabled={!draft.destinationKey || testClinicalExportMutation.isPending} onClick={() => testClinicalExportMutation.mutate(draft.destinationKey)}>Test destination</button><button type="button" className="btn-primary" disabled={saveClinicalExportMutation.isPending || (draft.enabled && !valid)} onClick={() => { if (draft.enabled && !valid) { setClinicalMessage("Select a valid PACS destination before enabling export."); return; } saveClinicalExportMutation.mutate(draft); }}>Save</button></div>
+          {draft.enabled && !valid && <p className="text-sm text-red-600">Select a valid PACS destination before enabling export.</p>}
+          <div className="flex gap-2"><button type="button" className="btn-secondary" disabled={!draft.destinationKey || !valid || testClinicalExportMutation.isPending} onClick={() => testClinicalExportMutation.mutate(draft.destinationKey)}>Test destination</button><button type="button" className="btn-primary" disabled={saveClinicalExportMutation.isPending || (draft.enabled && !valid)} onClick={() => { if (draft.enabled && !valid) { setClinicalMessage("Select a valid PACS destination before enabling export."); return; } saveClinicalExportMutation.mutate(draft); }}>Save</button></div>
           <p className="text-xs text-muted-foreground">Test destination checks DICOM connectivity (C-ECHO). It does not create a test study.</p>
         </div>;
-      })()}
+      })())}
       <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3">
         <div>
           <h4 className="font-semibold text-stone-900 dark:text-white">{t(language, "settings.pacs.autoCompletion")}</h4>

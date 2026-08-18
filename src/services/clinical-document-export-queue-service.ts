@@ -66,7 +66,8 @@ export async function enqueueClinicalDocumentExportsForAppointmentAutomatically(
     insert into clinical_document_exports (document_id, appointment_id, destination_key, representation_type, next_retry_at)
     select distinct d.id, b.id, $2, 'secondary_capture', now()
     from appointments_v2.bookings b join documents d on d.document_type in ('appointment_request', 'clinical_document') and (d.v2_booking_id=b.id or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=b.id))
-    where b.id=$1 on conflict (document_id, appointment_id, destination_key) do nothing returning id
+    where b.id=$1 and not exists (select 1 from clinical_document_exports prior where prior.document_id=d.id and prior.appointment_id=b.id and prior.destination_key like 'orthanc_remote:%')
+    on conflict (document_id, appointment_id, destination_key) do nothing returning id
   `, [appointmentId, destinationKey]);
   for (const row of result.rows) await logAuditEntry({ entityType: "clinical_document_export", entityId: Number(row.id), actionType: "clinical_document_export_queued", oldValues: null, newValues: { destinationKey, appointmentId }, changedByUserId });
   return result.rows.map((row) => Number(row.id));
