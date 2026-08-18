@@ -26,7 +26,7 @@ export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambig
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
 export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
 export type OrthancUploadedInstance = OrthancInstanceDetails;
-export type OrthancPatientIdentitySnapshot = OrthancStudyDetails & { otherPatientIdsSequence: Array<Record<string, unknown>>; seriesInstanceUids: string[]; sopInstanceUids: string[] };
+export type OrthancPatientIdentitySnapshot = OrthancStudyDetails & { otherPatientIdsSequence: Array<Record<string, unknown>> };
 export type OrthancResourceStatistics = { studies: number | null; series: number | null; instances: number | null; diskSizeBytes: number | null; diskSizeMb: number | null; uncompressedSizeBytes: number | null; uncompressedSizeMb: number | null };
 export type AuthoritativeOrthancRouteSynchronizationSummary = { created: number; updated: number; unchanged: number; removed: number; warnings: string[] };
 
@@ -71,6 +71,17 @@ function studyDetails(payload: unknown, orthancStudyId: string, statistics: unkn
     modalitiesInStudy: (first(requestedTags.ModalitiesInStudy, requestedTags["00080061"], dicom.ModalitiesInStudy, dicom["00080061"], dicom.Modality, dicom["00080060"]) || "").split("\\").filter(Boolean),
     seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"] ?? series.length),
     instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"] ?? requestedTags.NumberOfStudyRelatedInstances),
+  };
+}
+function patientModuleDetails(payload: unknown) {
+  const dicom = tags(payload);
+  const rawSequence = dicom.OtherPatientIDsSequence ?? dicom["00101002"] ?? dicom["0010,1002"] ?? dicom["0010-1002"];
+  return {
+    patientId: first(dicom.PatientID, dicom["00100020"]),
+    patientName: first(dicom.PatientName, dicom["00100010"]),
+    patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]),
+    patientSex: first(dicom.PatientSex, dicom["00100040"]),
+    otherPatientIdsSequence: Array.isArray(rawSequence) ? rawSequence.map(record) : Array.isArray(record(rawSequence).Value) ? (record(rawSequence).Value as unknown[]).map(record) : [],
   };
 }
 function routeSlug(value: string): string { return value.trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, ""); }
@@ -250,38 +261,12 @@ export class AuthoritativeOrthancClient {
     return studyDetails(detail, orthancStudyId);
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); return studyDetails(detail, orthancStudyId, statistics); }
-  private async getPatientIdentityReconciliationInstanceInventory(orthancStudyId: string, expectedStudyInstanceUid: string | null): Promise<{ seriesInstanceUids: string[]; sopInstanceUids: string[] }> {
-    const requestedTags = ["StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"].join(";");
-    const payload = await this.request(`/studies/${encodeURIComponent(orthancStudyId)}/instances?expand&requestedTags=${encodeURIComponent(requestedTags)}`);
-    if (!Array.isArray(payload) || !expectedStudyInstanceUid) throw new HttpError(502, "Authoritative Orthanc returned an invalid study inventory.", { code: "orthanc_invalid_response" });
-    const seriesInstanceUids = new Set<string>();
-    const sopInstanceUids = new Set<string>();
-    for (const item of payload) {
-      const row = record(item);
-      const dicom = tags(row);
-      const requested = record(row.RequestedTags);
-      const studyInstanceUid = first(dicom.StudyInstanceUID, dicom["0020000D"], requested.StudyInstanceUID, requested["0020000D"]);
-      const seriesInstanceUid = first(dicom.SeriesInstanceUID, dicom["0020000E"], requested.SeriesInstanceUID, requested["0020000E"]);
-      const sopInstanceUid = first(dicom.SOPInstanceUID, dicom["00080018"], requested.SOPInstanceUID, requested["00080018"]);
-      if (!studyInstanceUid || !seriesInstanceUid || !sopInstanceUid) throw new HttpError(502, "Authoritative Orthanc returned an invalid study inventory.", { code: "orthanc_invalid_response" });
-      if (studyInstanceUid !== expectedStudyInstanceUid) throw new HttpError(409, "Authoritative Orthanc returned conflicting study identity.", { code: "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" });
-      seriesInstanceUids.add(seriesInstanceUid);
-      sopInstanceUids.add(sopInstanceUid);
-    }
-    return { seriesInstanceUids: [...seriesInstanceUids].sort(), sopInstanceUids: [...sopInstanceUids].sort() };
-  }
   async getStudyForPatientIdentityReconciliation(query: OrthancStudyQuery): Promise<OrthancPatientIdentitySnapshot> {
     const found = await this.findStudy(query);
     if (found.status !== "matched" || !found.study) throw new HttpError(found.status === "ambiguous" ? 409 : 404, found.status === "ambiguous" ? "Authoritative Orthanc study match is ambiguous." : "Authoritative Orthanc study was not found.", { code: found.status === "ambiguous" ? "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" : "PATIENT_IDENTITY_RECONCILIATION_STUDY_NOT_FOUND" });
     const studyId = found.study.orthancStudyId;
-    const [shared, inventory] = await Promise.all([
-      this.request(`/studies/${encodeURIComponent(studyId)}/shared-tags`),
-      this.getPatientIdentityReconciliationInstanceInventory(studyId, found.study.studyInstanceUid),
-    ]);
-    const sharedTags = tags(shared);
-    const rawSequence = sharedTags.OtherPatientIDsSequence ?? sharedTags["00101002"] ?? sharedTags["0010,1002"] ?? sharedTags["0010-1002"];
-    const otherPatientIdsSequence = Array.isArray(rawSequence) ? rawSequence.map(record) : Array.isArray(record(rawSequence).Value) ? (record(rawSequence).Value as unknown[]).map(record) : [];
-    return { ...found.study, otherPatientIdsSequence, ...inventory };
+    const module = patientModuleDetails(await this.request(`/studies/${encodeURIComponent(studyId)}/module-patient?simplify`));
+    return { ...found.study, otherPatientIdsSequence: module.otherPatientIdsSequence };
   }
   async listPatientIdentityReconciliationStudies(studyInstanceUid: string): Promise<OrthancPatientIdentitySnapshot[]> {
     const uid = text(studyInstanceUid); if (!uid) throw new HttpError(400, "StudyInstanceUID is required.");
@@ -290,10 +275,8 @@ export class AuthoritativeOrthancClient {
     const snapshots: OrthancPatientIdentitySnapshot[] = [];
     for (const id of ids.filter((value): value is string => typeof value === "string")) {
       const study = await this.getStudy(id); if (study.studyInstanceUid !== uid) throw new HttpError(409, "Authoritative Orthanc returned conflicting study identity.", { code: "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" });
-      const [shared, inventory] = await Promise.all([this.request(`/studies/${encodeURIComponent(id)}/shared-tags`), this.getPatientIdentityReconciliationInstanceInventory(id, uid)]);
-      const sharedTags = tags(shared); const rawSequence = sharedTags.OtherPatientIDsSequence ?? sharedTags["00101002"] ?? sharedTags["0010,1002"] ?? sharedTags["0010-1002"];
-      const sequence = Array.isArray(rawSequence) ? rawSequence.map(record) : Array.isArray(record(rawSequence).Value) ? (record(rawSequence).Value as unknown[]).map(record) : [];
-      snapshots.push({ ...study, otherPatientIdsSequence: sequence, ...inventory });
+      const module = patientModuleDetails(await this.request(`/studies/${encodeURIComponent(id)}/module-patient?simplify`));
+      snapshots.push({ ...study, otherPatientIdsSequence: module.otherPatientIdsSequence });
     }
     return snapshots;
   }
