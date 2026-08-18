@@ -145,6 +145,54 @@ describe("Doctor protocoling request documents", () => {
     await waitFor(() => expect(mockRequestReconciliation).toHaveBeenCalledWith(42, "1.2.auto", "AUTO-ACC"));
   });
 
+  it("hides completed reconciliation candidates and their empty possible-studies section", async () => {
+    const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], studyDescription: "Reconciled candidate", reconciliation: { id: 1, operationType: "reconcile", status: "completed", oldPatientId: "OLD-77", failureCode: null } }] };
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Possible older PACS studies" })).toBeNull());
+    expect(screen.queryByText("Reconciled candidate")).toBeNull();
+  });
+
+  it("keeps only actionable studies and their visible count in mixed candidates", async () => {
+    const candidate = { ...historicalCandidate, studyCount: 2, studies: [{ ...historicalCandidate.studies[0], orthancStudyId: "reconciled", studyDescription: "Reconciled candidate", reconciliation: { id: 1, operationType: "reconcile", status: "completed", oldPatientId: "OLD-77", failureCode: null } }, { ...historicalCandidate.studies[0], orthancStudyId: "actionable", studyDescription: "Actionable candidate" }] };
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = await screen.findByRole("region", { name: "Possible older PACS studies" });
+    expect(within(section).queryByText("Reconciled candidate")).toBeNull();
+    expect(section.textContent).toContain("Actionable candidate");
+    expect(within(section).getByText("1 possible study")).toBeTruthy();
+  });
+
+  it("keeps failed forward reconciliation actionable with Retry", async () => {
+    const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], reconciliation: { id: 1, operationType: "reconcile", status: "failed", oldPatientId: "OLD-77", failureCode: "SAFE_FAILURE" } }] };
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: "1990-01-02" }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = await screen.findByRole("region", { name: "Possible older PACS studies" });
+    expect(section.textContent).toContain("Historical CT");
+    expect(within(section).getByText("Reconciliation failed")).toBeTruthy();
+    expect(within(section).getByRole("button", { name: "Retry reconciliation" })).toBeTruthy();
+  });
+
+  it("hides pending or failed reversals but shows a completed reversal", async () => {
+    for (const [status, hidden] of [["queued", true], ["processing", true], ["failed", true], ["completed", false]] as const) {
+      const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], reconciliation: { id: 1, operationType: "reverse", status, oldPatientId: "OLD-77", failureCode: status === "failed" ? "SAFE_FAILURE" : null } }] };
+      mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+      const view = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+      await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+      await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+      if (hidden) await waitFor(() => expect(screen.queryByRole("region", { name: "Possible older PACS studies" })).toBeNull());
+      else expect((await screen.findByRole("region", { name: "Possible older PACS studies" })).textContent).toContain("Historical CT");
+      view.unmount();
+    }
+  });
+
   it("uses the same reconciliation dialog and endpoint for manual old Patient ID results", async () => {
     const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], studyInstanceUid: "1.2.manual", accessionNumber: "MANUAL-ACC" }] };
     mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: "1990-01-02" }, items: [] });
@@ -395,10 +443,11 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     const section = screen.getByRole("region", { name: "Possible older PACS studies" });
     expect(await within(section).findByText("Reconciliation pending")).toBeTruthy();
-    expect(within(section).getByText(/Reconciled · Previous ID: OLD-forward-completed/)).toBeTruthy();
-    expect(within(section).getByText("Reconciliation failed")).toBeTruthy();
-    expect(within(section).getByText("Reversal pending")).toBeTruthy();
-    expect(within(section).getByText("Reversal failed")).toBeTruthy();
+    expect(section.textContent).toContain("forward-failed");
+    expect(section.textContent).toContain("reverse-completed");
+    expect(section.textContent).not.toContain("forward-completed");
+    expect(section.textContent).not.toContain("reverse-queued");
+    expect(section.textContent).not.toContain("reverse-failed");
     expect(within(section).getAllByRole("button", { name: "Retry reconciliation" })).toHaveLength(1);
     expect(within(section).getAllByRole("button", { name: "Reconcile patient identity" })).toHaveLength(1);
   });

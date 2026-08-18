@@ -123,9 +123,17 @@ function hasActivePatientIdentityReconciliation(candidates: HistoricalPacsCandid
   return Boolean(candidates?.some((candidate) => candidate.studies.some((study) => study.reconciliation?.status === "queued" || study.reconciliation?.status === "processing")));
 }
 
+function shouldHideHistoricalCandidateStudy(study: HistoricalPacsCandidate["studies"][number]): boolean {
+  const reconciliation = study.reconciliation;
+  if (!reconciliation) return false;
+  if (reconciliation.operationType === "reconcile" && reconciliation.status === "completed") return true;
+  return reconciliation.operationType === "reverse" && ["queued", "processing", "failed"].includes(reconciliation.status);
+}
+
 function HistoricalPacsCandidates({ candidates, canReconcilePatientIdentity, currentPatientId, source, manualSearchPatientId, onReconcile }: { candidates: HistoricalPacsCandidate[]; canReconcilePatientIdentity: boolean; currentPatientId: string | null; source: "automatic_candidate" | "manual_candidate"; manualSearchPatientId?: string; onReconcile: (target: PatientIdentityReconciliationTarget) => void }) {
-  if (!candidates.length) return <p className="text-xs text-muted-foreground">No historical PACS candidates found.</p>;
-  return <div className="space-y-2">{candidates.map((candidate) => {
+  const visibleCandidates = candidates.map((candidate) => ({ ...candidate, studies: candidate.studies.filter((study) => !shouldHideHistoricalCandidateStudy(study)) })).filter((candidate) => candidate.studies.length > 0);
+  if (!visibleCandidates.length) return null;
+  return <div className="space-y-2">{visibleCandidates.map((candidate) => {
     const classificationLabel = candidate.classification === "exact" ? "Exact Patient ID match" : candidate.classification === "strong_demographic" ? "Strong demographic match" : candidate.classification === "ambiguous" ? "Ambiguous candidate" : "Possible patient match";
     const hasHistoricalPatientId = Boolean(candidate.historicalPatientId.trim());
     return <section key={candidate.historicalPatientId} className="rounded-lg border border-amber-300 bg-amber-50/60 p-3 text-xs text-amber-950">
@@ -133,7 +141,7 @@ function HistoricalPacsCandidates({ candidates, canReconcilePatientIdentity, cur
       <p className="mt-1 text-sm font-semibold">{candidate.patientName || "Name unavailable"}</p>
       <div className="mt-1 flex flex-wrap items-center gap-2"><p dir="ltr" className="font-semibold">Old Patient ID: {candidate.historicalPatientId}</p>{hasHistoricalPatientId ? <a href={buildRadiantPacsTagUrl("00100020", candidate.historicalPatientId)} className="rounded border border-amber-300 px-2 py-1 text-xs font-semibold" title="Open studies for this old Patient ID in RadiAnt. RadiAnt must be installed on this workstation.">Open old studies in RadiAnt</a> : null}</div>
       <div className="mt-2 space-y-1 text-amber-950/80">
-        <p>{candidate.studyCount} possible {candidate.studyCount === 1 ? "study" : "studies"}</p>
+        <p>{candidate.studies.length} possible {candidate.studies.length === 1 ? "study" : "studies"}</p>
         <p>DOB: {candidate.patientBirthDate || "Unavailable"} · Sex: {candidate.patientSex || "Unavailable"}</p>
         <details className="mt-2"><summary className="cursor-pointer font-semibold">Why this matched</summary><p className="mt-1">{candidate.reasons.join(", ").replaceAll("_", " ")}</p></details>
         <div className="mt-2 space-y-2 border-t border-amber-200 pt-2">{candidate.studies.map((study) => {
@@ -1435,6 +1443,8 @@ function ProtocolAssignmentModal({
   });
   const reconciliationMutation=useMutation({mutationFn:()=>requestProtocolingPatientIdentityReconciliation(appointment.appointmentId,reconciliationStudy!.studyInstanceUid,reconciliationStudy!.accessionNumber),onSuccess:async()=>{const manualSearchPatientId=reconciliationStudy?.source==="manual_candidate"?reconciliationStudy.manualSearchPatientId:undefined;setReconciliationStudy(null);setReconciliationConfirmed(false);await Promise.all([queryClient.invalidateQueries({queryKey:["doctor","protocoling","history",appointment.patientId,appointment.appointmentId]}),queryClient.invalidateQueries({queryKey:["doctor","protocoling","historical-pacs-candidates",appointment.patientId]})]);if(manualSearchPatientId)oldPacsPatientIdMutation.mutate(manualSearchPatientId);},});
   const historyItems = historyQuery.data?.items ?? [];
+  const automaticHistoricalCandidates = historicalCandidatesQuery.data?.historicalCandidates ?? [];
+  const hideAutomaticHistoricalCandidatesSection = automaticHistoricalCandidates.length > 0 && !automaticHistoricalCandidates.some((candidate) => candidate.studies.some((study) => !shouldHideHistoricalCandidateStudy(study)));
   const historicalPacsIndexStatus = historicalCandidatesQuery.data?.historicalPacsIndexStatus ?? historyQuery.data?.historicalPacsIndexStatus;
   const historyModalities = useMemo(() => [...new Set(historyItems.flatMap((item) => item.modalities))].sort(), [historyItems]);
   const filteredHistory = selectedHistoryModalities.length ? historyItems.filter((item) => item.modalities.some((modality) => selectedHistoryModalities.includes(modality))) : historyItems;
@@ -1598,13 +1608,13 @@ function ProtocolAssignmentModal({
                   })}</div>
                 </>}
                  {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
-                  <section className="mt-4 border-t border-border pt-3" aria-label="Possible older PACS studies">
+                  {!hideAutomaticHistoricalCandidatesSection ? <section className="mt-4 border-t border-border pt-3" aria-label="Possible older PACS studies">
                     <div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-semibold">Possible older PACS studies</h5>{historicalCandidatesQuery.isFetching && historicalCandidatesQuery.data ? <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status"><span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Refreshing old PACS records…</span> : null}</div>
                     <p className="mt-1 text-xs text-muted-foreground">Possible studies for this patient under an older Patient ID. Verify the patient before use.</p>
                    {historicalPacsIndexStatus === "stale" || historicalPacsIndexStatus === "unavailable" ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">The local PACS index is not current. Existing candidates are shown, but absence is not proof that a study is missing from PACS.</p> : null}
                     {historicalCandidatesQuery.isLoading && !historicalCandidatesQuery.data ? <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950" role="status" aria-live="polite"><div className="flex items-center gap-2 font-semibold"><span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Searching old PACS records…</div><p className="mt-1 text-xs font-medium">Patient history above is already available.</p></div> : null}
                     {historicalCandidatesQuery.isError ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Old PACS search unavailable.</p><p className="mt-1">Patient history above is still available.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historicalCandidatesQuery.refetch()}>Retry historical search</Button></div> : null}
-                   {historicalCandidatesQuery.data?.historicalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={historicalCandidatesQuery.data.historicalCandidates} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="automatic_candidate" onReconcile={setReconciliationStudy} /></div> : null}
+                   {automaticHistoricalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={automaticHistoricalCandidates} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="automatic_candidate" onReconcile={setReconciliationStudy} /></div> : null}
                     {historicalCandidatesQuery.data && historicalCandidatesQuery.data.historicalCandidates.length === 0 && !historicalCandidatesQuery.isError ? <p className="mt-3 text-xs text-muted-foreground">No possible older PACS studies found.</p> : null}
                   <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(oldPacsPatientId.trim()); }}>
                     <label className="min-w-0 flex-1 text-xs font-semibold">Search old PACS Patient ID<Input aria-label="Old PACS Patient ID" className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
@@ -1612,7 +1622,7 @@ function ProtocolAssignmentModal({
                   </form>
                   {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search Authoritative Orthanc for that Patient ID.</p> : null}
                   {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="manual_candidate" manualSearchPatientId={oldPacsPatientIdMutation.variables} onReconcile={setReconciliationStudy} /></div> : null}
-                </section>
+                </section> : null}
                </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}
