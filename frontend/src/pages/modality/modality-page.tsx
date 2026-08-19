@@ -42,7 +42,8 @@ import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appoin
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
-import { todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
+import { pushToast } from "@/lib/toast";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, AppointmentStatus, HistoricalPacsStudy, ModalityProtocolAssignment } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
@@ -574,7 +575,7 @@ export default function ModalityPage() {
   const cdDestinationsQuery = useQuery({ queryKey: ["modality", "cd-robots"], queryFn: fetchCdRobotDestinations, staleTime: 60_000 });
   const cdHistoryQuery = useQuery({ queryKey: ["modality", "cd-deliveries", cdDialog?.appointment.id], queryFn: () => fetchCdRobotDeliveries(cdDialog!.appointment.id), enabled: cdDialog != null });
   const previousStudiesQuery = useQuery({ queryKey: ["modality", "previous-studies", selectedAppointmentId], queryFn: () => fetchModalityPreviousStudies(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
-  const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", selectedAppointmentId] }) });
+  const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", selectedAppointmentId] }), onError: () => pushToast({ type: "error", title: t(language, "modality.previousStudies.saveFailed") }) });
 
   useEffect(() => {
     const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
@@ -1164,7 +1165,7 @@ export default function ModalityPage() {
                                 <div className="relative flex items-center gap-1 whitespace-nowrap">
                                   <Button type="button" variant="secondary" size="sm" aria-label={chooseLocalized(language, "الدراسات السابقة", "History")} title={chooseLocalized(language, "الدراسات السابقة", "Previous studies")} className="h-10 min-w-[40px] shrink-0 border px-2" onClick={(event) => { event.stopPropagation(); openSelectedAppointment(appointment.id, "previousStudies"); }}>
                                     <History size={15} />
-                                    <span>{chooseLocalized(language, "السجل", "History")}</span>
+                                    <span>{t(language, "modality.previousStudies.history")}</span>
                                   </Button>
                                   {appointment.status === "completed" ? (
                                     <Button
@@ -1564,7 +1565,7 @@ export default function ModalityPage() {
               <Tabs value={selectedAppointmentTab} onValueChange={(value) => setSelectedAppointmentTab(value as "appointment" | "previousStudies")}>
                 <TabsList className="mx-4 mt-3 sm:mx-6">
                   <TabsTrigger value="appointment">{chooseLocalized(language, "الموعد", "Appointment")}</TabsTrigger>
-                  <TabsTrigger value="previousStudies">{chooseLocalized(language, "الدراسات السابقة", "Previous studies")}</TabsTrigger>
+                  <TabsTrigger value="previousStudies">{t(language, "modality.previousStudies.previous")}</TabsTrigger>
                 </TabsList>
                 {selectedAppointmentTab === "appointment" ? <>
               <main data-testid="clinical-workspace-region" className="min-h-0 flex-1 overflow-hidden bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
@@ -1596,7 +1597,7 @@ export default function ModalityPage() {
               </main>
                 </> : null}
                 {selectedAppointmentTab === "previousStudies" ? <div className="min-h-0 flex-1 overflow-auto bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
-                  <PreviousStudiesPanel data={previousStudiesQuery.data} isLoading={previousStudiesQuery.isLoading} isError={previousStudiesQuery.isError} onRetry={() => void previousStudiesQuery.refetch()} onAttest={(studyInstanceUid, status) => attestationMutation.mutate({ studyInstanceUid, status })} isSaving={attestationMutation.isPending} />
+                  <PreviousStudiesPanel language={language} data={previousStudiesQuery.data} isLoading={previousStudiesQuery.isLoading} isError={previousStudiesQuery.isError} onRetry={() => void previousStudiesQuery.refetch()} onAttest={(studyInstanceUid, status) => attestationMutation.mutate({ studyInstanceUid, status })} isSaving={attestationMutation.isPending} />
                 </div> : null}
               </Tabs>
 
