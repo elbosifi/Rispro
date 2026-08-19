@@ -633,6 +633,61 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
   });
 
+  it("refreshes a stale SonicDICOM cache entry through the protected board scope", async () => {
+    guard();
+    const date = addDays(80);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual Sonic refresh" });
+    statusByAppointmentId.set(appointmentId, "no_report");
+    await seedSonicDicomCache(appointmentId, "study_not_found");
+
+    const before = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`
+    );
+    assert.equal(before.status, 200, JSON.stringify(before.data));
+    assert.equal(before.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "study_not_found");
+
+    const refresh = await api<{ checked: number; successful: number; failed: number }>(supervisor.cookie, "/api/doctor/reporting-board/refresh-sonicdicom", {
+      method: "POST",
+      body: { filters: { dateFrom: date, dateTo: date, reportStatus: "all" } },
+    });
+    assert.equal(refresh.status, 200, JSON.stringify(refresh.data));
+    assert.equal(refresh.data.checked, 1);
+    assert.equal(refresh.data.successful, 1);
+    assert.equal(refresh.data.failed, 0);
+
+    const after = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`
+    );
+    assert.equal(after.status, 200, JSON.stringify(after.data));
+    assert.equal(after.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "no_report");
+  });
+
+  it("preserves a successful cached status when manual SonicDICOM refresh is unavailable", async () => {
+    guard();
+    const date = addDays(81);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual Sonic failure" });
+    await seedSonicDicomCache(appointmentId, "no_report");
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "throw");
+
+    const refresh = await api<{ checked: number; successful: number; failed: number }>(supervisor.cookie, "/api/doctor/reporting-board/refresh-sonicdicom", {
+      method: "POST",
+      body: { filters: { dateFrom: date, dateTo: date, reportStatus: "all" } },
+    });
+    assert.equal(refresh.status, 200, JSON.stringify(refresh.data));
+    assert.equal(refresh.data.checked, 1);
+    assert.equal(refresh.data.successful, 0);
+    assert.equal(refresh.data.failed, 1);
+
+    const after = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`
+    );
+    assert.equal(after.status, 200, JSON.stringify(after.data));
+    assert.equal(after.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "no_report");
+  });
+
   after(async () => {
     reportingBoardService?.__setReportingBoardAssignmentBatchCheckerForTest(null);
     if (app) await app.close();

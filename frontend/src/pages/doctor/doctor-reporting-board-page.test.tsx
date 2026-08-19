@@ -10,6 +10,7 @@ const fetchReportingBoardSettingsMock = vi.fn();
 const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
 const fetchReportingBoardStatsMock = vi.fn();
+const refreshReportingBoardSonicDicomMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
@@ -46,6 +47,7 @@ vi.mock("@/lib/api-hooks", () => ({
   updateReportingBoardSettings: (...args: unknown[]) => updateReportingBoardSettingsMock(...args),
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
   fetchReportingBoardStats: (...args: unknown[]) => fetchReportingBoardStatsMock(...args),
+  refreshReportingBoardSonicDicom: (...args: unknown[]) => refreshReportingBoardSonicDicomMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
@@ -226,6 +228,7 @@ describe("DoctorReportingBoardPage", () => {
       defaultReportStatusFilter: "required_not_final",
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
+    refreshReportingBoardSonicDicomMock.mockResolvedValue({ ok: true, checked: 1, successful: 1, failed: 0, checkedAt: "2026-08-19T10:00:00.000Z" });
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [caseRow],
       filters: {
@@ -884,7 +887,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: null, offset: 0 })));
   });
 
-  it("refreshes reporting cases and board statistics without changing filters", async () => {
+  it("live-refreshes SonicDICOM before refetching the board without changing filters", async () => {
     renderPage();
 
     const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
@@ -899,9 +902,26 @@ describe("DoctorReportingBoardPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
 
+    await waitFor(() => expect(refreshReportingBoardSonicDicomMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledTimes(caseCallCount + 1));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledTimes(statsCallCount + 1));
     expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("MRN-7");
+    expect(screen.getByText(/Board refreshed:/)).toBeTruthy();
+    expect(screen.queryByText(/Last refreshed:/)).toBeNull();
+  });
+
+  it("refetches cached board data and warns when manual SonicDICOM refresh fails", async () => {
+    refreshReportingBoardSonicDicomMock.mockRejectedValue(new Error("SonicDICOM unavailable"));
+    renderPage();
+    await screen.findByText("V2-000042");
+    const caseCallCount = fetchReportingBoardCasesMock.mock.calls.length;
+    const statsCallCount = fetchReportingBoardStatsMock.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledTimes(caseCallCount + 1));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledTimes(statsCallCount + 1));
+    expect(await screen.findByText("SonicDICOM refresh was incomplete; cached statuses are being shown.")).toBeTruthy();
   });
 
   it("keeps advanced filters collapsed until opened", async () => {

@@ -603,6 +603,13 @@ export async function fetchReportingBoardStats(filters: ReportingBoardFilters): 
   return api<ReportingBoardStatsResponse>(`/doctor/reporting-board/stats?${reportingBoardParams(filters).toString()}`);
 }
 
+export async function refreshReportingBoardSonicDicom(filters: ReportingBoardFilters): Promise<{ ok: true; checked: number; successful: number; failed: number; checkedAt: string }> {
+  return api("/doctor/reporting-board/refresh-sonicdicom", {
+    method: "POST",
+    body: JSON.stringify({ filters }),
+  });
+}
+
 export async function fetchReportingBoardMobileView(token: string, filters: ReportingBoardFilters = {}): Promise<ReportingBoardMobileResponse> {
   const params = reportingBoardParams(filters);
   const query = params.toString();

@@ -33,6 +33,7 @@ import {
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
+  refreshReportingBoardSonicDicomStatuses,
   resumeScheduledReportingBoardBulkAssignmentJob,
   revokeReportingBoardSavedView,
   rotateReportingBoardSavedViewToken,
@@ -192,6 +193,14 @@ router.get(
   "/cases",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await getReportingBoardCases(actor(req), filtersFromQuery(req.query)));
+  })
+);
+
+router.post(
+  "/refresh-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await refreshReportingBoardSonicDicomStatuses(actor(req), filtersFromBody(body.filters)));
   })
 );
 

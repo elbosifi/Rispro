@@ -5,6 +5,7 @@ import { pool } from "../../db/pool.js";
 import {
   buildSonicDicomStaffViewerUrl,
   checkSonicDicomReportStatusesBatch,
+  type ReportLookupContext,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResults } from "../../services/reporting-board-sonicdicom-cache-service.js";
@@ -98,6 +99,7 @@ export interface Actor {
 }
 
 const MAX_CASE_LIST_LIMIT = 300;
+const MAX_SONICDICOM_BATCH_SIZE = 200;
 const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
@@ -612,6 +614,55 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
     ...(sourceAllowsComparisons(filters.caseSource) ? await listComparisonReportingBoardStatsRows(scopedFilters) : []),
   ].filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
   return { filters, ...aggregateReportingBoardStats(rows) };
+}
+
+export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, input: ReportingBoardFilters): Promise<{
+  ok: true;
+  checked: number;
+  successful: number;
+  failed: number;
+  checkedAt: string;
+}> {
+  const { cases } = await getReportingBoardCases(actor, input);
+  const contexts: ReportLookupContext[] = cases
+    .filter((row) => row.caseType === "appointment" && row.appointmentStatus === "completed" && row.requiresReport && !row.manualFinalOverrideId)
+    .map((row) => ({
+      bookingId: row.appointmentId,
+      accessionNumber: row.accessionNumber,
+      studyInstanceUid: row.studyInstanceUid,
+      requiresReport: row.requiresReport,
+      status: row.appointmentStatus,
+    }));
+  const settings = await readSonicDicomReportSettings();
+  let successful = 0;
+  let failed = 0;
+
+  for (let start = 0; start < contexts.length; start += MAX_SONICDICOM_BATCH_SIZE) {
+    const batch = contexts.slice(start, start + MAX_SONICDICOM_BATCH_SIZE);
+    let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
+    let failure: unknown = null;
+    try {
+      statuses = await assignmentBatchChecker(batch, { audit: false });
+    } catch (error) {
+      failure = error;
+    }
+    await persistReportingBoardSonicDicomCacheResults(batch.map((context) => {
+      const result = statuses.get(context.bookingId) ?? null;
+      const unavailable = !result || result.state === "unavailable";
+      return {
+        context,
+        result,
+        error: failure ?? (unavailable ? "SonicDICOM unavailable during manual Reporting Board refresh" : null),
+      };
+    }), settings);
+    for (const context of batch) {
+      const state = statuses.get(context.bookingId)?.state;
+      if (state === "final" || state === "draft" || state === "no_report" || state === "study_not_found") successful += 1;
+      else failed += 1;
+    }
+  }
+
+  return { ok: true, checked: contexts.length, successful, failed, checkedAt: new Date().toISOString() };
 }
 
 type SonicDicomOpenScope = "study" | "patient";

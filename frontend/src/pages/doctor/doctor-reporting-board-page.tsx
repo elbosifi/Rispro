@@ -25,6 +25,7 @@ import {
   fetchOhifViewerAvailability,
   fetchOhifRetrievalJob,
   fetchReportingBoardStats,
+  refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
   finalizeComparisonRequest,
   markReportingBoardCaseManualFinal,
@@ -1657,16 +1658,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
   const ohifAvailabilityQuery = useQuery({ queryKey: ["ohif", "availability"], queryFn: fetchOhifViewerAvailability });
+  const boardRefreshInterval = Math.max(15, settingsQuery.data?.refreshIntervalSeconds ?? 30) * 1000;
   const casesQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "cases", filters],
     queryFn: () => fetchReportingBoardCases(filters),
-    refetchInterval: 30000,
+    refetchInterval: boardRefreshInterval,
     placeholderData: (previousData) => previousData,
   });
   const statsQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "stats", filters],
     queryFn: () => fetchReportingBoardStats(filters),
-    refetchInterval: 30000,
+    refetchInterval: boardRefreshInterval,
     placeholderData: (previousData) => previousData,
   });
   const pushConfigQuery = useQuery({ queryKey: ["doctor", "reporting-board", "push-config"], queryFn: fetchReportingBoardPushConfig });
@@ -2150,12 +2152,20 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
   const refreshBoard = async () => {
     setBoardRefreshing(true);
+    let refreshIncomplete = false;
     try {
+      const result = await refreshReportingBoardSonicDicom(compactFilters(filters));
+      refreshIncomplete = result.failed > 0;
+    } catch {
+      refreshIncomplete = true;
+    } finally {
       await Promise.all([
         casesQuery.refetch(),
         statsQuery.refetch(),
       ]);
-    } finally {
+      if (refreshIncomplete) {
+        setBoardActionMessage({ tone: "error", text: "SonicDICOM refresh was incomplete; cached statuses are being shown." });
+      }
       setBoardRefreshing(false);
     }
   };
@@ -2439,7 +2449,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <ActiveFilterStrip scopeChips={boardScopeChips} userChips={userFilterChips} loadedSavedViewName={loadedSavedView?.name ?? null} onReset={resetToDefaultBoard} />
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
             <p>{resultSummary}</p>
-            <p>{isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Last refreshed: {refreshedLabel}</p>
+            <p>{isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Board refreshed: {refreshedLabel}</p>
           </div>
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <div className="max-h-[70vh] overflow-auto">
