@@ -6,7 +6,7 @@ import { normalizePositiveInteger } from "../utils/normalize.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDocumentAbsolutePath } from "./document-service.js";
-import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesKind, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
+import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesDescription, documentSeriesKind, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
 import { createAuthoritativeOrthancClient, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { enqueueClinicalDocumentExportsForAppointmentAutomatically } from "./clinical-document-export-queue-service.js";
@@ -206,7 +206,7 @@ async function resolveTargetStudy(context: AppointmentExportContext, row: Clinic
     if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) throw new ClinicalDocumentExportBlockedError("patient_identity_conflict", "The matched PACS study patient identity does not match the appointment.");
     if (study.modality && study.modality.toUpperCase() !== modality) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
     if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) throw new ClinicalDocumentExportBlockedError("study_date_conflict", "The matched PACS study date does not match the appointment.");
-    return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyDescription: study.studyDescription || null, modalitiesInStudy: study.modality ? [study.modality] : [], seriesCount: 0, instanceCount: 0 };
+    return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyTime: study.studyTime || null, studyDescription: study.studyDescription || null, modalitiesInStudy: study.modality ? [study.modality] : [], seriesCount: 0, instanceCount: 0 };
   }
   const client = await dependencies.createOrthancClient();
   const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
@@ -336,7 +336,7 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
       await renewLease(row); if (page.status === "verified") { activePage = null; continue; } let instance = client ? await client.findInstanceBySopInstanceUid(page.sop_instance_uid) : null;
       if (!instance) {
         const renderedPage = rendered.pages[page.page_number - 1]!; const pixels = await dependencies.readRenderedPage(renderedPage.path);
-        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number });
+        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number, studyDate: study.studyDate, studyTime: study.studyTime, studyDescription: study.studyDescription, seriesDescription: documentSeriesDescription(documentSeriesKind(row.document_type)) });
         if (!client) {
           const acknowledgement = await (dependencies.storeDicomStraight || storeDicomStraightToOrthancPacs)({ targetKey: remoteKeyFromClinicalDocumentExportDestination(row.destination_key)!, dicomBytes: dicom });
           if (acknowledgement.sopInstanceUid !== page.sop_instance_uid) throw new ClinicalDocumentExportBlockedError("sop_instance_uid_conflict", "PACS acknowledged a different SOPInstanceUID.");
@@ -555,6 +555,86 @@ export async function assertClinicalDocumentExportAppointmentAccess(appointmentI
   const { rows } = await pool.query<{ modality_id: number | null }>(`select modality_id from appointments_v2.bookings where id=$1 limit 1`, [appointmentId]);
   if (!rows[0]) throw new HttpError(404, "Appointment not found.");
   if (role === "modality_staff" && (!modalityId || Number(rows[0].modality_id) !== modalityId)) throw new HttpError(403, "This appointment is outside the requested modality scope.");
+}
+
+type ClinicalDocumentExportRebuildAudit = Pick<ClinicalDocumentExportRow, "id" | "status" | "destination_key" | "study_instance_uid" | "series_instance_uid" | "sop_instance_uid"> & {
+  page_sop_instance_uids: string[];
+};
+
+export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId, changedByUserId: UserId): Promise<{ queued: number; exportIds: number[]; appointmentId: number }> {
+  const id = normalizePositiveInteger(exportId, "exportId");
+  const client = await pool.connect();
+  let auditRows: ClinicalDocumentExportRebuildAudit[] = [];
+  let appointmentId = 0;
+  let preservedStudyInstanceUid: string | null = null;
+  try {
+    await client.query("begin");
+    const anchorResult = await client.query<ClinicalDocumentExportRow & { appointment_status: string; document_type: string }>(`
+      select e.*, b.status appointment_status, d.document_type
+      from clinical_document_exports e
+      join appointments_v2.bookings b on b.id=e.appointment_id
+      join documents d on d.id=e.document_id
+      where e.id=$1
+      for update of e
+    `, [id]);
+    const anchor = anchorResult.rows[0];
+    if (!anchor || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["exported", "failed", "blocked"].includes(anchor.status)) {
+      throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
+    }
+    appointmentId = Number(anchor.appointment_id);
+    await client.query("select pg_advisory_xact_lock($1::bigint)", [appointmentId]);
+    const matchingResult = await client.query<Pick<ClinicalDocumentExportRow, "id" | "status" | "destination_key" | "study_instance_uid" | "series_instance_uid" | "sop_instance_uid">>(`
+      select e.id, e.status, e.destination_key, e.study_instance_uid, e.series_instance_uid, e.sop_instance_uid
+      from clinical_document_exports e
+      join documents d on d.id=e.document_id
+      where e.appointment_id=$1
+        and e.destination_key=$2
+        and e.representation_type='secondary_capture'
+        and d.document_type in ('appointment_request','clinical_document')
+      order by e.id
+      for update of e
+    `, [appointmentId, anchor.destination_key]);
+    if (!matchingResult.rows.length) throw new HttpError(409, "No Request or Clinical Document Secondary Capture exports are available to rebuild.");
+    if (matchingResult.rows.some((row) => row.status === "pending" || row.status === "exporting")) throw new HttpError(409, "Secondary Capture rebuild cannot start while another matching export is pending or exporting.");
+    const studyInstanceUids = [...new Set(matchingResult.rows.map((row) => row.study_instance_uid).filter((value): value is string => Boolean(value)))];
+    if (studyInstanceUids.length > 1) throw new HttpError(409, "Matching Secondary Capture exports have conflicting StudyInstanceUIDs.");
+    preservedStudyInstanceUid = anchor.study_instance_uid || studyInstanceUids[0] || null;
+    const exportIds = matchingResult.rows.map((row) => Number(row.id));
+    const pageResult = await client.query<{ export_id: number; sop_instance_uid: string }>("select export_id,sop_instance_uid from clinical_document_export_instances where export_id=any($1::bigint[]) order by export_id,page_number", [exportIds]);
+    const pageSops = new Map<number, string[]>();
+    for (const page of pageResult.rows) { const pageExportId = Number(page.export_id); pageSops.set(pageExportId, [...(pageSops.get(pageExportId) || []), page.sop_instance_uid]); }
+    auditRows = matchingResult.rows.map((row) => ({ ...row, id: Number(row.id), page_sop_instance_uids: pageSops.get(Number(row.id)) || [] }));
+    await client.query("delete from clinical_document_export_instances where export_id=any($1::bigint[])", [exportIds]);
+    const reset = await client.query<{ id: number }>(`
+      update clinical_document_exports
+      set status='pending', attempt_count=0, next_retry_at=now(), last_attempt_at=null, last_error=null,
+          orthanc_study_id=null, orthanc_series_id=null, orthanc_instance_id=null,
+          study_instance_uid=coalesce(study_instance_uid,$2), series_instance_uid=null, sop_instance_uid=null,
+          expected_page_count=null, exported_page_count=0, verified_page_count=0, series_number=null,
+          exported_at=null, verified_at=null, export_lease_owner=null, export_lease_expires_at=null, updated_at=now()
+      where id=any($1::bigint[])
+      returning id
+    `, [exportIds, preservedStudyInstanceUid]);
+    if (reset.rowCount !== exportIds.length) throw new Error("Secondary Capture rebuild reset did not update every selected export.");
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  for (const row of auditRows) {
+    await logAuditEntry({
+      entityType: "clinical_document_export",
+      entityId: row.id,
+      actionType: "clinical_document_export_rebuild_requested",
+      oldValues: { status: row.status, studyInstanceUid: row.study_instance_uid, seriesInstanceUid: row.series_instance_uid, sopInstanceUid: row.sop_instance_uid, pageSopInstanceUids: row.page_sop_instance_uids, destinationKey: row.destination_key },
+      newValues: { status: "pending", studyInstanceUid: preservedStudyInstanceUid, destinationKey: row.destination_key, reason: "metadata_rebuild" },
+      changedByUserId,
+    });
+  }
+  return { queued: auditRows.length, exportIds: auditRows.map((row) => row.id), appointmentId };
 }
 
 export async function retryClinicalDocumentExport(exportId: UserId, changedByUserId: UserId): Promise<ClinicalDocumentExportRow> {

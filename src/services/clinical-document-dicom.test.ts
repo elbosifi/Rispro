@@ -49,16 +49,14 @@ function assertUnnumberedSeries(buffer: Buffer, dataset: Record<string, unknown>
   assert.ok(rawValue == null || rawValue.length === 0 || rawValue.every((value) => String(value ?? "").trim() === ""));
 }
 
-function assertAbsentOrEmptySecondaryCaptureMetadata(buffer: Buffer, dataset: Record<string, unknown>, allowSeriesDescription = false): void {
+function assertAbsentOrEmptyGeneratedSecondaryCaptureMetadata(buffer: Buffer, dataset: Record<string, unknown>): void {
   const raw = parseRaw(buffer);
   const tags: Record<string, string> = {
-    StudyDate: "00080020", StudyTime: "00080030", SeriesDescription: "0008103E", StudyDescription: "00081030",
     ContentDate: "00080023", ContentTime: "00080033", InstanceCreationDate: "00080012", InstanceCreationTime: "00080013",
     AcquisitionDate: "00080022", AcquisitionTime: "00080032", AcquisitionDateTime: "0008002A", SeriesDate: "00080021", SeriesTime: "00080031",
-    ProtocolName: "00181030", RequestedProcedureDescription: "00321060", Manufacturer: "00080070",
+    ProtocolName: "00181030", RequestedProcedureDescription: "00321060",
   };
   for (const [name, tag] of Object.entries(tags)) {
-    if (allowSeriesDescription && name === "SeriesDescription") continue;
     const value = raw[tag]?.Value;
     assert.ok(value == null || value.length === 0 || value.every((item) => String(item ?? "").trim() === ""), `${name} must be absent or empty`);
     assert.ok(dataset[name] == null || String(dataset[name]).trim() === "", `${name} must be absent or empty when naturalized`);
@@ -106,17 +104,18 @@ test("converts JPEG and PNG input to PDF before encapsulation", async () => {
   }
 });
 
-test("creates minimal RGB Secondary Capture MR and CT pages with native PixelData", async () => {
+test("creates RGB Secondary Capture Request and Clinical Document pages with authoritative study metadata", async () => {
   const pixels = Buffer.from([255, 0, 0, 0, 255, 0]);
-  for (const [modality, expectedModality, sopInstanceUid, instanceNumber] of [["MRI", "MR", "2.25.457", 4], ["CT", "CT", "2.25.458", 5]] as const) {
-    const suppliedDateMetadata = { ...metadata, sopInstanceUid, modality, instanceNumber, studyDate: "19991231", studyTime: "120000", contentDate: "19991231", contentTime: "120000" };
+  for (const [modality, expectedModality, sopInstanceUid, instanceNumber, seriesKind, expectedSeriesDescription] of [["MRI", "MR", "2.25.457", 4, "request", "Request Documents"], ["CT", "CT", "2.25.458", 5, "clinical", "Clinical Documents"]] as const) {
+    const suppliedDateMetadata = { ...metadata, sopInstanceUid, modality, instanceNumber, studyDate: "19991231", studyTime: "120000\u0000", studyDescription: "CT Chest", seriesDescription: documentSeriesDescription(seriesKind) };
     const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, suppliedDateMetadata);
     const dataset = parse(dicom);
     assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
     assert.match(dicom.toString("latin1"), /1\.2\.840\.10008\.1\.2\.1/);
     assert.equal(dataset.StudyInstanceUID, metadata.studyInstanceUid); assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
     assert.equal(dataset.SOPInstanceUID, sopInstanceUid); assert.equal(dataset.PatientID, metadata.patientId); assert.deepEqual(dataset.PatientName, [{ Alphabetic: metadata.patientName }]); assert.equal(dataset.AccessionNumber, metadata.accessionNumber);
-    assert.equal(dataset.Modality, expectedModality); assert.equal(dataset.ConversionType, "SD");
+    assert.equal(dataset.Modality, expectedModality); assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]); assert.equal(dataset.ConversionType, "SD"); assert.equal(dataset.Manufacturer, "RISpro");
+    assert.equal(dataset.StudyDate, "19991231"); assert.equal(dataset.StudyTime, "120000"); assert.equal(dataset.StudyDescription, "CT Chest"); assert.equal(dataset.SeriesDescription, expectedSeriesDescription);
     assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3); assert.equal(dataset.PlanarConfiguration, 0);
     assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.BitsStored, 8); assert.equal(dataset.HighBit, 7); assert.equal(dataset.PixelRepresentation, 0);
     assert.equal(pixelBytes(dataset.PixelData).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
@@ -125,7 +124,7 @@ test("creates minimal RGB Secondary Capture MR and CT pages with native PixelDat
     assert.equal(rawPixelData?.vr, "OW");
     assert.equal(pixelBytes(rawPixelData?.Value).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
     assert.equal(dataset.InstanceNumber, instanceNumber); assert.equal(dataset.BurnedInAnnotation, "YES");
-    assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset);
+    assertAbsentOrEmptyGeneratedSecondaryCaptureMetadata(dicom, dataset);
     for (const tag of ["SliceThickness", "ImagePositionPatient", "ImageOrientationPatient", "MagneticFieldStrength", "EchoTime", "RepetitionTime"]) assert.equal(dataset[tag], undefined);
   }
 });
@@ -136,10 +135,18 @@ test("emits an explicit reconciliation SeriesDescription without DICOM date or t
     modality: "CT",
     instanceNumber: 1,
     seriesDescription: "RISpro Patient Identity Reconciliation",
+    studyDate: null,
+    studyTime: null,
+    studyDescription: null,
   });
   const dataset = parse(dicom);
   assert.equal(dataset.SeriesDescription, "RISpro Patient Identity Reconciliation");
-  assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset, true);
+  assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]);
+  assert.equal(dataset.Manufacturer, "RISpro");
+  assert.ok(dataset.StudyDate == null || dataset.StudyDate === "");
+  assert.ok(dataset.StudyTime == null || dataset.StudyTime === "");
+  assert.ok(dataset.StudyDescription == null || dataset.StudyDescription === "");
+  assertAbsentOrEmptyGeneratedSecondaryCaptureMetadata(dicom, dataset);
 });
 
 test("maps only supported RISpro modality aliases", () => {
@@ -165,7 +172,7 @@ test("preserves a historical series number only for explicit legacy recovery", a
     legacySeriesNumber: 9000,
   });
   const dataset = parse(dicom);
-  assertAbsentOrEmptySecondaryCaptureMetadata(dicom, dataset);
+  assertAbsentOrEmptyGeneratedSecondaryCaptureMetadata(dicom, dataset);
   assert.equal(dataset.SeriesNumber, 9000);
 });
 

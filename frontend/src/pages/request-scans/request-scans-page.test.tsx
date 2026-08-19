@@ -204,6 +204,42 @@ describe("RequestScansPage", () => {
     expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
   });
 
+  it("shows Rebuild & resend SC only to supervisors and super admins for exported Secondary Capture", async () => {
+    const exportedSc = { ...completed, appointment_status: "completed", clinical_document_export_status: "exported" as const, clinical_document_export_id: 102, clinical_document_export_representation_type: "secondary_capture" as const };
+    authState.role = "supervisor";
+    mock([exportedSc]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "Rebuild & resend SC" })).toBeTruthy();
+    cleanup();
+
+    authState.role = "super_admin";
+    mock([exportedSc]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "Rebuild & resend SC" })).toBeTruthy();
+    cleanup();
+
+    authState.role = "modality_staff";
+    mock([exportedSc]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    await screen.findByText("completed.pdf");
+    expect(screen.queryByRole("button", { name: "Rebuild & resend SC" })).toBeNull();
+  });
+
+  it("confirms the SC rebuild warning before posting and refreshes with a success notice", async () => {
+    const fetchMock = mock([{ ...completed, appointment_status: "completed", clinical_document_export_status: "exported", clinical_document_export_id: 102, clinical_document_export_representation_type: "secondary_capture" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Rebuild & resend SC" }));
+    const endpoint = "/api/integrations/authoritative-orthanc/document-exports/102/rebuild-secondary-capture";
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === endpoint)).toBe(false);
+    expect(screen.getByText(/New Series and SOP Instance UIDs will be generated/)).toBeTruthy();
+    expect(screen.getByText(/Study Instance UID will remain unchanged/)).toBeTruthy();
+    expect(screen.getByText(/Existing remote PACS objects and diagnostic images will not be deleted/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild & resend" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input) === endpoint && options?.method === "POST")).toBe(true));
+    expect(await screen.findByText("SC rebuild queued.")).toBeTruthy();
+  });
+
   it("shows waiting, pending, exporting progress, and verified page progress without missing-count artifacts", async () => {
     mock([
       { ...completed, id: 31, filename: "waiting.pdf", appointment_status: "scheduled", clinical_document_export_status: null },

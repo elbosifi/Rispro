@@ -236,7 +236,7 @@ test("requests and parses computed ModalitiesInStudy from study details", async 
     urls.push(requestedUrl);
     if (requestedUrl.pathname.endsWith("/statistics")) return json({ CountSeries: 2, CountInstances: 5 });
     return json({
-      MainDicomTags: { StudyInstanceUID: "1.2.3", AccessionNumber: "ACC-1", StudyDate: "20260816" },
+      MainDicomTags: { StudyInstanceUID: "1.2.3", AccessionNumber: "ACC-1", StudyDate: "20260816", StudyTime: "101530" },
       RequestedTags: { ModalitiesInStudy: "CT\\US" },
     });
   });
@@ -244,6 +244,7 @@ test("requests and parses computed ModalitiesInStudy from study details", async 
   const result = await new service.AuthoritativeOrthancClient(enabled).getStudy("study-a");
 
   assert.deepEqual(result.modalitiesInStudy, ["CT", "US"]);
+  assert.equal(result.studyTime, "101530");
   const detailUrl = urls.find((url) => url.pathname === "/studies/study-a");
   assert.equal(detailUrl?.searchParams.get("requestedTags"), "ModalitiesInStudy");
   assert.equal(urls.length, 2);

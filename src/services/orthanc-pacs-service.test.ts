@@ -49,6 +49,7 @@ test("remote PACS search maps Orthanc DICOM tag JSON into study details", async 
         "0010,0020": { Name: "PatientID", Type: "String", Value: ["MRN-7"] },
         "0008,0050": { Name: "AccessionNumber", Type: "String", Value: ["ACC-7"] },
         "0008,0020": { Name: "StudyDate", Type: "String", Value: ["20260505"] },
+        "0008,0030": { Name: "StudyTime", Type: "String", Value: ["101530"] },
         "0008,0061": { Name: "ModalitiesInStudy", Type: "String", Value: ["CT"] },
         "0008,1030": { Name: "StudyDescription", Type: "String", Value: ["Chest CT"] },
         "0020,000D": { Name: "StudyInstanceUID", Type: "String", Value: ["1.2.3.4"] },
@@ -72,6 +73,7 @@ test("remote PACS search maps Orthanc DICOM tag JSON into study details", async 
     description: "Chest CT",
     studyDescription: "Chest CT",
     studyDate: "20260505",
+    studyTime: "101530",
     studyInstanceUid: "1.2.3.4",
   });
 });
@@ -91,6 +93,7 @@ test("remote PACS search preserves StudyInstanceUID and straight store sends raw
   assert.equal(acknowledgement.sopInstanceUid, "1.2.3.4");
   const query = calls.find((call) => call.path.endsWith("/query"));
   assert.equal((query?.options?.body as { Query: { StudyInstanceUID: string } }).Query.StudyInstanceUID, "1.2.840.7");
+  assert.equal((query?.options?.body as { Query: { StudyTime: string } }).Query.StudyTime, "");
   const store = calls.find((call) => call.path.endsWith("/store-straight"));
   assert.equal(store?.options?.body, bytes);
   assert.equal(store?.options?.contentType, "application/dicom");

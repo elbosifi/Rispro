@@ -17,7 +17,7 @@ const LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = /^rispro_autoroute(?:_[2-9]
 export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; autoRouteDestinationKeys: string[]; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
-export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
+export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyTime?: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
 export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null };
 export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: number; done: boolean };
 export type OrthancStudiesIndexPage = { studies: OrthancStudyDetails[]; resourceCount: number };
@@ -67,6 +67,7 @@ function studyDetails(payload: unknown, orthancStudyId: string, statistics: unkn
     patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"], requestedTags.PatientBirthDate),
     patientSex: first(dicom.PatientSex, dicom["00100040"], requestedTags.PatientSex),
     studyDate: first(dicom.StudyDate, dicom["00080020"], requestedTags.StudyDate),
+    studyTime: first(dicom.StudyTime, dicom["00080030"], requestedTags.StudyTime),
     studyDescription: first(dicom.StudyDescription, dicom["00081030"], requestedTags.StudyDescription),
     modalitiesInStudy: (first(requestedTags.ModalitiesInStudy, requestedTags["00080061"], dicom.ModalitiesInStudy, dicom["00080061"], dicom.Modality, dicom["00080060"]) || "").split("\\").filter(Boolean),
     seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"] ?? series.length),

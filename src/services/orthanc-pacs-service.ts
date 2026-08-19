@@ -30,6 +30,7 @@ export interface OrthancPacsStudySummary {
   description: string;
   studyDescription: string;
   studyDate: string;
+  studyTime?: string;
   studyInstanceUid: string;
 }
 
@@ -273,6 +274,7 @@ function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
       PatientName: criteria.patientName ? `*${criteria.patientName}*` : "",
       AccessionNumber: criteria.accessionNumber || "",
       StudyDate: criteria.studyDate || "",
+      StudyTime: "",
       ModalitiesInStudy: criteria.modality || "",
       StudyInstanceUID: criteria.studyInstanceUid || "",
       StudyDescription: "",
@@ -332,6 +334,7 @@ function studyFromPayload(payload: unknown): OrthancPacsStudySummary {
     description: studyDescription,
     studyDescription,
     studyDate: firstString(tags.StudyDate, tags["00080020"]),
+    studyTime: firstString(tags.StudyTime, tags["00080030"]),
     studyInstanceUid: firstString(tags.StudyInstanceUID, tags.StudyInstanceUid, tags["0020000D"]),
   };
 }
