@@ -569,6 +569,12 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
   let preservedStudyInstanceUid: string | null = null;
   try {
     await client.query("begin");
+    const appointmentResult = await client.query<Pick<ClinicalDocumentExportRow, "appointment_id">>("select appointment_id from clinical_document_exports where id=$1", [id]);
+    if (!appointmentResult.rows[0]) {
+      throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
+    }
+    appointmentId = Number(appointmentResult.rows[0].appointment_id);
+    await client.query("select pg_advisory_xact_lock($1::bigint)", [appointmentId]);
     const anchorResult = await client.query<ClinicalDocumentExportRow & { appointment_status: string; document_type: string }>(`
       select e.*, b.status appointment_status, d.document_type
       from clinical_document_exports e
@@ -578,11 +584,9 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
       for update of e
     `, [id]);
     const anchor = anchorResult.rows[0];
-    if (!anchor || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["appointment_request", "clinical_document"].includes(anchor.document_type) || !["exported", "failed", "blocked"].includes(anchor.status)) {
+    if (!anchor || Number(anchor.appointment_id) !== appointmentId || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["appointment_request", "clinical_document"].includes(anchor.document_type) || !["exported", "failed", "blocked"].includes(anchor.status)) {
       throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
     }
-    appointmentId = Number(anchor.appointment_id);
-    await client.query("select pg_advisory_xact_lock($1::bigint)", [appointmentId]);
     const matchingResult = await client.query<Pick<ClinicalDocumentExportRow, "id" | "status" | "destination_key" | "study_instance_uid" | "series_instance_uid" | "sop_instance_uid">>(`
       select e.id, e.status, e.destination_key, e.study_instance_uid, e.series_instance_uid, e.sop_instance_uid
       from clinical_document_exports e

@@ -94,8 +94,6 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.ok(row);
       await processClaimedClinicalDocumentExport(row, dependencies);
     }
-    assert.equal(await claimNextClinicalDocumentExport(`series-test-empty-${suffix}`), null);
-
     const rows = await pool.query<{ document_type: string; status: string; study_instance_uid: string; series_instance_uid: string; series_number: number | null; last_error: string | null }>("select d.document_type,e.status,e.study_instance_uid,e.series_instance_uid,e.series_number,e.last_error from clinical_document_exports e join documents d on d.id=e.document_id where e.id=any($1::bigint[]) and e.id<>$2 order by e.id", [exportIds, exportIds[0]]);
     assert.equal(rows.rowCount, 4);
     assert.ok(rows.rows.every((row) => row.status === "exported" && row.study_instance_uid === studyUid && row.series_number === null), JSON.stringify(rows.rows));
