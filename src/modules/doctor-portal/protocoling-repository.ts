@@ -303,6 +303,14 @@ async function getProtocolingAppointment(appointmentId: number): Promise<DoctorP
   return result.rows[0] ? mapAppointment(result.rows[0]) : null;
 }
 
+type PreviousStudiesAppointmentContext = Pick<DoctorProtocolingAppointmentRow, "appointmentId" | "patientId" | "accessionNumber" | "studyInstanceUid" | "patientDicomId" | "patientEnglishName" | "patientArabicName">;
+
+async function getModalityAppointmentContext(appointmentId: number): Promise<PreviousStudiesAppointmentContext | null> {
+  const result = await pool.query<RawRecord>(`select b.id as appointment_id, b.patient_id, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, b.study_instance_uid, coalesce(nullif(trim(pi.value),''), nullif(trim(p.identifier_value),''), nullif(trim(p.national_id),'')) as patient_dicom_id, p.english_full_name as patient_english_name, p.arabic_full_name as patient_arabic_name from appointments_v2.bookings b join patients p on p.id=b.patient_id left join lateral (select value from patient_identifiers where patient_id=p.id and is_primary=true order by id limit 1) pi on true where b.id=$1 limit 1`, [appointmentId]);
+  const row = result.rows[0];
+  return row ? { appointmentId: Number(row.appointment_id), patientId: Number(row.patient_id), accessionNumber: String(row.accession_number), studyInstanceUid: stringOrNull(row.study_instance_uid), patientDicomId: stringOrNull(row.patient_dicom_id), patientEnglishName: stringOrNull(row.patient_english_name), patientArabicName: stringOrNull(row.patient_arabic_name) } : null;
+}
+
 async function getAssignmentDetail(assignment: ProtocolAssignmentSummary): Promise<ProtocolAssignmentDetail> {
   if (!assignment.protocolVersionId) return { assignment, ctPhases: [], mriSequences: [] };
   const ctRows = await pool.query<RawRecord>(
@@ -514,9 +522,8 @@ export async function cancelProtocolAssignment(appointmentId: number): Promise<D
   return detail;
 }
 
-export async function getProtocolingPatientHistory(appointmentId: number) {
-  const current = await getProtocolingAppointment(appointmentId);
-  if (!current) throw new HttpError(404, "Appointment not found.");
+async function getPatientHistoryForContext(current: PreviousStudiesAppointmentContext) {
+  const appointmentId = current.appointmentId;
   const result = await pool.query<RawRecord>(
     `
       select
@@ -574,9 +581,7 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
 
 export async function requestProtocolingPatientIdentityReconciliation(appointmentId:number,studyInstanceUid:string,accessionNumber:string|null,userId:number){const current=await getProtocolingAppointment(appointmentId);if(!current)throw new HttpError(404,"Appointment not found.");return requestPatientIdentityReconciliation({patientId:current.patientId,studyInstanceUid,accessionNumber,requestedByUserId:userId});}
 
-export async function getProtocolingHistoricalPacsCandidates(appointmentId: number) {
-  const current = await getProtocolingAppointment(appointmentId);
-  if (!current) throw new HttpError(404, "Appointment not found.");
+async function getHistoricalPacsCandidatesForContext(current: PreviousStudiesAppointmentContext) {
   const discovery = await discoverHistoricalPacsCandidatesForPatient(current.patientId);
   return {
     historicalCandidates: await attachPatientIdentityReconciliationToHistoricalCandidates(discovery.candidates, undefined, current.patientId),
@@ -592,9 +597,31 @@ export async function searchProtocolingHistoricalPacsPatientId(appointmentId: nu
   return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId), undefined, current.patientId) };
 }
 
-export async function recordHistoricalPacsPatientAttestation(appointmentId: number, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
+export async function getProtocolingHistoricalPacsCandidates(appointmentId: number) {
   const current = await getProtocolingAppointment(appointmentId);
   if (!current) throw new HttpError(404, "Appointment not found.");
+  return getHistoricalPacsCandidatesForContext(current);
+}
+
+export async function getModalityHistoricalPacsCandidates(appointmentId: number) {
+  const current = await getModalityAppointmentContext(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return getHistoricalPacsCandidatesForContext(current);
+}
+
+export async function getProtocolingPatientHistory(appointmentId: number) {
+  const current = await getProtocolingAppointment(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return getPatientHistoryForContext(current);
+}
+
+export async function getModalityPatientHistory(appointmentId: number) {
+  const current = await getModalityAppointmentContext(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return getPatientHistoryForContext(current);
+}
+
+async function recordHistoricalPacsPatientAttestationForContext(current: PreviousStudiesAppointmentContext, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
   const normalizedStudyInstanceUid = studyInstanceUid.trim();
   if (!normalizedStudyInstanceUid) throw new HttpError(400, "studyInstanceUid is required.");
   const discovery = await discoverHistoricalPacsCandidatesForPatient(current.patientId);
@@ -612,6 +639,18 @@ export async function recordHistoricalPacsPatientAttestation(appointmentId: numb
   const row = result.rows[0]!;
   await logAuditEntry({ entityType: "historical_pacs_patient_attestation", entityId: null, actionType: `historical_pacs_patient_${status}`, oldValues: existing.rows[0] ?? null, newValues: { patientId: current.patientId, studyInstanceUid: normalizedStudyInstanceUid, status }, changedByUserId: recordedByUserId });
   return { studyInstanceUid: row.study_instance_uid, status: row.status, recordedByUserId: row.recorded_by_user_id, recordedByName: row.recorded_by_name, recordedAt: row.recorded_at };
+}
+
+export async function recordHistoricalPacsPatientAttestation(appointmentId: number, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
+  const current = await getProtocolingAppointment(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return recordHistoricalPacsPatientAttestationForContext(current, studyInstanceUid, status, recordedByUserId);
+}
+
+export async function recordModalityHistoricalPacsPatientAttestation(appointmentId: number, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
+  const current = await getModalityAppointmentContext(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return recordHistoricalPacsPatientAttestationForContext(current, studyInstanceUid, status, recordedByUserId);
 }
 
 export const __protocolingRepositoryTestables = { attachPatientIdentityReconciliationToHistoricalCandidates, latestPatientIdentityReconciliationJobs };

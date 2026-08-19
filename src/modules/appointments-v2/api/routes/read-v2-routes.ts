@@ -4,6 +4,7 @@ import { requireAuth } from "../../../../middleware/auth.js";
 import { requireActionPin } from "../../../../middleware/action-pin.js";
 import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
+import { HttpError } from "../../../../utils/http-error.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
@@ -34,7 +35,7 @@ import {
   qualifyingRequestDocumentExistsSql,
 } from "../../../../services/request-document-protocol-policy.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../../services/protocoling-modality.js";
-import { getProtocolingHistoricalPacsCandidates, getProtocolingPatientHistory, recordHistoricalPacsPatientAttestation } from "../../../doctor-portal/protocoling-repository.js";
+import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, recordModalityHistoricalPacsPatientAttestation } from "../../../doctor-portal/protocoling-repository.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1505,17 +1506,18 @@ router.get(
 
 router.get("/modality/appointments/:appointmentId/previous-studies", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
-  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new Error("Invalid appointment ID");
-  const [history, candidates] = await Promise.all([getProtocolingPatientHistory(appointmentId), getProtocolingHistoricalPacsCandidates(appointmentId)]);
-  res.json({ history, ...candidates });
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Invalid appointment ID.");
+  const history = await getModalityPatientHistory(appointmentId);
+  try { res.json({ history, ...(await getModalityHistoricalPacsCandidates(appointmentId)), historicalCandidatesError: false }); }
+  catch { res.json({ history, historicalCandidates: [], historicalPacsIndexStatus: "unavailable", historicalPacsLastSuccessAt: null, historicalCandidatesError: true }); }
 }));
 
 router.post("/modality/appointments/:appointmentId/previous-studies/attestations", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
   const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
   const status = body.status === "confirmed" || body.status === "denied" ? body.status : null;
-  if (!Number.isInteger(appointmentId) || appointmentId <= 0 || !status) throw new Error("Invalid historical PACS attestation.");
-  const attestation = await recordHistoricalPacsPatientAttestation(appointmentId, String(body.studyInstanceUid ?? ""), status, Number((req as AuthedRequest).user?.sub ?? 0));
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0 || !status || !String(body.studyInstanceUid ?? "").trim()) throw new HttpError(400, "Invalid historical PACS attestation.");
+  const attestation = await recordModalityHistoricalPacsPatientAttestation(appointmentId, String(body.studyInstanceUid), status, Number((req as AuthedRequest).user?.sub ?? 0));
   res.json({ attestation });
 }));
 
