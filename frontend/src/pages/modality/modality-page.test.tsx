@@ -16,6 +16,7 @@ const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
 const fetchModalityPreviousStudiesMock = vi.fn();
 const recordModalityHistoricalPacsAttestationMock = vi.fn();
+const pushToastMock = vi.fn();
 const listAppointmentDocumentsMock = vi.fn();
 const fetchRequestDocumentProtocolPolicyMock = vi.fn();
 const uploadAppointmentDocumentMock = vi.fn();
@@ -72,6 +73,10 @@ vi.mock("@/lib/protocol-printing", () => ({
     modality: assignment.modality,
     protocolName: assignment.protocolName || "Free-text protocol",
   })),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  pushToast: (...args: unknown[]) => pushToastMock(...args),
 }));
 
 vi.mock("@/providers/language-provider", () => ({
@@ -304,6 +309,7 @@ function boardAccessions() {
 describe("ModalityPage modality board", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    pushToastMock.mockReset();
     languageState.language = "en";
   });
 
@@ -1835,6 +1841,28 @@ describe("ModalityPage modality board", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "Patient denies" })[0]);
     expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledTimes(1); expect(screen.getByText("Confirm changing the patient ownership attestation.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  });
+
+  it("reports a failed patient confirmation without changing the persisted attestation state", async () => {
+    fetchModalityPreviousStudiesMock.mockResolvedValue({
+      history: { items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null },
+      historicalCandidates: [{
+        historicalPatientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", classification: "strong_demographic", reasons: ["exact_normalized_name"], authoritative: false, matchRank: 1, nameSimilarity: 1, phoneticMatchCount: 0, studyCount: 1,
+        studies: [{ orthancStudyId: "historical", studyInstanceUid: "1.2.3.4", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 10 }],
+      }],
+      historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, historicalCandidatesError: false,
+    });
+
+    const user = await openBoard([appointment({ id: 1 })]);
+    recordModalityHistoricalPacsAttestationMock.mockRejectedValue(new Error("save failed"));
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("Unreviewed")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Patient confirms" }));
+    await waitFor(() => expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledWith(1, "1.2.3.4", "confirmed"));
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })));
+    expect(screen.queryByText("Patient confirmed")).toBeNull();
+    expect(screen.getByText("Unreviewed")).toBeTruthy();
   });
 
   it("renders Previous Studies evidence in Arabic without raw PACS values", async () => {
