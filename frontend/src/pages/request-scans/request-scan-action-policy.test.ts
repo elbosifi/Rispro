@@ -29,7 +29,10 @@ describe("deriveRequestScanActions", () => {
     expect(kinds({ ...base, status: "failed", appointment_id: 12, document_id: 4, attachment_completed_at: "2026-07-27", clinical_document_export_status: null }, "supervisor").primary).toBe("retry-archive");
     expect(kinds({ ...base, status: "failed", appointment_id: 12, document_id: 4, attachment_completed_at: "2026-07-27" }, "modality_staff").primary).toBeNull();
     expect(kinds({ ...base, status: "failed", appointment_id: 12, clinical_document_export_status: "blocked" }, "supervisor").secondary).toContain("retry-matching");
+    expect(kinds({ ...base, status: "failed", appointment_id: 12, clinical_document_export_status: "blocked" }, "supervisor").secondary).toContain("manual-pacs-match");
+    expect(kinds({ ...base, status: "failed", appointment_id: 12, clinical_document_export_status: "blocked" }, "super_admin").secondary).toContain("manual-pacs-match");
     expect(kinds({ ...base, status: "failed", appointment_id: 12, clinical_document_export_status: "blocked" }, "modality_staff").secondary).not.toContain("retry-matching");
+    expect(kinds({ ...base, status: "failed", appointment_id: 12, clinical_document_export_status: "blocked" }, "modality_staff").secondary).not.toContain("manual-pacs-match");
     expect(kinds({ ...base, status: "failed", dismissed_at: "2026-07-27" }, "super_admin").secondary).toContain("restore");
     expect(kinds({ ...base, status: "failed", dismissed_at: "2026-07-27" }, "modality_staff").secondary).not.toContain("restore");
   });

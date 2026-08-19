@@ -5,7 +5,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { HttpError } from "../utils/http-error.js";
 import { findAuthoritativeOrthancStudyForAppointment, getAuthoritativeOrthancStatus, readAuthoritativeOrthancSettingsForDisplay, saveAuthoritativeOrthancSettings, testAuthoritativeOrthancConnection } from "../services/authoritative-orthanc-service.js";
-import { assertClinicalDocumentExportAppointmentAccess, listClinicalDocumentExportsForAppointment, rebuildClinicalDocumentSecondaryCaptures, retryClinicalDocumentExport } from "../services/clinical-document-export-service.js";
+import { assertClinicalDocumentExportAppointmentAccess, confirmClinicalDocumentExportManualStudyMatch, listClinicalDocumentExportManualStudyMatchCandidates, listClinicalDocumentExportsForAppointment, rebuildClinicalDocumentSecondaryCaptures, retryClinicalDocumentExport } from "../services/clinical-document-export-service.js";
 import { generateMissingClinicalDocumentSecondaryCaptureExports } from "../services/clinical-document-export-queue-service.js";
 import {
   getAuthoritativeOrthancOperationalJobs,
@@ -63,4 +63,6 @@ authoritativeOrthancRouter.get("/appointments/:appointmentId/document-exports", 
 authoritativeOrthancRouter.post("/appointments/:appointmentId/document-exports/generate-secondary-capture", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.status(202).json(await generateMissingClinicalDocumentSecondaryCaptureExports(appointmentId(req.params.appointmentId), req.user!.sub)); }));
 authoritativeOrthancRouter.post("/document-exports/reconcile", requireAnyRole(["super_admin"]), asyncRoute(async () => { throw new HttpError(410, "Clinical-document export reconciliation is retired; selected-PACS export is event-driven."); }));
 authoritativeOrthancRouter.post("/document-exports/:exportId/retry", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.status(202).json({ export: await retryClinicalDocumentExport(String(req.params.exportId || ""), req.user!.sub) }); }));
+authoritativeOrthancRouter.get("/document-exports/:exportId/manual-study-match/candidates", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.json(await listClinicalDocumentExportManualStudyMatchCandidates(String(req.params.exportId || ""))); }));
+authoritativeOrthancRouter.post("/document-exports/:exportId/manual-study-match", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.status(202).json({ export: await confirmClinicalDocumentExportManualStudyMatch(String(req.params.exportId || ""), body.studyInstanceUid, body.confirmed, req.user!.sub) }); }));
 authoritativeOrthancRouter.post("/document-exports/:exportId/rebuild-secondary-capture", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { res.status(202).json(await rebuildClinicalDocumentSecondaryCaptures(String(req.params.exportId || ""), req.user!.sub)); }));

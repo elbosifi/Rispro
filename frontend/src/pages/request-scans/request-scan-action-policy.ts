@@ -13,6 +13,7 @@ export type RequestScanActionKind =
   | "retry"
   | "retry-archive"
   | "retry-matching"
+  | "manual-pacs-match"
   | "dismiss"
   | "restore"
   | "return-to-incoming";
@@ -88,7 +89,7 @@ export function deriveRequestScanActions(job: RequestScanPolicyJob, userRole?: R
   if (job.status === "failed" && job.dismissed_at && supervisorRoles.has(userRole ?? "")) {
     if (!secondary.some((item) => item.kind === "restore")) secondary.push(action("restore"));
   }
-  if (job.clinical_document_export_status === "blocked" && supervisorRoles.has(userRole ?? "")) secondary.push(action("retry-matching"));
+  if (job.clinical_document_export_status === "blocked" && supervisorRoles.has(userRole ?? "")) secondary.push(action("retry-matching"), action("manual-pacs-match"));
 
   // The backend's retry route already performs the return-to-Incoming
   // checkpoint. Do not expose a duplicate recovery operation.

@@ -29,6 +29,8 @@ function renderPage(modality?: { id: number; code: string; name: string; onBack:
 function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
     const value = String(input);
+    if (value.includes("/manual-study-match/candidates")) return response({ context: { patient_name: "Patient One", patient_primary_id: "PID-9", patient_national_id: null, patient_mrn: "MRN-9", appointment_accession_number: "V2-000009", appointment_booking_date: "2026-07-25", modality_code: "CT" }, candidates: [{ patientName: "Patient One", patientId: "PID-9", accessionNumber: "V2-000009", studyDate: "20260818", studyDescription: "CT Head", modalitiesInStudy: ["CT", "SR"], studyInstanceUid: "2.25.101", match: { patientIdentity: "match", accession: "match", studyDate: "mismatch", modality: "match", bookingStudyInstanceUid: "unknown" } }] });
+    if (value.includes("/manual-study-match") && options?.method === "POST") return response({ export: { id: 101, status: "pending" } });
     if (value.includes("/document-exports/generate-secondary-capture") && options?.method === "POST") return response({ queued: 2, exportIds: [201, 202] });
     if (value.includes("/api/request-scans/status")) return response(status);
     if (value.includes("/v2/lookups/special-reason-codes")) return response({ items: [] });
@@ -180,6 +182,23 @@ describe("RequestScansPage", () => {
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Retry matching" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/integrations/authoritative-orthanc/document-exports/101/retry"))).toBe(true));
+  });
+
+  it("opens Manual PACS match from More, requires confirmation, and posts the selected StudyInstanceUID", async () => {
+    const fetchMock = mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "blocked", clinical_document_export_id: 101, appointment_status: "completed" }]);
+    renderPage();
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Manual PACS match" }));
+    expect(await screen.findByText("2.25.101")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Confirm PACS study" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("listitem").at(-1)!);
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this PACS study belongs to this RISpro appointment." }));
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input).endsWith("/document-exports/101/manual-study-match") && (options as RequestInit)?.method === "POST" && String((options as RequestInit).body).includes("2.25.101"))).toBe(true));
+    await waitFor(() => expect(screen.queryByText("Select PACS study")).toBeNull());
   });
 
   it("uses the Arabic blocked-export retry-matching label", async () => {

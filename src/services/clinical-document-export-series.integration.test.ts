@@ -237,12 +237,15 @@ test("request and clinical documents export into separate exact-name unnumbered 
       let failNextStore = false;
       let mismatchNextStore = false;
       let remoteStudyModality = "CT\\SR";
+      let remotePatientId = patientPrimaryId;
+      let remoteAccession = accession;
+      let remoteStudyDate = "20260818";
       const remoteDependencies: ClinicalDocumentProcessorDependencies = {
         ...dependencies,
         createOrthancClient: async () => { throw new Error("remote export must not create an authoritative Orthanc client"); },
         searchRemoteStudies: async ({ criteria }) => {
           lookupCriteria.push(criteria as Record<string, string>);
-          return { target: { type: "remote_modality" as const, key: "TEST_PACS", name: "TEST_PACS", isDefault: false }, studies: [{ patientId: patientPrimaryId, patientName: "Series^Patient", accessionNumber: accession, modality: remoteStudyModality, description: "CT Chest", studyDescription: "CT Chest", studyDate: "20260818", studyTime: "101530", studyInstanceUid: remoteStudyUid }] };
+          return { target: { type: "remote_modality" as const, key: "TEST_PACS", name: "TEST_PACS", isDefault: false }, studies: [{ patientId: remotePatientId, patientName: "Series^Patient", accessionNumber: remoteAccession, modality: remoteStudyModality, description: "CT Chest", studyDescription: "CT Chest", studyDate: remoteStudyDate, studyTime: "101530", studyInstanceUid: remoteStudyUid }] };
         },
         storeDicomStraight: async ({ dicomBytes }) => {
           const dataset = parseDicom(dicomBytes); captured.push(dataset);
@@ -287,6 +290,32 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.match(modalityConflict.last_error, /modality does not match/i);
       assert.equal(captured.length, capturedBeforeModalityConflict);
       remoteStudyModality = "CT\\SR";
+
+      await pool.query("update appointments_v2.bookings set study_instance_uid=$2 where id=$1", [created.bookingId, `2.25.${uidSuffix}booking-conflict`]);
+      remoteStudyModality = "MR"; remoteStudyDate = "20260817";
+      const manualId = await createRemoteExport("remote-manual");
+      await pool.query("update clinical_document_exports set study_instance_uid=$2,manual_study_match=true where id=$1", [manualId, remoteStudyUid]);
+      const manualRow = await claimNextClinicalDocumentExport(`remote-manual-${suffix}`, 300, "orthanc_remote:");
+      assert.equal(Number(manualRow?.id), manualId);
+      await processClaimedClinicalDocumentExport(manualRow!, remoteDependencies);
+      assert.deepEqual(lookupCriteria.at(-1), { studyInstanceUid: remoteStudyUid });
+      assert.equal((await pool.query<{ status: string; manual_study_match: boolean; study_instance_uid: string }>("select status,manual_study_match,study_instance_uid from clinical_document_exports where id=$1", [manualId])).rows[0]?.status, "exported");
+      remoteStudyModality = "CT\\SR"; remoteStudyDate = "20260818";
+      remotePatientId = "CONFLICTING-PATIENT";
+      const manualPatientConflictId = await createRemoteExport("remote-manual-patient-conflict");
+      await pool.query("update clinical_document_exports set study_instance_uid=$2,manual_study_match=true where id=$1", [manualPatientConflictId, remoteStudyUid]);
+      const manualPatientConflictRow = await claimNextClinicalDocumentExport(`remote-manual-patient-conflict-${suffix}`, 300, "orthanc_remote:");
+      await processClaimedClinicalDocumentExport(manualPatientConflictRow!, remoteDependencies);
+      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_exports where id=$1", [manualPatientConflictId])).rows[0]?.status, "blocked");
+      remotePatientId = patientPrimaryId;
+      remoteAccession = "CONFLICTING-ACCESSION";
+      const manualAccessionConflictId = await createRemoteExport("remote-manual-accession-conflict");
+      await pool.query("update clinical_document_exports set study_instance_uid=$2,manual_study_match=true where id=$1", [manualAccessionConflictId, remoteStudyUid]);
+      const manualAccessionConflictRow = await claimNextClinicalDocumentExport(`remote-manual-accession-conflict-${suffix}`, 300, "orthanc_remote:");
+      await processClaimedClinicalDocumentExport(manualAccessionConflictRow!, remoteDependencies);
+      assert.equal((await pool.query<{ status: string }>("select status from clinical_document_exports where id=$1", [manualAccessionConflictId])).rows[0]?.status, "blocked");
+      remoteAccession = accession;
+      await pool.query("update appointments_v2.bookings set study_instance_uid=null where id=$1", [created.bookingId]);
 
       const retryId = await createRemoteExport("remote-retry"); failNextStore = true;
       const failedRow = await claimNextClinicalDocumentExport(`remote-failed-${suffix}`, 300, "orthanc_remote:");

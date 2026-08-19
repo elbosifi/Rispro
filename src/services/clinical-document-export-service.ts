@@ -11,7 +11,7 @@ import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDoc
 import { createAuthoritativeOrthancClient, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { enqueueClinicalDocumentExportsForAppointmentAutomatically } from "./clinical-document-export-queue-service.js";
 import { isOrthancRemoteClinicalDocumentExportDestination, remoteKeyFromClinicalDocumentExportDestination } from "./clinical-document-export-queue-service.js";
-import { searchOrthancPacsStudies, storeDicomStraightToOrthancPacs } from "./orthanc-pacs-service.js";
+import { searchOrthancPacsStudies, storeDicomStraightToOrthancPacs, type OrthancPacsStudySummary } from "./orthanc-pacs-service.js";
 import { readClinicalDocumentExportSettings } from "./clinical-document-export-settings-service.js";
 
 const EXPORT_LEASE_SECONDS = 300;
@@ -36,6 +36,7 @@ export type ClinicalDocumentExportRow = {
   orthanc_series_id: string | null;
   orthanc_instance_id: string | null;
   study_instance_uid: string | null;
+  manual_study_match: boolean;
   series_instance_uid: string | null;
   sop_instance_uid: string | null;
   representation_type: "encapsulated_pdf" | "secondary_capture";
@@ -192,21 +193,24 @@ async function resolveTargetStudy(context: AppointmentExportContext, row: Clinic
     const modality = normalizeRisproModalityCode(context.modality_code);
     if (!modality) throw new ClinicalDocumentExportBlockedError("unmapped_modality", "The RISpro modality code cannot be mapped to a DICOM modality.");
     const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));
-    if (row.study_instance_uid && context.appointment_study_instance_uid && row.study_instance_uid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The persisted export StudyInstanceUID differs from the booking StudyInstanceUID.");
+    if (row.manual_study_match && !row.study_instance_uid) throw new ClinicalDocumentExportBlockedError("missing_study_instance_uid", "The manually confirmed export has no StudyInstanceUID.");
+    if (!row.manual_study_match && row.study_instance_uid && context.appointment_study_instance_uid && row.study_instance_uid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The persisted export StudyInstanceUID differs from the booking StudyInstanceUID.");
     const studyInstanceUid = row.study_instance_uid || context.appointment_study_instance_uid;
     const criteria = studyInstanceUid ? { studyInstanceUid } : { accessionNumber: context.appointment_accession_number };
     const result = await (dependencies.searchRemoteStudies || searchOrthancPacsStudies)({ criteria, targetKey: remoteKey, currentUserId: null, audit: false });
     if (result.studies.length === 0) throw new Error("Orthanc study was not found yet.");
     const distinctUids = new Set(result.studies.map((study) => study.studyInstanceUid).filter(Boolean));
-    if (result.studies.length > 1 && distinctUids.size !== 1) throw new ClinicalDocumentExportBlockedError("ambiguous_study_match", "PACS study matching is ambiguous and needs review.");
+    if (row.manual_study_match && (result.studies.length !== 1 || distinctUids.size !== 1)) throw new ClinicalDocumentExportBlockedError("manual_study_match_invalid", "The manually confirmed PACS study could not be resolved uniquely.");
+    if (!row.manual_study_match && result.studies.length > 1 && distinctUids.size !== 1) throw new ClinicalDocumentExportBlockedError("ambiguous_study_match", "PACS study matching is ambiguous and needs review.");
     const study = result.studies[0]!;
     if (!study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("missing_study_instance_uid", "The matched PACS study has no StudyInstanceUID.");
-    if (context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The matched PACS study does not match the booking StudyInstanceUID.");
+    if (row.manual_study_match && study.studyInstanceUid !== row.study_instance_uid) throw new ClinicalDocumentExportBlockedError("manual_study_match_invalid", "The manually confirmed PACS study did not return the selected StudyInstanceUID.");
+    if (!row.manual_study_match && context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The matched PACS study does not match the booking StudyInstanceUID.");
     if (study.accessionNumber && study.accessionNumber !== context.appointment_accession_number) throw new ClinicalDocumentExportBlockedError("accession_conflict", "The matched PACS study accession does not match the appointment.");
     if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) throw new ClinicalDocumentExportBlockedError("patient_identity_conflict", "The matched PACS study patient identity does not match the appointment.");
     const studyModalities = normalizeDicomModalityValues(study.modality);
-    if (studyModalities.length && !studyModalities.includes(modality)) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
-    if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) throw new ClinicalDocumentExportBlockedError("study_date_conflict", "The matched PACS study date does not match the appointment.");
+    if (!row.manual_study_match && studyModalities.length && !studyModalities.includes(modality)) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
+    if (!row.manual_study_match && study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) throw new ClinicalDocumentExportBlockedError("study_date_conflict", "The matched PACS study date does not match the appointment.");
     return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyTime: study.studyTime || null, studyDescription: study.studyDescription || null, modalitiesInStudy: studyModalities, seriesCount: 0, instanceCount: 0 };
   }
   const client = await dependencies.createOrthancClient();
@@ -556,6 +560,100 @@ export async function assertClinicalDocumentExportAppointmentAccess(appointmentI
   const { rows } = await pool.query<{ modality_id: number | null }>(`select modality_id from appointments_v2.bookings where id=$1 limit 1`, [appointmentId]);
   if (!rows[0]) throw new HttpError(404, "Appointment not found.");
   if (role === "modality_staff" && (!modalityId || Number(rows[0].modality_id) !== modalityId)) throw new HttpError(403, "This appointment is outside the requested modality scope.");
+}
+
+export type ManualClinicalDocumentStudyCandidate = {
+  patientName: string;
+  patientId: string;
+  accessionNumber: string;
+  studyDate: string;
+  studyDescription: string;
+  modalitiesInStudy: string[];
+  studyInstanceUid: string;
+  match: { patientIdentity: "match" | "conflict" | "unknown"; accession: "match" | "conflict" | "unknown"; studyDate: "match" | "mismatch" | "unknown"; modality: "match" | "mismatch" | "unknown"; bookingStudyInstanceUid: "match" | "mismatch" | "unknown" };
+};
+
+type ManualStudyMatchExportContext = ClinicalDocumentExportWorkRow & { has_export_evidence: boolean };
+
+async function loadManualStudyMatchExport(exportId: number): Promise<ManualStudyMatchExportContext> {
+  const row = await loadExportWork(exportId);
+  if (!row || row.status !== "blocked" || !isOrthancRemoteClinicalDocumentExportDestination(row.destination_key) || row.representation_type !== "secondary_capture") throw new HttpError(409, "Only blocked selected-PACS Secondary Capture exports can be manually matched.");
+  const evidence = await pool.query<{ exists: boolean }>("select exists(select 1 from clinical_document_export_instances where export_id=$1 and (status in ('exporting','verified') or exported_at is not null or verified_at is not null))", [exportId]);
+  const hasExportEvidence = row.exported_page_count > 0 || row.verified_page_count > 0 || Boolean(row.exported_at || row.verified_at) || Boolean(evidence.rows[0]?.exists);
+  if (hasExportEvidence) throw new HttpError(409, "Manual PACS matching is unavailable after Secondary Capture transmission or verification.");
+  return { ...row, has_export_evidence: hasExportEvidence };
+}
+
+function manualStudyCandidate(study: OrthancPacsStudySummary, context: AppointmentExportContext): ManualClinicalDocumentStudyCandidate {
+  const ids = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].map((value) => String(value || "").trim()).filter(Boolean);
+  const normalizedIds = ids.map((value) => value.toUpperCase());
+  const patientId = String(study.patientId || "").trim();
+  const accessionNumber = String(study.accessionNumber || "").trim();
+  const modalitiesInStudy = normalizeDicomModalityValues(study.modality);
+  const expectedModality = normalizeRisproModalityCode(context.modality_code);
+  const sameDate = study.studyDate && context.appointment_booking_date && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) === context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8);
+  return {
+    patientName: study.patientName || "",
+    patientId,
+    accessionNumber,
+    studyDate: study.studyDate || "",
+    studyDescription: study.studyDescription || study.description || "",
+    modalitiesInStudy,
+    studyInstanceUid: study.studyInstanceUid || "",
+    match: {
+      patientIdentity: !patientId || !normalizedIds.length ? "unknown" : normalizedIds.includes(patientId.toUpperCase()) ? "match" : "conflict",
+      accession: !accessionNumber || !context.appointment_accession_number ? "unknown" : accessionNumber === context.appointment_accession_number ? "match" : "conflict",
+      studyDate: !study.studyDate || !context.appointment_booking_date ? "unknown" : sameDate ? "match" : "mismatch",
+      modality: !modalitiesInStudy.length || !expectedModality ? "unknown" : modalitiesInStudy.includes(expectedModality) ? "match" : "mismatch",
+      bookingStudyInstanceUid: !context.appointment_study_instance_uid ? "unknown" : study.studyInstanceUid === context.appointment_study_instance_uid ? "match" : "mismatch",
+    },
+  };
+}
+
+export async function listClinicalDocumentExportManualStudyMatchCandidates(exportId: UserId): Promise<{ context: Pick<ClinicalDocumentExportWorkRow, "patient_name" | "patient_primary_id" | "patient_national_id" | "patient_mrn" | "appointment_accession_number" | "appointment_booking_date" | "modality_code">; candidates: ManualClinicalDocumentStudyCandidate[] }> {
+  const id = normalizePositiveInteger(exportId, "exportId");
+  if (id === null) throw new HttpError(400, "exportId must be a positive integer.");
+  const row = await loadManualStudyMatchExport(id);
+  const remoteKey = remoteKeyFromClinicalDocumentExportDestination(row.destination_key);
+  if (!remoteKey) throw new HttpError(409, "This export does not have a selected remote PACS destination.");
+  const criteria = [{ accessionNumber: row.appointment_accession_number }, ...[row.patient_primary_id, row.patient_national_id, row.patient_mrn].map((patientId) => ({ patientId: String(patientId || "").trim() })).filter((value, index, values) => value.patientId && values.findIndex((candidate) => candidate.patientId.toUpperCase() === value.patientId.toUpperCase()) === index)].slice(0, 4);
+  const results = await Promise.all(criteria.map((criteria) => searchOrthancPacsStudies({ criteria, targetKey: remoteKey, currentUserId: null, audit: false })));
+  const seen = new Set<string>();
+  const candidates = results.flatMap((result) => result.studies).filter((study) => Boolean(study.studyInstanceUid) && !seen.has(study.studyInstanceUid) && Boolean(seen.add(study.studyInstanceUid))).map((study) => manualStudyCandidate(study, appointmentContext(row)));
+  candidates.sort((a, b) => Number(b.match.accession === "match") - Number(a.match.accession === "match") || Number(b.match.patientIdentity === "match") - Number(a.match.patientIdentity === "match") || Number(b.match.studyDate === "match") - Number(a.match.studyDate === "match") || Number(b.match.modality === "match") - Number(a.match.modality === "match") || b.studyDate.localeCompare(a.studyDate));
+  return { context: { patient_name: row.patient_name, patient_primary_id: row.patient_primary_id, patient_national_id: row.patient_national_id, patient_mrn: row.patient_mrn, appointment_accession_number: row.appointment_accession_number, appointment_booking_date: row.appointment_booking_date, modality_code: row.modality_code }, candidates: candidates.slice(0, 25) };
+}
+
+export async function confirmClinicalDocumentExportManualStudyMatch(exportId: UserId, studyInstanceUid: unknown, confirmed: unknown, changedByUserId: UserId): Promise<ClinicalDocumentExportRow> {
+  const id = normalizePositiveInteger(exportId, "exportId");
+  if (id === null) throw new HttpError(400, "exportId must be a positive integer.");
+  const selectedUid = String(studyInstanceUid || "").trim();
+  if (confirmed !== true) throw new HttpError(400, "Manual PACS study confirmation is required.");
+  if (!selectedUid) throw new HttpError(400, "studyInstanceUid is required.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const locked = await client.query<ClinicalDocumentExportRow>("select * from clinical_document_exports where id=$1 for update", [id]);
+    const exportRow = locked.rows[0];
+    if (!exportRow || exportRow.status !== "blocked" || !isOrthancRemoteClinicalDocumentExportDestination(exportRow.destination_key) || exportRow.representation_type !== "secondary_capture") throw new HttpError(409, "Only blocked selected-PACS Secondary Capture exports can be manually matched.");
+    await client.query("select pg_advisory_xact_lock($1::bigint)", [exportRow.appointment_id]);
+    const evidence = await client.query<{ exists: boolean }>("select exists(select 1 from clinical_document_export_instances where export_id=$1 and (status in ('exporting','verified') or exported_at is not null or verified_at is not null))", [id]);
+    if (exportRow.exported_page_count > 0 || exportRow.verified_page_count > 0 || exportRow.exported_at || exportRow.verified_at || evidence.rows[0]?.exists) throw new HttpError(409, "Manual PACS matching is unavailable after Secondary Capture transmission or verification.");
+    const context = await loadExportWork(id);
+    const remoteKey = remoteKeyFromClinicalDocumentExportDestination(exportRow.destination_key);
+    if (!context || !remoteKey) throw new HttpError(409, "This export does not have a selected remote PACS destination.");
+    const result = await searchOrthancPacsStudies({ criteria: { studyInstanceUid: selectedUid }, targetKey: remoteKey, currentUserId: null, audit: false });
+    if (result.studies.length !== 1 || result.studies[0]?.studyInstanceUid !== selectedUid) throw new HttpError(409, "The selected PACS study could not be verified uniquely on this export destination.");
+    const candidate = manualStudyCandidate(result.studies[0], appointmentContext(context));
+    if (candidate.match.patientIdentity === "conflict") throw new HttpError(409, "The selected PACS study patient identity conflicts with the RISpro appointment.");
+    if (candidate.match.accession === "conflict") throw new HttpError(409, "The selected PACS study accession conflicts with the RISpro appointment.");
+    await client.query("delete from clinical_document_export_instances where export_id=$1", [id]);
+    const updated = await client.query<ClinicalDocumentExportRow>("update clinical_document_exports set study_instance_uid=$2,manual_study_match=true,status='pending',attempt_count=0,next_retry_at=null,last_attempt_at=null,last_error=null,orthanc_study_id=null,orthanc_series_id=null,orthanc_instance_id=null,series_instance_uid=null,sop_instance_uid=null,expected_page_count=null,exported_page_count=0,verified_page_count=0,series_number=null,exported_at=null,verified_at=null,export_lease_owner=null,export_lease_expires_at=null,updated_at=now() where id=$1 returning *", [id, selectedUid]);
+    const row = updated.rows[0]!;
+    await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_manual_study_match", oldValues: { status: exportRow.status, studyInstanceUid: exportRow.study_instance_uid, destinationKey: exportRow.destination_key }, newValues: { status: "pending", studyInstanceUid: selectedUid, destinationKey: exportRow.destination_key, candidateAccession: candidate.accessionNumber, candidatePatientId: candidate.patientId, candidateStudyDate: candidate.studyDate, candidateModalities: candidate.modalitiesInStudy, softMismatchFlags: candidate.match, changedByUserId }, changedByUserId }, client);
+    await client.query("commit");
+    return row;
+  } catch (error) { await client.query("rollback").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
 type ClinicalDocumentExportRebuildAudit = Pick<ClinicalDocumentExportRow, "id" | "status" | "destination_key" | "study_instance_uid" | "series_instance_uid" | "sop_instance_uid"> & {
