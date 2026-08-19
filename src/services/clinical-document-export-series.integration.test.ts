@@ -321,6 +321,8 @@ test("request and clinical documents export into separate exact-name unnumbered 
         const capturedStart = captured.length;
         const rebuild = await rebuildClinicalDocumentSecondaryCaptures(rebuildIds[0]!, created.userId);
         assert.deepEqual(rebuild, { queued: 4, exportIds: rebuildIds, appointmentId: created.bookingId });
+        const rebuildAudits = await pool.query<{ entity_id: number }>("select entity_id from audit_log where entity_type='clinical_document_export' and action_type='clinical_document_export_rebuild_requested' and entity_id=any($1::bigint[]) order by entity_id", [rebuildIds]);
+        assert.deepEqual(rebuildAudits.rows.map((row) => Number(row.entity_id)), rebuildIds);
         const resetRows = await pool.query<{ id: number; destination_key: string; status: string; attempt_count: number; study_instance_uid: string; series_instance_uid: string | null; sop_instance_uid: string | null; expected_page_count: number | null; exported_page_count: number; verified_page_count: number; series_number: number | null; orthanc_study_id: string | null; orthanc_series_id: string | null; orthanc_instance_id: string | null; exported_at: string | null; verified_at: string | null }>("select id,destination_key,status,attempt_count,study_instance_uid,series_instance_uid,sop_instance_uid,expected_page_count,exported_page_count,verified_page_count,series_number,orthanc_study_id,orthanc_series_id,orthanc_instance_id,exported_at,verified_at from clinical_document_exports where id=any($1::bigint[]) order by id", [rebuildIds]);
         assert.ok(resetRows.rows.every((row) => row.destination_key === "orthanc_remote:REBUILD_PACS" && row.status === "pending" && row.attempt_count === 0 && row.study_instance_uid === remoteStudyUid && row.series_instance_uid === null && row.sop_instance_uid === null && row.expected_page_count === null && row.exported_page_count === 0 && row.verified_page_count === 0 && row.series_number === null && row.orthanc_study_id === null && row.orthanc_series_id === null && row.orthanc_instance_id === null && row.exported_at === null && row.verified_at === null));
         assert.equal(Number((await pool.query<{ count: number }>("select count(*)::int count from clinical_document_export_instances where export_id=any($1::bigint[])", [rebuildIds])).rows[0]?.count), 0);
@@ -348,6 +350,10 @@ test("request and clinical documents export into separate exact-name unnumbered 
         const conflictAnchor = await createExistingExport(12, "appointment_request", "orthanc_remote:CONFLICT_PACS", `${remoteStudyUid}.1`);
         await createExistingExport(13, "clinical_document", "orthanc_remote:CONFLICT_PACS", `${remoteStudyUid}.2`);
         await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(conflictAnchor, created.userId), /conflicting StudyInstanceUIDs/i);
+        const unsupportedAnchorDocumentId = Number((await pool.query<{ document_id: number }>("select document_id from clinical_document_exports where id=$1", [rebuildIds[0]])).rows[0]!.document_id);
+        await pool.query("update documents set document_type='other' where id=$1", [unsupportedAnchorDocumentId]);
+        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(rebuildIds[0]!, created.userId), /Only exported, failed, or blocked Secondary Capture exports/i);
+        await pool.query("update documents set document_type='appointment_request' where id=$1", [unsupportedAnchorDocumentId]);
       });
     });
   } finally {

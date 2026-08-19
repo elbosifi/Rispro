@@ -578,7 +578,7 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
       for update of e
     `, [id]);
     const anchor = anchorResult.rows[0];
-    if (!anchor || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["exported", "failed", "blocked"].includes(anchor.status)) {
+    if (!anchor || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["appointment_request", "clinical_document"].includes(anchor.document_type) || !["exported", "failed", "blocked"].includes(anchor.status)) {
       throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
     }
     appointmentId = Number(anchor.appointment_id);
@@ -616,23 +616,22 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
       returning id
     `, [exportIds, preservedStudyInstanceUid]);
     if (reset.rowCount !== exportIds.length) throw new Error("Secondary Capture rebuild reset did not update every selected export.");
+    for (const row of auditRows) {
+      await logAuditEntry({
+        entityType: "clinical_document_export",
+        entityId: row.id,
+        actionType: "clinical_document_export_rebuild_requested",
+        oldValues: { status: row.status, studyInstanceUid: row.study_instance_uid, seriesInstanceUid: row.series_instance_uid, sopInstanceUid: row.sop_instance_uid, pageSopInstanceUids: row.page_sop_instance_uids, destinationKey: row.destination_key },
+        newValues: { status: "pending", studyInstanceUid: preservedStudyInstanceUid, destinationKey: row.destination_key, reason: "metadata_rebuild" },
+        changedByUserId,
+      }, client);
+    }
     await client.query("commit");
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
   } finally {
     client.release();
-  }
-
-  for (const row of auditRows) {
-    await logAuditEntry({
-      entityType: "clinical_document_export",
-      entityId: row.id,
-      actionType: "clinical_document_export_rebuild_requested",
-      oldValues: { status: row.status, studyInstanceUid: row.study_instance_uid, seriesInstanceUid: row.series_instance_uid, sopInstanceUid: row.sop_instance_uid, pageSopInstanceUids: row.page_sop_instance_uids, destinationKey: row.destination_key },
-      newValues: { status: "pending", studyInstanceUid: preservedStudyInstanceUid, destinationKey: row.destination_key, reason: "metadata_rebuild" },
-      changedByUserId,
-    });
   }
   return { queued: auditRows.length, exportIds: auditRows.map((row) => row.id), appointmentId };
 }

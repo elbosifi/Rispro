@@ -130,7 +130,7 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     assert.equal(synchronized.status, 200);
     assert.deepEqual((await synchronized.json()).summary, { created: 0, updated: 0, unchanged: 0, removed: 0, warnings: [] });
     assert.equal((await request("/document-exports/reconcile", supervisor, "POST")).status, 403);
-    assert.equal((await request("/document-exports/reconcile", superAdmin, "POST")).status, 202);
+    assert.equal((await request("/document-exports/reconcile", superAdmin, "POST")).status, 410);
     assert.equal((await request(`/document-exports/${supervisorRebuildAnchor}/rebuild-secondary-capture`, modalityStaff, "POST")).status, 403);
     assert.equal((await request(`/document-exports/${supervisorRebuildAnchor}/rebuild-secondary-capture`, supervisor, "POST")).status, 202);
     assert.equal((await request(`/document-exports/${superAdminRebuildAnchor}/rebuild-secondary-capture`, superAdmin, "POST")).status, 202);
