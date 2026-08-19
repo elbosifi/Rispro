@@ -1836,4 +1836,15 @@ describe("ModalityPage modality board", () => {
     expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledTimes(1); expect(screen.getByText("Confirm changing the patient ownership attestation.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   });
+
+  it("opens Previous studies from a cold History entry", async () => {
+    languageState.language = "en";
+    fetchModalityPreviousStudiesMock.mockClear();
+    await openBoard([appointment({ id: 52 })]);
+    expect(fetchModalityPreviousStudiesMock).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByRole("button", { name: "Previous studies" }).getAttribute("data-state")).toBe("active");
+    expect(screen.getByRole("button", { name: "Appointment" }).getAttribute("data-state")).toBe("inactive");
+    await waitFor(() => expect(fetchModalityPreviousStudiesMock).toHaveBeenCalledWith(52));
+  });
 });
