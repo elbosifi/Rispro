@@ -695,7 +695,7 @@ function AssignmentEditor({
     <div className="grid min-w-64 gap-2">
       <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
         <option value="">Doctor</option>
-        {row.assignedDoctorId && <option value={UNASSIGN_VALUE}>Return to waiting pool</option>}
+        {row.assignedDoctorId && row.reportStatus !== "final" && <option value={UNASSIGN_VALUE}>Return to waiting pool</option>}
         {row.assignedDoctorId && <option disabled>────────</option>}
         {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
       </select>
@@ -1989,7 +1989,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const doctorStats = statsQuery.data?.byDoctor ?? [];
   const canEditSettings = isManager(me);
   const canManage = isManager(me);
-  const assignmentFilterValue = filters.assignedDoctorId ? `doctor:${filters.assignedDoctorId}` : filters.assignmentStatus === "unassigned" ? "unassigned" : "all";
+  const assignmentFilterValue = filters.assignedDoctorId
+    ? `doctor:${filters.assignedDoctorId}`
+    : filters.assignmentStatus === "unassigned"
+      ? "unassigned"
+      : filters.assignmentStatus === "assigned"
+        ? "assigned"
+        : "all";
   const selectedAssignedDoctor = filters.assignedDoctorId
     ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === filters.assignedDoctorId) ?? null
     : null;
@@ -2286,14 +2292,16 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               value={assignmentFilterValue}
               onChange={(event) => {
                 const value = event.target.value;
-                if (value === "unassigned") setFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, offset: 0 }));
+                if (value === "all") setFilters((current) => ({ ...current, assignmentStatus: "all", assignedDoctorId: null, offset: 0 }));
+                else if (value === "unassigned") setFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, offset: 0 }));
+                else if (value === "assigned") setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: null, offset: 0 }));
                 else if (value.startsWith("doctor:")) setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: Number(value.slice(7)), offset: 0 }));
-                else setFilters((current) => ({ ...current, assignmentStatus: "all", assignedDoctorId: null, offset: 0 }));
               }}
               className={inputClass()}
             >
               <option value="all">All</option>
               <option value="unassigned">Unassigned</option>
+              <option value="assigned">Assigned</option>
               {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{doctor.displayName}</option>)}
             </select>
           </Field>

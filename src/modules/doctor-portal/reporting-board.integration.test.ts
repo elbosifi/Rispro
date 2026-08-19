@@ -1596,6 +1596,64 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(allStatuses.data.assignedAppointmentIds, [routine]);
   });
 
+  it("allows a supervisor to assign an unassigned SonicDICOM-final appointment without changing finality", async () => {
+    guard();
+    const date = addDays(48);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual final attribution" });
+    statusByAppointmentId.set(appointmentId, "final");
+    await statusByAppointmentId.flush();
+
+    const board = await api<{ cases: Array<{ appointmentId: number; reportStatus: string; canAssign: boolean; exclusionReason: string | null }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=final`
+    );
+    assert.equal(board.status, 200, JSON.stringify(board.data));
+    const row = board.data.cases.find((caseRow) => caseRow.appointmentId === appointmentId);
+    assert.deepEqual(row && { reportStatus: row.reportStatus, canAssign: row.canAssign, exclusionReason: row.exclusionReason }, {
+      reportStatus: "final", canAssign: true, exclusionReason: null,
+    });
+
+    const assigned = await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+      method: "POST",
+      body: { doctorId: targetDoctor.doctorId, reason: "attribute completed final report" },
+    });
+    assert.equal(assigned.status, 200, JSON.stringify(assigned.data));
+    assert.equal((await pool.query(
+      `select 1 from doctor_portal.case_team_assignments where appointment_id = $1 and assigned_doctor_id = $2 and assignment_type = 'reporting' and status = 'active'`,
+      [appointmentId, targetDoctor.doctorId]
+    )).rowCount, 1);
+    assert.equal((await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=final`
+    )).data.cases.find((caseRow) => caseRow.appointmentId === appointmentId)?.reportStatus, "final");
+  });
+
+  it("allows a supervisor to reassign a SonicDICOM-final appointment but not return it to the waiting pool", async () => {
+    guard();
+    const date = addDays(49);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual final reassignment" });
+    statusByAppointmentId.set(appointmentId, "final");
+    await statusByAppointmentId.flush();
+    await assignDirectly(appointmentId, otherDoctor.doctorId);
+
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+      method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "" },
+    })).status, 400);
+    const reassigned = await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+      method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "correct reporting attribution" },
+    });
+    assert.equal(reassigned.status, 200, JSON.stringify(reassigned.data));
+    const assignments = await pool.query<{ assigned_doctor_id: string; status: string }>(
+      `select assigned_doctor_id::text, status from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' order by id`,
+      [appointmentId]
+    );
+    assert.equal(assignments.rows.some((row) => Number(row.assigned_doctor_id) === otherDoctor.doctorId && row.status === "corrected"), true);
+    assert.equal(assignments.rows.some((row) => Number(row.assigned_doctor_id) === targetDoctor.doctorId && row.status === "active"), true);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/unassign`, {
+      method: "POST", body: { reason: "must remain attributed" },
+    })).status, 409);
+  });
+
   it("keeps a previously assigned and unassigned case in original completion-age order", async () => {
     guard();
     const date = addDays(48);

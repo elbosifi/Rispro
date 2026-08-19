@@ -555,6 +555,64 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByRole("columnheader", { name: "Assigned doctor" })).toBeNull();
   });
 
+  it("keeps the Assigned tile, filter chip, and Assigned doctor selector synchronized", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    const assignedTile = await screen.findByRole("button", { name: /^Assigned-/i });
+    fireEvent.click(assignedTile);
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: null })));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: null })));
+    expect((screen.getByLabelText("Assigned doctor") as HTMLSelectElement).value).toBe("assigned");
+    expect(screen.getByText("Assigned:").parentElement?.textContent).toContain("Assigned:Assigned");
+  });
+
+  it("maps every Assigned doctor selector option to the existing assignment filters", async () => {
+    renderPage();
+
+    const selector = await screen.findByLabelText("Assigned doctor");
+    fireEvent.change(selector, { target: { value: "unassigned" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "unassigned", assignedDoctorId: null, offset: 0 })));
+
+    fireEvent.change(selector, { target: { value: "assigned" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: null, offset: 0 })));
+
+    fireEvent.change(selector, { target: { value: "doctor:5" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: 5, offset: 0 })));
+
+    fireEvent.change(selector, { target: { value: "all" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "all", assignedDoctorId: null, offset: 0 })));
+  });
+
+  it("allows manager assignment controls for final cases but hides return to waiting pool", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        { ...caseRow, reportStatus: "final", assignedDoctorId: null, assignedDoctorName: null, assignmentStatus: "unassigned", canAssign: true, manualFinalOverrideId: null },
+        { ...caseRow, appointmentId: 43, accessionNumber: "V2-000043", reportStatus: "final", assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned", canAssign: true, manualFinalOverrideId: null },
+      ],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "all" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const unassignedRow = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(unassignedRow).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
+    let menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("combobox")).toBeTruthy();
+    expect(within(menu).getByRole("option", { name: "Dr Target" })).toBeTruthy();
+    expect(within(menu).queryByText(/report final/i)).toBeNull();
+
+    const assignedRow = screen.getByText("V2-000043").closest("tr")!;
+    fireEvent.click(within(assignedRow).getByRole("button", { name: "Open actions for V2-000043" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    menu = screen.getAllByRole("menu").at(-1)!;
+    expect(within(menu).getByRole("combobox")).toBeTruthy();
+    expect(within(menu).getByRole("option", { name: "Dr Target" })).toBeTruthy();
+    expect(within(menu).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
+  });
+
   it("keeps row reassignment available from the compact action menu", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" }],
