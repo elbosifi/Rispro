@@ -204,24 +204,38 @@ describe("RequestScansPage", () => {
     expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
   });
 
-  it("shows Rebuild & resend SC only to supervisors and super admins for exported Secondary Capture", async () => {
-    const exportedSc = { ...completed, appointment_status: "completed", clinical_document_export_status: "exported" as const, clinical_document_export_id: 102, clinical_document_export_representation_type: "secondary_capture" as const };
+  it("shows the SC rebuild state matrix to supervisors and super admins through the shared Request Scans page", async () => {
+    const exportJob = (id: number, exportStatus: "pending" | "exporting" | "failed" | "blocked" | "exported") => ({ ...completed, id, filename: `${exportStatus}.pdf`, appointment_status: "completed", clinical_document_export_status: exportStatus, clinical_document_export_id: 100 + id, clinical_document_export_representation_type: "secondary_capture" as const });
+    const jobs = [exportJob(41, "pending"), exportJob(42, "exporting"), exportJob(43, "failed"), exportJob(44, "blocked"), exportJob(45, "exported")];
+    const fetchMock = mock(jobs);
+    const rebuildButtonFor = (filename: string) => within(screen.getByText(filename).closest("tr")!).getByRole("button", { name: "Rebuild & resend SC" });
+
     authState.role = "supervisor";
-    mock([exportedSc]);
-    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
-    expect(await screen.findByRole("button", { name: "Rebuild & resend SC" })).toBeTruthy();
+    renderPage();
+    await screen.findByText("pending.pdf");
+    expect((rebuildButtonFor("pending.pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect((rebuildButtonFor("failed.pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect(within(screen.getByText("failed.pdf").closest("tr")!).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect((rebuildButtonFor("blocked.pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect(within(screen.getByText("blocked.pdf").closest("tr")!).getByRole("button", { name: "Retry matching" })).toBeTruthy();
+    expect((rebuildButtonFor("exported.pdf") as HTMLButtonElement).disabled).toBe(false);
+    const exportingRebuild = rebuildButtonFor("exporting.pdf");
+    expect((exportingRebuild as HTMLButtonElement).disabled).toBe(true);
+    expect(exportingRebuild.getAttribute("title")).toMatch(/actively in progress and must finish before rebuilding/i);
+    fireEvent.click(exportingRebuild);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/document-exports/142/rebuild-secondary-capture"))).toBe(false);
     cleanup();
 
     authState.role = "super_admin";
-    mock([exportedSc]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
-    expect(await screen.findByRole("button", { name: "Rebuild & resend SC" })).toBeTruthy();
+    await screen.findByText("pending.pdf");
+    for (const filename of ["pending.pdf", "failed.pdf", "blocked.pdf", "exported.pdf"]) expect((rebuildButtonFor(filename) as HTMLButtonElement).disabled).toBe(false);
+    expect((rebuildButtonFor("exporting.pdf") as HTMLButtonElement).disabled).toBe(true);
     cleanup();
 
     authState.role = "modality_staff";
-    mock([exportedSc]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
-    await screen.findByText("completed.pdf");
+    await screen.findByText("pending.pdf");
     expect(screen.queryByRole("button", { name: "Rebuild & resend SC" })).toBeNull();
   });
 

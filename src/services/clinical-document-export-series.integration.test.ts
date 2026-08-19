@@ -305,7 +305,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
         const clinicalOldSeriesUid = `2.25.${uidSuffix}9600`;
         const oldSopUids: string[] = [];
         const rebuildIds: number[] = [];
-        const createExistingExport = async (index: number, documentType: "appointment_request" | "clinical_document", destinationKey: string, rowStudyUid: string, status: "exported" | "pending" = "exported") => {
+        const createExistingExport = async (index: number, documentType: "appointment_request" | "clinical_document", destinationKey: string, rowStudyUid: string, status: "pending" | "exporting" | "exported" | "failed" | "blocked" = "exported") => {
           const documentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,$2,'manual_upload',$3,$4,'image/png',3,$5) returning id", [created.patientId, documentType, `rebuild-${index}-${suffix}.png`, `documents/export-test/rebuild-${index}-${suffix}.png`, created.bookingId])).rows[0]!.id);
           documentIds.push(documentId);
           const baseSeriesUid = documentType === "appointment_request" ? requestOldSeriesUid : clinicalOldSeriesUid;
@@ -345,15 +345,25 @@ test("request and clinical documents export into separate exact-name unnumbered 
         assert.ok(rebuiltDatasets.filter((dataset) => dataset.SeriesInstanceUID === [...newRequestSeries][0]).every((dataset) => dataset.SeriesDescription === "Request Documents"));
         assert.ok(rebuiltDatasets.filter((dataset) => dataset.SeriesInstanceUID === [...newClinicalSeries][0]).every((dataset) => dataset.SeriesDescription === "Clinical Documents"));
 
-        const pendingAnchor = await createExistingExport(10, "appointment_request", "orthanc_remote:PENDING_PACS", remoteStudyUid);
-        await createExistingExport(11, "clinical_document", "orthanc_remote:PENDING_PACS", remoteStudyUid, "pending");
-        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(pendingAnchor, created.userId), /pending or exporting/i);
+        const pendingAnchor = await createExistingExport(10, "appointment_request", "orthanc_remote:PENDING_PACS", remoteStudyUid, "pending");
+        const pendingMatch = await createExistingExport(11, "clinical_document", "orthanc_remote:PENDING_PACS", remoteStudyUid, "pending");
+        assert.deepEqual(await rebuildClinicalDocumentSecondaryCaptures(pendingAnchor, created.userId), { queued: 2, exportIds: [pendingAnchor, pendingMatch], appointmentId: created.bookingId });
+        const pendingResetRows = await pool.query<{ status: string; study_instance_uid: string; series_instance_uid: string | null; sop_instance_uid: string | null }>("select status,study_instance_uid,series_instance_uid,sop_instance_uid from clinical_document_exports where id=any($1::bigint[]) order by id", [[pendingAnchor, pendingMatch]]);
+        assert.ok(pendingResetRows.rows.every((row) => row.status === "pending" && row.study_instance_uid === remoteStudyUid && row.series_instance_uid === null && row.sop_instance_uid === null));
+        const failedAnchor = await createExistingExport(14, "appointment_request", "orthanc_remote:FAILED_PACS", remoteStudyUid, "failed");
+        assert.equal((await rebuildClinicalDocumentSecondaryCaptures(failedAnchor, created.userId)).queued, 1);
+        const blockedAnchor = await createExistingExport(15, "clinical_document", "orthanc_remote:BLOCKED_PACS", remoteStudyUid, "blocked");
+        assert.equal((await rebuildClinicalDocumentSecondaryCaptures(blockedAnchor, created.userId)).queued, 1);
+        const activeAnchor = await createExistingExport(16, "appointment_request", "orthanc_remote:ACTIVE_PACS", remoteStudyUid);
+        const activeMatch = await createExistingExport(17, "clinical_document", "orthanc_remote:ACTIVE_PACS", remoteStudyUid, "exporting");
+        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(activeAnchor, created.userId), /matching export is exporting/i);
+        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(activeMatch, created.userId), /Only pending, exported, failed, or blocked Secondary Capture exports/i);
         const conflictAnchor = await createExistingExport(12, "appointment_request", "orthanc_remote:CONFLICT_PACS", `${remoteStudyUid}.1`);
         await createExistingExport(13, "clinical_document", "orthanc_remote:CONFLICT_PACS", `${remoteStudyUid}.2`);
         await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(conflictAnchor, created.userId), /conflicting StudyInstanceUIDs/i);
         const unsupportedAnchorDocumentId = Number((await pool.query<{ document_id: number }>("select document_id from clinical_document_exports where id=$1", [rebuildIds[0]])).rows[0]!.document_id);
         await pool.query("update documents set document_type='other' where id=$1", [unsupportedAnchorDocumentId]);
-        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(rebuildIds[0]!, created.userId), /Only exported, failed, or blocked Secondary Capture exports/i);
+        await assert.rejects(() => rebuildClinicalDocumentSecondaryCaptures(rebuildIds[0]!, created.userId), /Only pending, exported, failed, or blocked Secondary Capture exports/i);
         await pool.query("update documents set document_type='appointment_request' where id=$1", [unsupportedAnchorDocumentId]);
       });
     });

@@ -571,7 +571,7 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
     await client.query("begin");
     const appointmentResult = await client.query<Pick<ClinicalDocumentExportRow, "appointment_id">>("select appointment_id from clinical_document_exports where id=$1", [id]);
     if (!appointmentResult.rows[0]) {
-      throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
+      throw new HttpError(409, "Only pending, exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
     }
     appointmentId = Number(appointmentResult.rows[0].appointment_id);
     await client.query("select pg_advisory_xact_lock($1::bigint)", [appointmentId]);
@@ -584,8 +584,8 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
       for update of e
     `, [id]);
     const anchor = anchorResult.rows[0];
-    if (!anchor || Number(anchor.appointment_id) !== appointmentId || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["appointment_request", "clinical_document"].includes(anchor.document_type) || !["exported", "failed", "blocked"].includes(anchor.status)) {
-      throw new HttpError(409, "Only exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
+    if (!anchor || Number(anchor.appointment_id) !== appointmentId || !isOrthancRemoteClinicalDocumentExportDestination(anchor.destination_key) || anchor.representation_type !== "secondary_capture" || anchor.appointment_status !== "completed" || !["appointment_request", "clinical_document"].includes(anchor.document_type) || !["pending", "exported", "failed", "blocked"].includes(anchor.status)) {
+      throw new HttpError(409, "Only pending, exported, failed, or blocked Secondary Capture exports for completed selected-PACS appointments can be rebuilt.");
     }
     const matchingResult = await client.query<Pick<ClinicalDocumentExportRow, "id" | "status" | "destination_key" | "study_instance_uid" | "series_instance_uid" | "sop_instance_uid">>(`
       select e.id, e.status, e.destination_key, e.study_instance_uid, e.series_instance_uid, e.sop_instance_uid
@@ -599,7 +599,7 @@ export async function rebuildClinicalDocumentSecondaryCaptures(exportId: UserId,
       for update of e
     `, [appointmentId, anchor.destination_key]);
     if (!matchingResult.rows.length) throw new HttpError(409, "No Request or Clinical Document Secondary Capture exports are available to rebuild.");
-    if (matchingResult.rows.some((row) => row.status === "pending" || row.status === "exporting")) throw new HttpError(409, "Secondary Capture rebuild cannot start while another matching export is pending or exporting.");
+    if (matchingResult.rows.some((row) => row.status === "exporting")) throw new HttpError(409, "Secondary Capture rebuild cannot start while another matching export is exporting.");
     const studyInstanceUids = [...new Set(matchingResult.rows.map((row) => row.study_instance_uid).filter((value): value is string => Boolean(value)))];
     if (studyInstanceUids.length > 1) throw new HttpError(409, "Matching Secondary Capture exports have conflicting StudyInstanceUIDs.");
     preservedStudyInstanceUid = anchor.study_instance_uid || studyInstanceUids[0] || null;
