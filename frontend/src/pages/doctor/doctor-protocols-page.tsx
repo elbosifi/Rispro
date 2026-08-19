@@ -155,6 +155,7 @@ function HistoricalPacsCandidates({ candidates, canReconcilePatientIdentity, cur
             <p className="mt-1 text-xs text-amber-950/80">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>
             {studyInstanceUid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">Study UID: {studyInstanceUid}</p> : null}
             <p className="mt-1 text-[11px] text-muted-foreground">{study.seriesCount} series · {study.instanceCount} {study.instanceCount === 1 ? "image" : "images"}</p>
+            {study.attestation ? <p className="mt-1 text-[11px] font-semibold text-foreground">{study.attestation.status === "confirmed" ? "Patient confirmed" : "Patient denied ownership"} · {study.attestation.recordedByName || "Staff"} · {new Date(study.attestation.recordedAt).toLocaleString()}</p> : null}
             {reconciliationUi.status ? <p className={`mt-1 font-semibold ${reconciliationUi.statusClassName}`}>{reconciliationUi.status}</p> : null}
             {canReconcile ? <Button size="sm" variant="secondary" className="mt-2" onClick={() => onReconcile({ studyInstanceUid, accessionNumber: study.accessionNumber, date: studyDate, description: study.studyDescription, historicalPatientId: study.patientId, historicalPatientName: study.patientName, historicalPatientBirthDate: study.patientBirthDate, source, manualSearchPatientId })}>{reconciliationUi.action}</Button> : null}
           </div>;

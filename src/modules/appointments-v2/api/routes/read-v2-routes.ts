@@ -34,6 +34,7 @@ import {
   qualifyingRequestDocumentExistsSql,
 } from "../../../../services/request-document-protocol-policy.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../../services/protocoling-modality.js";
+import { getProtocolingHistoricalPacsCandidates, getProtocolingPatientHistory, recordHistoricalPacsPatientAttestation } from "../../../doctor-portal/protocoling-repository.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1501,6 +1502,22 @@ router.get(
     res.json({ assignment });
   })
 );
+
+router.get("/modality/appointments/:appointmentId/previous-studies", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new Error("Invalid appointment ID");
+  const [history, candidates] = await Promise.all([getProtocolingPatientHistory(appointmentId), getProtocolingHistoricalPacsCandidates(appointmentId)]);
+  res.json({ history, ...candidates });
+}));
+
+router.post("/modality/appointments/:appointmentId/previous-studies/attestations", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+  const status = body.status === "confirmed" || body.status === "denied" ? body.status : null;
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0 || !status) throw new Error("Invalid historical PACS attestation.");
+  const attestation = await recordHistoricalPacsPatientAttestation(appointmentId, String(body.studyInstanceUid ?? ""), status, Number((req as AuthedRequest).user?.sub ?? 0));
+  res.json({ attestation });
+}));
 
 router.get(
   "/registrations/appointments/:appointmentId/protocol-assignment",

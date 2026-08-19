@@ -33,6 +33,7 @@ type RawRecord = Record<string, unknown>;
 type HistoricalPacsCandidateWithReconciliation = Omit<HistoricalPacsCandidate, "studies"> & {
   studies: Array<HistoricalPacsCandidate["studies"][number] & {
     reconciliation: { id: number; status: string; oldPatientId: string | null; operationType: string; failureCode: string | null } | null;
+    attestation: { studyInstanceUid: string; status: "confirmed" | "denied"; recordedByUserId: number; recordedByName: string | null; recordedAt: string } | null;
   }>;
 };
 
@@ -50,15 +51,23 @@ function latestPatientIdentityReconciliationJobs<T extends { id: number; study_i
 async function attachPatientIdentityReconciliationToHistoricalCandidates(
   candidates: HistoricalPacsCandidate[],
   loadJobs = getPatientIdentityReconciliationForStudies,
+  patientId?: number,
 ): Promise<HistoricalPacsCandidateWithReconciliation[]> {
   const studyInstanceUids = [...new Set(candidates.flatMap((candidate) => candidate.studies.map((study) => study.studyInstanceUid?.trim()).filter((value): value is string => Boolean(value))))];
   const jobs = await loadJobs(studyInstanceUids);
+  const attestations = patientId && studyInstanceUids.length
+    ? await pool.query<{ study_instance_uid: string; status: "confirmed" | "denied"; recorded_by_user_id: number; recorded_by_name: string | null; recorded_at: string }>(
+      `select a.study_instance_uid, a.status, a.recorded_by_user_id, coalesce(nullif(u.full_name, ''), u.username) as recorded_by_name, a.recorded_at::text
+       from historical_pacs_patient_attestations a join users u on u.id = a.recorded_by_user_id
+       where a.patient_id = $1 and a.study_instance_uid = any($2::text[])`, [patientId, studyInstanceUids])
+    : { rows: [] };
+  const attestationByStudy = new Map(attestations.rows.map((row) => [row.study_instance_uid, { studyInstanceUid: row.study_instance_uid, status: row.status, recordedByUserId: row.recorded_by_user_id, recordedByName: row.recorded_by_name, recordedAt: row.recorded_at }]));
   const latest = latestPatientIdentityReconciliationJobs(jobs);
   return candidates.map((candidate) => ({
     ...candidate,
     studies: candidate.studies.map((study) => {
       const job = study.studyInstanceUid ? latest.get(study.studyInstanceUid.trim()) : undefined;
-      return { ...study, reconciliation: job ? { id: job.id, status: job.status, oldPatientId: job.old_patient_id, operationType: job.operation_type, failureCode: job.failure_code } : null };
+      return { ...study, reconciliation: job ? { id: job.id, status: job.status, oldPatientId: job.old_patient_id, operationType: job.operation_type, failureCode: job.failure_code } : null, attestation: study.studyInstanceUid ? attestationByStudy.get(study.studyInstanceUid.trim()) ?? null : null };
     }),
   }));
 }
@@ -570,7 +579,7 @@ export async function getProtocolingHistoricalPacsCandidates(appointmentId: numb
   if (!current) throw new HttpError(404, "Appointment not found.");
   const discovery = await discoverHistoricalPacsCandidatesForPatient(current.patientId);
   return {
-    historicalCandidates: await attachPatientIdentityReconciliationToHistoricalCandidates(discovery.candidates),
+    historicalCandidates: await attachPatientIdentityReconciliationToHistoricalCandidates(discovery.candidates, undefined, current.patientId),
     historicalPacsIndexStatus: discovery.indexStatus,
     historicalPacsLastSuccessAt: discovery.lastSuccessAt,
   };
@@ -578,7 +587,31 @@ export async function getProtocolingHistoricalPacsCandidates(appointmentId: numb
 
 export async function searchProtocolingHistoricalPacsPatientId(appointmentId: number, oldPatientId: string) {
   if (!(await getProtocolingAppointment(appointmentId))) throw new HttpError(404, "Appointment not found.");
-  return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId)) };
+  const current = await getProtocolingAppointment(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId), undefined, current.patientId) };
+}
+
+export async function recordHistoricalPacsPatientAttestation(appointmentId: number, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
+  const current = await getProtocolingAppointment(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  const normalizedStudyInstanceUid = studyInstanceUid.trim();
+  if (!normalizedStudyInstanceUid) throw new HttpError(400, "studyInstanceUid is required.");
+  const discovery = await discoverHistoricalPacsCandidatesForPatient(current.patientId);
+  if (!discovery.candidates.some((candidate) => candidate.studies.some((study) => study.studyInstanceUid?.trim() === normalizedStudyInstanceUid))) {
+    throw new HttpError(404, "Historical PACS study is not a candidate for this patient.");
+  }
+  const existing = await pool.query<{ status: string }>(`select status from historical_pacs_patient_attestations where patient_id=$1 and study_instance_uid=$2`, [current.patientId, normalizedStudyInstanceUid]);
+  const result = await pool.query<{ study_instance_uid: string; status: "confirmed" | "denied"; recorded_by_user_id: number; recorded_by_name: string | null; recorded_at: string }>(
+    `insert into historical_pacs_patient_attestations (patient_id, study_instance_uid, status, recorded_by_user_id)
+     values ($1, $2, $3, $4)
+     on conflict (patient_id, study_instance_uid) do update set status=excluded.status, recorded_by_user_id=excluded.recorded_by_user_id, recorded_at=now()
+     returning study_instance_uid, status, recorded_by_user_id, (select coalesce(nullif(full_name, ''), username) from users where id=$4) as recorded_by_name, recorded_at::text`,
+    [current.patientId, normalizedStudyInstanceUid, status, recordedByUserId]
+  );
+  const row = result.rows[0]!;
+  await logAuditEntry({ entityType: "historical_pacs_patient_attestation", entityId: null, actionType: `historical_pacs_patient_${status}`, oldValues: existing.rows[0] ?? null, newValues: { patientId: current.patientId, studyInstanceUid: normalizedStudyInstanceUid, status }, changedByUserId: recordedByUserId });
+  return { studyInstanceUid: row.study_instance_uid, status: row.status, recordedByUserId: row.recorded_by_user_id, recordedByName: row.recorded_by_name, recordedAt: row.recorded_at };
 }
 
 export const __protocolingRepositoryTestables = { attachPatientIdentityReconciliationToHistoricalCandidates, latestPatientIdentityReconciliationJobs };

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CircleX,
   Clock3,
+  History,
   ChevronRight,
   Disc3,
   Printer,
@@ -32,15 +33,18 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from "@/components/shared";
-import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery } from "@/lib/api-hooks";
+import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityPreviousStudies, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityPreviousStudiesResponse } from "@/lib/api-hooks";
 import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { todayIsoDateLy } from "@/lib/date-format";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AppointmentLookups, AppointmentStatus, ModalityProtocolAssignment } from "@/types/api";
+import type { AppointmentLookups, AppointmentStatus, HistoricalPacsStudy, ModalityProtocolAssignment } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
@@ -514,6 +518,7 @@ export default function ModalityPage() {
   const [documentFilter, setDocumentFilter] = useState<DocumentFilter>("all");
   const [documentAppointmentId, setDocumentAppointmentId] = useState<number | null>(null);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
+  const [selectedAppointmentTab, setSelectedAppointmentTab] = useState<"appointment" | "previousStudies">("appointment");
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
@@ -568,6 +573,8 @@ export default function ModalityPage() {
   });
   const cdDestinationsQuery = useQuery({ queryKey: ["modality", "cd-robots"], queryFn: fetchCdRobotDestinations, staleTime: 60_000 });
   const cdHistoryQuery = useQuery({ queryKey: ["modality", "cd-deliveries", cdDialog?.appointment.id], queryFn: () => fetchCdRobotDeliveries(cdDialog!.appointment.id), enabled: cdDialog != null });
+  const previousStudiesQuery = useQuery({ queryKey: ["modality", "previous-studies", selectedAppointmentId], queryFn: () => fetchModalityPreviousStudies(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
+  const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", selectedAppointmentId] }) });
 
   useEffect(() => {
     const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
@@ -684,6 +691,10 @@ export default function ModalityPage() {
 
   const handlePrint = (appointmentId: number) => {
     void printAppointmentSlipById(appointmentId, language);
+  };
+  const openSelectedAppointment = (appointmentId: number, tab: "appointment" | "previousStudies" = "appointment") => {
+    setSelectedAppointmentTab(tab);
+    setSelectedAppointmentId(appointmentId);
   };
   const openSpecimenLabel = (appointment: AppointmentWithDetails) => {
     setSpecimenLabelText("");
@@ -1025,12 +1036,12 @@ export default function ModalityPage() {
                               tabIndex={0}
                               onClick={() => {
                                 setOpenMoreMenu(null);
-                                setSelectedAppointmentId(appointment.id);
+                                openSelectedAppointment(appointment.id);
                               }}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
                                   event.preventDefault();
-                                  setSelectedAppointmentId(appointment.id);
+                                  openSelectedAppointment(appointment.id);
                                 }
                               }}
                               className={`h-16 cursor-pointer align-middle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${rowStatusClass(appointment.status, selected)} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
@@ -1151,6 +1162,10 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1.5">
                                 <div className="relative flex items-center gap-1 whitespace-nowrap">
+                                  <Button type="button" variant="secondary" size="sm" aria-label={chooseLocalized(language, "الدراسات السابقة", "History")} title={chooseLocalized(language, "الدراسات السابقة", "Previous studies")} className="h-10 min-w-[40px] shrink-0 border px-2" onClick={(event) => { event.stopPropagation(); openSelectedAppointment(appointment.id, "previousStudies"); }}>
+                                    <History size={15} />
+                                    <span>{chooseLocalized(language, "السجل", "History")}</span>
+                                  </Button>
                                   {appointment.status === "completed" ? (
                                     <Button
                                       type="button"
@@ -1499,7 +1514,7 @@ export default function ModalityPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
+      <Dialog open={Boolean(selectedAppointment)} onClose={() => { setSelectedAppointmentId(null); setSelectedAppointmentTab("appointment"); }}>
         <DialogContent
           maxWidth="min(98vw, 1560px)"
           scrollable={false}
@@ -1546,7 +1561,12 @@ export default function ModalityPage() {
                   <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>{t(language, "modality.specimenLabel.print")}</Button> : null}</div>
                 </div>
               </DialogHeader>
-
+              <Tabs value={selectedAppointmentTab} onValueChange={(value) => setSelectedAppointmentTab(value as "appointment" | "previousStudies")}>
+                <TabsList className="mx-4 mt-3 sm:mx-6">
+                  <TabsTrigger value="appointment">{chooseLocalized(language, "الموعد", "Appointment")}</TabsTrigger>
+                  <TabsTrigger value="previousStudies">{chooseLocalized(language, "الدراسات السابقة", "Previous studies")}</TabsTrigger>
+                </TabsList>
+                {selectedAppointmentTab === "appointment" ? <>
               <main data-testid="clinical-workspace-region" className="min-h-0 flex-1 overflow-hidden bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
                 <div data-testid="clinical-workspace" className={`grid h-full min-h-0 gap-3 ${selectedAppointment.protocolAssignmentSummary || selectedProtocolQuery.data || selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching || selectedProtocolQuery.isError ? "grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)] lg:grid-rows-1" : "grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-1 lg:grid-rows-1"}`}>
                   <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:order-2">
@@ -1574,12 +1594,17 @@ export default function ModalityPage() {
                   </section>
                 </div>
               </main>
+                </> : null}
+                {selectedAppointmentTab === "previousStudies" ? <div className="min-h-0 flex-1 overflow-auto bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
+                  <PreviousStudiesPanel data={previousStudiesQuery.data} isLoading={previousStudiesQuery.isLoading} isError={previousStudiesQuery.isError} onRetry={() => void previousStudiesQuery.refetch()} onAttest={(studyInstanceUid, status) => attestationMutation.mutate({ studyInstanceUid, status })} isSaving={attestationMutation.isPending} />
+                </div> : null}
+              </Tabs>
 
               <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-wrap border-t border-slate-200 bg-white px-3 py-3 !justify-start sm:px-5 sm:!justify-end">
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setSelectedAppointmentId(null)}
+                  onClick={() => { setSelectedAppointmentId(null); setSelectedAppointmentTab("appointment"); }}
                 >
                   <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
                 </Button>
@@ -1786,6 +1811,21 @@ export default function ModalityPage() {
       </Dialog>
     </div>
   );
+}
+
+function PreviousStudiesPanel({ data, isLoading, isError, onRetry, onAttest, isSaving }: { data: ModalityPreviousStudiesResponse | undefined; isLoading: boolean; isError: boolean; onRetry: () => void; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
+  if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading previous studies…</div>;
+  if (isError) return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">Historical PACS search failed.</p><Button variant="secondary" size="sm" onClick={onRetry}>Retry historical search</Button></div>;
+  if (!data) return null;
+  return <div className="grid gap-4 lg:grid-cols-2">
+    <section className="rounded-lg border border-slate-200 bg-white p-3"><h3 className="font-semibold">RISpro patient history</h3>{data.history.items.length ? <div className="mt-3 space-y-2">{data.history.items.map((item) => <div key={`${item.appointmentId}-${item.studyInstanceUid}`} className="rounded border border-slate-200 p-2 text-sm"><p className="font-medium">{item.date || "Unknown date"} · {item.description || "Study"}</p><p className="text-muted-foreground">{item.modalities.join(", ") || "Modality unavailable"}{item.accessionNumber ? ` · Accession ${item.accessionNumber}` : ""}</p></div>)}</div> : <p className="mt-3 text-sm text-muted-foreground">No previous RISpro studies.</p>}</section>
+    <section className="rounded-lg border border-amber-200 bg-amber-50/40 p-3"><h3 className="font-semibold">Historical PACS matches</h3>{data.historicalPacsIndexStatus === "unavailable" ? <p className="mt-3 text-sm text-muted-foreground">Historical PACS index unavailable.</p> : data.historicalCandidates.length ? <div className="mt-3 space-y-3">{data.historicalCandidates.map((candidate) => <div key={candidate.historicalPatientId} className="rounded border border-amber-200 bg-white/80 p-2 text-sm"><Badge variant={candidate.classification === "exact" ? "info" : "warning"} size="sm">{candidate.classification.replaceAll("_", " ")}</Badge><p className="mt-1 font-semibold">{candidate.patientName || "Name unavailable"}</p><details className="mt-1"><summary className="cursor-pointer font-semibold">Why this matched</summary><p>{candidate.reasons.join(", ").replaceAll("_", " ")}</p></details><div className="mt-2 space-y-2">{candidate.studies.map((study) => <HistoricalPacsStudyAttestation key={study.orthancStudyId} study={study} onAttest={onAttest} isSaving={isSaving} />)}</div></div>)}</div> : <p className="mt-3 text-sm text-muted-foreground">Historical PACS search complete. No possible matches were found.</p>}</section>
+  </div>;
+}
+
+function HistoricalPacsStudyAttestation({ study, onAttest, isSaving }: { study: HistoricalPacsStudy; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
+  const uid = study.studyInstanceUid?.trim();
+  return <div className="rounded border border-amber-200 p-2"><p className="font-medium">{study.studyDate || "Unknown date"} · {study.studyDescription || "Study"}</p><p className="text-xs text-muted-foreground">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>{uid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">Study UID: {uid}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{study.seriesCount} series · {study.instanceCount} images</p>{study.attestation ? <p className="mt-2 text-xs font-semibold text-foreground">{study.attestation.status === "confirmed" ? "Patient confirmed" : "Patient denied ownership"} · {study.attestation.recordedByName || "Staff"} · {new Date(study.attestation.recordedAt).toLocaleString()}</p> : null}{uid ? <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "confirmed")}>Patient confirms</Button><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "denied")}>Patient denies</Button></div> : null}</div>;
 }
 
 function ClinicalBannerField({
