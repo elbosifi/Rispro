@@ -1814,7 +1814,7 @@ export default function ModalityPage() {
   );
 }
 
-function PreviousStudiesPanel({ data, isLoading, isError, onRetry, onAttest, isSaving }: { data: ModalityPreviousStudiesResponse | undefined; isLoading: boolean; isError: boolean; onRetry: () => void; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
+function PreviousStudiesPanel({ language, data, isLoading, isError, onRetry, onAttest, isSaving }: { language: Language; data: ModalityPreviousStudiesResponse | undefined; isLoading: boolean; isError: boolean; onRetry: () => void; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
   if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading previous studies…</div>;
   if (isError) return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">Historical PACS search failed.</p><Button variant="secondary" size="sm" onClick={onRetry}>Retry historical search</Button></div>;
   if (!data) return null;
