@@ -696,7 +696,7 @@ function AssignmentEditor({
       <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
         <option value="">Doctor</option>
         {row.assignedDoctorId && row.reportStatus !== "final" && <option value={UNASSIGN_VALUE}>Return to waiting pool</option>}
-        {row.assignedDoctorId && <option disabled>────────</option>}
+        {row.assignedDoctorId && row.reportStatus !== "final" && <option disabled>────────</option>}
         {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
       </select>
       {returningToPool && (

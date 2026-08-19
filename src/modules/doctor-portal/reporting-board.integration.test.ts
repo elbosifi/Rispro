@@ -1180,6 +1180,76 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(raceResults.map((result) => result.status).sort(), [200, 409]);
   });
 
+  it("keeps SonicDICOM-final mobile action flags closed except for manager reassignment", async () => {
+    guard();
+    const date = addDays(13);
+    const label = uniq("mobile_final_actions");
+    const finalUnassigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} final unassigned` });
+    const draftUnassigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} draft unassigned` });
+    const finalAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} final assigned` });
+    const draftAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} draft assigned` });
+    statusByAppointmentId.set(finalUnassigned, "final");
+    statusByAppointmentId.set(draftUnassigned, "draft");
+    statusByAppointmentId.set(finalAssigned, "final");
+    statusByAppointmentId.set(draftAssigned, "draft");
+    await statusByAppointmentId.flush();
+    await assignDirectly(finalAssigned, targetDoctor.doctorId);
+    await assignDirectly(draftAssigned, targetDoctor.doctorId);
+    const allStatuses = await api(admin.cookie, "/api/doctor/reporting-board/settings", {
+      method: "PUT",
+      body: {
+        cutoffMode: "fixed_date",
+        defaultCutoffDate: addDays(-1),
+        daysBack: 14,
+        enabledModalityCodes: ["CT", "MR"],
+        defaultRequiresReport: true,
+        defaultReportStatusFilter: "all",
+      },
+    });
+    assert.equal(allStatuses.status, 200, JSON.stringify(allStatuses.data));
+
+    try {
+      const own = await getDoctorWorklist(doctor, false);
+      const ownView = await api<{ cases: Array<{ appointmentId: number; canAssignToMe: boolean; actionDisabledReason: string | null }> }>(
+        doctor.cookie,
+        `/api/reporting/saved-views/public/${own.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=all&limit=100`
+      );
+      assert.equal(ownView.status, 200, JSON.stringify(ownView.data));
+      const ownCases = new Map(ownView.data.cases.map((row) => [row.appointmentId, row]));
+      assert.equal(ownCases.get(finalUnassigned)?.canAssignToMe, false);
+      assert.equal(ownCases.get(finalUnassigned)?.actionDisabledReason, "Report is final; self-claim is closed.");
+      assert.equal(ownCases.get(draftUnassigned)?.canAssignToMe, true);
+
+      const managerView = await createSavedView(admin, false, { q: label, reportStatus: "all" });
+      const managed = await api<{ cases: Array<{ appointmentId: number; canUnassign: boolean; canReassign: boolean }> }>(
+        supervisor.cookie,
+        `/api/reporting/saved-views/public/${managerView.token}/mobile?reportStatus=all&limit=100`
+      );
+      assert.equal(managed.status, 200, JSON.stringify(managed.data));
+      const managedCases = new Map(managed.data.cases.map((row) => [row.appointmentId, row]));
+      assert.deepEqual(managedCases.get(finalAssigned) && {
+        canUnassign: managedCases.get(finalAssigned)!.canUnassign,
+        canReassign: managedCases.get(finalAssigned)!.canReassign,
+      }, { canUnassign: false, canReassign: true });
+      assert.deepEqual(managedCases.get(draftAssigned) && {
+        canUnassign: managedCases.get(draftAssigned)!.canUnassign,
+        canReassign: managedCases.get(draftAssigned)!.canReassign,
+      }, { canUnassign: true, canReassign: true });
+    } finally {
+      await api(admin.cookie, "/api/doctor/reporting-board/settings", {
+        method: "PUT",
+        body: {
+          cutoffMode: "fixed_date",
+          defaultCutoffDate: addDays(-1),
+          daysBack: 14,
+          enabledModalityCodes: ["CT", "MR"],
+          defaultRequiresReport: true,
+          defaultReportStatusFilter: "required_not_final",
+        },
+      });
+    }
+  });
+
   it("exposes patientDicomId from primary patient identifier with legacy fallbacks but never MRN", async () => {
     guard();
     const date = addDays(10);

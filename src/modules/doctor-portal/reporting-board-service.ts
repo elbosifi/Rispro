@@ -874,15 +874,18 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
 }
 
 function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canClaimToSelf = false) {
+  const isFinal = row.reportStatus === "final";
   const actionDisabledReason = !canManage && !canClaimToSelf
     ? "Sign in with the doctor profile linked to this worklist to claim eligible cases."
+    : !canManage && canClaimToSelf && isFinal && !row.manualFinalOverrideId
+      ? "Report is final; self-claim is closed."
     : !row.canAssign
       ? row.exclusionReason ?? "This case is not eligible for assignment changes."
       : null;
   return {
-    canAssignToMe: canClaimToSelf && row.canAssign && row.assignmentStatus === "unassigned",
+    canAssignToMe: canClaimToSelf && row.canAssign && !isFinal && row.assignmentStatus === "unassigned",
     canReassign: canManage && row.canAssign,
-    canUnassign: canManage && row.canAssign && row.assignmentStatus === "assigned",
+    canUnassign: canManage && row.canAssign && !isFinal && row.assignmentStatus === "assigned",
     actionDisabledReason,
   };
 }
