@@ -457,6 +457,29 @@ describe("RequestScansPage", () => {
     expect(within(menu).getByRole("menuitem", { name: "View processing details" })).toBeTruthy();
   });
 
+  it("portals More actions above a bottom-row button and keeps its action behavior", async () => {
+    vi.stubGlobal("innerWidth", 1024);
+    vi.stubGlobal("innerHeight", 600);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (this.getAttribute("role") === "menu") return { x: 0, y: 0, width: 256, height: 160, top: 0, right: 256, bottom: 160, left: 0, toJSON: () => ({}) } as DOMRect;
+      if (this.getAttribute("aria-haspopup") === "menu") return { x: 760, y: 560, width: 80, height: 24, top: 560, right: 840, bottom: 584, left: 760, toJSON: () => ({}) } as DOMRect;
+      return { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    mock();
+    renderPage();
+
+    const button = await screen.findByRole("button", { name: "More actions for request.pdf" });
+    fireEvent.click(button);
+    const menu = await screen.findByRole("menu", { name: "Actions for request.pdf" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.closest(".overflow-x-auto")).toBeNull();
+    expect(menu.style.position).toBe("fixed");
+    expect(menu.style.top).toBe("392px");
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open in browser" }));
+    expect(screen.queryByRole("menu", { name: "Actions for request.pdf" })).toBeNull();
+  });
+
   it("opens request scans in the browser and retains the attached-document link", async () => {
     mock();
     renderPage();
