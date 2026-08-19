@@ -14,6 +14,8 @@ const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
 const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
+const fetchModalityPreviousStudiesMock = vi.fn();
+const recordModalityHistoricalPacsAttestationMock = vi.fn();
 const listAppointmentDocumentsMock = vi.fn();
 const fetchRequestDocumentProtocolPolicyMock = vi.fn();
 const uploadAppointmentDocumentMock = vi.fn();
@@ -40,6 +42,8 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchModalityWorklist: (...args: unknown[]) => fetchModalityWorklistMock(...args),
   fetchModalityProtocolAssignment: (...args: unknown[]) => fetchModalityProtocolAssignmentMock(...args),
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
+  fetchModalityPreviousStudies: (...args: unknown[]) => fetchModalityPreviousStudiesMock(...args),
+  recordModalityHistoricalPacsAttestation: (...args: unknown[]) => recordModalityHistoricalPacsAttestationMock(...args),
   listAppointmentDocuments: (...args: unknown[]) => listAppointmentDocumentsMock(...args),
   fetchRequestDocumentProtocolPolicy: (...args: unknown[]) => fetchRequestDocumentProtocolPolicyMock(...args),
   uploadAppointmentDocument: (...args: unknown[]) => uploadAppointmentDocumentMock(...args),
@@ -265,6 +269,8 @@ function renderPage(
   createCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
   retryCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
   updateAppointmentStatusMock.mockResolvedValue({ ok: true });
+  if (!fetchModalityPreviousStudiesMock.getMockImplementation()) fetchModalityPreviousStudiesMock.mockResolvedValue({ history: { items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }, historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, historicalCandidatesError: false });
+  recordModalityHistoricalPacsAttestationMock.mockResolvedValue({ studyInstanceUid: "1.2.3", status: "confirmed", recordedByUserId: 1, recordedByName: "Modality Staff", recordedAt: "2026-06-18T08:00:00Z" });
 
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -297,7 +303,7 @@ function boardAccessions() {
 
 describe("ModalityPage modality board", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     languageState.language = "en";
   });
 
@@ -1789,5 +1795,45 @@ describe("ModalityPage modality board", () => {
     expect(screen.getByRole("button", { name: "Completed" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Problem" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "All" })).toBeTruthy();
+  });
+
+  it("loads previous studies only from its tab and opens History in the same modal", async () => {
+    languageState.language = "en";
+    fetchModalityPreviousStudiesMock.mockClear();
+    await openBoard([appointment({ id: 31 })]);
+    expect(fetchModalityPreviousStudiesMock).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByText("Patient One"));
+    expect(screen.getByRole("button", { name: "Appointment" }).getAttribute("data-state")).toBe("active");
+    expect(fetchModalityPreviousStudiesMock).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Previous studies" }));
+    await waitFor(() => expect(fetchModalityPreviousStudiesMock).toHaveBeenCalledWith(31));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => expect(fetchModalityPreviousStudiesMock).toHaveBeenCalledWith(31));
+    expect(screen.getByRole("button", { name: "Previous studies" }).getAttribute("data-state")).toBe("active");
+  });
+
+  it("renders localized previous-study evidence, visibility, and attestation changes", async () => {
+    languageState.language = "en";
+    const candidate = { historicalPatientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", classification: "strong_demographic", reasons: ["exact_normalized_name", "exact_dob", "compatible_sex"], authoritative: false, matchRank: 1, nameSimilarity: 1, phoneticMatchCount: 0, studyCount: 4, studies: [
+      { orthancStudyId: "visible", studyInstanceUid: "1.2.visible", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", studyDate: "20240102", studyDescription: "Visible study", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 1 },
+      { orthancStudyId: "hidden-forward", studyInstanceUid: "1.2.hidden.forward", accessionNumber: null, patientId: null, patientName: null, patientBirthDate: null, patientSex: null, studyDate: "20240102", studyDescription: "Hidden forward", modalitiesInStudy: [], seriesCount: 0, instanceCount: 0, reconciliation: { id: 1, operationType: "reconcile", status: "completed", oldPatientId: "OLD-77", failureCode: null } },
+      { orthancStudyId: "hidden-reverse", studyInstanceUid: "1.2.hidden.reverse", accessionNumber: null, patientId: null, patientName: null, patientBirthDate: null, patientSex: null, studyDate: "20240102", studyDescription: "Hidden reverse", modalitiesInStudy: [], seriesCount: 0, instanceCount: 0, reconciliation: { id: 2, operationType: "reverse", status: "queued", oldPatientId: "OLD-77", failureCode: null } },
+      { orthancStudyId: "denied", studyInstanceUid: "1.2.denied", accessionNumber: null, patientId: null, patientName: null, patientBirthDate: null, patientSex: null, studyDate: "20240102", studyDescription: "Denied remains visible", modalitiesInStudy: ["MR"], seriesCount: 1, instanceCount: 2, attestation: { studyInstanceUid: "1.2.denied", status: "denied", recordedByUserId: 4, recordedByName: "Reviewer", recordedAt: "2026-06-18T08:00:00Z" } },
+    ] };
+    fetchModalityPreviousStudiesMock.mockResolvedValue({ history: { items: [{ appointmentId: 1, orthancStudyId: null, studyInstanceUid: null, accessionNumber: null, date: "2024-01-01", time: null, modalities: ["CT"], description: "RISpro PACS", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs", identityDiscrepancy: "patient_id_mismatch" }, { appointmentId: 2, orthancStudyId: null, studyInstanceUid: null, accessionNumber: null, date: "2024-01-01", time: null, modalities: ["CT"], description: "RISpro only", appointmentStatus: null, reportAvailable: false, source: "rispro_only", identityDiscrepancy: null }, { appointmentId: 3, orthancStudyId: null, studyInstanceUid: null, accessionNumber: null, date: "2024-01-01", time: null, modalities: ["CT"], description: "PACS only", appointmentStatus: null, reportAvailable: false, source: "pacs_only", identityDiscrepancy: null }], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }, historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, historicalCandidatesError: false });
+    await openBoard([appointment({ id: 1 })]);
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("In PACS")).toBeTruthy(); expect(screen.getByText("Not in PACS")).toBeTruthy(); expect(screen.getByText("PACS only")).toBeTruthy();
+    expect(screen.getByText("Study UID matches, but the PACS Patient ID differs from this RISpro patient.")).toBeTruthy();
+    expect(screen.getByText("Strong demographic match")).toBeTruthy(); expect(screen.getByText(/31\/12\/1980/)).toBeTruthy(); expect(screen.getAllByText(/Female/).length).toBeGreaterThan(3);
+    await userEvent.click(screen.getByText("Why this matched"));
+    expect(screen.getByText(/Exact normalized name, Exact date of birth, Compatible sex/)).toBeTruthy();
+    expect(screen.queryByText(/Hidden forward/)).toBeNull(); expect(screen.queryByText(/Hidden reverse/)).toBeNull(); expect(screen.getByText(/Denied remains visible/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Patient confirms" }));
+    await waitFor(() => expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledWith(1, "1.2.visible", "confirmed"));
+    await userEvent.click(screen.getByRole("button", { name: "Patient denies" }));
+    expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledTimes(1); expect(screen.getByText("Confirm changing the patient ownership attestation.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   });
 });
