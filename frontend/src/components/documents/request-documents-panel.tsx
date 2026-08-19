@@ -53,6 +53,10 @@ interface RequestDocumentsPanelProps {
   onExpandedChange?: (expanded: boolean) => void;
   layout?: "default" | "workspace";
   supplementaryPanel?: ReactNode;
+  workspaceRailSize?: "standard" | "wide";
+  supplementaryPanelPlacement?: "before-documents" | "after-documents";
+  pdfUtilityToolbarPlacement?: "top" | "bottom";
+  pdfInitialSizingMode?: "fit-page" | "fit-width";
   enableAnnotations?: boolean;
   onAnnotationDirtyChange?: (dirty: boolean) => void;
   readOnly?: boolean;
@@ -71,6 +75,10 @@ export function RequestDocumentsPanel({
   onExpandedChange,
   layout = "default",
   supplementaryPanel,
+  workspaceRailSize = "standard",
+  supplementaryPanelPlacement = "after-documents",
+  pdfUtilityToolbarPlacement = "bottom",
+  pdfInitialSizingMode = "fit-page",
   enableAnnotations = false,
   onAnnotationDirtyChange,
   readOnly = false,
@@ -661,7 +669,7 @@ export function RequestDocumentsPanel({
     return (
       <div data-expanded={expanded ? "true" : "false"} data-layout="appointment-workspace" data-testid="appointment-document-workspace" className="flex h-full min-h-0 min-w-0 flex-col">
         {protocolEligibilityStatus ? <div className="mb-2 shrink-0">{protocolEligibilityStatus}</div> : null}
-        <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 ${documentRailCollapsed ? "lg:grid-cols-[minmax(0,1fr)_44px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
+        <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 ${documentRailCollapsed ? "lg:grid-cols-[minmax(0,1fr)_44px]" : workspaceRailSize === "wide" ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
           <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-background p-1 sm:p-1.5" aria-label={resolvedTitle}>
             <div className="flex min-h-0 flex-1 flex-col">
               {isLoading ? <div className="flex min-h-48 flex-1 items-center justify-center text-sm text-muted-foreground" role="status">{t("documents.loading")}</div> : null}
@@ -674,7 +682,7 @@ export function RequestDocumentsPanel({
                   {canAttachDocuments ? <div className="mt-4 w-full max-w-sm">{scanControlsContent}</div> : null}
                 </div>
               ) : null}
-              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage annotationToolbar={annotationToolbar} annotations={annotationToolbar ? annotations : []} annotationTool={annotationTool} selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null} onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined} onCreateAnnotation={annotationToolbar ? createAnnotation : undefined} /> : null}
+              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage utilityToolbarPlacement={pdfUtilityToolbarPlacement} initialPdfSizingMode={pdfInitialSizingMode} annotationToolbar={annotationToolbar} annotations={annotationToolbar ? annotations : []} annotationTool={annotationTool} selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null} onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined} onCreateAnnotation={annotationToolbar ? createAnnotation : undefined} /> : null}
             </div>
           </section>
 
@@ -684,6 +692,7 @@ export function RequestDocumentsPanel({
               <span className="mt-2 text-[10px] font-semibold text-muted-foreground [writing-mode:vertical-rl]">{t("documents.documentSelector")}</span>
             </aside>
           ) : <aside className="min-h-0 space-y-3 overflow-y-auto pb-20 lg:pb-0" aria-label={t("documents.documentSelector")} data-testid="document-rail">
+            {supplementaryPanelPlacement === "before-documents" ? supplementaryPanel : null}
             {layout === "workspace" ? null : (isMobile ? (canAttachDocuments ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : uploadDocumentLabel}</span></label><input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />{file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={uploadMutation.isPending || !canAttachDocuments}>{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}</section> : null) : canAttachDocuments ? scanControls : null)}
             <section className="rounded-xl border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -726,7 +735,7 @@ export function RequestDocumentsPanel({
                 </div>
               )}
             </section>
-            {supplementaryPanel}
+            {supplementaryPanelPlacement === "after-documents" ? supplementaryPanel : null}
           </aside>}
         </div>
       </div>

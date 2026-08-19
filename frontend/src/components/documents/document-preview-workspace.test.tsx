@@ -75,11 +75,11 @@ const pdfDocument = (id = 42): RequestDocument => ({
   createdAt: "2026-01-01T00:00:00.000Z",
 });
 
-function renderWorkspace(document: RequestDocument, options: { expanded?: boolean; onExpandedChange?: (expanded: boolean) => void } = {}) {
+function renderWorkspace(document: RequestDocument, options: { expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; utilityToolbarPlacement?: "top" | "bottom"; initialPdfSizingMode?: "fit-page" | "fit-width" } = {}) {
   return render(
     <LanguageProvider>
       <div className="h-[600px]">
-        <DocumentPreviewWorkspace document={document} expanded={options.expanded} onExpandedChange={options.onExpandedChange} />
+        <DocumentPreviewWorkspace document={document} expanded={options.expanded} onExpandedChange={options.onExpandedChange} utilityToolbarPlacement={options.utilityToolbarPlacement} initialPdfSizingMode={options.initialPdfSizingMode} />
       </div>
     </LanguageProvider>
   );
@@ -117,6 +117,22 @@ describe("DocumentPreviewWorkspace", () => {
       expect(1000 * tallPageScale).toBeLessThanOrEqual(240);
       expect(tallPageScale).not.toBe(portraitScale);
     });
+  });
+
+  it("defaults to a bottom utility toolbar and fit-page, with opt-in top fit-width sizing", async () => {
+    const defaultView = renderWorkspace(pdfDocument());
+    await screen.findByTestId("mock-pdf-page-1");
+    expect(screen.getByRole("button", { name: "Fit page" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("mock-pdf-page-1").compareDocumentPosition(defaultView.container.querySelector('[role="toolbar"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    defaultView.unmount();
+    const topView = renderWorkspace(pdfDocument(), { utilityToolbarPlacement: "top", initialPdfSizingMode: "fit-width" });
+    const page = await screen.findByTestId("mock-pdf-page-1");
+    const topToolbar = topView.container.querySelector('[role="toolbar"]');
+    expect(screen.getByRole("button", { name: "Fit width" }).getAttribute("aria-pressed")).toBe("true");
+    expect(Number(page.getAttribute("data-width"))).toBeGreaterThan(0);
+    expect(topToolbar).not.toBeNull();
+    expect(topToolbar!.compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("supports fit-width, zoom, and rotation controls", async () => {

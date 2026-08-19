@@ -33,6 +33,9 @@ export interface DocumentPreviewLabels {
   showPages: string;
 }
 
+export type DocumentUtilityToolbarPlacement = "top" | "bottom";
+export type PdfInitialSizingMode = "fit-page" | "fit-width";
+
 const LazyPdfDocumentPreview = lazy(() => import("./pdf-document-preview"));
 
 interface PreviewErrorBoundaryProps {
@@ -184,6 +187,8 @@ interface DocumentPreviewWorkspaceProps {
   selectedAnnotationId?: number | null;
   onSelectAnnotation?: (id: number | null) => void;
   onCreateAnnotation?: (input: { pageNumber: number; annotationType: "arrow" | "rectangle" | "freehand" | "text"; geometry: Record<string, unknown>; textContent?: string | null }) => void;
+  utilityToolbarPlacement?: DocumentUtilityToolbarPlacement;
+  initialPdfSizingMode?: PdfInitialSizingMode;
 }
 
 export function DocumentPreviewWorkspace({
@@ -198,6 +203,8 @@ export function DocumentPreviewWorkspace({
   selectedAnnotationId = null,
   onSelectAnnotation,
   onCreateAnnotation,
+  utilityToolbarPlacement = "bottom",
+  initialPdfSizingMode = "fit-page",
 }: DocumentPreviewWorkspaceProps) {
   const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
@@ -260,7 +267,7 @@ export function DocumentPreviewWorkspace({
           </div>
         }
       >
-        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} annotationOverlay={annotationOverlay} annotationToolbar={annotationToolbar} onExpandedChange={onExpandedChange} showOpenAction={showOpenAction} />
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} utilityToolbarPlacement={utilityToolbarPlacement} initialPdfSizingMode={initialPdfSizingMode} annotationOverlay={annotationOverlay} annotationToolbar={annotationToolbar} onExpandedChange={onExpandedChange} showOpenAction={showOpenAction} />
       </Suspense>
       </PreviewErrorBoundary>
     </div>

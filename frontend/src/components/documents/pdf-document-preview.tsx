@@ -4,6 +4,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RequestDocument } from "@/lib/api-hooks";
 import type { DocumentPreviewLabels } from "./document-preview-workspace";
+import type { DocumentUtilityToolbarPlacement, PdfInitialSizingMode } from "./document-preview-workspace";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
@@ -18,6 +19,8 @@ interface PdfDocumentPreviewProps {
   annotationToolbar?: ReactNode;
   onExpandedChange?: (expanded: boolean) => void;
   showOpenAction: boolean;
+  utilityToolbarPlacement: DocumentUtilityToolbarPlacement;
+  initialPdfSizingMode: PdfInitialSizingMode;
 }
 
 type PdfSizingMode = "fit-page" | "fit-width";
@@ -50,11 +53,11 @@ function PdfFailure({ message, document, labels, includeOpenAction }: Pick<PdfDo
   );
 }
 
-export default function PdfDocumentPreview({ document, labels, includeOpenAction, expanded, annotationOverlay, annotationToolbar, onExpandedChange, showOpenAction }: PdfDocumentPreviewProps) {
+export default function PdfDocumentPreview({ document, labels, includeOpenAction, expanded, utilityToolbarPlacement, initialPdfSizingMode, annotationOverlay, annotationToolbar, onExpandedChange, showOpenAction }: PdfDocumentPreviewProps) {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageSizes, setPageSizes] = useState<Record<number, PdfPageSize>>({});
-  const [sizingMode, setSizingMode] = useState<PdfSizingMode>("fit-page");
+  const [sizingMode, setSizingMode] = useState<PdfSizingMode>(initialPdfSizingMode);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -150,7 +153,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       onSourceError={handlePreviewError}
       error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
-      <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-1">
+      <div className={`grid h-full min-h-0 min-w-0 flex-1 gap-1 ${utilityToolbarPlacement === "top" ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_auto]"}`}>
+        {utilityToolbarPlacement === "top" ? documentUtilityBar : null}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-hidden">
           {previewError ? (
             <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} />
@@ -179,7 +183,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
             </>
           )}
         </div>
-        {documentUtilityBar}
+        {utilityToolbarPlacement === "bottom" ? documentUtilityBar : null}
       </div>
     </Document>
   );

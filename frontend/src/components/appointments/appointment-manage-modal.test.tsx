@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { AppointmentManageModal } from "./appointment-manage-modal";
@@ -47,9 +48,10 @@ vi.mock("@/components/appointments/appointment-editor", () => ({
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
-  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void }) => (
-    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"}>
+  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange, workspaceRailSize, supplementaryPanelPlacement, pdfUtilityToolbarPlacement, pdfInitialSizingMode, supplementaryPanel }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; workspaceRailSize?: string; supplementaryPanelPlacement?: string; pdfUtilityToolbarPlacement?: string; pdfInitialSizingMode?: string; supplementaryPanel?: ReactNode }) => (
+    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"} data-workspace-rail-size={workspaceRailSize} data-supplementary-panel-placement={supplementaryPanelPlacement} data-pdf-utility-toolbar-placement={pdfUtilityToolbarPlacement} data-pdf-initial-sizing-mode={pdfInitialSizingMode}>
       Request documents content
+      {supplementaryPanel}
       <button type="button" onClick={() => onExpandedChange?.(!expanded)}>{expanded ? "Exit expanded review" : "Expand review"}</button>
     </div>
   ),
@@ -203,6 +205,10 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-appointment-id")).toBe("42");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-patient-id")).toBe("7");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-preview-mode")).toBe("inline");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-workspace-rail-size")).toBe("wide");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-supplementary-panel-placement")).toBe("before-documents");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-utility-toolbar-placement")).toBe("top");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-initial-sizing-mode")).toBe("fit-width");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
@@ -248,6 +254,50 @@ describe("AppointmentManageModal", () => {
     mocks.getAppointmentById.mockResolvedValueOnce({ ...protocolAppointment, modalityCode: "US", modalityNameEn: "Ultrasound", protocolAssignmentSummary: null });
     renderModal({ initialTab: "documents" });
     expect((await screen.findByTestId("appointment-header-badge-cluster")).textContent).not.toContain("Protocol");
+  });
+
+  it("shows free-text protocols alongside library protocols with clinical fallbacks", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      protocolAssignmentSummary: {
+        assignmentId: 1,
+        protocolName: null,
+        versionNumber: null,
+        freeTextProtocol: "CT neck, chest, abdomen and pelvis with IV contrast; portal venous phase.",
+        scannerName: null,
+        assignedBy: "Doctor",
+        assignedAt: null,
+        protocolNotes: null,
+        contrastNotes: null,
+      },
+    } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents" });
+
+    expect(await screen.findByText("Protocol assigned")).toBeTruthy();
+    expect(screen.getByText("Free-text protocol")).toBeTruthy();
+    expect(screen.getByText("CT neck, chest, abdomen and pelvis with IV contrast; portal venous phase.")).toBeTruthy();
+    expect(screen.getByText("Scanner").parentElement?.textContent).toContain("Not selected");
+    expect(screen.getByText("Protocol notes").parentElement?.textContent).toContain("None");
+    expect(screen.getByText("Contrast notes").parentElement?.textContent).toContain("None");
+
+    cleanup();
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      protocolAssignmentSummary: {
+        assignmentId: 2,
+        protocolName: "CT CAP",
+        versionNumber: "2",
+        freeTextProtocol: "Add delayed imaging.",
+        scannerName: "CT A",
+        assignedBy: "Doctor",
+        assignedAt: null,
+        protocolNotes: "Keep arms raised.",
+        contrastNotes: "IV contrast.",
+      },
+    } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents" });
+    expect(await screen.findByText("CT CAP v2")).toBeTruthy();
+    expect(screen.getByText("Add delayed imaging.")).toBeTruthy();
   });
 
   it("opens the Information page with both populated sections", async () => {

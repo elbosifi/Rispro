@@ -176,6 +176,7 @@ export function AppointmentManageModal({
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [documentReviewExpanded, setDocumentReviewExpanded] = useState(false);
+  const [protocolPanelOpen, setProtocolPanelOpen] = useState(true);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
   const [reportError, setReportError] = useState("");
@@ -608,6 +609,10 @@ export function AppointmentManageModal({
   }, [appointment?.id, appointment?.status, activeTab]);
 
   useEffect(() => {
+    if (open && appointment?.id != null) setProtocolPanelOpen(true);
+  }, [appointment?.id, open]);
+
+  useEffect(() => {
     if (open && activeTab === "cancel" && appointment) setCancelConfirmOpen(true);
   }, [activeTab, appointment, open]);
 
@@ -646,9 +651,12 @@ export function AppointmentManageModal({
       <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" className="min-h-9 flex-1 text-xs" disabled={!publicAppointmentToken(appointment) || reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : null}{reportStatusMutation.isPending ? t("registrations.reportChecking") : t("registrations.reportCheck")}</Button>{reportStatus?.canViewReport ? <Button type="button" size="sm" className="min-h-9 flex-1 text-xs" onClick={openReport}><ExternalLink size={14} className="me-1.5" aria-hidden="true" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button> : null}</div>
     </section>
   ) : null;
-  const protocolPanel = appointment ? (
-    <section className="rounded-xl border border-border bg-background p-3"><details><summary className="cursor-pointer list-none text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><span className="flex items-center justify-between gap-2"><span>{chooseLocalized(language, "البروتوكول والملاحظات", "Protocol and notes")}</span><span className={`rounded-full px-2 py-0.5 text-[10px] ${appointment.protocolAssignmentSummary ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{appointment.protocolAssignmentSummary ? chooseLocalized(language, "معين", "Assigned") : chooseLocalized(language, "غير معين", "Not assigned")}</span></span></summary><div className="mt-3 space-y-2 text-xs text-muted-foreground">{appointment.protocolAssignmentSummary ? <><p className="font-semibold text-foreground">{protocolVersionText(appointment)}</p><p>{appointment.protocolAssignmentSummary.scannerName || chooseLocalized(language, "لم يتم اختيار جهاز", "Scanner not selected")}</p><p>{appointment.protocolAssignmentSummary.protocolNotes || chooseLocalized(language, "لا توجد ملاحظات بروتوكول", "No protocol notes")}</p><p>{appointment.protocolAssignmentSummary.contrastNotes || chooseLocalized(language, "لا توجد ملاحظات تباين", "No contrast notes")}</p></> : <p>{chooseLocalized(language, "لا يوجد بروتوكول معين لهذا الموعد.", "No protocol is assigned to this appointment.")}</p>}{appointment.notes ? <div className="border-t border-border pt-2"><p className="mb-1 font-semibold text-foreground">{chooseLocalized(language, "ملاحظات الموعد", "Appointment notes")}</p><p>{appointment.notes}</p></div> : null}</div></details></section>
-  ) : null;
+  const protocolPanel = appointment ? (() => {
+    const summary = appointment.protocolAssignmentSummary;
+    const protocolVersion = protocolVersionText(appointment);
+    const freeTextProtocol = summary?.freeTextProtocol?.trim();
+    return <section className="rounded-xl border border-border bg-background p-3"><details open={protocolPanelOpen} onToggle={(event) => setProtocolPanelOpen(event.currentTarget.open)}><summary className="cursor-pointer list-none text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><span className="flex items-center justify-between gap-2"><span>{chooseLocalized(language, "البروتوكول والملاحظات", "Protocol and notes")}</span><span className={`rounded-full px-2 py-0.5 text-[10px] ${summary ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{summary ? chooseLocalized(language, "معين", "Assigned") : chooseLocalized(language, "غير معين", "Not assigned")}</span></span></summary><div className="mt-3 space-y-2 text-xs text-muted-foreground">{summary ? <>{protocolVersion ? <p className="font-semibold text-foreground">{protocolVersion}</p> : null}{freeTextProtocol ? <div><p className="mb-1 font-semibold text-foreground">{chooseLocalized(language, "بروتوكول نصي حر", "Free-text protocol")}</p><p className="whitespace-pre-wrap break-words text-foreground">{freeTextProtocol}</p></div> : null}<div><p className="font-semibold text-foreground">{chooseLocalized(language, "الجهاز", "Scanner")}</p><p>{summary.scannerName || chooseLocalized(language, "غير محدد", "Not selected")}</p></div><div><p className="font-semibold text-foreground">{chooseLocalized(language, "ملاحظات البروتوكول", "Protocol notes")}</p><p>{summary.protocolNotes || chooseLocalized(language, "لا يوجد", "None")}</p></div><div><p className="font-semibold text-foreground">{chooseLocalized(language, "ملاحظات التباين", "Contrast notes")}</p><p>{summary.contrastNotes || chooseLocalized(language, "لا يوجد", "None")}</p></div></> : <p>{chooseLocalized(language, "لا يوجد بروتوكول معين لهذا الموعد.", "No protocol is assigned to this appointment.")}</p>}{appointment.notes ? <div className="border-t border-border pt-2"><p className="mb-1 font-semibold text-foreground">{chooseLocalized(language, "ملاحظات الموعد", "Appointment notes")}</p><p>{appointment.notes}</p></div> : null}</div></details></section>;
+  })() : null;
   const canVoidAppointment = user?.role === "supervisor" || user?.role === "super_admin";
   const moreMenuItems = appointment ? <>
     {selectedCanReschedule ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("reschedule"); }}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button> : null}
@@ -754,7 +762,7 @@ export function AppointmentManageModal({
           {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onAppointmentUpdated={updateDisplayedAppointment} /></div> : null}
 
 
-          {appointment && activeTab === "documents" ? <div className="h-full min-h-0"><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" supplementaryPanel={<>{reportPanel}{protocolPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["registrations"] })} /></div> : null}
+          {appointment && activeTab === "documents" ? <div className="h-full min-h-0"><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" workspaceRailSize="wide" supplementaryPanelPlacement="before-documents" pdfUtilityToolbarPlacement="top" pdfInitialSizingMode="fit-width" supplementaryPanel={<>{protocolPanel}{reportPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["registrations"] })} /></div> : null}
 
           <div className={activeTab !== "documents" && activeTab !== "details" ? "absolute inset-2 z-20 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5" : "hidden"}>
           {appointment && activeTab === "report" ? (

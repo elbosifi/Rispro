@@ -103,7 +103,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; supplementaryPanelPlacement?: "before-documents" | "after-documents"; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -128,6 +128,8 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           onExpandedChange={options.onExpandedChange}
           layout={options.layout}
           supplementaryPanel={options.supplementaryPanel}
+          workspaceRailSize={options.workspaceRailSize}
+          supplementaryPanelPlacement={options.supplementaryPanelPlacement}
           enableAnnotations={options.enableAnnotations}
           readOnly={options.readOnly}
           onDocumentsChanged={options.onDocumentsChanged}
@@ -700,6 +702,30 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByText("Attached documents")).toBeTruthy();
     expect(await screen.findByText("request.png")).toBeTruthy();
     expect(screen.getByText("Images and report")).toBeTruthy();
+  });
+
+  it("keeps standard workspace geometry by default and supports the wide appointment rail", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    const standard = renderPanel({ layout: "workspace" });
+    expect((await screen.findByTestId("appointment-document-workspace")).querySelector(".grid")?.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]");
+
+    standard.unmount();
+    renderPanel({ layout: "workspace", workspaceRailSize: "wide" });
+    expect((await screen.findByTestId("appointment-document-workspace")).querySelector(".grid")?.className).toContain("lg:grid-cols-[minmax(0,1fr)_340px]");
+    await userEvent.click(screen.getByRole("button", { name: "Collapse document rail" }));
+    expect(screen.getByTestId("appointment-document-workspace").querySelector(".grid")?.className).toContain("lg:grid-cols-[minmax(0,1fr)_44px]");
+  });
+
+  it("places supplementary content after documents by default and before documents when requested", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    const after = renderPanel({ layout: "workspace", supplementaryPanel: <section>Images and report</section> });
+    const afterRail = await screen.findByTestId("document-rail");
+    expect(afterRail.textContent?.indexOf("Attached documents")).toBeLessThan(afterRail.textContent?.indexOf("Images and report") ?? -1);
+
+    after.unmount();
+    renderPanel({ layout: "workspace", supplementaryPanelPlacement: "before-documents", supplementaryPanel: <section>Protocol and notes</section> });
+    const beforeRail = await screen.findByTestId("document-rail");
+    expect(beforeRail.textContent?.indexOf("Protocol and notes")).toBeLessThan(beforeRail.textContent?.indexOf("Attached documents") ?? -1);
   });
 
   it("shows friendly labels for automated document sources", async () => {
