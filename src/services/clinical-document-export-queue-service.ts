@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { OptionalUserId } from "../types/http.js";
 import { readClinicalDocumentExportSettings } from "./clinical-document-export-settings-service.js";
+import { HttpError } from "../utils/http-error.js";
 
 export const CLINICAL_DOCUMENT_EXPORT_DESTINATION = "authoritative_orthanc";
 export const ORTHANC_REMOTE_DESTINATION_PREFIX = "orthanc_remote:";
@@ -71,6 +72,22 @@ export async function enqueueClinicalDocumentExportsForAppointmentAutomatically(
   `, [appointmentId, destinationKey]);
   for (const row of result.rows) await logAuditEntry({ entityType: "clinical_document_export", entityId: Number(row.id), actionType: "clinical_document_export_queued", oldValues: null, newValues: { destinationKey, appointmentId }, changedByUserId });
   return result.rows.map((row) => Number(row.id));
+}
+
+export async function generateMissingClinicalDocumentSecondaryCaptureExports(
+  appointmentId: number,
+  changedByUserId: OptionalUserId = null,
+): Promise<{ queued: number; exportIds: number[] }> {
+  const appointment = await pool.query<{ status: string }>("select status from appointments_v2.bookings where id=$1", [appointmentId]);
+  if (!appointment.rows[0]) throw new HttpError(404, "Appointment not found.");
+  if (appointment.rows[0].status !== "completed") throw new HttpError(409, "Secondary Capture exports can only be generated for completed appointments.");
+
+  const settings = await readClinicalDocumentExportSettings();
+  if (!settings.enabled) throw new HttpError(409, "Clinical-document PACS export is disabled.");
+  if (!settings.destinationKey) throw new HttpError(409, "No clinical-document PACS destination is configured.");
+
+  const exportIds = await enqueueClinicalDocumentExportsForAppointmentAutomatically(appointmentId, changedByUserId);
+  return { queued: exportIds.length, exportIds };
 }
 
 export async function reconcileClinicalDocumentExports(changedByUserId: OptionalUserId = null): Promise<number> {

@@ -27,8 +27,9 @@ function renderPage(modality?: { id: number; code: string; name: string; onBack:
 }
 
 function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
     const value = String(input);
+    if (value.includes("/document-exports/generate-secondary-capture") && options?.method === "POST") return response({ queued: 2, exportIds: [201, 202] });
     if (value.includes("/api/request-scans/status")) return response(status);
     if (value.includes("/v2/lookups/special-reason-codes")) return response({ items: [] });
     if (value.includes("/api/v2/read/appointments/")) return response({ appointment: {
@@ -204,6 +205,54 @@ describe("RequestScansPage", () => {
     expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
   });
 
+  it("distinguishes a completed missing export from pending and keeps non-completed rows waiting", async () => {
+    mock([
+      { ...completed, id: 31, filename: "missing.pdf", appointment_status: "completed", clinical_document_export_id: null, clinical_document_export_status: null },
+      { ...completed, id: 32, filename: "waiting.pdf", appointment_status: "scheduled", clinical_document_export_id: null, clinical_document_export_status: null },
+    ]);
+    renderPage();
+    expect(await screen.findByText("Not exported to PACS")).toBeTruthy();
+    expect(screen.getByText("Waiting for study completion")).toBeTruthy();
+    expect(screen.queryByText("Pending export")).toBeNull();
+    const waitingRow = screen.getByText("waiting.pdf").closest("tr")!;
+    expect(within(waitingRow).queryByRole("button", { name: "Generate & send SC" })).toBeNull();
+  });
+
+  it("shows missing-export generation only to supervisors and super admins, including modality context", async () => {
+    const missing = [{ ...completed, appointment_status: "completed", clinical_document_export_id: null, clinical_document_export_status: null }];
+    authState.role = "supervisor";
+    mock(missing);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "Generate & send SC" })).toBeTruthy();
+    cleanup();
+
+    authState.role = "super_admin";
+    mock(missing);
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Generate & send SC" })).toBeTruthy();
+    cleanup();
+
+    authState.role = "modality_staff";
+    mock(missing);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    await screen.findByText("Not exported to PACS");
+    expect(screen.queryByRole("button", { name: "Generate & send SC" })).toBeNull();
+  });
+
+  it("confirms missing-export generation before POST and refetches Request Scan data after success", async () => {
+    const endpoint = "/api/integrations/authoritative-orthanc/appointments/9/document-exports/generate-secondary-capture";
+    const fetchMock = mock([{ ...completed, appointment_status: "completed", clinical_document_export_id: null, clinical_document_export_status: null }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Generate & send SC" }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === endpoint)).toBe(false);
+    expect(screen.getByText(/Existing PACS exports will not be changed or deleted/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Generate & send" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input) === endpoint && options?.method === "POST")).toBe(true));
+    expect(await screen.findByText("2 SC export(s) queued.")).toBeTruthy();
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("?status=active")).length).toBeGreaterThan(1));
+  });
+
   it("shows the SC rebuild state matrix to supervisors and super admins through the shared Request Scans page", async () => {
     const exportJob = (id: number, exportStatus: "pending" | "exporting" | "failed" | "blocked" | "exported") => ({ ...completed, id, filename: `${exportStatus}.pdf`, appointment_status: "completed", clinical_document_export_status: exportStatus, clinical_document_export_id: 100 + id, clinical_document_export_representation_type: "secondary_capture" as const });
     const jobs = [exportJob(41, "pending"), exportJob(42, "exporting"), exportJob(43, "failed"), exportJob(44, "blocked"), exportJob(45, "exported")];
@@ -257,9 +306,9 @@ describe("RequestScansPage", () => {
   it("shows waiting, pending, exporting progress, and verified page progress without missing-count artifacts", async () => {
     mock([
       { ...completed, id: 31, filename: "waiting.pdf", appointment_status: "scheduled", clinical_document_export_status: null },
-      { ...completed, id: 32, filename: "pending.pdf", appointment_status: "completed", clinical_document_export_status: "pending" },
-      { ...completed, id: 33, filename: "exporting.pdf", appointment_status: "completed", clinical_document_export_status: "exporting", clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
-      { ...completed, id: 34, filename: "exported.pdf", appointment_status: "completed", clinical_document_export_status: "exported", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 2, clinical_document_export_verified_page_count: 2 },
+      { ...completed, id: 32, filename: "pending.pdf", appointment_status: "completed", clinical_document_export_id: 132, clinical_document_export_status: "pending" },
+      { ...completed, id: 33, filename: "exporting.pdf", appointment_status: "completed", clinical_document_export_id: 133, clinical_document_export_status: "exporting", clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 34, filename: "exported.pdf", appointment_status: "completed", clinical_document_export_id: 134, clinical_document_export_status: "exported", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 2, clinical_document_export_verified_page_count: 2 },
     ]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     expect(await screen.findByText("Waiting for study completion")).toBeTruthy();
