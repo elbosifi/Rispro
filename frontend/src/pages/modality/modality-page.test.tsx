@@ -1830,9 +1830,9 @@ describe("ModalityPage modality board", () => {
     await userEvent.click(screen.getByText("Why this matched"));
     expect(screen.getByText(/Exact normalized name, Exact date of birth, Compatible sex/)).toBeTruthy();
     expect(screen.queryByText(/Hidden forward/)).toBeNull(); expect(screen.queryByText(/Hidden reverse/)).toBeNull(); expect(screen.getByText(/Denied remains visible/)).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Patient confirms" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Patient confirms" })[0]);
     await waitFor(() => expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledWith(1, "1.2.visible", "confirmed"));
-    await userEvent.click(screen.getByRole("button", { name: "Patient denies" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Patient denies" })[0]);
     expect(recordModalityHistoricalPacsAttestationMock).toHaveBeenCalledTimes(1); expect(screen.getByText("Confirm changing the patient ownership attestation.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   });

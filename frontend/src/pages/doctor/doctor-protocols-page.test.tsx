@@ -787,4 +787,24 @@ describe("Doctor protocoling request documents", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Appointment details are unavailable right now.");
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
+
+  it("keeps confirmed historical attestation evidence and reconciliation available", async () => {
+    const candidate = { ...historicalCandidate, classification: "strong_demographic", studies: [{ ...historicalCandidate.studies[0], attestation: { studyInstanceUid: "1.2.3", status: "confirmed", recordedByUserId: 123, recordedByName: "Modality Staff", recordedAt: "2026-06-18T08:00:00Z" } }] };
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: null }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" })); await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    expect(within(section).getByText("Strong demographic match")).toBeTruthy(); expect(within(section).getByText(/Patient confirmed/)).toBeTruthy(); expect(within(section).getByText(/Modality Staff/)).toBeTruthy(); expect(within(section).getByText(/18\/06\/2026/)).toBeTruthy(); expect(within(section).getByRole("button", { name: /Reconcile/ })).toBeTruthy();
+  });
+
+  it("keeps denied historical studies visible and reconciliation unchanged", async () => {
+    const candidate = { ...historicalCandidate, studies: [{ ...historicalCandidate.studies[0], studyDescription: "Denied study", attestation: { studyInstanceUid: "1.2.3", status: "denied", recordedByUserId: 123, recordedByName: "Modality Staff", recordedAt: "2026-06-18T08:00:00Z" } }] };
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, canReconcilePatientIdentity: true, currentPatient: { id: 9, patientId: "NEW-9", name: "Current Patient", birthDate: null }, items: [] });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" })); await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const section = screen.getByRole("region", { name: "Possible older PACS studies" });
+    expect(within(section).getByText("Possible patient match")).toBeTruthy(); expect(within(section).getByText(/Patient denied ownership/)).toBeTruthy(); expect(within(section).getByText(/Denied study/)).toBeTruthy(); expect(within(section).getByRole("button", { name: /Reconcile/ })).toBeTruthy();
+  });
 });

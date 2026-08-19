@@ -167,7 +167,7 @@ function normalizeStatusLabel(language: Language, status: AppointmentStatus): st
 }
 
 function previousStudyAppointmentStatusLabel(language: Language, status: string | null): string {
-  const knownStatuses: AppointmentStatus[] = ["scheduled", "waiting", "arrived", "in-progress", "completed", "no-show", "cancelled", "discontinued"];
+  const knownStatuses: AppointmentStatus[] = ["scheduled", "waiting", "arrived", "in-progress", "completed", "no-show", "cancelled", "discontinued", "voided"];
   return status && knownStatuses.includes(status as AppointmentStatus) ? normalizeStatusLabel(language, status as AppointmentStatus) : status ?? "";
 }
 
