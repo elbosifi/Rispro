@@ -5,6 +5,7 @@ type BadgeVariant =
   | "warning"
   | "error"
   | "info"
+  | "secondary"
   | "neutral"
   | "accent"
   | "available"
@@ -30,6 +31,7 @@ const BADGE_VARIANTS: Record<BadgeVariant, string> = {
   warning: "state-chip state-chip--warning",
   error: "state-chip state-chip--error",
   info: "state-chip state-chip--info",
+  secondary: "state-chip state-chip--disabled",
   neutral: "state-chip state-chip--disabled",
   accent: "state-chip state-chip--live",
   available: "state-chip state-chip--available",

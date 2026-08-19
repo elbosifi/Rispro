@@ -40,7 +40,7 @@ import {
 import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityPreviousStudies, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityPreviousStudiesResponse } from "@/lib/api-hooks";
 import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
-import { chooseLocalized, t } from "@/lib/i18n";
+import { chooseLocalized, t, type TranslationKey } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
 import { pushToast } from "@/lib/toast";
@@ -172,7 +172,7 @@ function previousStudyAppointmentStatusLabel(language: Language, status: string 
 }
 
 function historicalMatchReasonLabel(language: Language, reason: string): string {
-  const keys: Record<string, string> = { exact_patient_id: "modality.previousStudies.reason.exactPatientId", exact_normalized_name: "modality.previousStudies.reason.exactNormalizedName", fuzzy_english_name: "modality.previousStudies.reason.fuzzyEnglishName", arabic_normalized_name: "modality.previousStudies.reason.arabicNormalizedName", double_metaphone: "modality.previousStudies.reason.doubleMetaphone", soundex: "modality.previousStudies.reason.soundex", exact_dob: "modality.previousStudies.reason.exactDob", age_within_5_years: "modality.previousStudies.reason.ageWithin5Years", compatible_sex: "modality.previousStudies.reason.compatibleSex", dob_mismatch: "modality.previousStudies.reason.dobMismatch", sex_mismatch: "modality.previousStudies.reason.sexMismatch", multiple_competing_identities: "modality.previousStudies.reason.multipleCompetingIdentities" };
+  const keys: Record<string, TranslationKey> = { exact_patient_id: "modality.previousStudies.reason.exactPatientId", exact_normalized_name: "modality.previousStudies.reason.exactNormalizedName", fuzzy_english_name: "modality.previousStudies.reason.fuzzyEnglishName", arabic_normalized_name: "modality.previousStudies.reason.arabicNormalizedName", double_metaphone: "modality.previousStudies.reason.doubleMetaphone", soundex: "modality.previousStudies.reason.soundex", exact_dob: "modality.previousStudies.reason.exactDob", age_within_5_years: "modality.previousStudies.reason.ageWithin5Years", compatible_sex: "modality.previousStudies.reason.compatibleSex", dob_mismatch: "modality.previousStudies.reason.dobMismatch", sex_mismatch: "modality.previousStudies.reason.sexMismatch", multiple_competing_identities: "modality.previousStudies.reason.multipleCompetingIdentities" };
   return keys[reason] ? t(language, keys[reason]) : reason.replaceAll("_", " ");
 }
 
