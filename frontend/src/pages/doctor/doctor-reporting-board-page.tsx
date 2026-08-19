@@ -2165,6 +2165,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
       if (refreshIncomplete) {
         setBoardActionMessage({ tone: "error", text: "SonicDICOM refresh was incomplete; cached statuses are being shown." });
+      } else {
+        setBoardActionMessage((message) => message?.text === "SonicDICOM refresh was incomplete; cached statuses are being shown." ? null : message);
       }
       setBoardRefreshing(false);
     }

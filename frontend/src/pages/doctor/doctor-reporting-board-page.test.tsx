@@ -910,7 +910,7 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByText(/Last refreshed:/)).toBeNull();
   });
 
-  it("refetches cached board data and warns when manual SonicDICOM refresh fails", async () => {
+  it("clears an incomplete SonicDICOM refresh warning after a successful retry", async () => {
     refreshReportingBoardSonicDicomMock.mockRejectedValue(new Error("SonicDICOM unavailable"));
     renderPage();
     await screen.findByText("V2-000042");
@@ -922,6 +922,12 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledTimes(caseCallCount + 1));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledTimes(statsCallCount + 1));
     expect(await screen.findByText("SonicDICOM refresh was incomplete; cached statuses are being shown.")).toBeTruthy();
+
+    refreshReportingBoardSonicDicomMock.mockResolvedValue({ ok: true, checked: 1, successful: 1, failed: 0, checkedAt: "2026-08-19T10:00:00.000Z" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(refreshReportingBoardSonicDicomMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("SonicDICOM refresh was incomplete; cached statuses are being shown.")).toBeNull());
   });
 
   it("keeps advanced filters collapsed until opened", async () => {
