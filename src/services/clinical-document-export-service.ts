@@ -6,7 +6,7 @@ import { normalizePositiveInteger } from "../utils/normalize.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDocumentAbsolutePath } from "./document-service.js";
-import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesDescription, documentSeriesKind, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
+import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesDescription, documentSeriesKind, normalizeDicomModalityValues, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
 import { createAuthoritativeOrthancClient, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { enqueueClinicalDocumentExportsForAppointmentAutomatically } from "./clinical-document-export-queue-service.js";
@@ -204,9 +204,10 @@ async function resolveTargetStudy(context: AppointmentExportContext, row: Clinic
     if (context.appointment_study_instance_uid && study.studyInstanceUid !== context.appointment_study_instance_uid) throw new ClinicalDocumentExportBlockedError("study_instance_uid_conflict", "The matched PACS study does not match the booking StudyInstanceUID.");
     if (study.accessionNumber && study.accessionNumber !== context.appointment_accession_number) throw new ClinicalDocumentExportBlockedError("accession_conflict", "The matched PACS study accession does not match the appointment.");
     if (study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === study.patientId.toUpperCase())) throw new ClinicalDocumentExportBlockedError("patient_identity_conflict", "The matched PACS study patient identity does not match the appointment.");
-    if (study.modality && study.modality.toUpperCase() !== modality) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
+    const studyModalities = normalizeDicomModalityValues(study.modality);
+    if (studyModalities.length && !studyModalities.includes(modality)) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched PACS study modality does not match the appointment.");
     if (study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== context.appointment_booking_date.replace(/[^0-9]/g, "").slice(0, 8)) throw new ClinicalDocumentExportBlockedError("study_date_conflict", "The matched PACS study date does not match the appointment.");
-    return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyTime: study.studyTime || null, studyDescription: study.studyDescription || null, modalitiesInStudy: study.modality ? [study.modality] : [], seriesCount: 0, instanceCount: 0 };
+    return { orthancStudyId: "", studyInstanceUid: study.studyInstanceUid, accessionNumber: study.accessionNumber || null, patientId: study.patientId || null, patientName: study.patientName || null, patientBirthDate: null, patientSex: null, studyDate: study.studyDate || null, studyTime: study.studyTime || null, studyDescription: study.studyDescription || null, modalitiesInStudy: studyModalities, seriesCount: 0, instanceCount: 0 };
   }
   const client = await dependencies.createOrthancClient();
   const expectedPatientIds = [context.patient_primary_id, context.patient_national_id, context.patient_mrn].filter((value): value is string => Boolean(String(value || "").trim()));

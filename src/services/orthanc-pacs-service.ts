@@ -2,6 +2,7 @@ import { HttpError } from "../utils/http-error.js";
 import { validateIsoDate } from "../utils/date.js";
 import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
+import { normalizeDicomModalityValues } from "./clinical-document-dicom.js";
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
 import type { OptionalUserId, UnknownRecord } from "../types/http.js";
 
@@ -326,11 +327,13 @@ function extractTags(payload: unknown): UnknownRecord {
 function studyFromPayload(payload: unknown): OrthancPacsStudySummary {
   const tags = extractTags(payload);
   const studyDescription = firstString(tags.StudyDescription, tags["00081030"]);
+  const modalities = normalizeDicomModalityValues(tags.ModalitiesInStudy ?? tags["00080061"]);
+  if (modalities.length === 0) modalities.push(...normalizeDicomModalityValues(tags.Modality ?? tags["00080060"]));
   return {
     patientId: firstString(tags.PatientID, tags["00100020"]),
     patientName: firstString(tags.PatientName, tags["00100010"]),
     accessionNumber: firstString(tags.AccessionNumber, tags["00080050"]),
-    modality: firstString(tags.Modality, tags.ModalitiesInStudy, tags["00080060"], tags["00080061"]),
+    modality: modalities.join("\\"),
     description: studyDescription,
     studyDescription,
     studyDate: firstString(tags.StudyDate, tags["00080020"]),

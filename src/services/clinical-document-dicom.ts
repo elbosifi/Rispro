@@ -70,6 +70,30 @@ export function normalizeRisproModalityCode(value: unknown): string | null {
   return MODALITY_ALIASES[code] || null;
 }
 
+/** Parses a DICOM modality value without applying RISpro modality aliases. */
+export function normalizeDicomModalityValues(value: unknown): string[] {
+  const values: string[] = [];
+  const collect = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(collect);
+      return;
+    }
+    if (candidate && typeof candidate === "object") {
+      const record = candidate as Record<string, unknown>;
+      if ("Value" in record) collect(record.Value);
+      return;
+    }
+    if (typeof candidate !== "string") return;
+    for (const part of candidate.split("\\")) {
+      const normalized = part.trim().toUpperCase();
+      if (normalized) values.push(normalized);
+    }
+  };
+
+  collect(value);
+  return Array.from(new Set(values));
+}
+
 export function createClinicalDocumentUid(): string {
   return `2.25.${BigInt(`0x${randomUUID().replaceAll("-", "")}`).toString(10)}`;
 }

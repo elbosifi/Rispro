@@ -1,4 +1,5 @@
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
+import { normalizeDicomModalityValues } from "./clinical-document-dicom.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 export type OrthancVerificationTargetType = "local" | "remote_modality";
@@ -351,6 +352,8 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
       : lastUpdate
         ? "low"
         : null;
+  const modalities = normalizeDicomModalityValues(tags.ModalitiesInStudy ?? tags["00080061"]);
+  if (modalities.length === 0) modalities.push(...normalizeDicomModalityValues(tags.Modality ?? tags["00080060"]));
 
   return {
     orthancStudyId: firstString(options.orthancStudyId, record.ID, record.Id, record.id) || null,
@@ -360,7 +363,7 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
       firstString(tags.PatientID, tags["00100020"]),
       firstString(tags.OtherPatientIDs, tags["00101000"]),
     ].filter((value): value is string => Boolean(value)))),
-    modality: firstString(tags.Modality, tags.ModalitiesInStudy, tags["00080060"], tags["00080061"]),
+    modality: modalities.join("\\") || null,
     studyDate: normalizeDicomDate(tags.StudyDate ?? tags["00080020"]),
     seriesCount,
     instanceCount,

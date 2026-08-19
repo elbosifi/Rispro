@@ -299,6 +299,19 @@ test("modality conflict blocks completion", async () => {
   assert.equal(result.lastError, "modality_conflict");
 });
 
+test("study-level multi-valued modalities accept the appointment modality despite a derived series modality", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") return orthancResponse(studyPayload({ MainDicomTags: { Modality: "SR", ModalitiesInStudy: "CT\\SR" } }));
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+  assert.equal(result.status, "matched");
+  assert.notEqual(result.lastError, "modality_conflict");
+});
+
 test("study date conflict blocks completion", async () => {
   service.__setOrthancFetchForTests(async (path) => {
     if (path === "/tools/find") return orthancResponse(["study-1"]);

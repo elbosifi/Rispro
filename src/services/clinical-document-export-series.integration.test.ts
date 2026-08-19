@@ -236,12 +236,13 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const captured: Record<string, unknown>[] = [];
       let failNextStore = false;
       let mismatchNextStore = false;
+      let remoteStudyModality = "CT\\SR";
       const remoteDependencies: ClinicalDocumentProcessorDependencies = {
         ...dependencies,
         createOrthancClient: async () => { throw new Error("remote export must not create an authoritative Orthanc client"); },
         searchRemoteStudies: async ({ criteria }) => {
           lookupCriteria.push(criteria as Record<string, string>);
-          return { target: { type: "remote_modality" as const, key: "TEST_PACS", name: "TEST_PACS", isDefault: false }, studies: [{ patientId: patientPrimaryId, patientName: "Series^Patient", accessionNumber: accession, modality: "CT", description: "CT Chest", studyDescription: "CT Chest", studyDate: "20260818", studyTime: "101530", studyInstanceUid: remoteStudyUid }] };
+          return { target: { type: "remote_modality" as const, key: "TEST_PACS", name: "TEST_PACS", isDefault: false }, studies: [{ patientId: patientPrimaryId, patientName: "Series^Patient", accessionNumber: accession, modality: remoteStudyModality, description: "CT Chest", studyDescription: "CT Chest", studyDate: "20260818", studyTime: "101530", studyInstanceUid: remoteStudyUid }] };
         },
         storeDicomStraight: async ({ dicomBytes }) => {
           const dataset = parseDicom(dicomBytes); captured.push(dataset);
@@ -275,6 +276,17 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.notEqual(clinicalPage.series_instance_uid, firstPage.series_instance_uid);
       assert.equal(captured.at(-1)?.StudyInstanceUID, remoteStudyUid);
       assert.equal(captured.at(-1)?.StudyDate, "20260818"); assert.equal(captured.at(-1)?.StudyTime, "101530"); assert.equal(captured.at(-1)?.StudyDescription, "CT Chest"); assert.equal(captured.at(-1)?.SeriesDescription, "Clinical Documents");
+
+      remoteStudyModality = "MR\\SR";
+      const modalityConflictId = await createRemoteExport("remote-modality-conflict");
+      const capturedBeforeModalityConflict = captured.length;
+      const modalityConflictRow = await claimNextClinicalDocumentExport(`remote-modality-conflict-${suffix}`, 300, "orthanc_remote:");
+      await processClaimedClinicalDocumentExport(modalityConflictRow!, remoteDependencies);
+      const modalityConflict = (await pool.query<{ status: string; last_error: string }>("select status,last_error from clinical_document_exports where id=$1", [modalityConflictId])).rows[0]!;
+      assert.equal(modalityConflict.status, "blocked");
+      assert.match(modalityConflict.last_error, /modality does not match/i);
+      assert.equal(captured.length, capturedBeforeModalityConflict);
+      remoteStudyModality = "CT\\SR";
 
       const retryId = await createRemoteExport("remote-retry"); failNextStore = true;
       const failedRow = await claimNextClinicalDocumentExport(`remote-failed-${suffix}`, 300, "orthanc_remote:");

@@ -78,6 +78,42 @@ test("remote PACS search maps Orthanc DICOM tag JSON into study details", async 
   });
 });
 
+test("remote PACS search prefers study-level multi-valued modalities over a derived series modality", async () => {
+  service.__setOrthancPacsFetchForTests(async (path) => {
+    if (path === "/modalities/iMac/query") return orthancResponse({ ID: "query-2" });
+    if (path === "/queries/query-2/answers") return orthancResponse(["2"]);
+    if (path === "/queries/query-2/answers/2/content") {
+      return orthancResponse({
+        "0008,0060": { Name: "Modality", Value: ["SR"] },
+        "0008,0061": { Name: "ModalitiesInStudy", Value: [" CT ", ["SR"]] },
+        "0020,000D": { Name: "StudyInstanceUID", Value: ["1.2.3.5"] },
+      });
+    }
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.searchOrthancPacsStudies({ targetKey: "iMac", criteria: { patientName: "Jane" }, currentUserId: null });
+  assert.equal(result.studies[0]?.modality, "CT\\SR");
+});
+
+test("remote PACS search preserves backslash-delimited study modalities", async () => {
+  service.__setOrthancPacsFetchForTests(async (path) => {
+    if (path === "/modalities/iMac/query") return orthancResponse({ ID: "query-3" });
+    if (path === "/queries/query-3/answers") return orthancResponse(["3"]);
+    if (path === "/queries/query-3/answers/3/content") {
+      return orthancResponse({
+        "0008,0060": { Name: "Modality", Value: ["SR"] },
+        "0008,0061": { Name: "ModalitiesInStudy", Value: "CT\\SR" },
+        "0020,000D": { Name: "StudyInstanceUID", Value: ["1.2.3.6"] },
+      });
+    }
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.searchOrthancPacsStudies({ targetKey: "iMac", criteria: { patientName: "Jane" }, currentUserId: null });
+  assert.equal(result.studies[0]?.modality, "CT\\SR");
+});
+
 test("remote PACS search preserves StudyInstanceUID and straight store sends raw DICOM", async () => {
   const calls: Array<{ path: string; options?: { body?: unknown; contentType?: string } }> = [];
   const bytes = Buffer.from([0, 1, 2, 3]);
