@@ -44,6 +44,7 @@ import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
 import { pushToast } from "@/lib/toast";
+import { historicalDicomDateToIso, shouldHideHistoricalCandidateStudy } from "@/lib/historical-pacs-presentation";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, AppointmentStatus, HistoricalPacsStudy, ModalityProtocolAssignment } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
@@ -1815,8 +1816,8 @@ export default function ModalityPage() {
 }
 
 function PreviousStudiesPanel({ language, data, isLoading, isError, onRetry, onAttest, isSaving }: { language: Language; data: ModalityPreviousStudiesResponse | undefined; isLoading: boolean; isError: boolean; onRetry: () => void; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
-  if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading previous studies…</div>;
-  if (isError) return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">Historical PACS search failed.</p><Button variant="secondary" size="sm" onClick={onRetry}>Retry historical search</Button></div>;
+  if (isLoading) return <div className="p-4 text-sm text-muted-foreground">{t(language, "modality.previousStudies.loading")}</div>;
+  if (isError || data?.historicalCandidatesError) return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">{t(language, "modality.previousStudies.failed")}</p><Button variant="secondary" size="sm" onClick={onRetry}>{t(language, "modality.previousStudies.retry")}</Button></div>;
   if (!data) return null;
   return <div className="grid gap-4 lg:grid-cols-2">
     <section className="rounded-lg border border-slate-200 bg-white p-3"><h3 className="font-semibold">RISpro patient history</h3>{data.history.items.length ? <div className="mt-3 space-y-2">{data.history.items.map((item) => <div key={`${item.appointmentId}-${item.studyInstanceUid}`} className="rounded border border-slate-200 p-2 text-sm"><p className="font-medium">{item.date || "Unknown date"} · {item.description || "Study"}</p><p className="text-muted-foreground">{item.modalities.join(", ") || "Modality unavailable"}{item.accessionNumber ? ` · Accession ${item.accessionNumber}` : ""}</p></div>)}</div> : <p className="mt-3 text-sm text-muted-foreground">No previous RISpro studies.</p>}</section>
@@ -1826,7 +1827,8 @@ function PreviousStudiesPanel({ language, data, isLoading, isError, onRetry, onA
 
 function HistoricalPacsStudyAttestation({ study, onAttest, isSaving }: { study: HistoricalPacsStudy; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
   const uid = study.studyInstanceUid?.trim();
-  return <div className="rounded border border-amber-200 p-2"><p className="font-medium">{study.studyDate || "Unknown date"} · {study.studyDescription || "Study"}</p><p className="text-xs text-muted-foreground">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>{uid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">Study UID: {uid}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{study.seriesCount} series · {study.instanceCount} images</p>{study.attestation ? <p className="mt-2 text-xs font-semibold text-foreground">{study.attestation.status === "confirmed" ? "Patient confirmed" : "Patient denied ownership"} · {study.attestation.recordedByName || "Staff"} · {new Date(study.attestation.recordedAt).toLocaleString()}</p> : null}{uid ? <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "confirmed")}>Patient confirms</Button><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "denied")}>Patient denies</Button></div> : null}</div>;
+  const date = historicalDicomDateToIso(study.studyDate);
+  return <div className="rounded border border-amber-200 p-2"><p className="font-medium">{date ? formatDateLy(date) : "Unknown date"} · {study.studyDescription || "Study"}</p><p className="text-xs text-muted-foreground">{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>{uid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">Study UID: {uid}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{study.seriesCount} series · {study.instanceCount} images</p><p className="mt-2 text-xs font-semibold text-foreground">{study.attestation ? `${study.attestation.status === "confirmed" ? "Patient confirmed" : "Patient denied ownership"} · ${study.attestation.recordedByName || "Staff"} · ${formatDateTimeLy(study.attestation.recordedAt)}` : "Unreviewed"}</p>{uid ? <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "confirmed")}>Patient confirms</Button><Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onAttest(uid, "denied")}>Patient denies</Button></div> : null}</div>;
 }
 
 function ClinicalBannerField({

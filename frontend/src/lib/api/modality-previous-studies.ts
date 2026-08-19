@@ -1,7 +1,7 @@
 import { api } from "@/lib/api-client";
 import type { HistoricalPacsPatientAttestation, ProtocolingHistoricalPacsCandidatesResponse, ProtocolingPatientHistoryResponse } from "@/types/api";
 
-export type ModalityPreviousStudiesResponse = ProtocolingHistoricalPacsCandidatesResponse & { history: ProtocolingPatientHistoryResponse };
+export type ModalityPreviousStudiesResponse = ProtocolingHistoricalPacsCandidatesResponse & { history: ProtocolingPatientHistoryResponse; historicalCandidatesError?: boolean };
 
 export function fetchModalityPreviousStudies(appointmentId: number): Promise<ModalityPreviousStudiesResponse> {
   return api<ModalityPreviousStudiesResponse>(`/v2/read/modality/appointments/${appointmentId}/previous-studies`);
