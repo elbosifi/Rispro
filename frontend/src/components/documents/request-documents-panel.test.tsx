@@ -103,7 +103,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; supplementaryPanelPlacement?: "before-documents" | "after-documents"; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -130,6 +130,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           supplementaryPanel={options.supplementaryPanel}
           workspaceRailSize={options.workspaceRailSize}
           supplementaryPanelPlacement={options.supplementaryPanelPlacement}
+          hideSatisfiedProtocolEligibilityStatus={options.hideSatisfiedProtocolEligibilityStatus}
           enableAnnotations={options.enableAnnotations}
           readOnly={options.readOnly}
           onDocumentsChanged={options.onDocumentsChanged}
@@ -971,6 +972,18 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
     renderPanel();
     expect(await screen.findByText("Request attached")).toBeTruthy();
+  });
+
+  it("hides only the satisfied eligibility banner in the appointment workspace", async () => {
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
+    const satisfied = renderPanel({ layout: "workspace", hideSatisfiedProtocolEligibilityStatus: true });
+    await waitFor(() => expect(mockFetchRequestDocumentProtocolPolicy).toHaveBeenCalled());
+    expect(screen.queryByTestId("request-document-protocol-status")).toBeNull();
+    satisfied.unmount();
+
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false });
+    renderPanel({ layout: "workspace", hideSatisfiedProtocolEligibilityStatus: true });
+    expect((await screen.findByTestId("request-document-protocol-status")).textContent).toContain("Request missing");
   });
 
   it("does not show protocol eligibility status when the policy is disabled", async () => {

@@ -48,8 +48,8 @@ vi.mock("@/components/appointments/appointment-editor", () => ({
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
-  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange, workspaceRailSize, supplementaryPanelPlacement, pdfUtilityToolbarPlacement, pdfInitialSizingMode, supplementaryPanel }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; workspaceRailSize?: string; supplementaryPanelPlacement?: string; pdfUtilityToolbarPlacement?: string; pdfInitialSizingMode?: string; supplementaryPanel?: ReactNode }) => (
-    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"} data-workspace-rail-size={workspaceRailSize} data-supplementary-panel-placement={supplementaryPanelPlacement} data-pdf-utility-toolbar-placement={pdfUtilityToolbarPlacement} data-pdf-initial-sizing-mode={pdfInitialSizingMode}>
+  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange, workspaceRailSize, supplementaryPanelPlacement, pdfUtilityToolbarPlacement, pdfInitialSizingMode, hideSatisfiedProtocolEligibilityStatus, supplementaryPanel }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; workspaceRailSize?: string; supplementaryPanelPlacement?: string; pdfUtilityToolbarPlacement?: string; pdfInitialSizingMode?: string; hideSatisfiedProtocolEligibilityStatus?: boolean; supplementaryPanel?: ReactNode }) => (
+    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"} data-workspace-rail-size={workspaceRailSize} data-supplementary-panel-placement={supplementaryPanelPlacement} data-pdf-utility-toolbar-placement={pdfUtilityToolbarPlacement} data-pdf-initial-sizing-mode={pdfInitialSizingMode} data-hide-satisfied-protocol-eligibility-status={hideSatisfiedProtocolEligibilityStatus ? "true" : "false"}>
       Request documents content
       {supplementaryPanel}
       <button type="button" onClick={() => onExpandedChange?.(!expanded)}>{expanded ? "Exit expanded review" : "Expand review"}</button>
@@ -209,6 +209,7 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-supplementary-panel-placement")).toBe("before-documents");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-utility-toolbar-placement")).toBe("top");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-initial-sizing-mode")).toBe("fit-width");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-hide-satisfied-protocol-eligibility-status")).toBe("true");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
