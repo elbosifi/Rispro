@@ -1837,6 +1837,77 @@ describe("ModalityPage modality board", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   });
 
+  it("renders Previous Studies evidence in Arabic without raw PACS values", async () => {
+    languageState.language = "ar";
+    fetchModalityPreviousStudiesMock.mockResolvedValue({
+      history: {
+        items: [{ appointmentId: 1, orthancStudyId: null, studyInstanceUid: null, accessionNumber: null, date: "2024-01-01", time: null, modalities: ["CT"], description: "Previous CT", appointmentStatus: "voided", reportAvailable: false, source: "rispro_pacs", identityDiscrepancy: "patient_id_mismatch" }],
+        pacsStatus: "available",
+        historicalPacsIndexStatus: "ready",
+        historicalPacsLastSuccessAt: null,
+      },
+      historicalCandidates: [{
+        historicalPatientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", classification: "strong_demographic", reasons: ["exact_normalized_name", "exact_dob", "compatible_sex"], authoritative: false, matchRank: 1, nameSimilarity: 1, phoneticMatchCount: 0, studyCount: 1,
+        studies: [{ orthancStudyId: "historical", studyInstanceUid: "1.2.3.4", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 10 }],
+      }],
+      historicalPacsIndexStatus: "ready",
+      historicalPacsLastSuccessAt: null,
+      historicalCandidatesError: false,
+    });
+
+    await openBoard([appointment({ id: 1 })]);
+    await userEvent.click(screen.getByRole("button", { name: "الدراسات السابقة" }));
+    await screen.findByText("الدراسات السابقة");
+    await userEvent.click(screen.getByText("سبب المطابقة"));
+    const previousStudies = screen.getByRole("dialog");
+
+    for (const text of ["سجل المريض في RISpro", "مطابقات PACS التاريخية", "موجودة في PACS", "مطابقة ديموغرافية قوية", "لم يتم التحقق", "المريض يؤكد", "المريض ينفي"]) {
+      expect(within(previousStudies).getByText(text)).toBeTruthy();
+    }
+    for (const text of [/مبطل/, /رقم المريض القديم/, /^تاريخ الميلاد:/, /^الجنس: أنثى$/, /تطابق تام في الاسم بعد التوحيد/, /تطابق تام في تاريخ الميلاد/, /الجنس متوافق/]) expect(within(previousStudies).getByText(text)).toBeTruthy();
+    expect(within(previousStudies).getByText("معرف الدراسة مطابق لكن معرف PACS للمريض مختلف.")).toBeTruthy();
+    for (const rawValue of ["Historical PACS matches", "RISpro patient history", "Patient confirms", "Patient denies", "Unreviewed", "strong_demographic", "exact_normalized_name", "exact_dob", "compatible_sex", "voided", "Female", "19801231", "20240102"]) {
+      expect(within(previousStudies).queryByText(rawValue)).toBeNull();
+    }
+  });
+
+  it("keeps RISpro patient history visible when Historical PACS candidates fail", async () => {
+    fetchModalityPreviousStudiesMock.mockResolvedValue({
+      history: { items: [{ appointmentId: 1, orthancStudyId: null, studyInstanceUid: null, accessionNumber: "RISpro-ACC", date: "2024-01-01", time: null, modalities: ["CT"], description: "RISpro study remains", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs", identityDiscrepancy: null }], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null },
+      historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, historicalCandidatesError: true,
+    });
+
+    await openBoard([appointment({ id: 1 })]);
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+
+    expect(await screen.findByText("RISpro patient history")).toBeTruthy();
+    expect(await screen.findByText(/RISpro study remains/)).toBeTruthy();
+    expect(screen.getByText("Historical PACS search failed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry historical search" })).toBeTruthy();
+  });
+
+  it.each([
+    ["stale", /Historical PACS index is not current/i, true],
+    ["unavailable", /unavailable/i, false],
+    ["uninitialized", /not ready/i, false],
+    ["ready", null, true],
+  ] as const)("renders the %s Historical PACS index state without a false empty result", async (historicalPacsIndexStatus, stateMessage, candidateMayRender) => {
+    fetchModalityPreviousStudiesMock.mockResolvedValue({
+      history: { items: [], pacsStatus: "available", historicalPacsIndexStatus, historicalPacsLastSuccessAt: historicalPacsIndexStatus === "stale" ? "2026-06-17T08:00:00Z" : null },
+      historicalCandidates: historicalPacsIndexStatus === "stale" ? [{ historicalPatientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", classification: "strong_demographic", reasons: ["exact_normalized_name"], authoritative: false, matchRank: 1, nameSimilarity: 1, phoneticMatchCount: 0, studyCount: 1, studies: [{ orthancStudyId: "historical", studyInstanceUid: "1.2.3.4", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 10 }] }] : [],
+      historicalPacsIndexStatus,
+      historicalPacsLastSuccessAt: historicalPacsIndexStatus === "stale" ? "2026-06-17T08:00:00Z" : null,
+      historicalCandidatesError: false,
+    });
+
+    await openBoard([appointment({ id: 1 })]);
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    if (stateMessage) expect(await screen.findByText(stateMessage)).toBeTruthy();
+    if (candidateMayRender && historicalPacsIndexStatus === "stale") expect(screen.getByText("Historical Patient")).toBeTruthy();
+    if (historicalPacsIndexStatus === "ready") expect(await screen.findByText(/No possible matches found/)).toBeTruthy();
+    else expect(screen.queryByText(/No possible matches found/)).toBeNull();
+  });
+
   it("opens Previous studies from a cold History entry", async () => {
     languageState.language = "en";
     fetchModalityPreviousStudiesMock.mockClear();
