@@ -19,6 +19,7 @@ function parseDicom(buffer: Buffer): Record<string, unknown> {
 
 test("request and clinical documents export into separate exact-name unnumbered series in one authoritative study", async (t) => {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 11);
+  const directDestination = `authoritative_orthanc:test:${suffix}`;
   const created = { patientId: 0, modalityId: 0, examTypeId: 0, policySetId: 0, policyVersionId: 0, bookingId: 0, userId: 0 };
   const documentIds: number[] = [];
   const exportIds: number[] = [];
@@ -52,7 +53,9 @@ test("request and clinical documents export into separate exact-name unnumbered 
     const legacySeriesUid = `2.25.${uidSuffix}9000`;
     exportIds.push(Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,representation_type,series_number,study_instance_uid,series_instance_uid,exported_at,verified_at) values($1,$2,'exported','secondary_capture',9000,$3,$4,now(),now()) returning id", [legacyDocumentId, created.bookingId, studyUid, legacySeriesUid])).rows[0]!.id));
 
-    exportIds.push(...await enqueueClinicalDocumentExportsForAppointment(created.bookingId));
+    const queuedExportIds = await enqueueClinicalDocumentExportsForAppointment(created.bookingId);
+    exportIds.push(...queuedExportIds);
+    await pool.query("update clinical_document_exports set destination_key=$1 where id=any($2::bigint[])", [directDestination, queuedExportIds]);
     assert.equal(exportIds.length, 5);
 
     const study: OrthancStudyDetails = { orthancStudyId: "study-1", studyInstanceUid: studyUid, accessionNumber: accession, patientId: patientPrimaryId, patientName: "Series^Patient", patientBirthDate: null, patientSex: "O", studyDate: "20260818", studyTime: "101530", studyDescription: "CT Chest", modalitiesInStudy: ["CT"], seriesCount: 1, instanceCount: 1 };
@@ -90,7 +93,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
     };
 
     for (let index = 0; index < 4; index += 1) {
-      const row = await claimNextClinicalDocumentExport(`series-test-${suffix}-${index}`);
+      const row = await claimNextClinicalDocumentExport(`series-test-${suffix}-${index}`, 300, directDestination);
       assert.ok(row);
       await processClaimedClinicalDocumentExport(row, dependencies);
     }
@@ -114,12 +117,12 @@ test("request and clinical documents export into separate exact-name unnumbered 
     documentIds.push(partialDocumentId);
     const partialSeriesUid = `2.25.${uidSuffix}9001`;
     const firstPageSopUid = `2.25.${uidSuffix}90011`;
-    const partialExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,representation_type,series_number,study_instance_uid,series_instance_uid,expected_page_count,exported_page_count,verified_page_count,next_retry_at) values($1,$2,'pending','secondary_capture',9001,$3,$4,2,1,1,now()) returning id", [partialDocumentId, created.bookingId, studyUid, partialSeriesUid])).rows[0]!.id);
+    const partialExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,representation_type,series_number,study_instance_uid,series_instance_uid,expected_page_count,exported_page_count,verified_page_count,next_retry_at) values($1,$2,$3,'pending','secondary_capture',9001,$4,$5,2,1,1,now()) returning id", [partialDocumentId, created.bookingId, directDestination, studyUid, partialSeriesUid])).rows[0]!.id);
     exportIds.push(partialExportId);
     const pixels = Buffer.from([1, 2, 3]);
     await pool.query("insert into clinical_document_export_instances(export_id,page_number,instance_number,sop_instance_uid,series_instance_uid,pixel_sha256,rows,columns,status,orthanc_instance_id,orthanc_series_id,exported_at,verified_at) values($1,1,1,$2,$3,$4,1,1,'verified','legacy-page-1','legacy-series',now(),now())", [partialExportId, firstPageSopUid, partialSeriesUid, createHash("sha256").update(pixels).digest("hex")]);
     uploaded.set(firstPageSopUid, { orthancInstanceId: "legacy-page-1", orthancSeriesId: "legacy-series", orthancStudyId: study.orthancStudyId, studyInstanceUid: studyUid, seriesInstanceUid: partialSeriesUid, sopInstanceUid: firstPageSopUid, patientId: patientPrimaryId, accessionNumber: accession, modality: "CT" });
-    const partialRow = await claimNextClinicalDocumentExport(`series-test-partial-${suffix}`);
+    const partialRow = await claimNextClinicalDocumentExport(`series-test-partial-${suffix}`, 300, directDestination);
     assert.equal(Number(partialRow?.id), partialExportId);
     await processClaimedClinicalDocumentExport(partialRow!, {
       ...dependencies,
@@ -135,7 +138,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
       documentIds.push(crashDocumentId);
       const crashSeriesUid = `2.25.${uidSuffix}9100`;
       const crashSopUid = `2.25.${uidSuffix}91001`;
-      const crashExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,representation_type,series_number,study_instance_uid,series_instance_uid,expected_page_count,exported_page_count,verified_page_count,next_retry_at) values($1,$2,'pending','secondary_capture',9000,$3,$4,1,0,0,now()) returning id", [crashDocumentId, created.bookingId, studyUid, crashSeriesUid])).rows[0]!.id);
+      const crashExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,representation_type,series_number,study_instance_uid,series_instance_uid,expected_page_count,exported_page_count,verified_page_count,next_retry_at) values($1,$2,$3,'pending','secondary_capture',9000,$4,$5,1,0,0,now()) returning id", [crashDocumentId, created.bookingId, directDestination, studyUid, crashSeriesUid])).rows[0]!.id);
       exportIds.push(crashExportId);
       const pixelSha = createHash("sha256").update(pixels).digest("hex");
       await pool.query("insert into clinical_document_export_instances(export_id,page_number,instance_number,sop_instance_uid,series_instance_uid,pixel_sha256,rows,columns,status) values($1,1,1,$2,$3,$4,1,1,'pending')", [crashExportId, crashSopUid, crashSeriesUid, pixelSha]);
@@ -145,7 +148,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const lookupCountBeforeRecovery = sopLookups.length;
       const uploadCountBeforeRecovery = uploadCallCount;
 
-      const crashRow = await claimNextClinicalDocumentExport(`series-test-crash-${suffix}`);
+      const crashRow = await claimNextClinicalDocumentExport(`series-test-crash-${suffix}`, 300, directDestination);
       assert.equal(Number(crashRow?.id), crashExportId);
       await processClaimedClinicalDocumentExport(crashRow!, dependencies);
 
@@ -165,10 +168,10 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const untouchedDocumentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','manual_upload',$2,$3,'image/png',3) returning id", [created.patientId, `untouched-${suffix}.png`, `documents/export-test/${suffix}-untouched.png`])).rows[0]!.id);
       documentIds.push(untouchedDocumentId);
       const untouchedSeriesUid = `2.25.${uidSuffix}9200`;
-      const untouchedExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,representation_type,series_number,study_instance_uid,series_instance_uid,exported_page_count,verified_page_count,next_retry_at) values($1,$2,'pending','secondary_capture',9000,$3,$4,0,0,now()) returning id", [untouchedDocumentId, created.bookingId, studyUid, untouchedSeriesUid])).rows[0]!.id);
+      const untouchedExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,representation_type,series_number,study_instance_uid,series_instance_uid,exported_page_count,verified_page_count,next_retry_at) values($1,$2,$3,'pending','secondary_capture',9000,$4,$5,0,0,now()) returning id", [untouchedDocumentId, created.bookingId, directDestination, studyUid, untouchedSeriesUid])).rows[0]!.id);
       exportIds.push(untouchedExportId);
 
-      const untouchedRow = await claimNextClinicalDocumentExport(`series-test-untouched-${suffix}`);
+      const untouchedRow = await claimNextClinicalDocumentExport(`series-test-untouched-${suffix}`, 300, directDestination);
       assert.equal(Number(untouchedRow?.id), untouchedExportId);
       await processClaimedClinicalDocumentExport(untouchedRow!, dependencies);
 
@@ -185,9 +188,9 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const failingDependencies: ClinicalDocumentProcessorDependencies = { ...dependencies, createOrthancClient: async () => failingClient };
       const belowLimitDocumentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','manual_upload',$2,$3,'image/png',3) returning id", [created.patientId, `retry-${suffix}.png`, `documents/export-test/${suffix}-retry.png`])).rows[0]!.id);
       documentIds.push(belowLimitDocumentId);
-      const belowLimitExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,attempt_count,representation_type,next_retry_at) values($1,$2,'pending',6,'secondary_capture',now()) returning id", [belowLimitDocumentId, created.bookingId])).rows[0]!.id);
+      const belowLimitExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,attempt_count,representation_type,next_retry_at) values($1,$2,$3,'pending',6,'secondary_capture',now()) returning id", [belowLimitDocumentId, created.bookingId, directDestination])).rows[0]!.id);
       exportIds.push(belowLimitExportId);
-      const belowLimitRow = await claimNextClinicalDocumentExport(`series-test-retry-${suffix}`);
+      const belowLimitRow = await claimNextClinicalDocumentExport(`series-test-retry-${suffix}`, 300, directDestination);
       assert.equal(Number(belowLimitRow?.id), belowLimitExportId);
       await processClaimedClinicalDocumentExport(belowLimitRow!, failingDependencies);
       const scheduled = await pool.query<{ status: string; attempt_count: number; next_retry_at: string | null }>("select status,attempt_count,next_retry_at from clinical_document_exports where id=$1", [belowLimitExportId]);
@@ -198,11 +201,11 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const exhaustedDocumentId = Number((await pool.query<{ id: number }>("insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','manual_upload',$2,$3,'image/png',3) returning id", [created.patientId, `exhausted-${suffix}.png`, `documents/export-test/${suffix}-exhausted.png`])).rows[0]!.id);
       documentIds.push(exhaustedDocumentId);
       const stable = { study: studyUid, series: `2.25.${uidSuffix}9300`, sop: `2.25.${uidSuffix}93001` };
-      const exhaustedExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,status,attempt_count,representation_type,series_number,study_instance_uid,series_instance_uid,sop_instance_uid,expected_page_count,next_retry_at) values($1,$2,'pending',7,'secondary_capture',9000,$3,$4,$5,1,now()) returning id", [exhaustedDocumentId, created.bookingId, stable.study, stable.series, stable.sop])).rows[0]!.id);
+      const exhaustedExportId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,attempt_count,representation_type,series_number,study_instance_uid,series_instance_uid,sop_instance_uid,expected_page_count,next_retry_at) values($1,$2,$3,'pending',7,'secondary_capture',9000,$4,$5,$6,1,now()) returning id", [exhaustedDocumentId, created.bookingId, directDestination, stable.study, stable.series, stable.sop])).rows[0]!.id);
       exportIds.push(exhaustedExportId);
       await pool.query("insert into clinical_document_export_instances(export_id,page_number,instance_number,sop_instance_uid,series_instance_uid,pixel_sha256,rows,columns,status) values($1,1,1,$2,$3,$4,1,1,'pending')", [exhaustedExportId, stable.sop, stable.series, createHash("sha256").update(pixels).digest("hex")]);
       uploaded.set(stable.sop, { orthancInstanceId: "exhausted-page-1", orthancSeriesId: "legacy-exhausted-series", orthancStudyId: study.orthancStudyId, studyInstanceUid: studyUid, seriesInstanceUid: stable.series, sopInstanceUid: stable.sop, patientId: patientPrimaryId, accessionNumber: accession, modality: "CT" });
-      const exhaustedRow = await claimNextClinicalDocumentExport(`series-test-exhausted-${suffix}`);
+      const exhaustedRow = await claimNextClinicalDocumentExport(`series-test-exhausted-${suffix}`, 300, directDestination);
       assert.equal(Number(exhaustedRow?.id), exhaustedExportId);
       await processClaimedClinicalDocumentExport(exhaustedRow!, failingDependencies);
       const exhausted = await pool.query<{ status: string; attempt_count: number; next_retry_at: string | null; last_error: string; study_instance_uid: string; series_instance_uid: string; sop_instance_uid: string }>("select status,attempt_count,next_retry_at,last_error,study_instance_uid,series_instance_uid,sop_instance_uid from clinical_document_exports where id=$1", [exhaustedExportId]);
@@ -210,7 +213,7 @@ test("request and clinical documents export into separate exact-name unnumbered 
       assert.equal(Number(exhausted.rows[0]?.attempt_count), 8);
       assert.equal(exhausted.rows[0]?.next_retry_at, null);
       assert.match(exhausted.rows[0]?.last_error || "", /Automatic retry limit reached/);
-      assert.equal(await claimNextClinicalDocumentExport(`series-test-exhausted-auto-${suffix}`), null);
+      assert.equal(await claimNextClinicalDocumentExport(`series-test-exhausted-auto-${suffix}`, 300, directDestination), null);
 
       const remoteRetryId = Number((await pool.query<{ id: number }>("insert into clinical_document_exports(document_id,appointment_id,destination_key,status,attempt_count,representation_type,study_instance_uid,series_instance_uid,sop_instance_uid,next_retry_at) values($1,$2,'orthanc_remote:TEST_PACS','failed',3,'secondary_capture',$3,$4,$5,now()) returning id", [exhaustedDocumentId, created.bookingId, stable.study, stable.series, `${stable.sop}.2`])).rows[0]!.id);
       exportIds.push(remoteRetryId);
