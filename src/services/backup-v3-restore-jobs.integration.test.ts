@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import test from "node:test";
+import fs from "node:fs/promises";
+import path from "node:path";
+import test, { afterEach } from "node:test";
 import { PassThrough } from "node:stream";
 import { pool } from "../db/pool.js";
+import { getProjectRootDir } from "./document-storage-path.js";
 import {
   appendBackupV3UploadChunk,
   BACKUP_V3_UPLOAD_CHUNK_BYTES,
@@ -17,6 +20,21 @@ import {
   runNextBackupV3RestorePreviewJob,
 } from "./backup-v3-restore-jobs-service.js";
 
+const createdUploadSessionIds = new Set<string>();
+const restoreUploadsRoot = path.join(getProjectRootDir(), "storage", "backups", "restore-uploads");
+
+async function createTrackedBackupV3UploadSession(input: Parameters<typeof createBackupV3UploadSession>[0]) {
+  const session = await createBackupV3UploadSession(input);
+  createdUploadSessionIds.add(session.uploadSessionId);
+  return session;
+}
+
+afterEach(async () => {
+  const sessionIds = [...createdUploadSessionIds];
+  createdUploadSessionIds.clear();
+  await Promise.all(sessionIds.map((sessionId) => fs.rm(path.join(restoreUploadsRoot, sessionId), { recursive: true, force: true })));
+});
+
 function chunk(value: string, length = Buffer.byteLength(value)) {
   const request = new PassThrough() as PassThrough & { header(name: string): string | undefined };
   request.header = (name) => name.toLowerCase() === "content-length" ? String(length) : undefined;
@@ -26,7 +44,7 @@ function chunk(value: string, length = Buffer.byteLength(value)) {
 
 test("durable restore uploads reject offset mismatch and duplicate chunks, then resume and validate checksum", async () => {
   const value = "abcdef";
-  const session = await createBackupV3UploadSession({ userId: null, archiveName: "upload.rispro.zip", expectedSizeBytes: value.length, expectedSha256: crypto.createHash("sha256").update(value).digest("hex") });
+  const session = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "upload.rispro.zip", expectedSizeBytes: value.length, expectedSha256: crypto.createHash("sha256").update(value).digest("hex") });
   try {
     await assert.rejects(() => appendBackupV3UploadChunk(session.uploadSessionId, 1, chunk("abc")), /offset mismatch/i);
     assert.equal((await appendBackupV3UploadChunk(session.uploadSessionId, 0, chunk("abc"))).receivedOffset, 3);
@@ -37,10 +55,10 @@ test("durable restore uploads reject offset mismatch and duplicate chunks, then 
 });
 
 test("durable restore uploads reject oversized chunks and clean cancelled, expired, and checksum-failed sessions", async () => {
-  const oversized = await createBackupV3UploadSession({ userId: null, archiveName: "oversized.rispro.zip", expectedSizeBytes: 1 });
-  const cancelled = await createBackupV3UploadSession({ userId: null, archiveName: "cancelled.rispro.zip", expectedSizeBytes: 1 });
-  const invalid = await createBackupV3UploadSession({ userId: null, archiveName: "invalid.rispro.zip", expectedSizeBytes: 1, expectedSha256: "a".repeat(64) });
-  const expired = await createBackupV3UploadSession({ userId: null, archiveName: "expired.rispro.zip", expectedSizeBytes: 1 });
+  const oversized = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "oversized.rispro.zip", expectedSizeBytes: 1 });
+  const cancelled = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "cancelled.rispro.zip", expectedSizeBytes: 1 });
+  const invalid = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "invalid.rispro.zip", expectedSizeBytes: 1, expectedSha256: "a".repeat(64) });
+  const expired = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "expired.rispro.zip", expectedSizeBytes: 1 });
   try {
     await assert.rejects(() => appendBackupV3UploadChunk(oversized.uploadSessionId, 0, chunk("", BACKUP_V3_UPLOAD_CHUNK_BYTES + 1)), /chunk size/i);
     await cancelBackupV3UploadSession(cancelled.uploadSessionId);
@@ -55,7 +73,7 @@ test("durable restore uploads reject oversized chunks and clean cancelled, expir
 
 test("durable preview persists a failed worker result and cleans its staged artifact", async () => {
   const archive = "not-a-zip";
-  const upload = await createBackupV3UploadSession({ userId: null, archiveName: "preview.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
+  const upload = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "preview.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
   let previewId: string | null = null;
   try {
     await appendBackupV3UploadChunk(upload.uploadSessionId, 0, chunk(archive));
@@ -78,7 +96,7 @@ test("durable preview persists a failed worker result and cleans its staged arti
 
 test("worker restart durably fails an interrupted preview without persisting its passphrase", async () => {
   const archive = "restart";
-  const upload = await createBackupV3UploadSession({ userId: null, archiveName: "restart.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
+  const upload = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "restart.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
   let previewId: string | null = null;
   try {
     await appendBackupV3UploadChunk(upload.uploadSessionId, 0, chunk(archive));
@@ -98,7 +116,7 @@ test("worker restart durably fails an interrupted preview without persisting its
 
 test("only one concurrent restore claim can consume a successful preview, and expired previews are rejected", async () => {
   const archive = "reviewed";
-  const upload = await createBackupV3UploadSession({ userId: null, archiveName: "claim.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
+  const upload = await createTrackedBackupV3UploadSession({ userId: null, archiveName: "claim.rispro.zip", expectedSizeBytes: archive.length, expectedSha256: crypto.createHash("sha256").update(archive).digest("hex") });
   const previewIds: string[] = [];
   try {
     await appendBackupV3UploadChunk(upload.uploadSessionId, 0, chunk(archive));

@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import jwt from "jsonwebtoken";
+import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { issueLegacyPublicCancelToken, issuePublicCancelToken, verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
@@ -37,6 +38,9 @@ import { __resetAuthoritativeOrthancForTests, __setAuthoritativeOrthancSettingsF
 
 const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], examTypes: [] as number[], users: [] as number[] };
 let sequence = 0;
+let clinicalDocumentExportSettingsBefore: Array<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | string | null }> = [];
+const originalUploadsDir = env.uploadsDir;
+let requestScanTempUploadsDir: string | null = null;
 
 const settings: RequestScanSettings = {
   enabled: true,
@@ -52,7 +56,19 @@ const settings: RequestScanSettings = {
   fileReadyDelaySeconds: 1,
 };
 
-before(() => {
+before(async () => {
+  requestScanTempUploadsDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-uploads-"));
+  env.uploadsDir = requestScanTempUploadsDir;
+  const previous = await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | string | null }>(
+    "select setting_key,setting_value,updated_by_user_id from system_settings where category='clinical_document_export' order by setting_key",
+  );
+  clinicalDocumentExportSettingsBefore = previous.rows;
+  await pool.query("delete from system_settings where category='clinical_document_export'");
+  await pool.query(
+    `insert into system_settings(category,setting_key,setting_value)
+     values ('clinical_document_export','enabled','{"value":"enabled"}'::jsonb),
+            ('clinical_document_export','destination_key','{"value":"REQUEST_SCAN_TEST"}'::jsonb)`,
+  );
   __setAuthoritativeOrthancSettingsForTests({
     enabled: true,
     autoExportClinicalDocuments: true,
@@ -1155,7 +1171,7 @@ test("manual assignment processes through the real checkpoint constraint and que
   assert.deepEqual(document.rows[0] && { document_type: document.rows[0].document_type, source: document.rows[0].source }, { document_type: "clinical_document", source: "modality_scan_automation" });
   assert.ok(await fs.stat(resolveStoredPath(document.rows[0]!.stored_path)).then((value) => value.isFile(), () => false));
   const exportRow = await pool.query<{ status: string; destination_key: string }>("select status,destination_key from clinical_document_exports where document_id=$1 and appointment_id=$2", [processed.document_id, booking.id]);
-  assert.deepEqual(exportRow.rows, [{ status: "pending", destination_key: "authoritative_orthanc" }]);
+  assert.deepEqual(exportRow.rows, [{ status: "pending", destination_key: "orthanc_remote:REQUEST_SCAN_TEST" }]);
   await fs.rm(resolveStoredPath(document.rows[0]!.stored_path), { force: true });
 });
 
@@ -1512,6 +1528,7 @@ test("archive-only retry queues the attached checkpoint once and reports per-ite
 });
 
 after(async () => {
+  try {
   __resetAuthoritativeOrthancForTests();
   if (created.users.length) await pool.query("delete from audit_log where changed_by_user_id=any($1::bigint[])", [created.users]);
   if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
@@ -1528,5 +1545,16 @@ after(async () => {
   if (created.examTypes.length) await pool.query("delete from exam_types where id = any($1::bigint[])", [created.examTypes]);
   if (created.modalities.length) await pool.query("delete from modalities where id = any($1::bigint[])", [created.modalities]);
   if (created.users.length) await pool.query("delete from users where id = any($1::bigint[])", [created.users]);
-  await pool.end();
+  await pool.query("delete from system_settings where category='clinical_document_export'");
+  for (const row of clinicalDocumentExportSettingsBefore) {
+    await pool.query(
+      "insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values ('clinical_document_export',$1,$2::jsonb,$3)",
+      [row.setting_key, row.setting_value, row.updated_by_user_id],
+    );
+  }
+  } finally {
+    env.uploadsDir = originalUploadsDir;
+    if (requestScanTempUploadsDir) await fs.rm(requestScanTempUploadsDir, { recursive: true, force: true });
+    await pool.end();
+  }
 });

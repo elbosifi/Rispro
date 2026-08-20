@@ -131,6 +131,24 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     }
   }
 
+  async function bookingDateFromToday(offsetDays: number): Promise<string> {
+    const result = await pool.query<{ booking_date: string }>(
+      `select (current_date + $1::int)::date::text as booking_date`,
+      [offsetDays]
+    );
+    const bookingDate = result.rows[0]?.booking_date;
+    assert.ok(bookingDate);
+    return bookingDate;
+  }
+
+  let nextBookingDateOffset = 30;
+
+  async function nextBookingDate(): Promise<string> {
+    const bookingDate = await bookingDateFromToday(nextBookingDateOffset);
+    nextBookingDateOffset += 1;
+    return bookingDate;
+  }
+
   async function createPatient(label: string, nationalIdPrefix: string = "2"): Promise<number> {
     guard();
     const uniqueNationalId = `${nationalIdPrefix}${Date.now().toString().slice(-11)}`;
@@ -251,7 +269,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   }
 
   it("returns preview for a valid token", async () => {
-    const bookingId = await createBooking("2026-08-01");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -268,11 +286,17 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
 
   it("ensures public tokens and returns only public-safe appointments for the same patient", async () => {
     const samePatientId = await createPatient("PublicSafeSame", "2");
-    const currentBookingId = await createBooking("2026-09-01", samePatientId);
-    const samePatientOtherId = await createBooking("2040-09-02", samePatientId);
-    const samePatientNoTokenId = await createBooking("2040-09-03", samePatientId);
-    const samePatientVoidedId = await createBooking("2040-09-04", samePatientId);
-    const samePatientRevokedId = await createBooking("2040-09-05", samePatientId);
+    const currentBookingDate = await nextBookingDate();
+    const samePatientOtherDate = await nextBookingDate();
+    const samePatientNoTokenDate = await nextBookingDate();
+    const samePatientVoidedDate = await nextBookingDate();
+    const samePatientRevokedDate = await nextBookingDate();
+    const otherPatientDate = await nextBookingDate();
+    const currentBookingId = await createBooking(currentBookingDate, samePatientId);
+    const samePatientOtherId = await createBooking(samePatientOtherDate, samePatientId);
+    const samePatientNoTokenId = await createBooking(samePatientNoTokenDate, samePatientId);
+    const samePatientVoidedId = await createBooking(samePatientVoidedDate, samePatientId);
+    const samePatientRevokedId = await createBooking(samePatientRevokedDate, samePatientId);
 
     const otherPatientId = await createPatient("Other", "3");
     const otherPatientBooking = await fetchJson<{ booking: { id: number | string } }>(app.baseUrl, "/api/v2/appointments", {
@@ -283,7 +307,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
         modalityId: testData.modalityId,
         examTypeId: testData.examTypeId,
         reportingPriorityId: 1,
-        bookingDate: "2040-09-06",
+        bookingDate: otherPatientDate,
         caseCategory: "non_oncology",
         policySetKey: testData.policySetKey,
       },
@@ -321,7 +345,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
       response.data.otherAppointments ?? [],
       [
         {
-          date: "2040-09-02",
+          date: samePatientOtherDate,
           time: "",
           modality: String(response.data.otherAppointments?.[0]?.modality),
           examName: String(response.data.otherAppointments?.[0]?.examName),
@@ -330,7 +354,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
           canCancel: true,
         },
         {
-          date: "2040-09-03",
+          date: samePatientNoTokenDate,
           time: "",
           modality: String(response.data.otherAppointments?.[1]?.modality),
           examName: String(response.data.otherAppointments?.[1]?.examName),
@@ -361,7 +385,9 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("keeps the original QR token valid after reschedule and exam type change", async () => {
-    const bookingId = await createBooking("2026-08-09");
+    const initialBookingDate = await nextBookingDate();
+    const rescheduledBookingDate = await nextBookingDate();
+    const bookingId = await createBooking(initialBookingDate);
     const alternateExamTypeId = await createAlternateExamType();
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
@@ -373,7 +399,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
         method: "PUT",
         cookie: authCookie,
         body: {
-          bookingDate: "2026-08-10",
+          bookingDate: rescheduledBookingDate,
           bookingTime: "13:30",
           policySetKey: testData.policySetKey,
         },
@@ -385,7 +411,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     const afterReschedule = await readPublicPreview(token);
     assert.equal(afterReschedule.status, 200);
     assert.equal(Number(afterReschedule.data.preview.bookingId), bookingId);
-    assert.equal(afterReschedule.data.preview.bookingDate, "2026-08-10");
+    assert.equal(afterReschedule.data.preview.bookingDate, rescheduledBookingDate);
     assert.equal(afterReschedule.data.preview.bookingTime, "13:30");
 
     const examTypeChanged = await fetchJson<{ booking: { id: number | string } }>(
@@ -395,7 +421,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
         method: "PUT",
         cookie: authCookie,
         body: {
-          bookingDate: "2026-08-10",
+          bookingDate: rescheduledBookingDate,
           bookingTime: "13:30",
           examTypeId: alternateExamTypeId,
           policySetKey: testData.policySetKey,
@@ -408,13 +434,13 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     const afterExamTypeChange = await readPublicPreview(token);
     assert.equal(afterExamTypeChange.status, 200);
     assert.equal(Number(afterExamTypeChange.data.preview.bookingId), bookingId);
-    assert.equal(afterExamTypeChange.data.preview.bookingDate, "2026-08-10");
+    assert.equal(afterExamTypeChange.data.preview.bookingDate, rescheduledBookingDate);
     assert.equal(afterExamTypeChange.data.preview.bookingTime, "13:30");
     assert.equal(afterExamTypeChange.data.preview.examNameEn, `${TEST_PREFIX} Alternate CT Chest`);
   });
 
   it("continues blocking the original QR token when patient QR access is disabled", async () => {
-    const bookingId = await createBooking("2026-08-11");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -433,7 +459,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("expires the original QR token after the configured post-appointment validity window", async () => {
-    const bookingId = await createBooking("2026-08-12");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -500,7 +526,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("cancels booking through public endpoint", async () => {
-    const bookingId = await createBooking("2026-08-05");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -523,7 +549,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("returns already-cancelled result on repeated cancel", async () => {
-    const bookingId = await createBooking("2026-08-06");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -547,7 +573,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("blocks report endpoints when report modality scope disallows booking modality", async () => {
-    const bookingId = await createBooking("2026-08-07");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -574,7 +600,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("blocks image-open when image modality scope disallows booking modality", async () => {
-    const bookingId = await createBooking("2026-08-08");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
 
@@ -593,7 +619,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("selects local and public SonicDICOM URLs for successful report-open and image-open routes", async () => {
-    const bookingId = await createBooking("2026-08-09");
+    const bookingId = await createBooking(await nextBookingDate());
     const token = await issuePublicCancelToken(bookingId);
     assert.ok(token);
     await pool.query(

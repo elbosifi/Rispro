@@ -140,9 +140,10 @@ test("document export queue includes request and clinical documents, deduplicate
     const user = await client.query<{ id: number }>("insert into users(username,full_name,password_hash,role,is_active) values($1,$2,'x','supervisor',true) returning id", [`export-test-${suffix}`, "Clinical export test"]);
     userId = user.rows[0]!.id;
     const stableUids = { study: `2.25.${Date.now()}${suffix}`, series: `2.25.${Date.now()}${suffix}1`, sop: `2.25.${Date.now()}${suffix}2` };
+    const operationsDestinationKey = `orthanc_remote:QUEUE_TEST_${suffix}`;
     await client.query(
-      "update clinical_document_exports set status='blocked', attempt_count=4, next_retry_at=now()+interval '1 hour', last_error='Patient identity conflict', export_lease_owner='stale-worker', export_lease_expires_at=now()+interval '1 minute', study_instance_uid=$2, series_instance_uid=$3, sop_instance_uid=$4, updated_at=now() where id=$1",
-      [directExportId, stableUids.study, stableUids.series, stableUids.sop],
+      "update clinical_document_exports set destination_key=$2, status='blocked', attempt_count=4, next_retry_at=now()+interval '1 hour', last_error='Patient identity conflict', export_lease_owner='stale-worker', export_lease_expires_at=now()+interval '1 minute', study_instance_uid=$3, series_instance_uid=$4, sop_instance_uid=$5, updated_at=now() where id=$1",
+      [directExportId, operationsDestinationKey, stableUids.study, stableUids.series, stableUids.sop],
     );
     const operationsSummary = await getClinicalDocumentExportOperationsSummary();
     assert.ok(operationsSummary.failed >= 1);
@@ -166,7 +167,7 @@ test("document export queue includes request and clinical documents, deduplicate
     assert.equal(failedRetry.sop_instance_uid, stableUids.sop);
 
     await client.query("update clinical_document_exports set status='exported' where id=$1", [directExportId]);
-    await assert.rejects(() => retryClinicalDocumentExport(directExportId, userId!), /Only failed or blocked clinical document exports can be retried/);
+    await assert.rejects(() => retryClinicalDocumentExport(directExportId, userId!), /Only failed or blocked selected-PACS clinical document exports can be retried/);
 
     const receptionRows = await client.query("select 1 from clinical_document_exports where document_id=$1", [receptionDocumentId]);
     assert.equal(receptionRows.rowCount, 1);

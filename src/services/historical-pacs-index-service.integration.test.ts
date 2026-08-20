@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { pool } from "../db/pool.js";
+import { invalidateCache } from "../utils/cache.js";
 import type { OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { reconcileProtocolingPatientHistory } from "../modules/doctor-portal/protocoling-history.js";
 import {
@@ -318,13 +319,26 @@ test("historical PACS index discovery and synchronization", async (t) => {
   });
 
   await t.test("Arabic dictionary fallback still applies the English PACS structural gate", async () => {
+    const dictionaryKeys = ["محمد", "علي"];
+    const dictionaryBefore = await pool.query<{ arabic_text: string; english_text: string; is_active: boolean }>(
+      `select arabic_text,english_text,is_active from name_dictionary where arabic_text=any($1::text[])`,
+      [dictionaryKeys],
+    );
+    const dictionaryBeforeByKey = new Map(dictionaryBefore.rows.map((row) => [row.arabic_text, row]));
+    await pool.query(
+      `insert into name_dictionary (arabic_text,english_text,is_active)
+       values ('محمد','Mohamed',true),('علي','Ali',true)
+       on conflict (arabic_text) do update set english_text=excluded.english_text,is_active=excluded.is_active`,
+    );
+    invalidateCache("name_dictionary");
     const dictionary = await pool.query<{ arabic_text: string; english_text: string }>(
       `select arabic_text,english_text from name_dictionary where is_active=true and arabic_text=any($1::text[])`,
       [["محمد", "علي"]],
     );
     assert.deepEqual(new Map(dictionary.rows.map((row) => [row.arabic_text, row.english_text])), new Map([["محمد", "Mohamed"], ["علي", "Ali"]]));
-    const patientId = await createPatient({ englishName: "", arabicName: "محمد علي" });
+    let patientId: number | null = null;
     try {
+      patientId = await createPatient({ englishName: "", arabicName: "محمد علي" });
       await upsertHistoricalPacsStudies([
         study({ orthancStudyId: "arabic-dictionary-adequate", patientId: "ARABIC-DICTIONARY-ADEQUATE", patientName: "MOHAMED^ALI" }),
         study({ orthancStudyId: "arabic-dictionary-weak", patientId: "ARABIC-DICTIONARY-WEAK", patientName: "KAREEM^ALI" }),
@@ -334,7 +348,19 @@ test("historical PACS index discovery and synchronization", async (t) => {
       assert.equal(result.candidates.some((candidate) => candidate.historicalPatientId === "ARABIC-DICTIONARY-WEAK"), false);
     } finally {
       await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('arabic-dictionary-adequate','arabic-dictionary-weak')`);
-      await removePatient(patientId);
+      if (patientId !== null) await removePatient(patientId);
+      for (const arabicText of dictionaryKeys) {
+        const previous = dictionaryBeforeByKey.get(arabicText);
+        if (previous) {
+          await pool.query(
+            `update name_dictionary set english_text=$2,is_active=$3 where arabic_text=$1`,
+            [previous.arabic_text, previous.english_text, previous.is_active],
+          );
+        } else {
+          await pool.query(`delete from name_dictionary where arabic_text=$1`, [arabicText]);
+        }
+      }
+      invalidateCache("name_dictionary");
     }
   });
 

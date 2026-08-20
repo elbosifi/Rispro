@@ -22,6 +22,7 @@ test("processing worker uses the durable claim path and is idle when no job is q
 test("processing worker runs failed and abandoned-awaiting staging retention before claiming", async () => {
   let cleanupArgs: [number, number] | null = null;
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async (failedHours, awaitingHours) => {
       cleanupArgs = [failedHours, awaitingHours];
       return 0;
@@ -44,6 +45,7 @@ test("processing worker continues after one claimed job fails", async () => {
   ];
   const processed: number[] = [];
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => 0,
     claim: async () => jobs.shift() as never,
     process: async ({ job }) => {
@@ -71,6 +73,7 @@ test("processing worker keeps at most four heavy jobs in flight and claims the f
   let maxInFlight = 0;
   let claimCount = 0;
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => 0,
     claim: async () => {
       const id = jobs.shift();
@@ -107,6 +110,7 @@ test("one lane failure does not stop the other processing lanes", async () => {
   const jobs = [21, 22, 23, 24];
   const completed: number[] = [];
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => 0,
     claim: async () => {
       const id = jobs.shift();
@@ -126,6 +130,7 @@ test("one lane failure does not stop the other processing lanes", async () => {
 test("graceful worker stop prevents interval claims", async () => {
   let claims = 0;
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => 0,
     claim: async () => {
       claims += 1;
@@ -140,11 +145,12 @@ test("graceful worker stop prevents interval claims", async () => {
 });
 
 test("graceful worker stop waits for in-flight processing to settle", async () => {
-  __dicomRemapProcessingWorkerTestables.setDependencies({ cleanup: async () => 0, claim: async () => null });
+  __dicomRemapProcessingWorkerTestables.setDependencies({ releaseRecoveries: async () => 0, cleanup: async () => 0, claim: async () => null });
   const worker = await startDicomRemapProcessingWorker({ intervalMs: 10_000, batchSize: 1, concurrency: 1, leaseSeconds: 120 });
   let release: () => void = () => { throw new Error("processing lane did not start"); };
   let entered = false;
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => 0,
     claim: async () => entered ? null : { job: { id: 31 } as never, recovered: false },
     process: async ({ job }) => {
@@ -168,6 +174,7 @@ test("graceful worker stop waits for in-flight processing to settle", async () =
 test("cleanup failure does not prevent processing claims", async () => {
   let claimed = false;
   __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
     cleanup: async () => { throw new Error("cleanup unavailable"); },
     claim: async () => {
       if (claimed) return null;

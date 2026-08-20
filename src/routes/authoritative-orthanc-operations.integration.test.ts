@@ -165,9 +165,9 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     assert.equal(generatedBody.queued, 2);
     assert.equal(generatedBody.exportIds.length, 2);
     created.exportIds.push(...generatedBody.exportIds);
-    const recoveryRows = await pool.query<{ id: number; document_id: number; destination_key: string; status: string; representation_type: string }>("select id,document_id,destination_key,status,representation_type from clinical_document_exports where document_id=any($1::bigint[]) order by document_id", [recoveryDocumentIds]);
+    const recoveryRows = await pool.query<{ id: string; document_id: string; destination_key: string; status: string; representation_type: string }>("select id,document_id,destination_key,status,representation_type from clinical_document_exports where document_id=any($1::bigint[]) order by document_id", [recoveryDocumentIds]);
     assert.equal(recoveryRows.rowCount, 2);
-    assert.deepEqual(new Set(recoveryRows.rows.map((row) => row.document_id)), new Set(recoveryDocumentIds));
+    assert.deepEqual(new Set(recoveryRows.rows.map((row) => Number(row.document_id))), new Set(recoveryDocumentIds));
     assert.ok(recoveryRows.rows.every((row) => row.destination_key === "orthanc_remote:ROUTE_RECOVERY" && row.status === "pending" && row.representation_type === "secondary_capture"));
     assert.equal((await pool.query("select 1 from clinical_document_export_instances where export_id=any($1::bigint[])", [generatedBody.exportIds])).rowCount, 0);
     const idempotent = await request(generatePath, superAdmin, "POST");
