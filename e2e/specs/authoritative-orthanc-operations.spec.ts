@@ -78,7 +78,7 @@ test("renders the Authoritative Orthanc operational workspace at desktop width",
   expect(navPositions[1]).toBeLessThan(navPositions[2]);
   await page.getByLabel("Study lookup value").fill("ACC-1042");
   await page.getByRole("button", { name: /Search/ }).click();
-  await expect(page.getByText("Sample Patient")).toBeVisible();
+  await expect(page.getByText("1.2.840.113619.2.55.3", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath("authoritative-orthanc-desktop.png"), fullPage: true });
 });

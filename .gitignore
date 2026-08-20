@@ -8,6 +8,7 @@ docker/orthanc/generated/
 
 # Persistent runtime data; protected from update-script git cleanup.
 storage/sante-hl7-outbox/
+storage/dicom/worklist-source/
 
 # Build outputs and local validation artifacts
 dist-frontend/
