@@ -11,6 +11,11 @@ set -euo pipefail
 DB_URL="${DATABASE_URL:-}"
 MAX_RETRIES="${DB_WAIT_RETRIES:-30}"
 RETRY_INTERVAL="${DB_WAIT_INTERVAL:-2}"
+bootstrap_started_at="$(date +%s%3N)"
+
+elapsed_ms() {
+  echo $(( $(date +%s%3N) - $1 ))
+}
 
 log() {
   printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$1"
@@ -39,6 +44,7 @@ extract_db_name() {
 # Wait for PostgreSQL
 # ---------------------------------------------------------------------------
 wait_for_postgres() {
+  local started_at="$(date +%s%3N)"
   if [ -z "$DB_URL" ]; then
     log "ERROR: DATABASE_URL is not set. Cannot start."
     exit 1
@@ -77,6 +83,7 @@ wait_for_postgres() {
       }
     " 2>/dev/null; then
       log "PostgreSQL is ready at ${host}:${port}/${dbname}"
+      log "[STARTUP] PostgreSQL readiness wait completed in $(elapsed_ms "$started_at") ms"
       return 0
     fi
 
@@ -92,9 +99,10 @@ wait_for_postgres() {
 # Run migrations
 # ---------------------------------------------------------------------------
 run_migrations() {
+  local started_at="$(date +%s%3N)"
   log "Running database migrations..."
   if npm run migrate; then
-    log "Migrations completed successfully."
+    log "Migrations completed successfully in $(elapsed_ms "$started_at") ms."
   else
     log "ERROR: Database migrations failed."
     exit 1
@@ -105,9 +113,10 @@ run_migrations() {
 # Seed admin accounts (idempotent)
 # ---------------------------------------------------------------------------
 seed_admin_accounts() {
+  local started_at="$(date +%s%3N)"
   log "Seeding supervisor/super_admin accounts (if missing)..."
   if npm run seed:supervisor 2>&1; then
-    log "Admin account seeding completed."
+    log "Admin account seeding completed in $(elapsed_ms "$started_at") ms."
   else
     log "WARNING: Admin account seeding skipped (may already exist or credentials missing)."
   fi
@@ -128,6 +137,8 @@ else
   run_migrations
   seed_admin_accounts
 fi
+
+log "[STARTUP] Bootstrap before Node command completed in $(elapsed_ms "$bootstrap_started_at") ms"
 
 log "Starting application..."
 log "========================================"

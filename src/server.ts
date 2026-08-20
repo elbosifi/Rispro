@@ -43,6 +43,22 @@ function logError(error: unknown): void {
   console.error(error);
 }
 
+async function measureStartupStage<T>(stage: string, operation: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    const result = await operation();
+    console.log(JSON.stringify({ type: "startup_timing", stage, status: "completed", durationMs: Math.round(performance.now() - startedAt) }));
+    return result;
+  } catch (error) {
+    console.log(JSON.stringify({ type: "startup_timing", stage, status: "failed", durationMs: Math.round(performance.now() - startedAt) }));
+    throw error;
+  }
+}
+
+function logSkippedStartupStage(stage: string, status: string): void {
+  console.log(JSON.stringify({ type: "startup_timing", stage, status, durationMs: 0 }));
+}
+
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   if (isShuttingDown) {
     return;
@@ -161,36 +177,42 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function start(): Promise<void> {
   const startupSummary: Record<string, string> = {};
+  const startupStartedAt = performance.now();
 
   try {
     // Auto-seed DICOM gateway defaults if missing (zero-config installation)
     const { seedDicomGatewayDefaultsIfMissing } = await import("./services/dicom-settings-resolver.js");
     const { seedOrthancMwlDefaultsIfMissing } = await import("./services/orthanc-settings-resolver.js");
     const { seedSanteWorklistDefaultsIfMissing } = await import("./services/sante-worklist-settings-resolver.js");
-    await seedDicomGatewayDefaultsIfMissing();
-    await seedOrthancMwlDefaultsIfMissing();
-    await seedSanteWorklistDefaultsIfMissing();
+    await measureStartupStage("dicom_settings_defaults", async () => {
+      await seedDicomGatewayDefaultsIfMissing();
+      await seedOrthancMwlDefaultsIfMissing();
+      await seedSanteWorklistDefaultsIfMissing();
+    });
 
     // Auto-create directories and rebuild worklists
     const { ensureDicomGatewayLayout, rebuildAllV2DicomWorklistSources } = await import("./services/dicom-service.js");
-    await ensureDicomGatewayLayout();
-    await rebuildAllV2DicomWorklistSources();
+    await measureStartupStage("dicom_gateway_layout", ensureDicomGatewayLayout);
 
     if (process.env.RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY === "1") {
+      logSkippedStartupStage("embedded_mwl_rebuild", "skipped_disabled_by_env");
       console.log("Embedded DICOM gateway disabled by environment. Skipping in-process gateway startup.");
       startupSummary.dicom_gateway = "disabled_by_env";
     } else {
+      await measureStartupStage("embedded_mwl_rebuild", rebuildAllV2DicomWorklistSources);
       // Start DICOM gateway services (MWL SCP and MWL worklist builder)
-      const { startDicomGateway, verifyMwlScpWithEcho } = await import("./services/dicom-gateway-service.js");
-      dicomGateway = await startDicomGateway();
+      await measureStartupStage("embedded_gateway_start_and_echo", async () => {
+        const { startDicomGateway, verifyMwlScpWithEcho } = await import("./services/dicom-gateway-service.js");
+        dicomGateway = await startDicomGateway();
 
-      // Give wlmscpfs a moment to initialize, then verify with C-ECHO
-      if (dicomGateway) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const { resolveGatewaySettings } = await import("./services/dicom-settings-resolver.js");
-        const settings = await resolveGatewaySettings();
-        await verifyMwlScpWithEcho(settings);
-      }
+        // Give wlmscpfs a moment to initialize, then verify with C-ECHO
+        if (dicomGateway) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const { resolveGatewaySettings } = await import("./services/dicom-settings-resolver.js");
+          const settings = await resolveGatewaySettings();
+          await verifyMwlScpWithEcho(settings);
+        }
+      });
     }
   } catch (error) {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
@@ -199,8 +221,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startNoShowWorker } = await import("./services/no-show-worker.js");
-    noShowWorker = await startNoShowWorker();
+    await measureStartupStage("no_show_worker", async () => {
+      const { startNoShowWorker } = await import("./services/no-show-worker.js");
+      noShowWorker = await startNoShowWorker();
+    });
     startupSummary.no_show_worker = "started";
   } catch (error) {
     console.error("No-show worker initialization failed. Continuing without blocking startup.");
@@ -209,8 +233,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startBackupV3Worker } = await import("./services/backup-v3-worker.js");
-    backupV3Worker = await startBackupV3Worker();
+    await measureStartupStage("backup_v3_worker", async () => {
+      const { startBackupV3Worker } = await import("./services/backup-v3-worker.js");
+      backupV3Worker = await startBackupV3Worker();
+    });
     startupSummary.backup_v3_worker = "started";
   } catch (error) {
     console.error("Backup V3 worker initialization failed. Continuing without blocking startup.");
@@ -220,8 +246,10 @@ async function start(): Promise<void> {
 
   try {
     if (env.requestScanWorkerProcessEnabled) {
-      const { startRequestScanWorker } = await import("./services/request-scan-worker.js");
-      requestScanWorker = await startRequestScanWorker();
+      await measureStartupStage("request_scan_worker", async () => {
+        const { startRequestScanWorker } = await import("./services/request-scan-worker.js");
+        requestScanWorker = await startRequestScanWorker();
+      });
       startupSummary.request_scan_worker = "started";
     } else startupSummary.request_scan_worker = "disabled_by_env";
   } catch (error) {
@@ -231,8 +259,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startClinicalDocumentExportWorker } = await import("./services/clinical-document-export-service.js");
-    clinicalDocumentExportWorker = await startClinicalDocumentExportWorker();
+    await measureStartupStage("clinical_document_export_worker", async () => {
+      const { startClinicalDocumentExportWorker } = await import("./services/clinical-document-export-service.js");
+      clinicalDocumentExportWorker = await startClinicalDocumentExportWorker();
+    });
     startupSummary.clinical_document_export = "started";
   } catch (error) {
     console.error("Clinical Document Export worker initialization failed. Continuing without blocking startup.");
@@ -241,8 +271,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startDicomRemapProcessingWorker } = await import("./services/dicom-remap-processing-worker.js");
-    dicomRemapProcessingWorker = await startDicomRemapProcessingWorker();
+    await measureStartupStage("dicom_remap_processing_worker", async () => {
+      const { startDicomRemapProcessingWorker } = await import("./services/dicom-remap-processing-worker.js");
+      dicomRemapProcessingWorker = await startDicomRemapProcessingWorker();
+    });
     startupSummary.dicom_remap_processing_worker = "started";
   } catch (error) {
     console.error("DICOM remap processing worker initialization failed. Continuing without blocking startup.");
@@ -251,8 +283,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startDicomRemapSendWorker } = await import("./services/dicom-remap-send-worker.js");
-    dicomRemapSendWorker = await startDicomRemapSendWorker();
+    await measureStartupStage("dicom_remap_send_worker", async () => {
+      const { startDicomRemapSendWorker } = await import("./services/dicom-remap-send-worker.js");
+      dicomRemapSendWorker = await startDicomRemapSendWorker();
+    });
     startupSummary.dicom_remap_send_worker = "started";
   } catch (error) {
     console.error("DICOM remap send worker initialization failed. Continuing without blocking startup.");
@@ -261,15 +295,17 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startOrthancMwlWorker } = await import("./services/orthanc-mwl-worker-service.js");
-    const { resolveOrthancSettings } = await import("./services/orthanc-settings-resolver.js");
-    const orthancSettings = await resolveOrthancSettings();
-    orthancMwlWorker = await startOrthancMwlWorker();
-    if (orthancSettings.enabled) {
-      startupSummary.orthanc_mwl = orthancSettings.shadowMode ? "enabled_shadow_mode" : "enabled_primary_mode";
-    } else {
-      startupSummary.orthanc_mwl = "disabled";
-    }
+    await measureStartupStage("orthanc_mwl_worker", async () => {
+      const { startOrthancMwlWorker } = await import("./services/orthanc-mwl-worker-service.js");
+      const { resolveOrthancSettings } = await import("./services/orthanc-settings-resolver.js");
+      const orthancSettings = await resolveOrthancSettings();
+      orthancMwlWorker = await startOrthancMwlWorker();
+      if (orthancSettings.enabled) {
+        startupSummary.orthanc_mwl = orthancSettings.shadowMode ? "enabled_shadow_mode" : "enabled_primary_mode";
+      } else {
+        startupSummary.orthanc_mwl = "disabled";
+      }
+    });
   } catch (error) {
     console.error("Orthanc MWL worker initialization failed. Continuing without blocking startup.");
     logError(error);
@@ -277,11 +313,13 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startSanteWorklistWorker } = await import("./services/sante-worklist-worker-service.js");
-    const { resolveSanteWorklistSettings } = await import("./services/sante-worklist-settings-resolver.js");
-    const santeSettings = await resolveSanteWorklistSettings();
-    santeWorklistWorker = await startSanteWorklistWorker();
-    startupSummary.sante_hl7 = santeSettings.enabled ? `enabled_${santeSettings.mode}` : "disabled";
+    await measureStartupStage("sante_worklist_worker", async () => {
+      const { startSanteWorklistWorker } = await import("./services/sante-worklist-worker-service.js");
+      const { resolveSanteWorklistSettings } = await import("./services/sante-worklist-settings-resolver.js");
+      const santeSettings = await resolveSanteWorklistSettings();
+      santeWorklistWorker = await startSanteWorklistWorker();
+      startupSummary.sante_hl7 = santeSettings.enabled ? `enabled_${santeSettings.mode}` : "disabled";
+    });
   } catch (error) {
     console.error("Sante HL7 file-drop worker initialization failed. Continuing without blocking startup.");
     logError(error);
@@ -289,8 +327,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startAppointmentsV2PacsAutoCompletionWorker } = await import("./services/appointments-v2-pacs-auto-completion-worker.js");
-    pacsAutoCompletionWorker = await startAppointmentsV2PacsAutoCompletionWorker();
+    await measureStartupStage("pacs_auto_completion_worker", async () => {
+      const { startAppointmentsV2PacsAutoCompletionWorker } = await import("./services/appointments-v2-pacs-auto-completion-worker.js");
+      pacsAutoCompletionWorker = await startAppointmentsV2PacsAutoCompletionWorker();
+    });
     startupSummary.pacs_auto_completion = "enabled";
   } catch (error) {
     console.error("PACS auto-completion worker initialization failed. Continuing without blocking startup.");
@@ -299,8 +339,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startPatientNotificationWorker } = await import("./services/patient-notification-worker.js");
-    patientNotificationWorker = await startPatientNotificationWorker();
+    await measureStartupStage("patient_notification_worker", async () => {
+      const { startPatientNotificationWorker } = await import("./services/patient-notification-worker.js");
+      patientNotificationWorker = await startPatientNotificationWorker();
+    });
     startupSummary.patient_notifications = "started";
   } catch (error) {
     if (env.webPushEnabled) {
@@ -313,8 +355,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startReportingBoardBulkAssignmentWorker } = await import("./services/reporting-board-bulk-assignment-worker.js");
-    reportingBoardBulkAssignmentWorker = await startReportingBoardBulkAssignmentWorker();
+    await measureStartupStage("reporting_board_bulk_assignment_worker", async () => {
+      const { startReportingBoardBulkAssignmentWorker } = await import("./services/reporting-board-bulk-assignment-worker.js");
+      reportingBoardBulkAssignmentWorker = await startReportingBoardBulkAssignmentWorker();
+    });
     startupSummary.reporting_board_bulk_assignments = "started";
   } catch (error) {
     console.error("Reporting Board bulk assignment worker initialization failed. Continuing without blocking startup.");
@@ -323,8 +367,10 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startReportingBoardSonicDicomCacheWorker } = await import("./services/reporting-board-sonicdicom-cache-worker.js");
-    reportingBoardSonicDicomCacheWorker = await startReportingBoardSonicDicomCacheWorker();
+    await measureStartupStage("reporting_board_sonicdicom_cache_worker", async () => {
+      const { startReportingBoardSonicDicomCacheWorker } = await import("./services/reporting-board-sonicdicom-cache-worker.js");
+      reportingBoardSonicDicomCacheWorker = await startReportingBoardSonicDicomCacheWorker();
+    });
     startupSummary.reporting_board_sonicdicom_cache = "started";
   } catch (error) {
     console.error("Reporting Board SonicDICOM cache worker initialization failed. Continuing without blocking startup.");
@@ -332,11 +378,13 @@ async function start(): Promise<void> {
     startupSummary.reporting_board_sonicdicom_cache = "initialization_failed";
   }
 
-  try { const {startPatientIdentityReconciliationWorker}=await import("./services/patient-identity-reconciliation-worker.js");patientIdentityReconciliationWorker=await startPatientIdentityReconciliationWorker();startupSummary.patient_identity_reconciliation_worker="started";} catch(error){console.error("Patient Identity Reconciliation worker initialization failed. Continuing without blocking startup.");logError(error);startupSummary.patient_identity_reconciliation_worker="initialization_failed";}
+  try { await measureStartupStage("patient_identity_reconciliation_worker", async () => { const {startPatientIdentityReconciliationWorker}=await import("./services/patient-identity-reconciliation-worker.js");patientIdentityReconciliationWorker=await startPatientIdentityReconciliationWorker();startupSummary.patient_identity_reconciliation_worker="started"; });} catch(error){console.error("Patient Identity Reconciliation worker initialization failed. Continuing without blocking startup.");logError(error);startupSummary.patient_identity_reconciliation_worker="initialization_failed";}
 
   try {
-    const { startHistoricalPacsSyncWorker } = await import("./services/historical-pacs-index-service.js");
-    historicalPacsSyncWorker = await startHistoricalPacsSyncWorker();
+    await measureStartupStage("historical_pacs_index_worker", async () => {
+      const { startHistoricalPacsSyncWorker } = await import("./services/historical-pacs-index-service.js");
+      historicalPacsSyncWorker = await startHistoricalPacsSyncWorker();
+    });
     startupSummary.historical_pacs_index = "started";
   } catch (error) {
     console.error("Historical PACS index worker initialization failed. Continuing without blocking startup.");
@@ -348,9 +396,11 @@ async function start(): Promise<void> {
     startupSummary.orthanc_pacs_modalities = "disabled_by_e2e";
   } else {
     try {
-      const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
-      const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
-      startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
+      await measureStartupStage("orthanc_pacs_modality_sync", async () => {
+        const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
+        const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
+        startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
+      });
     } catch (error) {
       console.warn("Orthanc PACS modality sync failed. Continuing startup.");
       logError(error);
@@ -360,8 +410,10 @@ async function start(): Promise<void> {
 
   if (env.ohifEnabled) {
     try {
-      const { startOhifRetrievalWorker } = await import("./modules/ohif-viewer/worker.js");
-      ohifRetrievalWorker = await startOhifRetrievalWorker({ intervalMs: env.ohifRetrievalWorkerIntervalMs });
+      await measureStartupStage("ohif_retrieval_worker", async () => {
+        const { startOhifRetrievalWorker } = await import("./modules/ohif-viewer/worker.js");
+        ohifRetrievalWorker = await startOhifRetrievalWorker({ intervalMs: env.ohifRetrievalWorkerIntervalMs });
+      });
       startupSummary.ohif_viewer = "enabled";
     } catch (error) {
       console.error("OHIF retrieval worker initialization failed. Continuing with OHIF unavailable.");
@@ -373,6 +425,7 @@ async function start(): Promise<void> {
   }
 
   server.listen(env.port, async () => {
+    console.log(JSON.stringify({ type: "startup_timing", stage: "total_start_to_http_listen", status: "completed", durationMs: Math.round(performance.now() - startupStartedAt) }));
     // Print startup summary
     console.log("");
     console.log("========================================");
