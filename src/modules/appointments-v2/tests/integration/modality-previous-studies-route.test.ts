@@ -111,16 +111,16 @@ if (!isDatabaseAvailable()) {
         const postPath = (id: string | number) => `${getPath(id)}/attestations`;
 
         for (const invalidId of [0, -1, "not-a-number"]) {
-          const response = await fetchJson(app.baseUrl, getPath(invalidId), { cookie: permittedCookie });
+          const response: { status: number } = await fetchJson<unknown>(app.baseUrl, getPath(invalidId), { cookie: permittedCookie });
           assert.equal(response.status, 400);
         }
         assert.equal((await fetchJson(app.baseUrl, postPath(0), { method: "POST", cookie: permittedCookie, body: {} })).status, 400);
         for (const status of ["approved", "yes", "", null]) {
-          const response = await fetchJson(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid: candidateUid, status } });
+          const response: { status: number } = await fetchJson<unknown>(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid: candidateUid, status } });
           assert.equal(response.status, 400);
         }
         for (const studyInstanceUid of ["", "   "]) {
-          const response = await fetchJson(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid, status: "confirmed" } });
+          const response: { status: number } = await fetchJson<unknown>(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid, status: "confirmed" } });
           assert.equal(response.status, 400);
         }
 
@@ -153,7 +153,7 @@ if (!isDatabaseAvailable()) {
         assert.deepEqual(updated.rows[0], { count: "1", status: "denied", recorded_by_user_id: testData.userId });
 
         for (const studyInstanceUid of ["1.2.3.arbitrary", otherPatientUid]) {
-          const response = await fetchJson(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid, status: "confirmed" } });
+          const response: { status: number } = await fetchJson<unknown>(app.baseUrl, postPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { studyInstanceUid, status: "confirmed" } });
           assert.equal(response.status, 404);
         }
 

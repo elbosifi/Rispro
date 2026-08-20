@@ -457,12 +457,11 @@ function RequestScanActionsMenu({ language, job, userRole, open, onToggle, onClo
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [menuDirection, setMenuDirection] = useState<"ltr" | "rtl" | undefined>(undefined);
   const invoke = (kind: RequestScanActionKind) => { onClose(); if (kind === "preview") onPreview(); else if (kind === "processing-details") onDetails(); else if (kind === "open-appointment") onAppointment(); else onAction(kind); };
+  const toggleMenu = () => { setMenuPosition(null); setMenuDirection(undefined); onToggle(); };
   useEffect(() => {
-    if (!open) {
-      setMenuPosition(null);
-      return;
-    }
+    if (!open) return;
 
     const button = buttonRef.current;
     const menu = menuRef.current;
@@ -472,12 +471,17 @@ function RequestScanActionsMenu({ language, job, userRole, open, onToggle, onClo
     const menuRect = menu.getBoundingClientRect();
     const margin = 8;
     const opensAbove = buttonRect.bottom + margin + menuRect.height > window.innerHeight - margin;
-    const direction = button.closest("[dir]")?.getAttribute("dir");
+    const rawDirection = button.closest("[dir]")?.getAttribute("dir");
+    const direction = rawDirection === "rtl" || rawDirection === "ltr" ? rawDirection : undefined;
     const left = direction === "rtl" ? buttonRect.left : buttonRect.right - menuRect.width;
-    setMenuPosition({
-      top: opensAbove ? Math.max(margin, buttonRect.top - margin - menuRect.height) : buttonRect.bottom + margin,
-      left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - menuRect.width - margin)),
+    const frame = window.requestAnimationFrame(() => {
+      setMenuDirection(direction);
+      setMenuPosition({
+        top: opensAbove ? Math.max(margin, buttonRect.top - margin - menuRect.height) : buttonRect.bottom + margin,
+        left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - menuRect.width - margin)),
+      });
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
   useEffect(() => {
@@ -492,8 +496,8 @@ function RequestScanActionsMenu({ language, job, userRole, open, onToggle, onClo
   }, [onClose, open]);
 
   return <div className="relative">
-    <button ref={buttonRef} type="button" aria-label={t(language, "requestScans.actions.forFile", { filename: job.filename })} aria-expanded={open} aria-haspopup="menu" aria-controls={`request-scan-actions-${job.id}`} onClick={onToggle} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-foreground transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><span>{t(language, "requestScans.actions.more")}</span><ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
-    {open ? createPortal(<div ref={menuRef} id={`request-scan-actions-${job.id}`} role="menu" aria-label={t(language, "requestScans.actions.menuForFile", { filename: job.filename })} dir={buttonRef.current?.closest("[dir]")?.getAttribute("dir") || undefined} style={{ position: "fixed", top: menuPosition?.top ?? -10000, left: menuPosition?.left ?? -10000, visibility: menuPosition ? "visible" : "hidden" }} className="z-[100] min-w-64 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
+    <button ref={buttonRef} type="button" aria-label={t(language, "requestScans.actions.forFile", { filename: job.filename })} aria-expanded={open} aria-haspopup="menu" aria-controls={`request-scan-actions-${job.id}`} onClick={toggleMenu} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-foreground transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><span>{t(language, "requestScans.actions.more")}</span><ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
+    {open ? createPortal(<div ref={menuRef} id={`request-scan-actions-${job.id}`} role="menu" aria-label={t(language, "requestScans.actions.menuForFile", { filename: job.filename })} dir={menuDirection} style={{ position: "fixed", top: menuPosition?.top ?? -10000, left: menuPosition?.left ?? -10000, visibility: menuPosition ? "visible" : "hidden" }} className="z-[100] min-w-64 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
       {actions.map(({ kind }) => kind === "open-browser" ? <a key={kind} role="menuitem" href={job.scoped_file_url || requestScanFileUrl(job.id)} target="_blank" rel="noreferrer" className={actionItemClass} onClick={onClose}>{actionIcon(kind)}{t(language, actionLabelKeys[kind])}</a> : kind === "view-attached" ? <a key={kind} role="menuitem" href={attachedDocumentUrl(job.document_id!)} target="_blank" rel="noreferrer" className={actionItemClass} onClick={onClose}>{actionIcon(kind)}{t(language, actionLabelKeys[kind])}</a> : <button key={kind} type="button" role="menuitem" className={actionItemClass} onClick={() => invoke(kind)}>{actionIcon(kind)}{t(language, actionLabelKeys[kind])}</button>)}
     </div>, document.body) : null}
   </div>;

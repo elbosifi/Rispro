@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 import { pushToast } from "@/lib/toast";
 import { connectQzTray, getInstalledPrinters, isQzConnected } from "@/services/printing/qz-tray-service";
 import { directTestPrint } from "@/services/printing/direct-print-service";
@@ -116,10 +117,10 @@ export default function QzTrayPrintingSection() {
             {profile.documentType === "ACCESSION_LABEL" ? <div className="mt-4 border-t border-border pt-4">
               <h5 className="font-medium">Printer compensation margins (mm)</h5>
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Field label="Accession label top margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.bottom - 0.01} step="0.5" value={margins.top} onChange={(event) => updateMargin("top", Number(event.target.value))} /></Field>
-                <Field label="Accession label right margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.left - 0.01} step="0.5" value={margins.right} onChange={(event) => updateMargin("right", Number(event.target.value))} /></Field>
-                <Field label="Accession label bottom margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.top - 0.01} step="0.5" value={margins.bottom} onChange={(event) => updateMargin("bottom", Number(event.target.value))} /></Field>
-                <Field label="Accession label left margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.right - 0.01} step="0.5" value={margins.left} onChange={(event) => updateMargin("left", Number(event.target.value))} /></Field>
+                <Field label="Accession label top margin"><Input className="h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.bottom - 0.01} step="0.5" value={margins.top} onChange={(event) => updateMargin("top", Number(event.target.value))} /></Field>
+                <Field label="Accession label right margin"><Input className="h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.left - 0.01} step="0.5" value={margins.right} onChange={(event) => updateMargin("right", Number(event.target.value))} /></Field>
+                <Field label="Accession label bottom margin"><Input className="h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.top - 0.01} step="0.5" value={margins.bottom} onChange={(event) => updateMargin("bottom", Number(event.target.value))} /></Field>
+                <Field label="Accession label left margin"><Input className="h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.right - 0.01} step="0.5" value={margins.left} onChange={(event) => updateMargin("left", Number(event.target.value))} /></Field>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">Printer compensation only. Label content already has a built-in 2 mm inset. Normally leave these values at 0.</p>
               <p className="mt-1 text-xs text-muted-foreground">If the beginning of text is clipped at the left physical edge, increase Left gradually.</p>

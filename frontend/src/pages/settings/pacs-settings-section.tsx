@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { ApiError, api } from "@/lib/api-client";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { Button } from "@/components/shared";
 
 const SETTINGS_LOAD_TIMEOUT_MS = 5000;
 
@@ -442,7 +443,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           {selected && <p className="text-xs text-muted-foreground">{selected.aet} — {selected.host}:{selected.port}</p>}
           {clinicalMessage && <p className="text-sm">{clinicalMessage}</p>}
           {draft.enabled && !valid && <p className="text-sm text-red-600">Select a valid PACS destination before enabling export.</p>}
-          <div className="flex gap-2"><button type="button" className="btn-secondary" disabled={!draft.destinationKey || !valid || testClinicalExportMutation.isPending} onClick={() => testClinicalExportMutation.mutate(draft.destinationKey)}>Test destination</button><button type="button" className="btn-primary" disabled={saveClinicalExportMutation.isPending || (draft.enabled && !valid)} onClick={() => { if (draft.enabled && !valid) { setClinicalMessage("Select a valid PACS destination before enabling export."); return; } saveClinicalExportMutation.mutate(draft); }}>Save</button></div>
+          <div className="flex gap-2"><Button type="button" variant="secondary" disabled={!draft.destinationKey || !valid || testClinicalExportMutation.isPending} onClick={() => testClinicalExportMutation.mutate(draft.destinationKey)}>Test destination</Button><Button type="button" disabled={saveClinicalExportMutation.isPending || (draft.enabled && !valid)} onClick={() => { if (draft.enabled && !valid) { setClinicalMessage("Select a valid PACS destination before enabling export."); return; } saveClinicalExportMutation.mutate(draft); }}>Save</Button></div>
           <p className="text-xs text-muted-foreground">Test destination checks DICOM connectivity (C-ECHO). It does not create a test study.</p>
         </div>;
       })())}

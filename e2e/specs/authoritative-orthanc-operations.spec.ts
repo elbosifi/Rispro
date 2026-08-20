@@ -20,6 +20,27 @@ const summary = {
   generatedAt: "2026-08-12T10:00:00.000Z",
 };
 
+const historicalPacsStatus = {
+  indexStatus: "ready",
+  runStatus: "idle",
+  mode: null,
+  indexedStudies: 42,
+  historicalPatientIds: 20,
+  orthancStudies: 42,
+  processed: null,
+  total: null,
+  progressPercent: null,
+  startedAt: null,
+  progressAt: null,
+  isStalled: false,
+  stalledForSeconds: null,
+  lastSuccessAt: "2026-08-20T00:00:00.000Z",
+  lastFullSyncAt: "2026-08-20T00:00:00.000Z",
+  lastAttemptAt: "2026-08-20T00:00:00.000Z",
+  lastChangeSequence: 123,
+  lastError: null,
+};
+
 async function mockOperations(page: Page) {
   await page.addInitScript(() => localStorage.setItem("rispro-language", "en"));
   await page.route("http://127.0.0.1:5173/api/**", async (route) => {
@@ -29,6 +50,7 @@ async function mockOperations(page: Page) {
     if (path === "/api/doctor/me") return route.fulfill({ json: { hasActiveDoctorProfile: false, canAccessDoctorPortal: false, canAccessDoctorAdmin: false, canAccessCoreWorkspace: true, profile: null } });
     if (path === "/api/v2/scheduling-override-requests") return route.fulfill({ json: { requests: [], total: 0 } });
     if (path === "/api/integrations/authoritative-orthanc/operations/summary") return route.fulfill({ json: summary });
+    if (path === "/api/integrations/authoritative-orthanc/operations/historical-pacs-index/status") return route.fulfill({ json: historicalPacsStatus });
     if (path === "/api/integrations/authoritative-orthanc/operations/studies/search") return route.fulfill({ json: { status: "matched", matchKey: "accession_number", study: { orthancStudyId: "study-1", studyInstanceUid: "1.2.840.113619.2.55.3", accessionNumber: "ACC-1042", patientId: "P-1042", patientName: "Sample Patient", patientBirthDate: "19870214", patientSex: "F", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"], seriesCount: 4, instanceCount: 220 } } });
     return route.fulfill({ json: {} });
   });
