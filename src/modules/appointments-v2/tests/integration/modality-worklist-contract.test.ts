@@ -227,8 +227,8 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
 
   it("returns active free-text MR protocol assignments in the worklist and detail read", async () => {
     guard();
-    const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = 'MR' limit 1");
-    assert.ok(mrModality.rows[0]?.id, "an MR modality is required for the regression fixture");
+    const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = 'MRI' limit 1");
+    assert.ok(mrModality.rows[0]?.id, "an MRI modality is required for the regression fixture");
     const mrModalityId = Number(mrModality.rows[0].id);
     const examType = await pool.query<{ id: string }>(
       `
