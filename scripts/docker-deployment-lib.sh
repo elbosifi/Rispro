@@ -11,6 +11,18 @@ SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 # Keep deployment configuration backups outside the checkout: update-docker's
 # git clean intentionally removes untracked repository files.
 RISPRO_CONFIG_BACKUP_DIR="${RISPRO_CONFIG_BACKUP_DIR:-${PROJECT_ROOT}/../rispro-config-backups}"
+ORTHANC_CONFIG_CHANGED=0
+ORTHANC_READINESS_ALREADY_VERIFIED=0
+
+deploy_now_ms() {
+  date +%s%3N
+}
+
+log_deploy_timing() {
+  local phase="$1"
+  local started_at="$2"
+  log "[DEPLOY TIMING] ${phase}=$(( $(deploy_now_ms) - started_at ))ms"
+}
 
 windows_path_hint() {
   local value="$1"
@@ -788,6 +800,7 @@ EOF_NODE
 
 render_orthanc_config() {
   mkdir -p "${ORTHANC_CONFIG_DIR}"
+  ORTHANC_CONFIG_CHANGED=0
 
   if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     rm -f "${ORTHANC_CONFIG_FILE}"
@@ -798,6 +811,13 @@ render_orthanc_config() {
   local users_block='{}'
   local orthanc_dicom_block=''
   local dicom_modalities_json='{}'
+  local previous_hash=''
+  local rendered_hash=''
+  local temporary_config="${ORTHANC_CONFIG_FILE}.$$"
+
+  if [ -f "${ORTHANC_CONFIG_FILE}" ]; then
+    previous_hash="$(sha256sum "${ORTHANC_CONFIG_FILE}" | awk '{print $1}')"
+  fi
 
   if command -v node >/dev/null 2>&1; then
     dicom_modalities_json="$(
@@ -892,7 +912,7 @@ EOF_DICOM
     users_block="{\"$(json_escape "$ORTHANC_USERNAME")\": \"$(json_escape "$ORTHANC_PASSWORD")\"}"
   fi
 
-  cat > "${ORTHANC_CONFIG_FILE}" <<EOF_ORTHANC
+  cat > "${temporary_config}" <<EOF_ORTHANC
 {
   "Name": "RISpro Orthanc",
   "StorageDirectory": "/var/lib/orthanc/db",
@@ -919,6 +939,22 @@ ${orthanc_dicom_block}
   }
 }
 EOF_ORTHANC
+
+  rendered_hash="$(sha256sum "${temporary_config}" | awk '{print $1}')"
+  if [ "${previous_hash}" != "${rendered_hash}" ]; then
+    ORTHANC_CONFIG_CHANGED=1
+  fi
+  mv -f "${temporary_config}" "${ORTHANC_CONFIG_FILE}"
+}
+
+recreate_internal_orthanc_if_changed() {
+  if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ] || [ "${ORTHANC_CONFIG_CHANGED}" != "1" ]; then
+    return 0
+  fi
+
+  log 'Rendered Orthanc configuration changed; recreating only the internal Orthanc service.'
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-deps --force-recreate orthanc
+  ORTHANC_READINESS_ALREADY_VERIFIED=0
 }
 
 build_compose_args() {
@@ -1032,6 +1068,9 @@ wait_for_internal_orthanc_worklists() {
   if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     return 0
   fi
+  if [ "${ORTHANC_READINESS_ALREADY_VERIFIED}" = "1" ]; then
+    return 0
+  fi
 
   local attempts=30
   local attempt=1
@@ -1040,6 +1079,7 @@ wait_for_internal_orthanc_worklists() {
   while [ "$attempt" -le "$attempts" ]; do
     if "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T orthanc /usr/local/bin/check-worklists-ready.sh >/dev/null 2>&1; then
       ok 'Internal Orthanc Worklists plugin is ready.'
+      ORTHANC_READINESS_ALREADY_VERIFIED=1
       return 0
     fi
     sleep 2

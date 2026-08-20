@@ -11,3 +11,12 @@ frontend/dist
 restore-v3-validation-*
 npm-debug.log
 README.md
+storage/sante-hl7-outbox/
+coverage/
+frontend/coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+tools/rispro-scanner-app/**/bin/
+tools/rispro-scanner-app/**/obj/
+tools/rispro-scanner-app/artifacts/

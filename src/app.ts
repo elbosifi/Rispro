@@ -183,7 +183,7 @@ export function createApp(): Application {
   // Legacy frontend (will be removed after migration is complete)
   app.get("/legacy", sendFrontendFile("index.html"));
   app.get("/legacy/app.js", sendFrontendFile("app.js"));
-  app.get("/legacy/styles.css", sendFrontendFile("styles.css", env.isProduction ? 3600 : 0));
+  app.get("/legacy/styles.css", sendFrontendFile("styles.css"));
 
   // New React frontend (default)
   const newFrontendDir = path.join(rootDir, "dist-frontend");

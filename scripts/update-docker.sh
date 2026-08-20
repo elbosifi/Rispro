@@ -104,9 +104,16 @@ parse_deployment_args() {
 build_and_restart() {
   cd "${PROJECT_ROOT}"
   log 'Building and restarting containers...'
-  RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build --force-recreate
+  RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
   ok 'Containers rebuilt and restarted.'
   log "Built/recreated rispro-app for commit: ${DEPLOY_COMMIT_SHA}"
+}
+
+recreate_gateway() {
+  cd "${PROJECT_ROOT}"
+  log 'Recreating the lightweight gateway to refresh its app upstream.'
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-deps --force-recreate gateway
+  ok 'Gateway recreated.'
 }
 
 should_reconfigure() {
@@ -134,7 +141,9 @@ main() {
   fi
 
   load_existing_config
+  git_update_started_at="$(deploy_now_ms)"
   check_git_repo
+  log_deploy_timing 'git_update' "${git_update_started_at}"
   load_existing_config
 
   if should_reconfigure "$@"; then
@@ -145,20 +154,45 @@ main() {
     hydrate_deployment_config_from_current_env
   fi
 
+  deployment_preflight_started_at="$(deploy_now_ms)"
   run_compose_preflight
+  log_deploy_timing 'deployment_preflight' "${deployment_preflight_started_at}"
   ok "Updated ${ENV_FILE}"
-  build_and_restart
+  orthanc_recreate_started_at="$(deploy_now_ms)"
+  recreate_internal_orthanc_if_changed
+  log_deploy_timing 'targeted_orthanc_recreation' "${orthanc_recreate_started_at}"
+  orthanc_readiness_started_at="$(deploy_now_ms)"
   wait_for_internal_orthanc_worklists
+  log_deploy_timing 'orthanc_readiness' "${orthanc_readiness_started_at}"
+  docker_build_started_at="$(deploy_now_ms)"
+  build_and_restart
+  log_deploy_timing 'docker_build_and_up' "${docker_build_started_at}"
+  gateway_recreate_started_at="$(deploy_now_ms)"
+  recreate_gateway
+  log_deploy_timing 'gateway_recreate' "${gateway_recreate_started_at}"
+  app_health_started_at="$(deploy_now_ms)"
   if ! wait_for_app_health; then
     if [ "${ALLOW_UNHEALTHY_DEPLOY:-0}" = "1" ]; then
       warn 'ALLOW_UNHEALTHY_DEPLOY=1: continuing despite failed application health check.'
     else
+      log_deploy_timing 'app_health' "${app_health_started_at}"
       err 'Deployment failed because RISpro did not become healthy. Set ALLOW_UNHEALTHY_DEPLOY=1 only for an intentional diagnostic deployment.'
       exit 1
     fi
   fi
-  verify_app_build_sha
-  verify_qz_bootstrap_readiness
+  log_deploy_timing 'app_health' "${app_health_started_at}"
+  build_sha_started_at="$(deploy_now_ms)"
+  if ! verify_app_build_sha; then
+    log_deploy_timing 'build_sha_verification' "${build_sha_started_at}"
+    exit 1
+  fi
+  log_deploy_timing 'build_sha_verification' "${build_sha_started_at}"
+  qz_started_at="$(deploy_now_ms)"
+  if ! verify_qz_bootstrap_readiness; then
+    log_deploy_timing 'qz_readiness' "${qz_started_at}"
+    exit 1
+  fi
+  log_deploy_timing 'qz_readiness' "${qz_started_at}"
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   print_deployment_summary 'Update complete.'
