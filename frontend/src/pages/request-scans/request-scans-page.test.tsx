@@ -63,7 +63,7 @@ function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7,
 
 async function openMenu(filename = "request.pdf") {
   fireEvent.click(await screen.findByRole("button", { name: `More actions for ${filename}` }));
-  return screen.getByRole("menu", { name: `Actions for ${filename}` });
+  return screen.findByRole("menu", { name: `Actions for ${filename}` });
 }
 
 afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });

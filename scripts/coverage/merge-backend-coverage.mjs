@@ -36,8 +36,8 @@ if (copiedFiles === 0) {
   process.exit(1);
 }
 
-const c8Command = path.join(repoRoot, "node_modules/.bin", process.platform === "win32" ? "c8.cmd" : "c8");
-const result = spawnSync(c8Command, [
+const c8Cli = path.join(repoRoot, "node_modules/c8/bin/c8.js");
+const result = spawnSync(process.execPath, [c8Cli,
   "report",
   "--config", "coverage.config.json",
   "--temp-directory", path.relative(repoRoot, mergedRawDirectory),
