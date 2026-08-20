@@ -16,7 +16,7 @@ function run(args) {
 function waitForDatabase() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    const result = spawnSync("docker", ["exec", name, "pg_isready", "-U", user, "-d", target.database], { stdio: "ignore" });
+    const result = spawnSync("docker", ["exec", name, "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", user, "-d", target.database], { stdio: "ignore" });
     if (result.status === 0) return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
   }
