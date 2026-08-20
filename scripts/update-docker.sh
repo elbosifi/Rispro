@@ -104,7 +104,7 @@ parse_deployment_args() {
 build_and_restart() {
   cd "${PROJECT_ROOT}"
   log 'Building and restarting containers...'
-  RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
   ok 'Containers rebuilt and restarted.'
   log "Built/recreated rispro-app for commit: ${DEPLOY_COMMIT_SHA}"
 }
