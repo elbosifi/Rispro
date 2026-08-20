@@ -157,10 +157,11 @@ if (!isDatabaseAvailable()) {
           assert.equal(response.status, 404);
         }
 
-        const audit = await pool.query<{ action_type: string; changed_by_user_id: number; new_values: { patientId: number; studyInstanceUid: string; status: string } }>(
+        const audit = await pool.query<{ action_type: string; changed_by_user_id: string; new_values: { patientId: number; studyInstanceUid: string; status: string } }>(
           "select action_type, changed_by_user_id, new_values from audit_log where entity_type='historical_pacs_patient_attestation' and changed_by_user_id=$1 order by id desc limit 1", [testData.userId],
         );
-        assert.deepEqual(audit.rows[0], { action_type: "historical_pacs_patient_denied", changed_by_user_id: testData.userId, new_values: { patientId: testData.patientId, studyInstanceUid: candidateUid, status: "denied" } });
+        const auditRow = audit.rows[0]!;
+        assert.deepEqual({ ...auditRow, changed_by_user_id: Number(auditRow.changed_by_user_id) }, { action_type: "historical_pacs_patient_denied", changed_by_user_id: testData.userId, new_values: { patientId: testData.patientId, studyInstanceUid: candidateUid, status: "denied" } });
         assert.equal(reconciliationRequests.mock.calls.length, 0, "Attestation must not request reconciliation or a PACS mutation");
 
         failCandidateDiscovery = true;

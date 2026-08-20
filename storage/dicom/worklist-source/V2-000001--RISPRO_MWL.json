@@ -1,0 +1,20 @@
+{
+  "appointmentId": "1",
+  "accessionNumber": "V2-000001",
+  "modalityId": "5",
+  "modalityCode": "E2E_CT",
+  "patientId": "1",
+  "patientMrn": "000001",
+  "patientNationalId": "100000000099",
+  "patientNameEnglish": "E2E Queue Patient",
+  "patientNameArabic": "اختبار قائمة الانتظار",
+  "appointmentDate": "2026-08-20",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

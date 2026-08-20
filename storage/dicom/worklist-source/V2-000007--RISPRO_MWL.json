@@ -1,0 +1,20 @@
+{
+  "appointmentId": "7",
+  "accessionNumber": "V2-000007",
+  "modalityId": "5",
+  "modalityCode": "E2E_CT",
+  "patientId": "7",
+  "patientMrn": "000007",
+  "patientNationalId": "100000000105",
+  "patientNameEnglish": "E2E Full Fixture 5",
+  "patientNameArabic": "E2E Full Fixture 5",
+  "appointmentDate": "2026-08-21",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}
