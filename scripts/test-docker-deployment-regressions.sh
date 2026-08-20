@@ -45,8 +45,17 @@ grep -q 'up -d --build$' scripts/update-docker.sh || fail 'Normal deployment no 
 if grep -q 'up -d --build --force-recreate' scripts/update-docker.sh; then
   fail 'Normal deployment still uses blanket --force-recreate'
 fi
+grep -q 'BUILDX_NO_DEFAULT_ATTESTATIONS=1.*RISPRO_BUILD_COMMIT_SHA=' scripts/update-docker.sh || fail 'BuildKit default attestations are not disabled for deployment builds'
 grep -q 'up -d --no-deps --force-recreate gateway' scripts/update-docker.sh || fail 'Targeted gateway recreation is missing'
 pass 'Normal deployment uses Docker cache with targeted gateway recreation'
+
+app_block="$(sed -n '/^  app:/,/^  request-scan-worker:/p' docker-compose.yml)"
+worker_block="$(sed -n '/^  request-scan-worker:/,/^  ohif:/p' docker-compose.yml)"
+printf '%s\n' "${app_block}" | grep -q '^    build:' || fail 'App no longer owns the RISpro build definition'
+printf '%s\n' "${worker_block}" | grep -q '^    build:' && fail 'Request Scan worker still owns a build definition'
+printf '%s\n' "${worker_block}" | grep -Fq 'image: ${RISPRO_APP_IMAGE:-rispro-app:local}' || fail 'Request Scan worker image reference changed'
+printf '%s\n' "${worker_block}" | grep -Fq 'pull_policy: never' || fail 'Request Scan worker does not require the local image'
+pass 'App builds the shared RISpro image exactly once for both runtime services'
 
 ordering_text="$(sed -n '/run_compose_preflight/,/verify_qz_bootstrap_readiness/p' scripts/update-docker.sh)"
 preflight_line="$(printf '%s\n' "${ordering_text}" | grep -n 'run_compose_preflight' | head -n1 | cut -d: -f1)"

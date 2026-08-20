@@ -58,11 +58,8 @@ services:
       - rispro-network
 
   request-scan-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: ${RISPRO_APP_IMAGE_TARGET:-production}
     image: ${RISPRO_APP_IMAGE:-rispro-app:local}
+    pull_policy: never
     env_file:
       - .env
     command: ["npm", "run", "start:request-scan-worker"]
