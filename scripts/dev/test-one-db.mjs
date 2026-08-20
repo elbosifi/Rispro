@@ -47,7 +47,7 @@ const env = {
 
 const migrateCommand = npmCommand(["run", "migrate"]);
 runOrExit(migrateCommand.command, migrateCommand.args, env);
-runOrExit(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", testFile], env);
+runOrExit(process.execPath, ["--experimental-test-module-mocks", "--import", "tsx", "--test", "--test-concurrency=1", testFile], env);
 
 function runOrExit(command, args, env) {
   const result = spawnSync(command, args, {

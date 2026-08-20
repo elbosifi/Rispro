@@ -126,7 +126,13 @@ if (mode === "unit") {
 }
 
 const nodeCommand = process.execPath;
-const baseArgs = ["--import", "tsx", "--test", "--test-concurrency=1"];
+const baseArgs = [
+  ...(mode === "db" ? ["--experimental-test-module-mocks"] : []),
+  "--import",
+  "tsx",
+  "--test",
+  "--test-concurrency=1",
+];
 const maxCommandLength = process.platform === "win32" ? 7000 : 20000;
 const dbTestFileTimeoutMs = Number(process.env.DB_TEST_FILE_TIMEOUT_MS ?? 120_000);
 let batch = [];
