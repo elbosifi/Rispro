@@ -12,7 +12,6 @@ SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 # git clean intentionally removes untracked repository files.
 RISPRO_CONFIG_BACKUP_DIR="${RISPRO_CONFIG_BACKUP_DIR:-${PROJECT_ROOT}/../rispro-config-backups}"
 ORTHANC_CONFIG_CHANGED=0
-ORTHANC_READINESS_ALREADY_VERIFIED=0
 
 deploy_now_ms() {
   date +%s%3N
@@ -954,7 +953,6 @@ recreate_internal_orthanc_if_changed() {
 
   log 'Rendered Orthanc configuration changed; recreating only the internal Orthanc service.'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-deps --force-recreate orthanc
-  ORTHANC_READINESS_ALREADY_VERIFIED=0
 }
 
 build_compose_args() {
@@ -1068,9 +1066,6 @@ wait_for_internal_orthanc_worklists() {
   if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     return 0
   fi
-  if [ "${ORTHANC_READINESS_ALREADY_VERIFIED}" = "1" ]; then
-    return 0
-  fi
 
   local attempts=30
   local attempt=1
@@ -1079,7 +1074,6 @@ wait_for_internal_orthanc_worklists() {
   while [ "$attempt" -le "$attempts" ]; do
     if "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T orthanc /usr/local/bin/check-worklists-ready.sh >/dev/null 2>&1; then
       ok 'Internal Orthanc Worklists plugin is ready.'
-      ORTHANC_READINESS_ALREADY_VERIFIED=1
       return 0
     fi
     sleep 2

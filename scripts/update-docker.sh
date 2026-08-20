@@ -41,9 +41,9 @@ check_git_repo() {
     EXPECTED_SHA="$(printf '%s' "${EXPECTED_SHA}" | tr '[:upper:]' '[:lower:]')"
   fi
 
-  warn "This update runs 'git reset --hard HEAD' and 'git clean -fd -e /storage/sante-hl7-outbox/' before deployment; local tracked and untracked repository changes will be discarded, except the persistent Sante HL7 outbox."
+  warn "This update runs 'git reset --hard HEAD' and 'git clean -fd -e storage/sante-hl7-outbox/' before deployment; local tracked and untracked repository changes will be discarded, except the persistent Sante HL7 outbox."
   git reset --hard HEAD
-  git clean -fd -e '/storage/sante-hl7-outbox/'
+  git clean -fd -e 'storage/sante-hl7-outbox/'
 
   if [ -z "${EXPECTED_SHA}" ]; then
     log "Manual update mode: fetching origin/${DEPLOY_BRANCH} to resolve the deployment commit..."
@@ -161,12 +161,12 @@ main() {
   orthanc_recreate_started_at="$(deploy_now_ms)"
   recreate_internal_orthanc_if_changed
   log_deploy_timing 'targeted_orthanc_recreation' "${orthanc_recreate_started_at}"
-  orthanc_readiness_started_at="$(deploy_now_ms)"
-  wait_for_internal_orthanc_worklists
-  log_deploy_timing 'orthanc_readiness' "${orthanc_readiness_started_at}"
   docker_build_started_at="$(deploy_now_ms)"
   build_and_restart
   log_deploy_timing 'docker_build_and_up' "${docker_build_started_at}"
+  orthanc_readiness_started_at="$(deploy_now_ms)"
+  wait_for_internal_orthanc_worklists
+  log_deploy_timing 'orthanc_readiness' "${orthanc_readiness_started_at}"
   gateway_recreate_started_at="$(deploy_now_ms)"
   recreate_gateway
   log_deploy_timing 'gateway_recreate' "${gateway_recreate_started_at}"

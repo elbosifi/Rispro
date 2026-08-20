@@ -48,6 +48,23 @@ fi
 grep -q 'up -d --no-deps --force-recreate gateway' scripts/update-docker.sh || fail 'Targeted gateway recreation is missing'
 pass 'Normal deployment uses Docker cache with targeted gateway recreation'
 
+ordering_text="$(sed -n '/run_compose_preflight/,/verify_qz_bootstrap_readiness/p' scripts/update-docker.sh)"
+preflight_line="$(printf '%s\n' "${ordering_text}" | grep -n 'run_compose_preflight' | head -n1 | cut -d: -f1)"
+orthanc_recreate_line="$(printf '%s\n' "${ordering_text}" | grep -n 'recreate_internal_orthanc_if_changed' | head -n1 | cut -d: -f1)"
+build_line="$(printf '%s\n' "${ordering_text}" | grep -n '^  build_and_restart$' | head -n1 | cut -d: -f1)"
+orthanc_ready_line="$(printf '%s\n' "${ordering_text}" | grep -n 'wait_for_internal_orthanc_worklists' | head -n1 | cut -d: -f1)"
+gateway_line="$(printf '%s\n' "${ordering_text}" | grep -n '^  recreate_gateway$' | head -n1 | cut -d: -f1)"
+test -n "${preflight_line}${orthanc_recreate_line}${build_line}${orthanc_ready_line}${gateway_line}" || fail 'Deployment ordering markers are incomplete'
+test "${preflight_line}" -lt "${orthanc_recreate_line}" \
+  && test "${orthanc_recreate_line}" -lt "${build_line}" \
+  && test "${build_line}" -lt "${orthanc_ready_line}" \
+  && test "${orthanc_ready_line}" -lt "${gateway_line}" \
+  || fail 'Orthanc readiness is not ordered after build/up and before gateway recreation'
+if grep -q 'ORTHANC_READINESS_ALREADY_VERIFIED' scripts/docker-deployment-lib.sh; then
+  fail 'Orthanc readiness still caches an earlier container check'
+fi
+pass 'Orthanc readiness validates the final Compose-converged service'
+
 grep -q 'ORTHANC_CONFIG_CHANGED=1' scripts/docker-deployment-lib.sh || fail 'Orthanc config-change flag is missing'
 grep -q 'ORTHANC_CONFIG_CHANGED}" != "1"' scripts/docker-deployment-lib.sh || fail 'Unchanged Orthanc config does not bypass targeted recreation'
 grep -q 'up -d --no-deps --force-recreate orthanc' scripts/docker-deployment-lib.sh || fail 'Targeted Orthanc recreation is missing'
@@ -91,7 +108,7 @@ printf 'baseline\n' > "${test_root}/README"
 git -C "${test_root}" add README
 git -C "${test_root}" commit -qm baseline
 
-git -C "${test_root}" clean -fd -e '/storage/sante-hl7-outbox/' >/dev/null
+git -C "${test_root}" clean -fd -e 'storage/sante-hl7-outbox/' >/dev/null
 test -f "${test_root}/storage/sante-hl7-outbox/sentinel.hl7" || fail 'git clean removed the Sante HL7 sentinel'
 test ! -e "${test_root}/storage/untracked-risk" || fail 'simulated git clean did not remove an unprotected path'
 pass 'protected Sante HL7 outbox survives the exact update clean operation'
