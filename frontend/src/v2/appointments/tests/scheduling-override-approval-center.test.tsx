@@ -64,10 +64,11 @@ vi.mock("../api", () => ({
 }));
 
 function request(overrides: Partial<SchedulingOverrideRequestDto> = {}): SchedulingOverrideRequestDto {
+  const overrideType = overrides.overrideType ?? overrides.overrideTypes?.[0] ?? "category_override";
+  const overrideTypes = overrides.overrideTypes ?? [overrideType];
   return {
     id: 11,
     requestType: "create_booking",
-    overrideType: "category_override",
     status: "pending",
     requesterUserId: 5,
     approverUserId: null,
@@ -106,6 +107,8 @@ function request(overrides: Partial<SchedulingOverrideRequestDto> = {}): Schedul
     approverUsername: null,
     decisionContext: null,
     ...overrides,
+    overrideType,
+    overrideTypes,
   };
 }
 
