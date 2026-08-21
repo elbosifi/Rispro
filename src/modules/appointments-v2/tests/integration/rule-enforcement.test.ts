@@ -51,7 +51,7 @@ describe("final scheduling override type consistency", () => {
     );
     assert.throws(
       () => validateFinalOverrideTypeConsistency(["modality_block_override", "exam_restriction_override"], "modality_block_override"),
-      (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("multiple_override_types_required")
+      (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("override_type_mismatch")
     );
   });
 

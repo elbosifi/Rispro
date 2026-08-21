@@ -87,6 +87,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   let receptionistId = 0;
   let secondReceptionistId = 0;
   let supervisorUsername = "";
+  let superAdminUsername = "";
   let supervisorCookie = "";
   let superAdminCookie = "";
   let receptionistCookie = "";
@@ -135,6 +136,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       [`${TEST_PREFIX.toLowerCase()}superadmin`, bcryptHash, `${TEST_PREFIX}SuperAdmin`]
     );
     const superAdminId = Number(superAdmin.rows[0].id);
+    superAdminUsername = `${TEST_PREFIX.toLowerCase()}superadmin`;
     superAdminCookie = `${createTestAuthCookie(superAdminId, "super_admin")}; ${createTestSupervisorReauthCookie(superAdminId, "super_admin")}`;
   });
 
@@ -838,7 +840,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(snapshot.changedDateApproval.finalBookingDate, changedDate);
     assert.equal(snapshot.changedDateApproval.finalBookingTime, "10:30");
     assert.equal(snapshot.changedDateApproval.originalOverrideType, "category_override");
-    assert.equal(snapshot.changedDateApproval.finalRequiredOverrideType, null);
+    assert.deepEqual(snapshot.changedDateApproval.finalRequiredOverrideTypes, []);
   });
 
   it("validates changed-date approval input", async () => {
@@ -957,7 +959,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(snapshot.changedDateApproval.originalBookingTime, null);
     assert.equal(snapshot.changedDateApproval.finalBookingDate, changedDate);
     assert.equal(snapshot.changedDateApproval.finalBookingTime, changedTime);
-    assert.equal(snapshot.changedDateApproval.finalRequiredOverrideType, "total_capacity_override");
+    assert.deepEqual(snapshot.changedDateApproval.finalRequiredOverrideTypes, ["total_capacity_override"]);
   });
 
   it("supervisor approves a pending reschedule request and audit is written", async () => {
@@ -1098,7 +1100,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(snapshot.changedDateApproval.originalBookingTime, null);
     assert.equal(snapshot.changedDateApproval.finalBookingDate, changedDate);
     assert.equal(snapshot.changedDateApproval.finalBookingTime, changedTime);
-    assert.equal(snapshot.changedDateApproval.finalRequiredOverrideType, null);
+    assert.deepEqual(snapshot.changedDateApproval.finalRequiredOverrideTypes, []);
 
     const rescheduleAudit = await pool.query<{ new_date: string; new_time: string | null }>(
       `select new_date::text, new_time::text
@@ -1200,7 +1202,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(stored.approval_decision_snapshot_json, null);
   });
 
-  it("approves normally when the override is no longer needed", async () => {
+  it("fails closed when the override is no longer needed", async () => {
     if (!testData) return;
     await setCapacityLimits();
     const date = "2042-02-08";
@@ -1214,9 +1216,54 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       body: { approverReason: "Capacity opened" },
     });
 
-    assert.equal(approved.status, 200);
-    assert.equal((approved.data as any).request.status, "approved");
-    assert.ok(Number((approved.data as any).booking.id) > 0);
+    assert.equal(approved.status, 409);
+    const stored = await getRequestFromDb(Number((requested.data as any).request.id));
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failure_code, "override_type_changed");
+  });
+
+  it("handles the exact 18/18 total plus 7/7 exam-mix combined override", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    async function arrange(date: string) {
+      await setCapacityLimits(18, 18);
+      await fillNonOncologyCategory(date, 18);
+      const rule = await pool.query<{ id: number }>(
+        `insert into appointments_v2.exam_mix_quota_rules (policy_version_id, modality_id, title, rule_type, specific_date, daily_limit)
+         values ($1, $2, 'Exact combined acceptance', 'specific_date', $3::date, 7) returning id`,
+        [testData.policyVersionId, testData.modalityId, date]
+      );
+      await pool.query(`insert into appointments_v2.exam_mix_quota_rule_items (rule_id, exam_type_id) values ($1, $2)`, [rule.rows[0].id, testData.examTypeId]);
+    }
+    const directDate = "2042-12-11";
+    await arrange(directDate);
+    const directPatient = await createPatient();
+    const direct = await fetchAs(superAdminCookie, "/api/v2/appointments", { method: "POST", body: {
+      patientId: directPatient, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: directDate,
+      caseCategory: "non_oncology", policySetKey: testData.policySetKey, capacityResolutionMode: "total_capacity_override",
+      override: { supervisorUsername: superAdminUsername, supervisorPassword: "test_password", reason: "Exact combined acceptance", overrideTypes: ["total_capacity_override", "exam_mix_override"] },
+    }});
+    assert.equal(direct.status, 201, JSON.stringify(direct.data));
+    const directBookingId = Number((direct.data as any).booking.id);
+    const directAudit = await pool.query<{ override_type: string }>(`select override_type from appointments_v2.override_audit_events where booking_id = $1 order by override_type`, [directBookingId]);
+    assert.deepEqual(directAudit.rows.map((row) => row.override_type), ["exam_mix_override", "total_capacity_override"]);
+    const subsetPatient = await createPatient();
+    const subset = await fetchAs(superAdminCookie, "/api/v2/appointments", { method: "POST", body: {
+      patientId: subsetPatient, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: directDate, caseCategory: "non_oncology", policySetKey: testData.policySetKey, capacityResolutionMode: "total_capacity_override",
+      override: { supervisorUsername: superAdminUsername, supervisorPassword: "test_password", reason: "Subset", overrideTypes: ["total_capacity_override"] },
+    }});
+    assert.equal(subset.status, 409); assert.match(String((subset.data as any).error), /scheduling state has changed.*different override type/i); assert.equal(await countBookings(directDate, subsetPatient), 0);
+    const deferredDate = "2042-12-12";
+    await arrange(deferredDate);
+    const deferredPatient = await createPatient();
+    const requested = await fetchAs(supervisorCookie, "/api/v2/scheduling-override-requests", { method: "POST", body: { requestType: "create_booking", requesterReason: "Exact combined deferred", requestPayload: { patientId: deferredPatient, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: deferredDate, caseCategory: "non_oncology", policySetKey: testData.policySetKey } }});
+    assert.equal(requested.status, 201, JSON.stringify(requested.data));
+    const requestId = Number((requested.data as any).request.id);
+    assert.deepEqual((requested.data as any).request.overrideTypes, ["total_capacity_override", "exam_mix_override"]); assert.equal((requested.data as any).request.overrideType, "total_capacity_override"); assert.equal(await countBookings(deferredDate, deferredPatient), 0);
+    const forbidden = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, { method: "POST", body: { approverReason: "No authority" } }); assert.equal(forbidden.status, 403);
+    const approved = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, { method: "POST", body: { approverReason: "Approved exact combined" } }); assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    const deferredAudit = await pool.query<{ override_type: string }>(`select override_type from appointments_v2.override_audit_events where booking_id = $1 order by override_type`, [Number((approved.data as any).booking.id)]);
+    assert.deepEqual(deferredAudit.rows.map((row) => row.override_type), ["exam_mix_override", "total_capacity_override"]);
   });
 
   it("allows only one concurrent approval to create a booking", async () => {

@@ -40,7 +40,7 @@ import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
-import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency, validateFinalOverrideRoleAuthority } from "./override-authority.js";
+import { normalizeSchedulingOverrideTypes, resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideRoleAuthority, validateFinalOverrideTypesConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 import {
@@ -360,7 +360,17 @@ export async function createBookingInternal(
     requesterUserId: userId,
   };
 
-  const requestedOverrideType = approvedOverrideContext?.overrideType ?? payload.override?.overrideType ?? null;
+  const requestedOverrideTypes = normalizeSchedulingOverrideTypes(
+    approvedOverrideContext?.overrideTypes?.length
+      ? approvedOverrideContext.overrideTypes
+      : payload.override?.overrideTypes?.length
+        ? payload.override.overrideTypes
+        : approvedOverrideContext?.overrideType
+          ? [approvedOverrideContext.overrideType]
+          : payload.override?.overrideType
+            ? [payload.override.overrideType]
+            : []
+  );
   const pureInput: PureEvaluateInput = {
     patientId: payload.patientId,
     modalityId: payload.modalityId,
@@ -373,7 +383,7 @@ export async function createBookingInternal(
     // standalone scheduling rule input at this stage.
     specialReasonCode: payload.specialReasonCode ?? null,
     includeOverrideEvaluation: payload.override != null,
-    bypassExamMixQuota: requestedOverrideType === "exam_mix_override",
+    bypassExamMixQuota: requestedOverrideTypes.includes("exam_mix_override"),
     context,
   };
 
@@ -395,11 +405,12 @@ export async function createBookingInternal(
   // 8. Check if booking is allowed or requires override
   let wasOverride = false;
   let supervisorUserId: number | null = null;
-  const requiredOverrideTypes = resolveRequiredOverrideTypes(decision, capacityResolutionMode);
-  if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
+  let requiredOverrideTypes = resolveRequiredOverrideTypes(decision, capacityResolutionMode);
+  if (requestedOverrideTypes.includes("exam_mix_override") && !requiredOverrideTypes.includes("exam_mix_override")) {
     requiredOverrideTypes.push("exam_mix_override");
   }
-  validateFinalOverrideTypeConsistency(requiredOverrideTypes, requestedOverrideType);
+  requiredOverrideTypes = normalizeSchedulingOverrideTypes(requiredOverrideTypes);
+  validateFinalOverrideTypesConsistency(requiredOverrideTypes, requestedOverrideTypes);
 
   if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
     // Hard block — cannot book even with override
@@ -432,6 +443,7 @@ export async function createBookingInternal(
         payload.override.supervisorUsername,
         payload.override.supervisorPassword
       );
+      if (requiredOverrideTypes.length > 0) validateFinalOverrideRoleAuthority(requiredOverrideTypes, supervisor.role as Role);
       console.info(JSON.stringify({
         type: "appointments_v2_booking_override",
         modalityId: payload.modalityId,
@@ -520,11 +532,8 @@ export async function createBookingInternal(
   }
 
   // 10. Record override audit if applicable
-  const schedulingAuditOverrideType: SchedulingOverrideType | null =
-      approvedOverrideContext?.overrideType ??
-      (requiredOverrideTypes.length === 1 ? requiredOverrideTypes[0] : null);
-  if (wasOverride && supervisorUserId != null && schedulingAuditOverrideType) {
-    await recordOverrideAudit(client, {
+  if (wasOverride && supervisorUserId != null && requiredOverrideTypes.length > 0) {
+    for (const overrideType of requiredOverrideTypes) await recordOverrideAudit(client, {
       bookingId: booking.id,
       patientId: payload.patientId,
       modalityId: payload.modalityId,
@@ -533,9 +542,9 @@ export async function createBookingInternal(
       requestingUserId: approvedOverrideContext?.requesterUserId ?? userId,
       supervisorUserId,
       overrideReason: approvedOverrideContext?.reason ?? payload.override?.reason ?? null,
-      overrideType: schedulingAuditOverrideType,
+      overrideType,
       decisionSnapshot: approvedOverrideContext
-        ? { ...decision, capacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId }
+        ? { ...decision, capacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId, approvedOverrideTypes: requiredOverrideTypes }
         : { ...decision, capacityResolutionMode },
       outcome: "approved_and_booked",
     });

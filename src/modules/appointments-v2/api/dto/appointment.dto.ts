@@ -41,6 +41,7 @@ export interface CreateAppointmentDto {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideTypes?: SchedulingOverrideType[];
     overrideType?: SchedulingOverrideType;
   };
 }
@@ -65,6 +66,7 @@ export interface UpdateAppointmentDto {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideTypes?: SchedulingOverrideType[];
     overrideType?: SchedulingOverrideType;
   };
 }

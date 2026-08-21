@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   fetchPatientDirectorySummary: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
   fetchPublicSchedulingCapacitySettings: vi.fn(),
+  createSchedulingOverrideRequest: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
   userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist",
@@ -39,7 +40,7 @@ vi.mock("@/v2/appointments/api", () => ({
   useV2Availability: () => ({ data: { items: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() }),
   useV2ExamTypes: () => ({ data: [], isLoading: false }),
   useV2SpecialReasonCodes: () => ({ data: [] }),
-  useCreateSchedulingOverrideRequest: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateSchedulingOverrideRequest: () => ({ mutateAsync: mocks.createSchedulingOverrideRequest, isPending: false }),
   rescheduleV2Booking: (...args: unknown[]) => mocks.rescheduleV2Booking(...args),
 }));
 
@@ -160,6 +161,8 @@ beforeEach(() => {
   }));
   mocks.updateAppointmentStatus.mockReset();
   mocks.updateAppointmentStatus.mockResolvedValue(undefined);
+  mocks.createSchedulingOverrideRequest.mockReset();
+  mocks.createSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
   mocks.rescheduleV2Booking.mockReset();
   mocks.rescheduleV2Booking.mockResolvedValue(undefined);
   mocks.userRole = "super_admin";
@@ -483,7 +486,7 @@ describe("AppointmentManageModal", () => {
     });
   });
 
-  it("does not open a single override path when a reschedule has multiple override types", async () => {
+  it("opens a combined authorization path when a reschedule has multiple override types", async () => {
     mocks.userRole = "supervisor";
     mocks.availabilityRows = [{
       date: "2026-09-01",
@@ -515,10 +518,88 @@ describe("AppointmentManageModal", () => {
     await userEvent.click(await screen.findByRole("button", { name: /2026-09-01 restricted/i }));
     await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
 
-    expect(screen.queryByText("Supervisor Override Required")).toBeNull();
-    expect(screen.queryByText("Request Approval")).toBeNull();
-    expect(screen.getByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeTruthy();
+    expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+    expect(screen.queryByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeNull();
     expect(mocks.rescheduleV2Booking).not.toHaveBeenCalled();
+  });
+
+  it("lets a super admin directly reschedule with the complete total-capacity and exam-mix override set", async () => {
+    mocks.availabilityRows = [{
+      date: "2026-09-02",
+      dayLabel: "Wed, Sep 2",
+      status: "full",
+      bucketMode: "total_only",
+      remainingCapacity: 0,
+      dailyCapacity: 18,
+      oncologyReserved: null,
+      oncologyFilled: 0,
+      oncologyRemaining: null,
+      nonOncologyReserved: null,
+      nonOncologyFilled: 18,
+      nonOncologyRemaining: null,
+      specialQuotaRemaining: null,
+      reasonText: "Total capacity and exam mix exhausted",
+      requiresSupervisorOverride: true,
+      reasonCodes: ["modality_daily_capacity_exhausted", "exam_mix_quota_exhausted"],
+    }];
+    renderModal({ initialTab: "reschedule" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show full days" }));
+    await userEvent.click(await screen.findByRole("button", { name: /2026-09-02 full/i }));
+    fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), { target: { value: "total_capacity_override" } });
+    await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
+    expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+    expect(screen.getByText("Total modality capacity override")).toBeTruthy();
+    expect(screen.getByText("Exam mix override")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Supervisor Username"), { target: { value: "superadmin" } });
+    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
+    fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "combined" } });
+    await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+
+    await waitFor(() => expect(mocks.rescheduleV2Booking).toHaveBeenCalledTimes(1));
+    expect(mocks.rescheduleV2Booking.mock.calls[0][1].override).toMatchObject({
+      overrideTypes: ["total_capacity_override", "exam_mix_override"],
+      overrideType: "total_capacity_override",
+    });
+  });
+
+  it("submits one combined deferred reschedule request for a supervisor", async () => {
+    mocks.userRole = "supervisor";
+    mocks.availabilityRows = [{
+      date: "2026-09-02",
+      dayLabel: "Wed, Sep 2",
+      status: "full",
+      bucketMode: "total_only",
+      remainingCapacity: 0,
+      dailyCapacity: 18,
+      oncologyReserved: null,
+      oncologyFilled: 0,
+      oncologyRemaining: null,
+      nonOncologyReserved: null,
+      nonOncologyFilled: 18,
+      nonOncologyRemaining: null,
+      specialQuotaRemaining: null,
+      reasonText: "Total capacity and exam mix exhausted",
+      requiresSupervisorOverride: true,
+      reasonCodes: ["modality_daily_capacity_exhausted", "exam_mix_quota_exhausted"],
+    }];
+    renderModal({ initialTab: "reschedule" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show full days" }));
+    await userEvent.click(await screen.findByRole("button", { name: /2026-09-02 full/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
+    expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+    expect(await screen.findByText(/Total modality capacity override, Exam mix override/)).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), { target: { value: "combined" } });
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() => expect(mocks.createSchedulingOverrideRequest).toHaveBeenCalledTimes(1));
+    expect(mocks.rescheduleV2Booking).not.toHaveBeenCalled();
+    expect(mocks.createSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+      requestType: "reschedule_booking",
+      requestPayload: { bookingDate: "2026-09-02" },
+    });
   });
 
   it("does not open a supervisor modal for a receptionist when reschedule requests are disabled", async () => {

@@ -34,6 +34,14 @@ const STATUS_OPTIONS: Array<SchedulingOverrideRequestStatus | ""> = ["", "pendin
 const REQUEST_TYPE_OPTIONS = ["", "create_booking", "reschedule_booking"] as const;
 const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "exam_mix_override", "exam_restriction_override", "modality_block_override", "total_capacity_override"];
 
+function effectiveOverrideTypes(request: SchedulingOverrideRequestDto): SchedulingOverrideType[] {
+  return request.overrideTypes?.length ? request.overrideTypes : [request.overrideType];
+}
+
+function canRoleApproveOverrideTypes(role: User["role"] | undefined, overrideTypes: readonly SchedulingOverrideType[]): boolean {
+  return overrideTypes.every((overrideType) => canRoleApproveSchedulingOverride(role, overrideType));
+}
+
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
@@ -53,8 +61,9 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
 
   const actionableCount = badgeQuery.data?.requests.filter((request) => {
+    const overrideTypes = effectiveOverrideTypes(request);
     if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
-    if (user?.role === "supervisor") return canRoleApproveSchedulingOverride(user.role, request.overrideType);
+    if (user?.role === "supervisor") return canRoleApproveOverrideTypes(user.role, overrideTypes);
     return user?.role === "super_admin";
   }).length ?? 0;
 
@@ -310,7 +319,8 @@ export function SchedulingOverrideRequestsWorkspace({
       changedBookingDate: "",
       changedBookingTime: "",
     };
-    const approvalNoteRequired = request.decisionContext?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType);
+    const overrideTypes = effectiveOverrideTypes(request);
+    const approvalNoteRequired = request.decisionContext?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride);
     if (draft.approvalMode === "changed_date" && !draft.changedBookingDate) {
       setActionError("New booking date is required when approving with a changed date.");
       return;
@@ -470,14 +480,15 @@ function RequestCard({
   busy: boolean;
 }) {
   const { language } = useLanguage();
+  const overrideTypes = effectiveOverrideTypes(request);
   const isPending = request.status === "pending";
-  const canApprove = isPending && canRoleApproveSchedulingOverride(user.role, request.overrideType);
+  const canApprove = isPending && canRoleApproveOverrideTypes(user.role, overrideTypes);
   const isOwn = Number(request.requesterUserId) === Number(user.id);
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
-  const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && request.overrideType === "total_capacity_override";
+  const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && overrideTypes.includes("total_capacity_override");
   const context = request.decisionContext ?? null;
   const changedDateMode = approvalDraft.approvalMode === "changed_date";
-  const approvalNoteRequired = (context?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType)) || changedDateMode;
+  const approvalNoteRequired = (context?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride)) || changedDateMode;
   const approveDisabled = busy || (changedDateMode && !approvalDraft.changedBookingDate) || (approvalNoteRequired && !approveReason.trim());
   const changedDateApproval = getChangedDateApproval(request);
   const requesterMeta = [
@@ -493,7 +504,7 @@ function RequestCard({
           <Badge variant={request.status === "failed" ? "error" : request.status === "pending" ? "warning" : request.status === "approved" ? "success" : "neutral"} size="sm">
             {request.status}
           </Badge>
-          <Badge variant="info" size="sm">{formatOverrideType(request.overrideType)}</Badge>
+          {overrideTypes.map((overrideType) => <Badge key={overrideType} variant="info" size="sm">{formatOverrideType(overrideType)}</Badge>)}
         </div>
         <span className="text-[11px] text-muted-foreground">{new Date(request.createdAt).toLocaleString()}</span>
       </div>
@@ -537,7 +548,7 @@ function RequestCard({
 
       <SectionTitle>Why approval is required</SectionTitle>
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        <p><span className="font-semibold">Rule:</span> {context?.violatedRuleLabel || formatOverrideType(request.overrideType)}</p>
+        <p><span className="font-semibold">Rule:</span> {context?.violatedRuleLabel || overrideTypes.map(formatOverrideType).join(", ")}</p>
         {context?.violatedRuleType ? <p className="mt-1 text-amber-800"><span className="font-semibold">Rule type:</span> {context.violatedRuleType}</p> : null}
         {context?.currentCapacity != null || context?.totalCapacity != null ? (
           <div className="mt-2 grid gap-1">

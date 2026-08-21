@@ -9,6 +9,13 @@ const SUPPORTED_OVERRIDE_TYPES = new Set<SchedulingOverrideType>([
   "modality_block_override",
   "total_capacity_override",
 ]);
+const OVERRIDE_TYPE_ORDER: readonly SchedulingOverrideType[] = ["total_capacity_override", "category_override", "exam_mix_override", "closed_weekday_override", "modality_block_override", "exam_restriction_override"];
+
+export function normalizeSchedulingOverrideTypes(types: readonly SchedulingOverrideType[]): SchedulingOverrideType[] {
+  const values = new Set(types);
+  if (values.has("total_capacity_override")) values.delete("category_override");
+  return OVERRIDE_TYPE_ORDER.filter((type) => values.has(type));
+}
 
 function collectSupportedOverrideTypes(reasonCodes: readonly string[] | undefined): SchedulingOverrideType[] {
   const codes = new Set(reasonCodes ?? []);
@@ -26,13 +33,13 @@ function collectSupportedOverrideTypes(reasonCodes: readonly string[] | undefine
   const examMix = codes.has("exam_mix_quota_exhausted");
   const modalityBlock = codes.has("modality_blocked_overridable");
 
-  return [
+  return normalizeSchedulingOverrideTypes([
     total ? "total_capacity_override" : null,
     category ? "category_override" : null,
     examMix ? "exam_mix_override" : null,
     modalityBlock ? "modality_block_override" : null,
     closed ? "closed_weekday_override" : null,
-  ].filter((type): type is SchedulingOverrideType => type !== null);
+  ].filter((type): type is SchedulingOverrideType => type !== null));
 }
 
 function collectSupportedOverrideTypesFromExamRuleMetadata(params: {
@@ -47,7 +54,19 @@ function collectSupportedOverrideTypesFromExamRuleMetadata(params: {
   if (params.requiresSupervisorOverride && params.effectModes?.includes("restriction_overridable")) {
     candidates.push("exam_restriction_override");
   }
-  return [...new Set(candidates)];
+  return normalizeSchedulingOverrideTypes(candidates);
+}
+
+export function inferSupportedOverrideTypes(reasonCodes: readonly string[] | undefined): SchedulingOverrideType[] {
+  return collectSupportedOverrideTypes(reasonCodes);
+}
+
+export function inferSupportedOverrideTypesFromDecision(decision: SchedulingDecisionDto | null | undefined, capacityResolutionMode?: CapacityResolutionMode): SchedulingOverrideType[] {
+  return inferSupportedOverrideTypesFromExamRuleMetadata({ reasonCodes: decision?.reasons?.map((reason) => reason.code), requiresSupervisorOverride: Boolean(decision?.requiresSupervisorOverride), effectModes: decision?.matchedExamRuleSummaries?.map((summary) => summary.effectMode), capacityResolutionMode });
+}
+
+export function inferSupportedOverrideTypesFromExamRuleMetadata(params: { reasonCodes?: readonly string[]; requiresSupervisorOverride: boolean; effectModes?: readonly string[]; capacityResolutionMode?: CapacityResolutionMode }): SchedulingOverrideType[] {
+  return collectSupportedOverrideTypesFromExamRuleMetadata(params);
 }
 
 function resolveSingleSupportedOverrideType(candidates: readonly SchedulingOverrideType[]): SchedulingOverrideType | null {
@@ -125,12 +144,15 @@ export function canRoleApproveSchedulingOverride(role: Role | undefined, overrid
 
 export function shouldUseDeferredOverrideRequest(
   role: Role | undefined,
-  overrideType: SchedulingOverrideType | null,
+  overrideTypes: readonly SchedulingOverrideType[] | SchedulingOverrideType | null,
   receptionistRequestsEnabled: boolean
 ): boolean {
-  if (!overrideType) return false;
+  const types = normalizeSchedulingOverrideTypes(
+    Array.isArray(overrideTypes) ? overrideTypes : overrideTypes ? [overrideTypes] : []
+  );
+  if (!types.length) return false;
   if (role === "receptionist") return receptionistRequestsEnabled;
-  if (role === "supervisor") return overrideType === "total_capacity_override" || overrideType === "exam_mix_override";
+  if (role === "supervisor") return types.includes("total_capacity_override") || types.includes("exam_mix_override");
   return false;
 }
 

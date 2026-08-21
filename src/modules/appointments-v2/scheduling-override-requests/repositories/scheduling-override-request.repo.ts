@@ -11,6 +11,7 @@ const SELECT_COLUMNS = `
   id,
   request_type as "requestType",
   override_type as "overrideType",
+  override_types as "overrideTypes",
   status,
   requester_user_id as "requesterUserId",
   approver_user_id as "approverUserId",
@@ -47,6 +48,7 @@ export async function insertSchedulingOverrideRequest(
   input: {
     requestType: "create_booking" | "reschedule_booking";
     overrideType: SchedulingOverrideType;
+    overrideTypes: SchedulingOverrideType[];
     requesterUserId: number;
     patientId: number;
     modalityId: number;
@@ -66,21 +68,22 @@ export async function insertSchedulingOverrideRequest(
   const result = await client.query<SchedulingOverrideRequestRow>(
     `
       insert into appointments_v2.scheduling_override_requests (
-        request_type, override_type, requester_user_id, patient_id, modality_id, exam_type_id,
+        request_type, override_type, override_types, requester_user_id, patient_id, modality_id, exam_type_id,
         requested_booking_date, requested_booking_time, booking_id, requested_policy_version_id, patient_identity_verification_fingerprint,
         request_payload_json, original_decision_snapshot_json, requester_reason, expires_at,
         created_from_context
       ) values (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11,
-        $12::jsonb, $13::jsonb, $14, $15,
-        $16
+        $1, $2, $3::text[], $4, $5, $6, $7,
+        $8, $9, $10, $11, $12,
+        $13::jsonb, $14::jsonb, $15, $16,
+        $17
       )
       returning ${SELECT_COLUMNS}
     `,
     [
       input.requestType,
       input.overrideType,
+      input.overrideTypes,
       input.requesterUserId,
       input.patientId,
       input.modalityId,
@@ -122,7 +125,7 @@ export async function listSchedulingOverrideRequests(
   }
   if (filters.overrideType) {
     values.push(filters.overrideType);
-    where.push(`override_type = $${values.length}`);
+    where.push(`$${values.length} = any(override_types)`);
   }
   if (filters.modalityId) {
     values.push(filters.modalityId);
