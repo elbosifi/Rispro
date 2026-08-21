@@ -47,6 +47,7 @@ describe("AvailabilityDateRow exam-rule display", () => {
         ruleId: "201",
         title: "Brain MRI restriction",
         effectLabel: "Restricted unless supervisor approves",
+        effectMode: "restriction_overridable",
         isBlocking: false,
       },
     });
