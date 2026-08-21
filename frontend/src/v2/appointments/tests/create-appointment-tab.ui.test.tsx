@@ -458,7 +458,7 @@ const combinedTotalAndExamMixRows: AvailabilityRowViewModel[] = [
 const combinedTotalAndExamMixDecision: SchedulingDecisionDto = {
   isAllowed: false,
   requiresSupervisorOverride: true,
-  displayStatus: "full",
+  displayStatus: "blocked",
   suggestedBookingMode: "override",
   consumedCapacityMode: "override",
   remainingStandardCapacity: 0,

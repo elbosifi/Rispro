@@ -6,6 +6,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { pool } from "../../../../db/pool.js";
+import type { SchedulingOverrideType } from "../../shared/types/common.js";
 import {
   isDatabaseAvailable,
   canReachDatabase,
@@ -259,7 +260,10 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     return ruleId;
   }
 
-  async function supervisorOverride(reason = "approved") {
+  async function supervisorOverride(
+    reason = "approved",
+    overrideTypes?: SchedulingOverrideType[]
+  ) {
     const pool = await db();
     const supervisorRow = await pool.query<{ username: string }>(
       `select username from users where id = $1`,
@@ -269,6 +273,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       supervisorUsername: supervisorRow.rows[0]?.username ?? "",
       supervisorPassword: "test_password",
       reason,
+      ...(overrideTypes ? { overrideTypes } : {}),
     };
   }
 
@@ -284,6 +289,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       supervisorUsername: string;
       supervisorPassword: string;
       reason: string;
+      overrideTypes?: SchedulingOverrideType[];
     };
   }) {
     return fetch("/api/v2/appointments", {
@@ -333,7 +339,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       bookingDate: date,
       caseCategory: "non_oncology",
       capacityResolutionMode: "category_override",
-      override: await supervisorOverride("category capacity approved"),
+      override: await supervisorOverride("category capacity approved", ["category_override"]),
     });
     assert.equal(second.status, 201);
 
@@ -494,6 +500,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
         supervisorUsername: supervisorRow.rows[0]?.username ?? "",
         supervisorPassword: "test_password",
         reason: "approved",
+        overrideTypes: ["modality_block_override"],
       },
     });
     assert.equal(result.status, 201);

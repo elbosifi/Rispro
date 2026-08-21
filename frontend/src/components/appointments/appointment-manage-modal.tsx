@@ -303,8 +303,6 @@ export function AppointmentManageModal({
             ? "special_quota_extra"
             : "standard"
           : "standard";
-  const canUseSelectedRescheduleCapacityMode =
-    rescheduleCapacityResolutionMode === "special_quota_extra" ? canUseRescheduleSpecialQuota : effectiveRescheduleCapacityResolutionMode !== "standard";
   const showRescheduleCapacityActions =
     (canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride) ||
     (isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride) ||

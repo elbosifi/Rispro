@@ -227,7 +227,10 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       },
     });
     assert.equal(fillB.status, 409);
-    assert.ok(String((fillB.data as any).error ?? "").includes("not allowed"));
+    assert.equal(
+      (fillB.data as any).error,
+      "The current scheduling state requires an explicit override type."
+    );
   });
 
   it("respects exam type change policy settings for disabled and supervisor-required modes", async () => {

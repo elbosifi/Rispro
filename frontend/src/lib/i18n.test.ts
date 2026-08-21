@@ -17,13 +17,13 @@ describe("i18n catalog parity", () => {
     const englishKeys = Object.keys(__i18nTestables.en).sort();
     const arabicKeys = Object.keys(__i18nTestables.ar).sort();
 
-    expect(englishKeys).toHaveLength(2217);
+    expect(englishKeys).toHaveLength(2218);
     expect(arabicKeys).toEqual(englishKeys);
   });
 
   it("keeps every translation key and value byte-for-byte stable", () => {
-    expect(catalogHash(__i18nTestables.en)).toBe("3f13fa94d38149f0275c035e21f16220eb8bc444b29ea4b359399a86b73c4462");
-    expect(catalogHash(__i18nTestables.ar)).toBe("e207b414ec587f638baaae381c89f9de96c751e50e2ae59fd464afdd0ada820d");
+    expect(catalogHash(__i18nTestables.en)).toBe("a4defb392c4ad1235aa30a61259f18c3c85825182f399b0e1c49b308792e27bf");
+    expect(catalogHash(__i18nTestables.ar)).toBe("0fadc9a0dd7b9c35972c66664e5f5be993a5c415016f60fa76945ca7c8f19b5d");
   });
 
   it("preserves interpolation and localized fallback behavior", () => {
