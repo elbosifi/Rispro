@@ -31,10 +31,30 @@ import {
   createTestAuthCookie,
   type TestData,
 } from "./helpers.js";
+import { validateFinalOverrideTypeConsistency } from "../../booking/services/override-authority.js";
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "RULE_ENF_";
 const WEEKEND_APPOINTMENT_SETTING_KEYS = ["allow_friday_appointments", "allow_saturday_appointments"] as const;
+
+describe("final scheduling override type consistency", () => {
+  it("requires an explicit type only when exactly one scheduling type is final", () => {
+    assert.doesNotThrow(() => validateFinalOverrideTypeConsistency([], null));
+    assert.throws(
+      () => validateFinalOverrideTypeConsistency(["modality_block_override"], null),
+      (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("override_type_required")
+    );
+    assert.doesNotThrow(() => validateFinalOverrideTypeConsistency(["modality_block_override"], "modality_block_override"));
+    assert.throws(
+      () => validateFinalOverrideTypeConsistency(["modality_block_override"], "exam_restriction_override"),
+      (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("override_type_mismatch")
+    );
+    assert.throws(
+      () => validateFinalOverrideTypeConsistency(["modality_block_override", "exam_restriction_override"], "modality_block_override"),
+      (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("multiple_override_types_required")
+    );
+  });
+});
 
 type WeekendAppointmentSettingKey = typeof WEEKEND_APPOINTMENT_SETTING_KEYS[number];
 
@@ -667,7 +687,14 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
 
       await publishPolicyWithRules({ modalityBlockedRules: [], categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true }], examTypeRules: [examRule(softDate, "restriction_overridable")] }, "RE_ps_exam_override_soft");
       const withoutOverride = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology" } });
-      assert.strictEqual(withoutOverride.status, 403);
+      assert.strictEqual(withoutOverride.status, 409);
+      const missingType = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Missing typed scheduling override" } } });
+      assert.strictEqual(missingType.status, 409);
+      const missingTypeBookingCount = await pool.query<{ count: string }>(
+        "select count(*)::text as count from appointments_v2.bookings where patient_id = $1 and booking_date = $2",
+        [testData.patientId, softDate]
+      );
+      assert.strictEqual(Number(missingTypeBookingCount.rows[0]?.count), 0);
       const supervisorBooking = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Exam restriction approved", overrideType: "exam_restriction_override" } } });
       assert.strictEqual(supervisorBooking.status, 201);
       assert.strictEqual((supervisorBooking.data as any).wasOverride, true);
@@ -1452,7 +1479,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         },
       });
 
-      assert.strictEqual(result.status, 403, "Override required but not provided should return 403");
+      assert.strictEqual(result.status, 409, "Typed scheduling overrides must provide overrideType");
     });
   });
 });

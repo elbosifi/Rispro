@@ -689,20 +689,10 @@ export async function rescheduleBookingInternal(
     });
   }
 
-  if (wasOverride && supervisorUserId != null) {
-    const overrideType: SchedulingOverrideType =
+  const schedulingAuditOverrideType: SchedulingOverrideType | null =
       approvedOverrideContext?.overrideType ??
-      (requiredOverrideTypes.includes("total_capacity_override")
-        ? "total_capacity_override"
-        : requiredOverrideTypes.includes("exam_mix_override")
-        ? "exam_mix_override"
-        : requiredOverrideTypes.includes("exam_restriction_override")
-        ? "exam_restriction_override"
-        : requiredOverrideTypes.includes("modality_block_override")
-        ? "modality_block_override"
-        : requiredOverrideTypes.includes("category_override")
-        ? "category_override"
-        : "closed_weekday_override");
+      (requiredOverrideTypes.length === 1 ? requiredOverrideTypes[0] : null);
+  if (wasOverride && supervisorUserId != null && schedulingAuditOverrideType) {
     await recordOverrideAudit(client, {
       bookingId,
       patientId: booking.patientId,
@@ -712,7 +702,7 @@ export async function rescheduleBookingInternal(
       requestingUserId: approvedOverrideContext?.requesterUserId ?? userId,
       supervisorUserId,
       overrideReason: approvedOverrideContext?.reason ?? override?.reason ?? null,
-      overrideType,
+      overrideType: schedulingAuditOverrideType,
       decisionSnapshot: approvedOverrideContext
         ? { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId }
         : { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },

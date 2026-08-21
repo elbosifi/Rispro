@@ -48,6 +48,14 @@ export function validateFinalOverrideTypeConsistency(
     );
   }
 
+  if (finalTypes.length === 1 && !requestedOverrideType) {
+    throw new SchedulingError(
+      409,
+      "The current scheduling state requires an explicit override type.",
+      ["override_type_required"]
+    );
+  }
+
   if (requestedOverrideType && finalTypes.length === 1 && finalTypes[0] !== requestedOverrideType) {
     throw new SchedulingError(
       409,

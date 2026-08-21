@@ -1387,6 +1387,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
           supervisorUsername,
           supervisorPassword: "test_password",
           reason: "Immediate supervisor override regression",
+          overrideType: "category_override",
         },
       },
     });
