@@ -324,19 +324,27 @@ export function CreateAppointmentTab({
   const hasAnySpecialQuotaAvailable = (availability.rawItems ?? []).some(
     (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
-  const selectedDateNeedsCategoryOverride = Boolean(availabilitySelectedRow?.reasonCodes.includes("category_capacity_exhausted"));
-  const selectedDateNeedsTotalCapacityOverride = Boolean(availabilitySelectedRow?.reasonCodes.includes("modality_daily_capacity_exhausted"));
-  const effectiveCapacityResolutionMode =
-    form.capacityResolutionMode === "category_override" && canUseNonStandardCapacityModes && selectedDateNeedsCategoryOverride
-      ? "category_override"
-      : form.capacityResolutionMode === "total_capacity_override" && isSuperAdmin && selectedDateNeedsTotalCapacityOverride
-        ? "total_capacity_override"
-        : form.capacityResolutionMode;
+  const selectedDateNeedsCategoryOverride = Boolean(availabilitySelectedRow?.reasonCodes?.includes("category_capacity_exhausted"));
+  const selectedDateNeedsTotalCapacityOverride = Boolean(availabilitySelectedRow?.reasonCodes?.includes("modality_daily_capacity_exhausted"));
   const canUseSpecialQuotaMode =
     isSuperAdmin ||
     hasSpecialQuotaAvailable ||
     hasAnySpecialQuotaAvailable ||
     (form.capacityResolutionMode === "special_quota_extra" && availability.isLoading);
+  const effectiveCapacityResolutionMode =
+    form.capacityResolutionMode === "category_override"
+      ? canUseNonStandardCapacityModes && selectedDateNeedsCategoryOverride
+        ? "category_override"
+        : "standard"
+      : form.capacityResolutionMode === "total_capacity_override"
+        ? isSuperAdmin && selectedDateNeedsTotalCapacityOverride
+          ? "total_capacity_override"
+          : "standard"
+        : form.capacityResolutionMode === "special_quota_extra"
+          ? canUseSpecialQuotaMode && hasSpecialQuotaAvailable
+            ? "special_quota_extra"
+            : "standard"
+          : "standard";
   const canUseSelectedCapacityMode =
     form.capacityResolutionMode === "special_quota_extra"
       ? hasSpecialQuotaAvailable
@@ -751,7 +759,7 @@ export function CreateAppointmentTab({
         supervisorUsername: payload.supervisorUsername,
         supervisorPassword: payload.supervisorPassword,
         reason: payload.overrideReason,
-        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision, form.capacityResolutionMode) ?? undefined,
+        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision, effectiveCapacityResolutionMode) ?? undefined,
       });
 
       setShowOverrideModal(false);

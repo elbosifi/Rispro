@@ -288,17 +288,25 @@ export function AppointmentManageModal({
     offset: rescheduleOffset,
   });
   const selectedRescheduleAvailabilityItem = rescheduleAvailability.rawItems.find((item) => item.date === rescheduleDate);
-  const rescheduleSelectedDateNeedsCategoryOverride = Boolean(rescheduleSelectedRow?.reasonCodes.includes("category_capacity_exhausted"));
-  const rescheduleSelectedDateNeedsTotalCapacityOverride = Boolean(rescheduleSelectedRow?.reasonCodes.includes("modality_daily_capacity_exhausted"));
-  const effectiveRescheduleCapacityResolutionMode =
-    rescheduleCapacityResolutionMode === "category_override" && canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride
-      ? "category_override"
-      : rescheduleCapacityResolutionMode === "total_capacity_override" && isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride
-        ? "total_capacity_override"
-        : rescheduleCapacityResolutionMode;
+  const rescheduleSelectedDateNeedsCategoryOverride = Boolean(rescheduleSelectedRow?.reasonCodes?.includes("category_capacity_exhausted"));
+  const rescheduleSelectedDateNeedsTotalCapacityOverride = Boolean(rescheduleSelectedRow?.reasonCodes?.includes("modality_daily_capacity_exhausted"));
   const rescheduleSpecialQuotaAvailable = (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
   const rescheduleAnySpecialQuotaAvailable = rescheduleAvailability.rawItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
   const canUseRescheduleSpecialQuota = isSuperAdmin || rescheduleSpecialQuotaAvailable || rescheduleAnySpecialQuotaAvailable || rescheduleCapacityResolutionMode === "special_quota_extra";
+  const effectiveRescheduleCapacityResolutionMode =
+    rescheduleCapacityResolutionMode === "category_override"
+      ? canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride
+        ? "category_override"
+        : "standard"
+      : rescheduleCapacityResolutionMode === "total_capacity_override"
+        ? isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride
+          ? "total_capacity_override"
+          : "standard"
+        : rescheduleCapacityResolutionMode === "special_quota_extra"
+          ? canUseRescheduleSpecialQuota && rescheduleSpecialQuotaAvailable
+            ? "special_quota_extra"
+            : "standard"
+          : "standard";
   const canUseSelectedRescheduleCapacityMode =
     rescheduleCapacityResolutionMode === "special_quota_extra" ? canUseRescheduleSpecialQuota : effectiveRescheduleCapacityResolutionMode !== "standard";
   const showRescheduleCapacityActions =

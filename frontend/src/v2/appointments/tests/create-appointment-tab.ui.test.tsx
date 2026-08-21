@@ -1022,7 +1022,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     }
   });
 
-  it("reclassifies a selected soft exam restriction when the capacity mode changes", async () => {
+  it("does not expose capacity actions for a selected soft exam restriction", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = [softExamRestrictionRow];
     try {
@@ -1043,12 +1043,9 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      const capacityAction = screen.getAllByRole("combobox").find((element) =>
-        Array.from((element as HTMLSelectElement).options).some((option) => option.value === "category_override")
-      ) as HTMLSelectElement;
-      fireEvent.change(capacityAction, { target: { value: "category_override" } });
       await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
-      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(false);
       expect(screen.queryByText("Supervisor Override Required")).toBeNull();
       expect(onCreateAppointment).not.toHaveBeenCalled();
     } finally {
@@ -1328,8 +1325,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-    const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
-    expect(Array.from(select.options).some((option) => option.value === "special_quota_extra")).toBe(false);
+    expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
   });
 
   it("does not offer special_quota_extra when configured quota is exhausted", async () => {
@@ -1416,7 +1412,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockAvailabilityLoading.current = true;
     fireEvent.change(document.querySelector("textarea") as HTMLTextAreaElement, { target: { value: "keep selection" } });
 
-    expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("special_quota_extra");
+    expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
   });
 
   it("resets special quota mode after changing to an exam type without an authorized quota", async () => {
@@ -1434,29 +1430,34 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
     });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-    await waitFor(() => {
-      expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("standard");
-    });
+    expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
   });
 
   it("retains supervisor capacity control boundaries", async () => {
+    mockRowsRef.current = availabilityRows;
     setup(true, [], undefined, "supervisor");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     const supervisorOptions = Array.from((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).options).map((option) => option.value);
-    expect(supervisorOptions).toEqual(["standard", "category_override", "special_quota_extra"]);
+    expect(supervisorOptions).toContain("category_override");
+    expect(supervisorOptions).not.toContain("total_capacity_override");
 
   });
 
   it("retains super-admin total-capacity control", async () => {
+    mockRowsRef.current = supervisorTotalCapacityRows;
     setup(true, [], undefined, "super_admin");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-06 full/i }));
     const options = Array.from((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).options).map((option) => option.value);
-    expect(options).toEqual(["standard", "category_override", "total_capacity_override", "special_quota_extra"]);
+    expect(options).toContain("total_capacity_override");
   });
 
   describe("success state actions", () => {
