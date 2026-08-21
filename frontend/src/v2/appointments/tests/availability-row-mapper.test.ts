@@ -165,6 +165,19 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(isAvailabilityRowVisible(requestableBlocked, { showFullDays: true, showPolicyHiddenDays: false, requestableOverride: true })).toBe(true);
   });
 
+  it("shows a supervisor-overridable exam restriction without Show full days", () => {
+    const row = mapAvailabilityRow(baseDay(), "en");
+    row.matchedExamRuleSummary = {
+      ruleId: "201",
+      title: "Brain MRI restriction",
+      effectLabel: "Restricted unless supervisor approves",
+      effectMode: "restriction_overridable",
+      isBlocking: false,
+    };
+
+    expect(isAvailabilityRowVisible(row, { showFullDays: false, showPolicyHiddenDays: false })).toBe(true);
+  });
+
   it("policy-hidden visibility does not show full rows when full days are hidden", () => {
     const row = {
       ...mapAvailabilityRow(baseDay(), "en"),

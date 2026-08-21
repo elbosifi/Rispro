@@ -39,6 +39,7 @@ export interface AvailabilityRowViewModel {
     ruleId: string;
     title: string;
     effectLabel: string;
+    effectMode: string;
     isBlocking: boolean;
   } | null;
   reasonText: string;
@@ -142,6 +143,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
           ruleId: matchedExamRuleSummary.ruleId,
           title: matchedExamRuleSummary.title,
           effectLabel,
+          effectMode: matchedExamRuleSummary.effectMode,
           isBlocking: matchedExamRuleSummary.isBlocking,
         }
       : null,
@@ -158,6 +160,8 @@ export function isAvailabilityRowVisible(
   options: AvailabilityRowVisibilityOptions
 ): boolean {
   if (row.hasSpecialQuotaPath) return true;
+  const hasExamRestrictionOverride = row.requiresSupervisorOverride && row.matchedExamRuleSummary?.effectMode === "restriction_overridable";
+  if (hasExamRestrictionOverride) return true;
   if (row.status === "full" || row.status === "restricted" || options.requestableOverride) {
     return options.showFullDays;
   }

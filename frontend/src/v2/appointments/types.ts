@@ -7,7 +7,7 @@
 export type CaseCategory = "oncology" | "non_oncology";
 export type CapacityResolutionMode = "standard" | "category_override" | "total_capacity_override" | "special_quota_extra";
 export type SchedulingOverrideRequestType = "create_booking" | "reschedule_booking";
-export type SchedulingOverrideType = "closed_weekday_override" | "category_override" | "exam_mix_override" | "total_capacity_override";
+export type SchedulingOverrideType = "closed_weekday_override" | "category_override" | "exam_mix_override" | "exam_restriction_override" | "total_capacity_override";
 export type SchedulingOverrideRequestStatus = "pending" | "approved" | "rejected" | "cancelled" | "failed" | "expired";
 export type DecisionStatus = "available" | "restricted" | "blocked";
 export type BookingStatus =

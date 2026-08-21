@@ -1,6 +1,6 @@
 import { isAvailabilityRowVisible } from "../hooks/availability-row-mapper";
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
-import { inferSupportedOverrideType } from "../utils/scheduling-override-requests";
+import { inferSupportedOverrideType, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -43,11 +43,15 @@ export function AvailabilityPanel({
 }: Props) {
   const { language } = useLanguage();
   const visibleRows = rows.filter((row) => {
+    const rowOverrideType = inferSupportedOverrideTypeFromExamRuleMetadata({
+      requiresSupervisorOverride: row.requiresSupervisorOverride,
+      effectModes: row.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
+    }) ?? inferSupportedOverrideType(row.reasonCodes);
     return isAvailabilityRowVisible(row, {
       showFullDays,
       showPolicyHiddenDays,
       selected: row.date === selectedDate,
-      requestableOverride: allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes)),
+      requestableOverride: allowOverrideRequests && Boolean(rowOverrideType),
     });
   });
 
@@ -95,7 +99,12 @@ export function AvailabilityPanel({
           {t(language, "appointments.create.noNonFullDays")}
         </div>
       ) : visibleRows.map((row) => {
-        const requestableOverride = allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes));
+        const requestableOverride = allowOverrideRequests && Boolean(
+          inferSupportedOverrideTypeFromExamRuleMetadata({
+            requiresSupervisorOverride: row.requiresSupervisorOverride,
+            effectModes: row.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
+          }) ?? inferSupportedOverrideType(row.reasonCodes)
+        );
         return (
           <AvailabilityDateRow
             key={row.date}

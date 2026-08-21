@@ -36,7 +36,7 @@ import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
-import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision } from "../utils/scheduling-override-requests";
+import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
 import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -420,28 +420,35 @@ export function CreateAppointmentTab({
     return isSupervisor && overrideType === "total_capacity_override";
   }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, isReceptionist, isSupervisor]);
 
+  const inferRowOverrideType = useCallback((row: AvailabilityRowViewModel | null | undefined): SchedulingOverrideType | null => {
+    return inferSupportedOverrideTypeFromExamRuleMetadata({
+      requiresSupervisorOverride: Boolean(row?.requiresSupervisorOverride),
+      effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
+    }) ?? inferSupportedOverrideType(row?.reasonCodes);
+  }, []);
+
   const visibleInAvailabilityPanel = useCallback((row: AvailabilityRowViewModel, selected = false): boolean => {
     return isAvailabilityRowVisible(row, {
       showFullDays,
       showPolicyHiddenDays,
       selected,
-      requestableOverride: canRequestDeferredOverride(inferSupportedOverrideType(row.reasonCodes), row),
+      requestableOverride: canRequestDeferredOverride(inferRowOverrideType(row), row),
     });
-  }, [canRequestDeferredOverride, showFullDays, showPolicyHiddenDays]);
+  }, [canRequestDeferredOverride, inferRowOverrideType, showFullDays, showPolicyHiddenDays]);
 
   const canSelectAvailabilityRow = useCallback((row: AvailabilityRowViewModel): boolean => {
-    const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
+    const supportedOverrideType = inferRowOverrideType(row);
     if (isReceptionist && row.status !== "available" && !row.hasSpecialQuotaPath && !canRequestDeferredOverride(supportedOverrideType, row)) {
       return false;
     }
     if (row.status === "blocked" && !supportedOverrideType) return false;
     if (row.status === "full" && !row.requiresSupervisorOverride && !supportedOverrideType) return false;
     return true;
-  }, [canRequestDeferredOverride, isReceptionist]);
+  }, [canRequestDeferredOverride, inferRowOverrideType, isReceptionist]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (!canSelectAvailabilityRow(row)) return;
-    const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
+    const supportedOverrideType = inferRowOverrideType(row);
     const quotaOnlyPath = row.hasSpecialQuotaPath;
     const requiresOverride = !quotaOnlyPath && (row.status === "restricted" || (row.status !== "available" && Boolean(supportedOverrideType)) || (row.status === "full" && row.requiresSupervisorOverride));
     if (quotaOnlyPath) actions.setCapacityResolutionMode("special_quota_extra");
@@ -450,7 +457,7 @@ export function CreateAppointmentTab({
     setPageError(null);
   }
 
-  const selectedRowSupportedOverrideType = inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
+  const selectedRowSupportedOverrideType = inferRowOverrideType(availabilitySelectedRow);
   const selectedRowCanUseImmediateOverride =
     availabilitySelectedRow != null &&
     availabilitySelectedRow.status !== "available" &&
@@ -673,7 +680,7 @@ export function CreateAppointmentTab({
       });
 
       const supportedOverrideType =
-        inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
+        inferSupportedOverrideTypeFromDecision(decision) ?? inferRowOverrideType(availabilitySelectedRow);
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !supportedOverrideType) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
@@ -728,7 +735,7 @@ export function CreateAppointmentTab({
         supervisorUsername: payload.supervisorUsername,
         supervisorPassword: payload.supervisorPassword,
         reason: payload.overrideReason,
-        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ?? undefined,
+        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? inferRowOverrideType(availabilitySelectedRow) ?? undefined,
       });
 
       setShowOverrideModal(false);

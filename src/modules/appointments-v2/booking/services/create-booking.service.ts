@@ -524,6 +524,8 @@ export async function createBookingInternal(
         ? "total_capacity_override"
         : requiredOverrideTypes.includes("exam_mix_override")
         ? "exam_mix_override"
+        : requiredOverrideTypes.includes("exam_restriction_override")
+        ? "exam_restriction_override"
         : requiredOverrideTypes.includes("category_override")
         ? "category_override"
         : "closed_weekday_override");

@@ -633,6 +633,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         "restricted",
         "Overridable restriction should show 'restricted'"
       );
+      assert.strictEqual(day.decision.requiresSupervisorOverride, true);
       assert.ok(
         Array.isArray(day.decision.matchedExamRuleSummaries),
         "Restricted exam-rule day should include matchedExamRuleSummaries"
@@ -642,6 +643,49 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         "restriction_overridable",
         "Matched exam-rule summary should preserve effect mode"
       );
+    });
+  });
+
+  describe("Exam restriction override booking authority", () => {
+    it("requires and records a supervisor override, permits super_admin, and rejects hard restrictions", async (t) => {
+      if (guard(t)) return;
+      const userResult = await pool.query<{ username: string }>("select username from users where id = $1", [testData.userId]);
+      const username = userResult.rows[0]?.username;
+      assert.ok(username);
+      const softDate = addDaysIso(120);
+      const superAdminDate = addDaysIso(121);
+      const hardDate = addDaysIso(122);
+      const examRule = (date: string, effectMode: "restriction_overridable" | "hard_restriction") => ({
+        modalityId: testData.modalityId,
+        ruleType: "specific_date" as const,
+        effectMode,
+        specificDate: date,
+        startDate: null, endDate: null,
+        weekday: null, alternateWeeks: false, recurrenceAnchorDate: null,
+        examTypeIds: [testData.examTypeId], title: "Exam restriction", notes: null, isActive: true,
+      });
+
+      await publishPolicyWithRules({ modalityBlockedRules: [], categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true }], examTypeRules: [examRule(softDate, "restriction_overridable")] }, "RE_ps_exam_override_soft");
+      const withoutOverride = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology" } });
+      assert.strictEqual(withoutOverride.status, 403);
+      assert.strictEqual(withoutOverride.status, 403);
+      const supervisorBooking = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Exam restriction approved", overrideType: "exam_restriction_override" } } });
+      assert.strictEqual(supervisorBooking.status, 201);
+      assert.strictEqual((supervisorBooking.data as any).wasOverride, true);
+
+      await pool.query("update users set role = 'super_admin' where id = $1", [testData.userId]);
+      try {
+        await publishPolicyWithRules({ modalityBlockedRules: [], categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true }], examTypeRules: [examRule(superAdminDate, "restriction_overridable")] }, "RE_ps_exam_override_admin");
+        const superAdminBooking = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: superAdminDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Super admin exam restriction approval", overrideType: "exam_restriction_override" } } });
+        assert.strictEqual(superAdminBooking.status, 201);
+        assert.strictEqual((superAdminBooking.data as any).wasOverride, true);
+      } finally {
+        await pool.query("update users set role = 'supervisor' where id = $1", [testData.userId]);
+      }
+
+      await publishPolicyWithRules({ modalityBlockedRules: [], categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true }], examTypeRules: [examRule(hardDate, "hard_restriction")] }, "RE_ps_exam_override_hard");
+      const hardBooking = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: hardDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Should not bypass hard restriction", overrideType: "exam_restriction_override" } } });
+      assert.strictEqual(hardBooking.status, 409);
     });
   });
 

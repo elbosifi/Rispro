@@ -5,6 +5,7 @@ const SUPPORTED_OVERRIDE_TYPES = new Set<SchedulingOverrideType>([
   "closed_weekday_override",
   "category_override",
   "exam_mix_override",
+  "exam_restriction_override",
   "total_capacity_override",
 ]);
 
@@ -32,7 +33,23 @@ export function inferSupportedOverrideType(reasonCodes: readonly string[] | unde
 }
 
 export function inferSupportedOverrideTypeFromDecision(decision: SchedulingDecisionDto | null | undefined): SchedulingOverrideType | null {
-  return inferSupportedOverrideType(decision?.reasons?.map((reason) => reason.code));
+  const reasonType = inferSupportedOverrideType(decision?.reasons?.map((reason) => reason.code));
+  if (
+    decision?.requiresSupervisorOverride &&
+    decision.matchedExamRuleSummaries?.some((summary) => summary.effectMode === "restriction_overridable")
+  ) {
+    return reasonType && reasonType !== "exam_restriction_override" ? null : "exam_restriction_override";
+  }
+  return reasonType;
+}
+
+export function inferSupportedOverrideTypeFromExamRuleMetadata(params: {
+  requiresSupervisorOverride: boolean;
+  effectModes?: readonly string[];
+}): SchedulingOverrideType | null {
+  return params.requiresSupervisorOverride && params.effectModes?.includes("restriction_overridable")
+    ? "exam_restriction_override"
+    : null;
 }
 
 export function formatOverrideType(type: SchedulingOverrideType | string | null | undefined): string {
@@ -43,6 +60,8 @@ export function formatOverrideType(type: SchedulingOverrideType | string | null 
       return "Category capacity override";
     case "exam_mix_override":
       return "Exam mix override";
+    case "exam_restriction_override":
+      return "Exam restriction override";
     case "total_capacity_override":
       return "Total modality capacity override";
     default:
@@ -57,7 +76,7 @@ export function formatRequestType(type: string): string {
 export function canRoleApproveSchedulingOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override";
+  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override" || overrideType === "exam_restriction_override";
 }
 
 export function approvalNoteRequiredForOverride(type: SchedulingOverrideType | string | null | undefined): boolean {

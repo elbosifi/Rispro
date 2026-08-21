@@ -445,7 +445,7 @@ async function canReceptionistCreateOverrideRequest(client: PoolClient, userId: 
 function canApproveOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override";
+  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override" || overrideType === "exam_restriction_override";
 }
 
 function canSeeAll(role: Role | undefined): boolean {
@@ -579,8 +579,9 @@ function inferRequiredOverrideType(decision: BookingDecision): SchedulingOverrid
     codes.has("category_override_forbidden") ||
     codes.has("category_capacity_exhausted");
   const examMix = codes.has("exam_mix_quota_exhausted");
+  const examRestriction = decision.requiresSupervisorOverride && decision.matchedExamRuleSummaries?.some((summary) => summary.effectMode === "restriction_overridable");
 
-  if ([closed, total, category, examMix].filter(Boolean).length > 1) {
+  if ([closed, total, category, examMix, examRestriction].filter(Boolean).length > 1) {
     throw new SchedulingError(
       409,
       "Multiple separate override types are required. Create separate requests after resolving the first blocker.",
@@ -591,6 +592,7 @@ function inferRequiredOverrideType(decision: BookingDecision): SchedulingOverrid
   if (total) return "total_capacity_override";
   if (category) return "category_override";
   if (examMix) return "exam_mix_override";
+  if (examRestriction) return "exam_restriction_override";
   if (closed) return "closed_weekday_override";
   return null;
 }

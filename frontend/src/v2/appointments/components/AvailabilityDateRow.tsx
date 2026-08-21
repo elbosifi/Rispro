@@ -38,6 +38,7 @@ interface Props {
     ruleId: string;
     title: string;
     effectLabel: string;
+    effectMode: string;
     isBlocking: boolean;
   } | null;
   reasonText: string;

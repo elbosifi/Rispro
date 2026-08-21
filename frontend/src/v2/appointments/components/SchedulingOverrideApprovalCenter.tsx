@@ -32,7 +32,7 @@ import {
 
 const STATUS_OPTIONS: Array<SchedulingOverrideRequestStatus | ""> = ["", "pending", "approved", "rejected", "cancelled", "failed", "expired"];
 const REQUEST_TYPE_OPTIONS = ["", "create_booking", "reschedule_booking"] as const;
-const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "exam_mix_override", "total_capacity_override"];
+const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "exam_mix_override", "exam_restriction_override", "total_capacity_override"];
 
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
