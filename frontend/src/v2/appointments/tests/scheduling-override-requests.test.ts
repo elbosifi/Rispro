@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SchedulingDecisionDto } from "../types";
 import {
   canRoleApproveSchedulingOverride,
+  hasMultipleSupportedOverrideTypesFromDecision,
   inferSupportedOverrideTypeFromDecision,
 } from "../utils/scheduling-override-requests";
 
@@ -41,6 +42,12 @@ describe("exam restriction scheduling override", () => {
     "closed_weekday_override_required",
   ])("does not mask a concurrent %s blocker", (reasonCode) => {
     expect(inferSupportedOverrideTypeFromDecision(decisionWithReasons("restriction_overridable", [reasonCode]))).toBeNull();
+  });
+
+  it.each(["category_override", "total_capacity_override"] as const)("treats %s capacity mode plus a soft exam restriction as multiple override types", (capacityResolutionMode) => {
+    const value = decision("restriction_overridable", true);
+    expect(inferSupportedOverrideTypeFromDecision(value, capacityResolutionMode)).toBeNull();
+    expect(hasMultipleSupportedOverrideTypesFromDecision(value, capacityResolutionMode)).toBe(true);
   });
 
   it.each([

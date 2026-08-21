@@ -517,6 +517,7 @@ describe("AppointmentManageModal", () => {
 
     expect(screen.queryByText("Supervisor Override Required")).toBeNull();
     expect(screen.queryByText("Request Approval")).toBeNull();
+    expect(screen.getByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeTruthy();
     expect(mocks.rescheduleV2Booking).not.toHaveBeenCalled();
   });
 

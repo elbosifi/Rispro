@@ -1050,7 +1050,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
-      expect(await screen.findByText("Availability changed before save")).toBeTruthy();
+      expect(await screen.findByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeTruthy();
       expect(screen.queryByText("Supervisor Override Required")).toBeNull();
       expect(screen.queryByRole("heading", { name: "Request override approval" })).toBeNull();
       expect(onCreateAppointment).not.toHaveBeenCalled();

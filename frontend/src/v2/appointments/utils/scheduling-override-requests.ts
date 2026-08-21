@@ -1,5 +1,5 @@
 import type { Role } from "@/types/api";
-import type { SchedulingDecisionDto, SchedulingOverrideType } from "../types";
+import type { CapacityResolutionMode, SchedulingDecisionDto, SchedulingOverrideType } from "../types";
 
 const SUPPORTED_OVERRIDE_TYPES = new Set<SchedulingOverrideType>([
   "closed_weekday_override",
@@ -36,8 +36,11 @@ function collectSupportedOverrideTypesFromExamRuleMetadata(params: {
   reasonCodes?: readonly string[];
   requiresSupervisorOverride: boolean;
   effectModes?: readonly string[];
+  capacityResolutionMode?: CapacityResolutionMode;
 }): SchedulingOverrideType[] {
   const candidates = collectSupportedOverrideTypes(params.reasonCodes);
+  if (params.capacityResolutionMode === "category_override") candidates.push("category_override");
+  if (params.capacityResolutionMode === "total_capacity_override") candidates.push("total_capacity_override");
   if (params.requiresSupervisorOverride && params.effectModes?.includes("restriction_overridable")) {
     candidates.push("exam_restriction_override");
   }
@@ -52,11 +55,12 @@ export function inferSupportedOverrideType(reasonCodes: readonly string[] | unde
   return resolveSingleSupportedOverrideType(collectSupportedOverrideTypes(reasonCodes));
 }
 
-export function inferSupportedOverrideTypeFromDecision(decision: SchedulingDecisionDto | null | undefined): SchedulingOverrideType | null {
+export function inferSupportedOverrideTypeFromDecision(decision: SchedulingDecisionDto | null | undefined, capacityResolutionMode?: CapacityResolutionMode): SchedulingOverrideType | null {
   return inferSupportedOverrideTypeFromExamRuleMetadata({
     reasonCodes: decision?.reasons?.map((reason) => reason.code),
     requiresSupervisorOverride: Boolean(decision?.requiresSupervisorOverride),
     effectModes: decision?.matchedExamRuleSummaries?.map((summary) => summary.effectMode),
+    capacityResolutionMode,
   });
 }
 
@@ -64,15 +68,17 @@ export function inferSupportedOverrideTypeFromExamRuleMetadata(params: {
   reasonCodes?: readonly string[];
   requiresSupervisorOverride: boolean;
   effectModes?: readonly string[];
+  capacityResolutionMode?: CapacityResolutionMode;
 }): SchedulingOverrideType | null {
   return resolveSingleSupportedOverrideType(collectSupportedOverrideTypesFromExamRuleMetadata(params));
 }
 
-export function hasMultipleSupportedOverrideTypesFromDecision(decision: SchedulingDecisionDto | null | undefined): boolean {
+export function hasMultipleSupportedOverrideTypesFromDecision(decision: SchedulingDecisionDto | null | undefined, capacityResolutionMode?: CapacityResolutionMode): boolean {
   return hasMultipleSupportedOverrideTypesFromExamRuleMetadata({
     reasonCodes: decision?.reasons?.map((reason) => reason.code),
     requiresSupervisorOverride: Boolean(decision?.requiresSupervisorOverride),
     effectModes: decision?.matchedExamRuleSummaries?.map((summary) => summary.effectMode),
+    capacityResolutionMode,
   });
 }
 
@@ -80,6 +86,7 @@ export function hasMultipleSupportedOverrideTypesFromExamRuleMetadata(params: {
   reasonCodes?: readonly string[];
   requiresSupervisorOverride: boolean;
   effectModes?: readonly string[];
+  capacityResolutionMode?: CapacityResolutionMode;
 }): boolean {
   return collectSupportedOverrideTypesFromExamRuleMetadata(params).length > 1;
 }

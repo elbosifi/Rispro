@@ -986,6 +986,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "appointments.create.specialReasonRequired": "مطلوب رمز سبب خاص",
   "appointments.create.confirmSpecialReason": "أكد اختيار السبب الخاص",
   "appointments.create.availabilityChanged": "تغير التوفر قبل الحفظ",
+  "appointments.create.multipleRestrictions": "تنطبق قيود جدولة متعددة. عالج أحد القيود أو اختر تاريخًا آخر.",
   "appointments.create.selectedDateNotAllowed": "التاريخ المحدد غير متاح",
   "appointments.create.failedCreate": "فشل إنشاء الموعد",
   "appointments.v2.rescheduling": "جاري إعادة الجدولة…",

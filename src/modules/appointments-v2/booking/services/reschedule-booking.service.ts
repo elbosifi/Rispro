@@ -43,7 +43,7 @@ import { scheduleBookingWorklistDetailReplacement } from "../../../../services/d
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
-import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
+import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 import {
@@ -571,6 +571,7 @@ export async function rescheduleBookingInternal(
   if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
     requiredOverrideTypes.push("exam_mix_override");
   }
+  validateFinalOverrideTypeConsistency(requiredOverrideTypes, requestedOverrideType);
 
   if (
     decision.displayStatus === "blocked" &&

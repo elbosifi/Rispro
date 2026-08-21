@@ -32,6 +32,28 @@ export function resolveRequiredOverrideTypes(
   return [...required];
 }
 
+export function validateFinalOverrideTypeConsistency(
+  requiredOverrideTypes: readonly SchedulingOverrideType[],
+  requestedOverrideType: SchedulingOverrideType | null
+): void {
+  const finalTypes = [...new Set(requiredOverrideTypes)];
+  if (finalTypes.length > 1) {
+    throw new SchedulingError(
+      409,
+      "Multiple scheduling override types are required. Resolve one restriction or choose another date.",
+      ["multiple_override_types_required"]
+    );
+  }
+
+  if (requestedOverrideType && finalTypes.length === 1 && finalTypes[0] !== requestedOverrideType) {
+    throw new SchedulingError(
+      409,
+      "The scheduling state has changed and requires a different override type.",
+      ["override_type_mismatch"]
+    );
+  }
+}
+
 export function validateCapacityModeAuthority(
   role: Role | undefined,
   capacityResolutionMode: CapacityResolutionMode

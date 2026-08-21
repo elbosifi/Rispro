@@ -40,7 +40,7 @@ import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
-import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
+import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 import {
@@ -399,6 +399,7 @@ export async function createBookingInternal(
   if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
     requiredOverrideTypes.push("exam_mix_override");
   }
+  validateFinalOverrideTypeConsistency(requiredOverrideTypes, requestedOverrideType);
 
   if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
     // Hard block — cannot book even with override

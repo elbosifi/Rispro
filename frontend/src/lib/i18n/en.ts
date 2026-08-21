@@ -945,6 +945,7 @@ export const en = {
   "appointments.create.specialReasonRequired": "Special reason code required",
   "appointments.create.confirmSpecialReason": "Confirm special reason selection",
   "appointments.create.availabilityChanged": "Availability changed before save",
+  "appointments.create.multipleRestrictions": "Multiple scheduling restrictions apply. Resolve one restriction or choose another date.",
   "appointments.create.selectedDateNotAllowed": "Selected date unavailable",
   "appointments.create.failedCreate": "Failed to create appointment",
   "appointments.v2.rescheduling": "Rescheduling…",

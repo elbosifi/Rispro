@@ -425,6 +425,7 @@ export function CreateAppointmentTab({
       reasonCodes: row?.reasonCodes,
       requiresSupervisorOverride: Boolean(row?.requiresSupervisorOverride),
       effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
+      capacityResolutionMode: form.capacityResolutionMode,
     });
   }, []);
 
@@ -680,12 +681,12 @@ export function CreateAppointmentTab({
         includeOverrideEvaluation: true,
       });
 
-      if (hasMultipleSupportedOverrideTypesFromDecision(decision)) {
-        setPageError(t(language, "appointments.create.availabilityChanged"));
+      if (hasMultipleSupportedOverrideTypesFromDecision(decision, form.capacityResolutionMode)) {
+        setPageError(t(language, "appointments.create.multipleRestrictions"));
         return;
       }
 
-      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision);
+      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision, form.capacityResolutionMode);
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !supportedOverrideType) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
@@ -740,7 +741,7 @@ export function CreateAppointmentTab({
         supervisorUsername: payload.supervisorUsername,
         supervisorPassword: payload.supervisorPassword,
         reason: payload.overrideReason,
-        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? undefined,
+        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision, form.capacityResolutionMode) ?? undefined,
       });
 
       setShowOverrideModal(false);
