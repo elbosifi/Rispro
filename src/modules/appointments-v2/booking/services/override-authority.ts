@@ -65,6 +65,15 @@ export function validateFinalOverrideTypeConsistency(
   }
 }
 
+export function validateFinalOverrideRoleAuthority(
+  requiredOverrideTypes: readonly SchedulingOverrideType[],
+  role: Role | undefined
+): void {
+  if (requiredOverrideTypes.includes("exam_mix_override") && role !== "super_admin") {
+    throw new SchedulingError(403, "Exam mix overbooking requires Super Admin approval.", ["exam_mix_override_forbidden"]);
+  }
+}
+
 export function validateCapacityModeAuthority(
   role: Role | undefined,
   capacityResolutionMode: CapacityResolutionMode

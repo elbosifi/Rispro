@@ -4,6 +4,7 @@ import {
   canRoleApproveSchedulingOverride,
   hasMultipleSupportedOverrideTypesFromDecision,
   inferSupportedOverrideTypeFromDecision,
+  shouldUseDeferredOverrideRequest,
 } from "../utils/scheduling-override-requests";
 
 function decision(effectMode: string, requiresSupervisorOverride: boolean): SchedulingDecisionDto {
@@ -81,5 +82,13 @@ describe("exam restriction scheduling override", () => {
     expect(canRoleApproveSchedulingOverride("super_admin", "exam_restriction_override")).toBe(true);
     expect(canRoleApproveSchedulingOverride("receptionist", "exam_restriction_override")).toBe(false);
     expect(canRoleApproveSchedulingOverride("supervisor", "modality_block_override")).toBe(true);
+  });
+
+  it("routes exam mix approval to Super Admin while preserving supervisor requests", () => {
+    expect(canRoleApproveSchedulingOverride("supervisor", "exam_mix_override")).toBe(false);
+    expect(canRoleApproveSchedulingOverride("super_admin", "exam_mix_override")).toBe(true);
+    expect(shouldUseDeferredOverrideRequest("supervisor", "exam_mix_override", false)).toBe(true);
+    expect(shouldUseDeferredOverrideRequest("supervisor", "total_capacity_override", false)).toBe(true);
+    expect(shouldUseDeferredOverrideRequest("supervisor", "category_override", false)).toBe(false);
   });
 });

@@ -36,7 +36,7 @@ import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
-import { formatOverrideType, hasMultipleSupportedOverrideTypesFromDecision, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
+import { formatOverrideType, hasMultipleSupportedOverrideTypesFromDecision, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata, shouldUseDeferredOverrideRequest } from "../utils/scheduling-override-requests";
 import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -300,9 +300,8 @@ export function CreateAppointmentTab({
     modalityId: form.modalityId,
     examTypeId: form.examTypeId,
     caseCategory: form.caseCategory,
-    capacityResolutionMode: form.capacityResolutionMode,
-    specialReasonCode:
-      form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
+    capacityResolutionMode: "standard",
+    specialReasonCode: null,
     days: AVAILABILITY_WINDOW_DAYS,
     offset: availabilityOffset,
   });
@@ -325,6 +324,14 @@ export function CreateAppointmentTab({
   const hasAnySpecialQuotaAvailable = (availability.rawItems ?? []).some(
     (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
+  const selectedDateNeedsCategoryOverride = Boolean(availabilitySelectedRow?.reasonCodes.includes("category_capacity_exhausted"));
+  const selectedDateNeedsTotalCapacityOverride = Boolean(availabilitySelectedRow?.reasonCodes.includes("modality_daily_capacity_exhausted"));
+  const effectiveCapacityResolutionMode =
+    form.capacityResolutionMode === "category_override" && canUseNonStandardCapacityModes && selectedDateNeedsCategoryOverride
+      ? "category_override"
+      : form.capacityResolutionMode === "total_capacity_override" && isSuperAdmin && selectedDateNeedsTotalCapacityOverride
+        ? "total_capacity_override"
+        : form.capacityResolutionMode;
   const canUseSpecialQuotaMode =
     isSuperAdmin ||
     hasSpecialQuotaAvailable ||
@@ -333,7 +340,11 @@ export function CreateAppointmentTab({
   const canUseSelectedCapacityMode =
     form.capacityResolutionMode === "special_quota_extra"
       ? hasSpecialQuotaAvailable
-      : canUseNonStandardCapacityModes;
+      : effectiveCapacityResolutionMode !== "standard";
+  const showCapacityResolutionActions =
+    (canUseNonStandardCapacityModes && selectedDateNeedsCategoryOverride) ||
+    (isSuperAdmin && selectedDateNeedsTotalCapacityOverride) ||
+    hasSpecialQuotaAvailable;
   const filteredPriorityOptions = useMemo(
     () => priorityOptions.filter((p) => !isRoutinePriority(p)),
     [priorityOptions]
@@ -348,12 +359,14 @@ export function CreateAppointmentTab({
     if (
       (form.capacityResolutionMode !== "standard" &&
         form.capacityResolutionMode !== "special_quota_extra" &&
-        !canUseSelectedCapacityMode) ||
+        !canUseSelectedCapacityMode ||
+        (form.capacityResolutionMode === "category_override" && !selectedDateNeedsCategoryOverride) ||
+        (form.capacityResolutionMode === "total_capacity_override" && !selectedDateNeedsTotalCapacityOverride)) ||
       specialQuotaIsDefinitivelyUnavailable
     ) {
       actions.setCapacityResolutionMode("standard");
     }
-  }, [actions, availability.enabled, availability.isLoading, form.appointmentDate, form.capacityResolutionMode, hasAnySpecialQuotaAvailable, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
+  }, [actions, availability.enabled, availability.isLoading, form.appointmentDate, form.capacityResolutionMode, hasAnySpecialQuotaAvailable, hasSpecialQuotaAvailable, canUseSelectedCapacityMode, selectedDateNeedsCategoryOverride, selectedDateNeedsTotalCapacityOverride]);
 
   useEffect(() => {
     if (!form.patientId) {
@@ -417,15 +430,15 @@ export function CreateAppointmentTab({
   ): boolean => {
     if (!overrideType || !row || row.status === "available") return false;
     if (isReceptionist) return allowReceptionOverrideRequestsFromAvailability;
-    return isSupervisor && overrideType === "total_capacity_override";
-  }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, isReceptionist, isSupervisor]);
+    return shouldUseDeferredOverrideRequest(currentUserRole, overrideType, allowReceptionOverrideRequestsFromAvailability);
+  }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, currentUserRole]);
 
   const inferRowOverrideType = useCallback((row: AvailabilityRowViewModel | null | undefined): SchedulingOverrideType | null => {
     return inferSupportedOverrideTypeFromExamRuleMetadata({
       reasonCodes: row?.reasonCodes,
       requiresSupervisorOverride: Boolean(row?.requiresSupervisorOverride),
       effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
-      capacityResolutionMode: form.capacityResolutionMode,
+      capacityResolutionMode: "standard",
     });
   }, [form.capacityResolutionMode]);
 
@@ -549,16 +562,14 @@ export function CreateAppointmentTab({
       bookingDate: form.appointmentDate,
       bookingTime: null,
       caseCategory: form.caseCategory,
-      capacityResolutionMode:
-        canUseSelectedCapacityMode ? form.capacityResolutionMode : "standard",
-      useSpecialQuota:
-        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra",
+      capacityResolutionMode: effectiveCapacityResolutionMode,
+      useSpecialQuota: canUseSpecialQuotaMode && effectiveCapacityResolutionMode === "special_quota_extra",
       specialReasonCode:
-        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
+        canUseSpecialQuotaMode && effectiveCapacityResolutionMode === "special_quota_extra"
           ? form.specialReasonCode || null
           : null,
       specialReasonNote:
-        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
+        canUseSpecialQuotaMode && effectiveCapacityResolutionMode === "special_quota_extra"
           ? form.specialReasonNote.trim() || null
           : null,
       notes: form.notes.trim() || null,
@@ -670,23 +681,22 @@ export function CreateAppointmentTab({
         examTypeId: form.examTypeId,
         scheduledDate: form.appointmentDate,
         caseCategory: form.caseCategory,
-        capacityResolutionMode:
-          canUseSelectedCapacityMode ? form.capacityResolutionMode : "standard",
+        capacityResolutionMode: effectiveCapacityResolutionMode,
         useSpecialQuota:
-          canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra",
+        canUseSpecialQuotaMode && effectiveCapacityResolutionMode === "special_quota_extra",
         specialReasonCode:
-          canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
+        canUseSpecialQuotaMode && effectiveCapacityResolutionMode === "special_quota_extra"
             ? form.specialReasonCode || null
             : null,
         includeOverrideEvaluation: true,
       });
 
-      if (hasMultipleSupportedOverrideTypesFromDecision(decision, form.capacityResolutionMode)) {
+      if (hasMultipleSupportedOverrideTypesFromDecision(decision, effectiveCapacityResolutionMode)) {
         setPageError(t(language, "appointments.create.multipleRestrictions"));
         return;
       }
 
-      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision, form.capacityResolutionMode);
+      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision, effectiveCapacityResolutionMode);
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !supportedOverrideType) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
@@ -699,8 +709,8 @@ export function CreateAppointmentTab({
       }
 
       const selectedCapacityModeNeedsOverrideAuth =
-        form.capacityResolutionMode === "category_override" ||
-        form.capacityResolutionMode === "total_capacity_override";
+        effectiveCapacityResolutionMode === "category_override" ||
+        effectiveCapacityResolutionMode === "total_capacity_override";
       if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || (decision.displayStatus === "blocked" && supportedOverrideType) || selectedCapacityModeNeedsOverrideAuth) {
         if (canRequestDeferredOverride(supportedOverrideType)) {
           setPendingRequestDecision(decision);
@@ -1233,13 +1243,12 @@ export function CreateAppointmentTab({
                 />
               </div>
 
-              <div className="xl:col-span-2">
+              {showCapacityResolutionActions ? <div className="xl:col-span-2">
                 <SpecialQuotaSection
                   capacityResolutionMode={form.capacityResolutionMode}
                   onChangeCapacityResolutionMode={(mode) => {
                     if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
                     actions.setCapacityResolutionMode(mode);
-                    setAvailabilitySelectedRow(null);
                     setPendingDecision(null);
                     setShowOverrideModal(false);
                     setOverrideError(null);
@@ -1247,10 +1256,10 @@ export function CreateAppointmentTab({
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
                   specialQuotaRemaining={selectedSpecialQuotaSummary?.remaining ?? null}
                   specialQuotaConfigured={selectedSpecialQuotaSummary?.configured ?? null}
-                  showCapacityActions={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
-                  canUseSpecialQuota={canUseSpecialQuotaMode}
-                  canUseCategoryOverride={canUseNonStandardCapacityModes}
-                  canUseTotalCapacityOverride={isSuperAdmin}
+                  showCapacityActions={showCapacityResolutionActions}
+                  canUseSpecialQuota={hasSpecialQuotaAvailable}
+                  canUseCategoryOverride={canUseNonStandardCapacityModes && selectedDateNeedsCategoryOverride}
+                  canUseTotalCapacityOverride={isSuperAdmin && selectedDateNeedsTotalCapacityOverride}
                   specialReasonCode={form.specialReasonCode}
                   onChangeSpecialReasonCode={actions.setSpecialReasonCode}
                   specialReasonConfirmed={form.specialReasonConfirmed}
@@ -1259,8 +1268,8 @@ export function CreateAppointmentTab({
                   onChangeSpecialReasonNote={actions.setSpecialReasonNote}
                   options={specialReasonOptions}
                 />
-              </div>
-              {isSuperAdmin && (
+              </div> : null}
+              {isSuperAdmin && selectedDateNeedsTotalCapacityOverride && (
                 <div className="text-xs text-muted-foreground xl:col-span-2">
                   {language === "ar"
                     ? "تجاوز السعة الإجمالية متاح فقط عبر مسار صريح مع سبب."

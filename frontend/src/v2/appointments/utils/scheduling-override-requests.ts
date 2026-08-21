@@ -120,7 +120,18 @@ export function formatRequestType(type: string): string {
 export function canRoleApproveSchedulingOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override" || overrideType === "exam_restriction_override" || overrideType === "modality_block_override";
+  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_restriction_override" || overrideType === "modality_block_override";
+}
+
+export function shouldUseDeferredOverrideRequest(
+  role: Role | undefined,
+  overrideType: SchedulingOverrideType | null,
+  receptionistRequestsEnabled: boolean
+): boolean {
+  if (!overrideType) return false;
+  if (role === "receptionist") return receptionistRequestsEnabled;
+  if (role === "supervisor") return overrideType === "total_capacity_override" || overrideType === "exam_mix_override";
+  return false;
 }
 
 export function approvalNoteRequiredForOverride(type: SchedulingOverrideType | string | null | undefined): boolean {

@@ -43,7 +43,7 @@ import { scheduleBookingWorklistDetailReplacement } from "../../../../services/d
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
-import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency } from "./override-authority.js";
+import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency, validateFinalOverrideRoleAuthority } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 import {
@@ -585,6 +585,8 @@ export async function rescheduleBookingInternal(
       { decision }
     );
   }
+
+  validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole);
 
   if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth || approvedOverrideContext) {
     if (approvedOverrideContext) {

@@ -42,8 +42,16 @@ import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSe
 import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/SchedulingOverrideRequestModal";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
-import { hasMultipleSupportedOverrideTypesFromExamRuleMetadata, inferSupportedOverrideTypeFromExamRuleMetadata } from "@/v2/appointments/utils/scheduling-override-requests";
+import { hasMultipleSupportedOverrideTypesFromExamRuleMetadata as hasMultipleSupportedOverrideTypesFromExamRuleMetadataRaw, inferSupportedOverrideTypeFromExamRuleMetadata as inferSupportedOverrideTypeFromExamRuleMetadataRaw, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
 import { useAuth } from "@/providers/auth-provider";
+
+function inferSupportedOverrideTypeFromExamRuleMetadata(params: Parameters<typeof inferSupportedOverrideTypeFromExamRuleMetadataRaw>[0]) {
+  return inferSupportedOverrideTypeFromExamRuleMetadataRaw({ ...params, capacityResolutionMode: "standard" });
+}
+
+function hasMultipleSupportedOverrideTypesFromExamRuleMetadata(params: Parameters<typeof hasMultipleSupportedOverrideTypesFromExamRuleMetadataRaw>[0]) {
+  return hasMultipleSupportedOverrideTypesFromExamRuleMetadataRaw({ ...params, capacityResolutionMode: "standard" });
+}
 
 export type AppointmentManageTab =
   | "details"
@@ -274,23 +282,30 @@ export function AppointmentManageModal({
     modalityId: appointment?.modalityId ?? null,
     examTypeId: appointment?.examTypeId ?? null,
     caseCategory: appointment?.caseCategory ?? "non_oncology",
-    capacityResolutionMode:
-      rescheduleCapacityResolutionMode === "special_quota_extra"
-        ? rescheduleCapacityResolutionMode
-        : canUseNonStandardCapacityModes
-          ? rescheduleCapacityResolutionMode
-          : "standard",
-    specialReasonCode: rescheduleCapacityResolutionMode === "special_quota_extra" ? rescheduleSpecialReasonCode || null : null,
+    capacityResolutionMode: "standard",
+    specialReasonCode: null,
     days: 14,
     offset: rescheduleOffset,
   });
   const selectedRescheduleAvailabilityItem = rescheduleAvailability.rawItems.find((item) => item.date === rescheduleDate);
+  const rescheduleSelectedDateNeedsCategoryOverride = Boolean(rescheduleSelectedRow?.reasonCodes.includes("category_capacity_exhausted"));
+  const rescheduleSelectedDateNeedsTotalCapacityOverride = Boolean(rescheduleSelectedRow?.reasonCodes.includes("modality_daily_capacity_exhausted"));
+  const effectiveRescheduleCapacityResolutionMode =
+    rescheduleCapacityResolutionMode === "category_override" && canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride
+      ? "category_override"
+      : rescheduleCapacityResolutionMode === "total_capacity_override" && isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride
+        ? "total_capacity_override"
+        : rescheduleCapacityResolutionMode;
   const rescheduleSpecialQuotaAvailable = (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
   const rescheduleAnySpecialQuotaAvailable = rescheduleAvailability.rawItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
   const canUseRescheduleSpecialQuota = isSuperAdmin || rescheduleSpecialQuotaAvailable || rescheduleAnySpecialQuotaAvailable || rescheduleCapacityResolutionMode === "special_quota_extra";
   const canUseSelectedRescheduleCapacityMode =
-    rescheduleCapacityResolutionMode === "special_quota_extra" ? canUseRescheduleSpecialQuota : canUseNonStandardCapacityModes;
-  const rescheduleCapacityModeNeedsOverrideAuth = canUseNonStandardCapacityModes && (rescheduleCapacityResolutionMode === "category_override" || rescheduleCapacityResolutionMode === "total_capacity_override");
+    rescheduleCapacityResolutionMode === "special_quota_extra" ? canUseRescheduleSpecialQuota : effectiveRescheduleCapacityResolutionMode !== "standard";
+  const showRescheduleCapacityActions =
+    (canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride) ||
+    (isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride) ||
+    rescheduleSpecialQuotaAvailable;
+  const rescheduleCapacityModeNeedsOverrideAuth = effectiveRescheduleCapacityResolutionMode === "category_override" || effectiveRescheduleCapacityResolutionMode === "total_capacity_override";
   const rescheduleSpecialQuotaNeedsDetails = canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra";
   const createRescheduleOverrideRequestMutation = useCreateSchedulingOverrideRequest();
 
@@ -474,10 +489,10 @@ export function AppointmentManageModal({
     return {
       bookingDate: rescheduleDate,
       bookingTime: null,
-      capacityResolutionMode: canUseSelectedRescheduleCapacityMode ? rescheduleCapacityResolutionMode : "standard",
-      useSpecialQuota: canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra",
-      specialReasonCode: canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra" ? rescheduleSpecialReasonCode || null : null,
-      specialReasonNote: canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra" ? rescheduleSpecialReasonNote.trim() || null : null,
+      capacityResolutionMode: effectiveRescheduleCapacityResolutionMode,
+      useSpecialQuota: canUseRescheduleSpecialQuota && effectiveRescheduleCapacityResolutionMode === "special_quota_extra",
+      specialReasonCode: canUseRescheduleSpecialQuota && effectiveRescheduleCapacityResolutionMode === "special_quota_extra" ? rescheduleSpecialReasonCode || null : null,
+      specialReasonNote: canUseRescheduleSpecialQuota && effectiveRescheduleCapacityResolutionMode === "special_quota_extra" ? rescheduleSpecialReasonNote.trim() || null : null,
       rescheduleReason: rescheduleReason.trim() || null,
     };
   };
@@ -490,15 +505,15 @@ export function AppointmentManageModal({
     if (!appointment || !canSubmitReschedule) return;
     const payload = buildReschedulePayload();
     if (!payload) return;
-    const hasMultipleOverrideTypes = hasMultipleSupportedOverrideTypesFromExamRuleMetadata({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: rescheduleCapacityResolutionMode });
-    const supportedOverrideType = inferSupportedOverrideTypeFromExamRuleMetadata({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: rescheduleCapacityResolutionMode });
+    const hasMultipleOverrideTypes = hasMultipleSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode });
+    const supportedOverrideType = inferSupportedOverrideTypeFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode });
     if (user?.role === "receptionist" && !allowReceptionOverrideRequestsFromAvailability && rescheduleSelectedRow?.requiresSupervisorOverride) return;
     if (hasMultipleOverrideTypes) {
       setRescheduleOverrideError(t("appointments.create.multipleRestrictions"));
       return;
     }
     if (rescheduleSelectedRow?.requiresSupervisorOverride || rescheduleSelectedRow?.status === "restricted" || rescheduleSelectedRow?.status === "full" || (rescheduleSelectedRow?.status === "blocked" && supportedOverrideType) || rescheduleCapacityModeNeedsOverrideAuth) {
-      if (user?.role === "receptionist" && supportedOverrideType) {
+      if (shouldUseDeferredOverrideRequest(user?.role, supportedOverrideType, allowReceptionOverrideRequestsFromAvailability)) {
         setPendingReschedulePayload(payload);
         setRescheduleRequestOverrideType(supportedOverrideType);
         setRescheduleRequestError(null);
@@ -528,7 +543,7 @@ export function AppointmentManageModal({
           supervisorUsername: overridePayload.supervisorUsername,
           supervisorPassword: overridePayload.supervisorPassword,
           reason: overridePayload.overrideReason.trim(),
-          overrideType: inferSupportedOverrideTypeFromExamRuleMetadata({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: rescheduleCapacityResolutionMode }) ?? undefined,
+          overrideType: inferSupportedOverrideTypeFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode }) ?? undefined,
         },
       });
       setRescheduleOverrideOpen(false);
@@ -624,13 +639,17 @@ export function AppointmentManageModal({
   }, [activeTab, appointment, open]);
 
   useEffect(() => {
+    if ((rescheduleCapacityResolutionMode === "category_override" && !rescheduleSelectedDateNeedsCategoryOverride) || (rescheduleCapacityResolutionMode === "total_capacity_override" && !rescheduleSelectedDateNeedsTotalCapacityOverride)) {
+      setRescheduleCapacityResolutionMode("standard");
+      return;
+    }
     if (rescheduleCapacityResolutionMode === "special_quota_extra" && !rescheduleAvailability.isLoading && !rescheduleSpecialQuotaAvailable) {
       setRescheduleCapacityResolutionMode("standard");
       setRescheduleSpecialReasonCode("");
       setRescheduleSpecialReasonConfirmed(false);
       setRescheduleSpecialReasonNote("");
     }
-  }, [rescheduleAvailability.isLoading, rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable]);
+  }, [rescheduleAvailability.isLoading, rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable, rescheduleSelectedDateNeedsCategoryOverride, rescheduleSelectedDateNeedsTotalCapacityOverride]);
 
   useEffect(() => {
     if (!open || !appointment) return;
@@ -788,7 +807,7 @@ export function AppointmentManageModal({
                 <div className="rounded-xl border border-border bg-background p-3"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-semibold text-foreground">{t("appointments.create.evaluatedAvailability")}</p><p className="text-[11px] text-muted-foreground">{t("registrations.rescheduleAvailabilitySameAsCreate")}</p></div>{rescheduleDate ? <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">{formatDateLy(rescheduleDate)}</span> : null}</div>
                   <AvailabilityPanel rows={rescheduleAvailability.rows.filter((row) => row.date !== appointment.appointmentDate && (row.status !== "blocked" || Boolean(inferSupportedOverrideTypeFromExamRuleMetadata({ reasonCodes: row.reasonCodes, requiresSupervisorOverride: row.requiresSupervisorOverride, effectModes: row.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: rescheduleCapacityResolutionMode }))))} selectedDate={rescheduleDate} onSelectDate={(row) => { setRescheduleSelectedRow(row); setRescheduleDate(row.date); setRescheduleOverrideError(null); }} loading={rescheduleAvailability.isLoading} emptyMessage={t("registrations.rescheduleNoDates")} showFullDays={rescheduleShowFullDays} onToggleShowFullDays={() => setRescheduleShowFullDays((current) => !current)} showPolicyHiddenDays={rescheduleShowWeekendDays} onToggleShowPolicyHiddenDays={() => setRescheduleShowWeekendDays((current) => !current)} startDate={startDateFromOffset(rescheduleOffset)} onChangeStartDate={(nextDate) => { setRescheduleOffset(offsetFromStartDate(nextDate)); setRescheduleDate(""); setRescheduleSelectedRow(null); }} onPreviousPage={() => { setRescheduleOffset((current) => Math.max(0, current - RESCHEDULE_AVAILABILITY_WINDOW_DAYS)); setRescheduleDate(""); setRescheduleSelectedRow(null); }} onNextPage={() => { setRescheduleOffset((current) => current + RESCHEDULE_AVAILABILITY_WINDOW_DAYS); setRescheduleDate(""); setRescheduleSelectedRow(null); }} canGoPrevious={rescheduleOffset > 0} allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || user?.role !== "receptionist"} />
                 </div>
-                {canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota ? <SpecialQuotaSection capacityResolutionMode={rescheduleCapacityResolutionMode} onChangeCapacityResolutionMode={(mode) => { if (mode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) return; setRescheduleCapacityResolutionMode(mode); setRescheduleOverrideError(null); setRescheduleOverrideOpen(false); setPendingReschedulePayload(null); }} specialQuotaAvailable={rescheduleSpecialQuotaAvailable} showCapacityActions={canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota} canUseSpecialQuota={canUseRescheduleSpecialQuota} canUseCategoryOverride={canUseNonStandardCapacityModes} canUseTotalCapacityOverride={isSuperAdmin} specialReasonCode={rescheduleSpecialReasonCode} onChangeSpecialReasonCode={setRescheduleSpecialReasonCode} specialReasonConfirmed={rescheduleSpecialReasonConfirmed} onChangeSpecialReasonConfirmed={setRescheduleSpecialReasonConfirmed} specialReasonNote={rescheduleSpecialReasonNote} onChangeSpecialReasonNote={setRescheduleSpecialReasonNote} options={specialReasonOptions} /> : null}
+                {showRescheduleCapacityActions ? <SpecialQuotaSection capacityResolutionMode={rescheduleCapacityResolutionMode} onChangeCapacityResolutionMode={(mode) => { if (mode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) return; setRescheduleCapacityResolutionMode(mode); setRescheduleOverrideError(null); setRescheduleOverrideOpen(false); setPendingReschedulePayload(null); }} specialQuotaAvailable={rescheduleSpecialQuotaAvailable} showCapacityActions={showRescheduleCapacityActions} canUseSpecialQuota={rescheduleSpecialQuotaAvailable} canUseCategoryOverride={canUseNonStandardCapacityModes && rescheduleSelectedDateNeedsCategoryOverride} canUseTotalCapacityOverride={isSuperAdmin && rescheduleSelectedDateNeedsTotalCapacityOverride} specialReasonCode={rescheduleSpecialReasonCode} onChangeSpecialReasonCode={setRescheduleSpecialReasonCode} specialReasonConfirmed={rescheduleSpecialReasonConfirmed} onChangeSpecialReasonConfirmed={setRescheduleSpecialReasonConfirmed} specialReasonNote={rescheduleSpecialReasonNote} onChangeSpecialReasonNote={setRescheduleSpecialReasonNote} options={specialReasonOptions} /> : null}
                 <div><label htmlFor="appointment-manage-reschedule-reason" className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">{t("registrations.rescheduleReason")}</label><textarea id="appointment-manage-reschedule-reason" value={rescheduleReason} onChange={(event) => setRescheduleReason(event.target.value)} rows={2} className="input-premium w-full resize-none" placeholder={t("registrations.rescheduleReasonPlaceholder")} /></div>
                 {rescheduleSelectedRow?.requiresSupervisorOverride || rescheduleSelectedRow?.status === "restricted" || rescheduleSelectedRow?.status === "full" || rescheduleCapacityModeNeedsOverrideAuth ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{t("registrations.rescheduleSupervisorRequired")}</div> : null}
                 {rescheduleOverrideError && !rescheduleOverrideOpen ? <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{rescheduleOverrideError}</div> : null}

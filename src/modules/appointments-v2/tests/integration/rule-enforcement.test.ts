@@ -31,7 +31,7 @@ import {
   createTestAuthCookie,
   type TestData,
 } from "./helpers.js";
-import { validateFinalOverrideTypeConsistency } from "../../booking/services/override-authority.js";
+import { validateFinalOverrideRoleAuthority, validateFinalOverrideTypeConsistency } from "../../booking/services/override-authority.js";
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "RULE_ENF_";
@@ -53,6 +53,14 @@ describe("final scheduling override type consistency", () => {
       () => validateFinalOverrideTypeConsistency(["modality_block_override", "exam_restriction_override"], "modality_block_override"),
       (error: any) => error.statusCode === 409 && error.reasonCodes?.includes("multiple_override_types_required")
     );
+  });
+
+  it("requires Super Admin authority for final exam mix approval", () => {
+    assert.throws(
+      () => validateFinalOverrideRoleAuthority(["exam_mix_override"], "supervisor"),
+      (error: any) => error.statusCode === 403 && error.reasonCodes?.includes("exam_mix_override_forbidden")
+    );
+    assert.doesNotThrow(() => validateFinalOverrideRoleAuthority(["exam_mix_override"], "super_admin"));
   });
 });
 

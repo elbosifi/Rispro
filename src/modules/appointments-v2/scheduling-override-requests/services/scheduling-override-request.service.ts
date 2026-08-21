@@ -447,7 +447,7 @@ async function canReceptionistCreateOverrideRequest(client: PoolClient, userId: 
 function canApproveOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override" || overrideType === "exam_restriction_override" || overrideType === "modality_block_override";
+  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_restriction_override" || overrideType === "modality_block_override";
 }
 
 function canSeeAll(role: Role | undefined): boolean {
