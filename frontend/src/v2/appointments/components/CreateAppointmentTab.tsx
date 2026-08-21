@@ -36,7 +36,7 @@ import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
-import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
+import { formatOverrideType, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
 import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -422,9 +422,10 @@ export function CreateAppointmentTab({
 
   const inferRowOverrideType = useCallback((row: AvailabilityRowViewModel | null | undefined): SchedulingOverrideType | null => {
     return inferSupportedOverrideTypeFromExamRuleMetadata({
+      reasonCodes: row?.reasonCodes,
       requiresSupervisorOverride: Boolean(row?.requiresSupervisorOverride),
       effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
-    }) ?? inferSupportedOverrideType(row?.reasonCodes);
+    });
   }, []);
 
   const visibleInAvailabilityPanel = useCallback((row: AvailabilityRowViewModel, selected = false): boolean => {

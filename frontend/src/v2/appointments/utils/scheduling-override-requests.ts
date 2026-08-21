@@ -33,23 +33,23 @@ export function inferSupportedOverrideType(reasonCodes: readonly string[] | unde
 }
 
 export function inferSupportedOverrideTypeFromDecision(decision: SchedulingDecisionDto | null | undefined): SchedulingOverrideType | null {
-  const reasonType = inferSupportedOverrideType(decision?.reasons?.map((reason) => reason.code));
-  if (
-    decision?.requiresSupervisorOverride &&
-    decision.matchedExamRuleSummaries?.some((summary) => summary.effectMode === "restriction_overridable")
-  ) {
-    return reasonType && reasonType !== "exam_restriction_override" ? null : "exam_restriction_override";
-  }
-  return reasonType;
+  return inferSupportedOverrideTypeFromExamRuleMetadata({
+    reasonCodes: decision?.reasons?.map((reason) => reason.code),
+    requiresSupervisorOverride: Boolean(decision?.requiresSupervisorOverride),
+    effectModes: decision?.matchedExamRuleSummaries?.map((summary) => summary.effectMode),
+  });
 }
 
 export function inferSupportedOverrideTypeFromExamRuleMetadata(params: {
+  reasonCodes?: readonly string[];
   requiresSupervisorOverride: boolean;
   effectModes?: readonly string[];
 }): SchedulingOverrideType | null {
-  return params.requiresSupervisorOverride && params.effectModes?.includes("restriction_overridable")
-    ? "exam_restriction_override"
-    : null;
+  const reasonType = inferSupportedOverrideType(params.reasonCodes);
+  const examRestriction = params.requiresSupervisorOverride && params.effectModes?.includes("restriction_overridable");
+  if (examRestriction && reasonType) return null;
+  if (examRestriction) return "exam_restriction_override";
+  return reasonType;
 }
 
 export function formatOverrideType(type: SchedulingOverrideType | string | null | undefined): string {

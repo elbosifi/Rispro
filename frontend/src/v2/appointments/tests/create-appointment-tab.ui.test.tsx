@@ -292,6 +292,28 @@ const availabilityRows: AvailabilityRowViewModel[] = [
 ];
 
 const mockRowsRef = { current: availabilityRows };
+const softExamRestrictionRow: AvailabilityRowViewModel = {
+  ...availabilityRows[1],
+  date: "2027-01-07",
+  dayLabel: "Thu, Jan 7",
+  reasonText: "",
+  reasonCodes: ["exam_type_not_allowed_for_rule"],
+  matchedExamRuleSummary: {
+    ruleId: "901",
+    title: "Exam restriction",
+    effectLabel: "Restricted unless supervisor approves",
+    effectMode: "restriction_overridable",
+    isBlocking: false,
+  },
+};
+const hardExamRestrictionRow: AvailabilityRowViewModel = {
+  ...softExamRestrictionRow,
+  date: "2027-01-08",
+  dayLabel: "Fri, Jan 8",
+  status: "blocked",
+  requiresSupervisorOverride: false,
+  matchedExamRuleSummary: { ...softExamRestrictionRow.matchedExamRuleSummary!, effectMode: "hard_restriction", isBlocking: true },
+};
 const mockAvailabilityLoading = { current: false };
 const mockRawItemsByExamType: { current: Record<number, MockRawAvailabilityItem[]> | null } = { current: null };
 type MockRawAvailabilityItem = {
@@ -961,6 +983,74 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(callArg.override).toBeTruthy();
     expect(callArg.override!.supervisorUsername).toBe("sup");
     expect(callArg.override!.reason).toBe("urgent");
+  });
+
+  it("opens the supervisor override for a soft exam restriction and submits its type", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [softExamRestrictionRow];
+    const evaluateDecision: SchedulingDecisionDto = {
+      isAllowed: true,
+      requiresSupervisorOverride: true,
+      displayStatus: "restricted",
+      suggestedBookingMode: "override",
+      consumedCapacityMode: "override",
+      remainingStandardCapacity: 1,
+      remainingSpecialQuota: null,
+      matchedRuleIds: [901],
+      matchedExamRuleSummaries: [{ ruleId: "901", title: "Exam restriction", ruleType: "specific_date", effectMode: "restriction_overridable", isBlocking: false }],
+      reasons: [{ code: "exam_type_not_allowed_for_rule", severity: "warning", message: "Exam restriction" }],
+      policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+      decisionTrace: { evaluatedAt: "", input: {} },
+    };
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "supervisor", [], evaluateDecision);
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      expect(screen.getByRole("button", { name: /2027-01-07 restricted/i })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+      expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+      fireEvent.change(screen.getByPlaceholderText("Supervisor Username"), { target: { value: "sup" } });
+      fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
+      fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "approved" } });
+      await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+      await waitFor(() => expect(onCreateAppointment).toHaveBeenCalled());
+      expect(onCreateAppointment.mock.calls[0][0].override?.overrideType).toBe("exam_restriction_override");
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("offers receptionist approval for a soft exam restriction but not direct booking", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [softExamRestrictionRow];
+    try {
+      setup(false, [], undefined, "receptionist");
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
+      expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("does not expose an override path for a hard exam restriction", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [hardExamRestrictionRow];
+    try {
+      setup(false, [], undefined, "supervisor");
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      expect(screen.queryByRole("button", { name: /2027-01-08 blocked/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Request override approval" })).toBeNull();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
   });
 
   it("lets receptionist request override approval without booking", async () => {

@@ -1,6 +1,6 @@
 import { isAvailabilityRowVisible } from "../hooks/availability-row-mapper";
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
-import { inferSupportedOverrideType, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
+import { inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -44,9 +44,10 @@ export function AvailabilityPanel({
   const { language } = useLanguage();
   const visibleRows = rows.filter((row) => {
     const rowOverrideType = inferSupportedOverrideTypeFromExamRuleMetadata({
+      reasonCodes: row.reasonCodes,
       requiresSupervisorOverride: row.requiresSupervisorOverride,
       effectModes: row.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
-    }) ?? inferSupportedOverrideType(row.reasonCodes);
+    });
     return isAvailabilityRowVisible(row, {
       showFullDays,
       showPolicyHiddenDays,
@@ -101,9 +102,10 @@ export function AvailabilityPanel({
       ) : visibleRows.map((row) => {
         const requestableOverride = allowOverrideRequests && Boolean(
           inferSupportedOverrideTypeFromExamRuleMetadata({
+            reasonCodes: row.reasonCodes,
             requiresSupervisorOverride: row.requiresSupervisorOverride,
             effectModes: row.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
-          }) ?? inferSupportedOverrideType(row.reasonCodes)
+          })
         );
         return (
           <AvailabilityDateRow

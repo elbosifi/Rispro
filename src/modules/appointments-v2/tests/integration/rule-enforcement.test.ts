@@ -668,7 +668,6 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       await publishPolicyWithRules({ modalityBlockedRules: [], categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true }], examTypeRules: [examRule(softDate, "restriction_overridable")] }, "RE_ps_exam_override_soft");
       const withoutOverride = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology" } });
       assert.strictEqual(withoutOverride.status, 403);
-      assert.strictEqual(withoutOverride.status, 403);
       const supervisorBooking = await fetch("/api/v2/appointments", { method: "POST", body: { patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: softDate, caseCategory: "non_oncology", override: { supervisorUsername: username, supervisorPassword: "test_password", reason: "Exam restriction approved", overrideType: "exam_restriction_override" } } });
       assert.strictEqual(supervisorBooking.status, 201);
       assert.strictEqual((supervisorBooking.data as any).wasOverride, true);

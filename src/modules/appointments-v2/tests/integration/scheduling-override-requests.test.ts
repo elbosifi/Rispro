@@ -316,6 +316,60 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     });
   }
 
+  async function publishSoftExamRestrictionPolicy(date: string) {
+    const policySetKey = `${TEST_PREFIX.toLowerCase()}exam-restriction-${Date.now()}`;
+    const snapshot = {
+      modalityBlockedRules: [],
+      categoryDailyLimits: [{
+        id: 1,
+        modalityId: testData.modalityId,
+        caseCategory: "non_oncology",
+        dailyLimit: 10,
+        isActive: true,
+      }],
+      examTypeRules: [{
+        id: 20,
+        modalityId: testData.modalityId,
+        ruleType: "specific_date",
+        effectMode: "restriction_overridable",
+        specificDate: date,
+        startDate: null,
+        endDate: null,
+        weekday: null,
+        alternateWeeks: false,
+        recurrenceAnchorDate: null,
+        examTypeIds: [testData.examTypeId],
+        title: "Exam restriction",
+        notes: null,
+        isActive: true,
+      }],
+      specialQuotaRules: [],
+      specialReasonCodes: [],
+    };
+    const { pool } = await import("../../../../db/pool.js");
+    await pool.query(
+      `insert into appointments_v2.policy_sets (key, name, created_by_user_id) values ($1, $2, $3)`,
+      [policySetKey, `${policySetKey} policy`, testData.userId]
+    );
+    const draft = await fetchAs(supervisorCookie, "/api/v2/scheduling/admin/policy/draft", {
+      method: "POST",
+      body: { policySetKey },
+    });
+    assert.equal(draft.status, 201, JSON.stringify(draft.data));
+    const draftId = Number((draft.data as any).draft.id);
+    const updated = await fetchAs(supervisorCookie, `/api/v2/scheduling/admin/policy/draft/${draftId}`, {
+      method: "PUT",
+      body: { policySnapshot: snapshot, changeNote: "Exam restriction override request test" },
+    });
+    assert.equal(updated.status, 200, JSON.stringify(updated.data));
+    const published = await fetchAs(supervisorCookie, `/api/v2/scheduling/admin/policy/draft/${draftId}/publish`, {
+      method: "POST",
+      body: { changeNote: "Exam restriction override request test" },
+    });
+    assert.equal(published.status, 200, JSON.stringify(published.data));
+    return policySetKey;
+  }
+
   async function createCategoryRequestWithTotalFullChangedDate(requestedDate: string, changedDate: string) {
     await setCapacityLimits(10, 5);
     await fillNonOncologyCategory(requestedDate);
@@ -449,6 +503,51 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(audit.rows[0].override_reason, "Approved for urgent clinical need");
     assert.equal(audit.rows[0].outcome, "approved_and_booked");
     assert.equal(Number(audit.rows[0].decision_snapshot.deferredApprovalRequestId), Number((requested.data as any).request.id));
+  });
+
+  it("receptionist requests and supervisor approves an exam restriction override", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-03-01";
+    const policySetKey = await publishSoftExamRestrictionPolicy(date);
+    const patientId = await createPatient();
+    const requested = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {
+      method: "POST",
+      body: {
+        requestType: "create_booking",
+        requesterReason: "Clinical urgency needs exam restriction approval",
+        requestPayload: {
+          patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: date,
+          bookingTime: null,
+          caseCategory: "non_oncology",
+          policySetKey,
+        },
+        createdFromContext: "integration_test",
+      },
+    });
+    assert.equal(requested.status, 201, JSON.stringify(requested.data));
+    assert.equal((requested.data as any).request.overrideType, "exam_restriction_override");
+    const requestId = Number((requested.data as any).request.id);
+
+    const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Approved exam restriction exception" },
+    });
+    assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    assert.equal((approved.data as any).request.status, "approved");
+    assert.ok(Number((approved.data as any).booking.id) > 0);
+    assert.equal(await countBookings(date, patientId), 1);
+
+    const { pool } = await import("../../../../db/pool.js");
+    const audit = await pool.query<{ override_type: string; outcome: string }>(
+      `select override_type, outcome from appointments_v2.override_audit_events where booking_id = $1`,
+      [Number((approved.data as any).booking.id)]
+    );
+    assert.equal(audit.rows[0]?.override_type, "exam_restriction_override");
+    assert.equal(audit.rows[0]?.outcome, "approved_and_booked");
   });
 
   it("stores only safe deferred identity metadata and rejects approval after the verified identity changes", async () => {

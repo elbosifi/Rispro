@@ -22,10 +22,25 @@ function decision(effectMode: string, requiresSupervisorOverride: boolean): Sche
   };
 }
 
+function decisionWithReason(effectMode: string, reasonCode: string): SchedulingDecisionDto {
+  const value = decision(effectMode, true);
+  value.reasons = [{ code: reasonCode, severity: "error", message: reasonCode }];
+  return value;
+}
+
 describe("exam restriction scheduling override", () => {
   it("classifies only a soft exam restriction", () => {
     expect(inferSupportedOverrideTypeFromDecision(decision("restriction_overridable", true))).toBe("exam_restriction_override");
     expect(inferSupportedOverrideTypeFromDecision(decision("hard_restriction", false))).toBeNull();
+  });
+
+  it.each([
+    "category_capacity_exhausted",
+    "modality_daily_capacity_exhausted",
+    "exam_mix_quota_exhausted",
+    "closed_weekday_override_required",
+  ])("does not mask a concurrent %s blocker", (reasonCode) => {
+    expect(inferSupportedOverrideTypeFromDecision(decisionWithReason("restriction_overridable", reasonCode))).toBeNull();
   });
 
   it("allows supervisors and super admins but not receptionists to approve it", () => {
