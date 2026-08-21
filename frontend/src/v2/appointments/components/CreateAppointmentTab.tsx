@@ -427,7 +427,7 @@ export function CreateAppointmentTab({
       effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
       capacityResolutionMode: form.capacityResolutionMode,
     });
-  }, []);
+  }, [form.capacityResolutionMode]);
 
   const visibleInAvailabilityPanel = useCallback((row: AvailabilityRowViewModel, selected = false): boolean => {
     return isAvailabilityRowVisible(row, {

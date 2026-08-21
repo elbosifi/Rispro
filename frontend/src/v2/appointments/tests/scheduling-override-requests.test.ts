@@ -59,9 +59,27 @@ describe("exam restriction scheduling override", () => {
     )).toBeNull();
   });
 
+  it("deduplicates a capacity reason and capacity mode representing the same override", () => {
+    const value = decisionWithReasons("restriction_overridable", ["category_capacity_exhausted"]);
+    value.requiresSupervisorOverride = false;
+    value.matchedExamRuleSummaries = [];
+    expect(inferSupportedOverrideTypeFromDecision(value, "category_override")).toBe("category_override");
+    expect(hasMultipleSupportedOverrideTypesFromDecision(value, "category_override")).toBe(false);
+  });
+
+  it("classifies an overridable modality block and keeps it distinct from other overrides", () => {
+    const value = decisionWithReasons("hard_restriction", ["modality_blocked_overridable"]);
+    value.requiresSupervisorOverride = true;
+    expect(inferSupportedOverrideTypeFromDecision(value)).toBe("modality_block_override");
+    value.reasons.push({ code: "exam_mix_quota_exhausted", severity: "error", message: "Exam mix" });
+    expect(inferSupportedOverrideTypeFromDecision(value)).toBeNull();
+    expect(hasMultipleSupportedOverrideTypesFromDecision(value)).toBe(true);
+  });
+
   it("allows supervisors and super admins but not receptionists to approve it", () => {
     expect(canRoleApproveSchedulingOverride("supervisor", "exam_restriction_override")).toBe(true);
     expect(canRoleApproveSchedulingOverride("super_admin", "exam_restriction_override")).toBe(true);
     expect(canRoleApproveSchedulingOverride("receptionist", "exam_restriction_override")).toBe(false);
+    expect(canRoleApproveSchedulingOverride("supervisor", "modality_block_override")).toBe(true);
   });
 });

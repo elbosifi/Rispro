@@ -508,7 +508,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   it("receptionist requests and supervisor approves an exam restriction override", async () => {
     if (!testData) return;
     await setCapacityLimits();
-    const date = "2042-03-01";
+    const date = "2042-04-20";
     const policySetKey = await publishSoftExamRestrictionPolicy(date);
     const patientId = await createPatient();
     const requested = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {

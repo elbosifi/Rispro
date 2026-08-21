@@ -1393,6 +1393,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             supervisorUsername,
             supervisorPassword: "test_password",
             reason: "Operational necessity",
+            overrideType: "modality_block_override",
           },
         },
       });
@@ -1403,7 +1404,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       // Verify override audit row was recorded (Test 7)
       const bookingId = Number((result.data as any).booking.id);
       const auditResult = await pool.query(
-        `select booking_id, supervisor_user_id, requesting_user_id
+        `select booking_id, supervisor_user_id, requesting_user_id, override_type
          from appointments_v2.override_audit_events
          where booking_id = $1`,
         [bookingId]
@@ -1413,6 +1414,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         "Override audit event should be recorded in DB"
       );
       assert.strictEqual(Number(auditResult.rows[0].booking_id), bookingId);
+      assert.strictEqual(auditResult.rows[0].override_type, "modality_block_override");
     });
 
     it("restricted day without override credentials fails with 403", async (t) => {

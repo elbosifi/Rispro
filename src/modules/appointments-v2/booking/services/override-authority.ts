@@ -22,6 +22,9 @@ export function resolveRequiredOverrideTypes(
   if (reasonCodes.has("exam_mix_quota_exhausted")) {
     required.add("exam_mix_override");
   }
+  if (reasonCodes.has("modality_blocked_overridable")) {
+    required.add("modality_block_override");
+  }
   if (
     decision.requiresSupervisorOverride &&
     decision.matchedExamRuleSummaries?.some((summary) => summary.effectMode === "restriction_overridable")

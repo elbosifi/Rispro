@@ -1022,6 +1022,40 @@ describe("CreateAppointmentTab UI interactions", () => {
     }
   });
 
+  it("reclassifies a selected soft exam restriction when the capacity mode changes", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [softExamRestrictionRow];
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "supervisor", [], {
+        isAllowed: false,
+        requiresSupervisorOverride: true,
+        displayStatus: "restricted",
+        suggestedBookingMode: "override",
+        consumedCapacityMode: "override",
+        remainingStandardCapacity: 1,
+        remainingSpecialQuota: null,
+        matchedRuleIds: [901],
+        matchedExamRuleSummaries: [{ ruleId: "901", title: "Exam restriction", ruleType: "specific_date", effectMode: "restriction_overridable", isBlocking: false }],
+        reasons: [{ code: "exam_type_not_allowed_for_rule", severity: "warning", message: "Exam restriction" }],
+        policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+        decisionTrace: { evaluatedAt: "", input: {} },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      const capacityAction = screen.getAllByRole("combobox").find((element) =>
+        Array.from((element as HTMLSelectElement).options).some((option) => option.value === "category_override")
+      ) as HTMLSelectElement;
+      fireEvent.change(capacityAction, { target: { value: "category_override" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
   it("does not use stale soft exam row metadata after a fresh evaluation finds multiple overrides", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = [softExamRestrictionRow];
