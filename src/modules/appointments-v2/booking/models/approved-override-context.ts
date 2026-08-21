@@ -5,7 +5,8 @@ export interface ApprovedOverrideContext {
   requesterUserId: number;
   approverUserId: number;
   approverRole: Role;
-  overrideType: SchedulingOverrideType;
+  overrideTypes: SchedulingOverrideType[];
+  overrideType?: SchedulingOverrideType;
   reason: string;
   source: "deferred_approval";
   requestId: number;

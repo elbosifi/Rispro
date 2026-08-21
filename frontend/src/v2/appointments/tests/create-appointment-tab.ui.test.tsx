@@ -437,6 +437,41 @@ const supervisorTotalCapacityRows: AvailabilityRowViewModel[] = [
   },
 ];
 
+const combinedTotalAndExamMixRows: AvailabilityRowViewModel[] = [
+  {
+    ...supervisorTotalCapacityRows[0],
+    date: "2027-01-09",
+    dayLabel: "Sat, Jan 9",
+    reasonCodes: ["modality_daily_capacity_exhausted", "exam_mix_quota_exhausted"],
+    examMixQuotaSummaries: [{
+      ruleId: 601,
+      title: "Combined exam mix",
+      dailyLimit: 7,
+      consumed: 7,
+      remaining: 0,
+      isBlocking: true,
+      isPrimaryBlocking: true,
+    }],
+  },
+];
+
+const combinedTotalAndExamMixDecision: SchedulingDecisionDto = {
+  isAllowed: false,
+  requiresSupervisorOverride: true,
+  displayStatus: "full",
+  suggestedBookingMode: "override",
+  consumedCapacityMode: "override",
+  remainingStandardCapacity: 0,
+  remainingSpecialQuota: null,
+  matchedRuleIds: [601],
+  reasons: [
+    { code: "modality_daily_capacity_exhausted", severity: "error", message: "Total capacity exhausted" },
+    { code: "exam_mix_quota_exhausted", severity: "error", message: "Exam mix exhausted" },
+  ],
+  policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+  decisionTrace: { evaluatedAt: "", input: {} },
+};
+
 const allowedSpecialQuotaDecision: SchedulingDecisionDto = {
   isAllowed: true,
   requiresSupervisorOverride: false,
@@ -1053,7 +1088,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     }
   });
 
-  it("does not use stale soft exam row metadata after a fresh evaluation finds multiple overrides", async () => {
+  it("uses the fresh combined override set instead of stale soft exam row metadata", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = [softExamRestrictionRow];
     const evaluateDecision: SchedulingDecisionDto = {
@@ -1081,9 +1116,8 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
-      expect(await screen.findByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeTruthy();
+      expect(screen.queryByText("Multiple scheduling restrictions apply. Resolve one restriction or choose another date.")).toBeNull();
       expect(screen.queryByText("Supervisor Override Required")).toBeNull();
-      expect(screen.queryByRole("heading", { name: "Request override approval" })).toBeNull();
       expect(onCreateAppointment).not.toHaveBeenCalled();
     } finally {
       mockRowsRef.current = previousRows;
@@ -1217,6 +1251,73 @@ describe("CreateAppointmentTab UI interactions", () => {
         requestPayload: {
           bookingDate: "2027-01-06",
         },
+      });
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("uses one combined direct authorization for a full total-capacity and exam-mix row", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = combinedTotalAndExamMixRows;
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "super_admin", [], combinedTotalAndExamMixDecision);
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-09 full/i }));
+
+      const capacityAction = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
+      expect(Array.from(capacityAction.options).map((option) => option.value)).toContain("total_capacity_override");
+      fireEvent.change(capacityAction, { target: { value: "total_capacity_override" } });
+      expect((screen.getByRole("button", { name: /2027-01-09 full/i }) as HTMLButtonElement).style.border).toContain("var(--blue)");
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+      expect(screen.getByText("Total modality capacity override")).toBeTruthy();
+      expect(screen.getByText("Exam mix override")).toBeTruthy();
+      fireEvent.change(screen.getByPlaceholderText("Supervisor Username"), { target: { value: "superadmin" } });
+      fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "test_password" } });
+      fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "Combined approval" } });
+      await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+
+      await waitFor(() => expect(onCreateAppointment).toHaveBeenCalledTimes(1));
+      expect(onCreateAppointment.mock.calls[0][0]).toMatchObject({
+        capacityResolutionMode: "total_capacity_override",
+        override: { overrideTypes: ["total_capacity_override", "exam_mix_override"] },
+      });
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("submits one combined deferred request for a supervisor without direct authorization", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = combinedTotalAndExamMixRows;
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "supervisor", [], combinedTotalAndExamMixDecision);
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-09 full/i }));
+
+      expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+      expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+      expect(await screen.findByText(/Total modality capacity override, Exam mix override/)).toBeTruthy();
+      fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+        target: { value: "Combined request" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+      await waitFor(() => expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalledTimes(1));
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+      expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+        requestType: "create_booking",
+        requesterReason: "Combined request",
+        requestPayload: { bookingDate: "2027-01-09" },
       });
     } finally {
       mockRowsRef.current = previousRows;

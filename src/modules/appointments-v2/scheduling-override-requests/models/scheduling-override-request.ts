@@ -8,6 +8,7 @@ export interface SchedulingOverrideRequestRow {
   id: number;
   requestType: SchedulingOverrideRequestType;
   overrideType: SchedulingOverrideType;
+  overrideTypes: SchedulingOverrideType[];
   status: SchedulingOverrideRequestStatus;
   requesterUserId: number;
   approverUserId: number | null;

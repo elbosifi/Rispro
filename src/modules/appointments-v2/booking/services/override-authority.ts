@@ -3,6 +3,23 @@ import type { CapacityResolutionMode, SchedulingOverrideType } from "../../share
 import type { Role } from "../../../../types/domain.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 
+const SCHEDULING_OVERRIDE_TYPE_ORDER: readonly SchedulingOverrideType[] = [
+  "total_capacity_override",
+  "category_override",
+  "exam_mix_override",
+  "closed_weekday_override",
+  "modality_block_override",
+  "exam_restriction_override",
+];
+
+export function normalizeSchedulingOverrideTypes(
+  types: readonly SchedulingOverrideType[]
+): SchedulingOverrideType[] {
+  const normalized = new Set(types);
+  if (normalized.has("total_capacity_override")) normalized.delete("category_override");
+  return SCHEDULING_OVERRIDE_TYPE_ORDER.filter((type) => normalized.has(type));
+}
+
 export function resolveRequiredOverrideTypes(
   decision: BookingDecision,
   capacityResolutionMode: CapacityResolutionMode
@@ -32,23 +49,17 @@ export function resolveRequiredOverrideTypes(
     required.add("exam_restriction_override");
   }
 
-  return [...required];
+  return normalizeSchedulingOverrideTypes([...required]);
 }
 
-export function validateFinalOverrideTypeConsistency(
+export function validateFinalOverrideTypesConsistency(
   requiredOverrideTypes: readonly SchedulingOverrideType[],
-  requestedOverrideType: SchedulingOverrideType | null
+  requestedOverrideTypes: readonly SchedulingOverrideType[]
 ): void {
-  const finalTypes = [...new Set(requiredOverrideTypes)];
-  if (finalTypes.length > 1) {
-    throw new SchedulingError(
-      409,
-      "Multiple scheduling override types are required. Resolve one restriction or choose another date.",
-      ["multiple_override_types_required"]
-    );
-  }
+  const finalTypes = normalizeSchedulingOverrideTypes(requiredOverrideTypes);
+  const requestedTypes = normalizeSchedulingOverrideTypes(requestedOverrideTypes);
 
-  if (finalTypes.length === 1 && !requestedOverrideType) {
+  if (finalTypes.length > 0 && requestedTypes.length === 0) {
     throw new SchedulingError(
       409,
       "The current scheduling state requires an explicit override type.",
@@ -56,7 +67,7 @@ export function validateFinalOverrideTypeConsistency(
     );
   }
 
-  if (requestedOverrideType && finalTypes.length === 1 && finalTypes[0] !== requestedOverrideType) {
+  if (finalTypes.length !== requestedTypes.length || finalTypes.some((type, index) => type !== requestedTypes[index])) {
     throw new SchedulingError(
       409,
       "The scheduling state has changed and requires a different override type.",
@@ -65,13 +76,36 @@ export function validateFinalOverrideTypeConsistency(
   }
 }
 
+/** @deprecated Prefer the array-based validator. */
+export function validateFinalOverrideTypeConsistency(
+  requiredOverrideTypes: readonly SchedulingOverrideType[],
+  requestedOverrideType: SchedulingOverrideType | null
+): void {
+  validateFinalOverrideTypesConsistency(requiredOverrideTypes, requestedOverrideType ? [requestedOverrideType] : []);
+}
+
 export function validateFinalOverrideRoleAuthority(
   requiredOverrideTypes: readonly SchedulingOverrideType[],
   role: Role | undefined
 ): void {
-  if (requiredOverrideTypes.includes("exam_mix_override") && role !== "super_admin") {
+  const types = normalizeSchedulingOverrideTypes(requiredOverrideTypes);
+  if (types.includes("total_capacity_override") && role !== "super_admin") {
+    throw new SchedulingError(403, "Total capacity override requires Super Admin approval.", ["total_capacity_override_forbidden"]);
+  }
+  if (types.includes("exam_mix_override") && role !== "super_admin") {
     throw new SchedulingError(403, "Exam mix overbooking requires Super Admin approval.", ["exam_mix_override_forbidden"]);
   }
+}
+
+export function canRoleApproveSchedulingOverrideTypes(
+  role: Role | undefined,
+  types: readonly SchedulingOverrideType[]
+): boolean {
+  if (role === "super_admin") return true;
+  if (role !== "supervisor") return false;
+  return normalizeSchedulingOverrideTypes(types).every((type) =>
+    type === "closed_weekday_override" || type === "category_override" || type === "exam_restriction_override" || type === "modality_block_override"
+  );
 }
 
 export function validateCapacityModeAuthority(

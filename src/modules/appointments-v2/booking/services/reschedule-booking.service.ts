@@ -43,7 +43,7 @@ import { scheduleBookingWorklistDetailReplacement } from "../../../../services/d
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
-import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideTypeConsistency, validateFinalOverrideRoleAuthority } from "./override-authority.js";
+import { normalizeSchedulingOverrideTypes, resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideRoleAuthority, validateFinalOverrideTypesConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 import {
@@ -517,7 +517,17 @@ export async function rescheduleBookingInternal(
     requesterUserId: userId,
   };
 
-  const requestedOverrideType = approvedOverrideContext?.overrideType ?? override?.overrideType ?? null;
+  const requestedOverrideTypes = normalizeSchedulingOverrideTypes(
+    approvedOverrideContext?.overrideTypes?.length
+      ? approvedOverrideContext.overrideTypes
+      : override?.overrideTypes?.length
+        ? override.overrideTypes
+        : approvedOverrideContext?.overrideType
+          ? [approvedOverrideContext.overrideType]
+          : override?.overrideType
+            ? [override.overrideType]
+            : []
+  );
   const pureInput: PureEvaluateInput = {
     patientId: booking.patientId,
     modalityId: bookingModalityId,
@@ -530,7 +540,7 @@ export async function rescheduleBookingInternal(
     // not create independent scheduling policy behavior.
     specialReasonCode,
     includeOverrideEvaluation: override != null,
-    bypassExamMixQuota: requestedOverrideType === "exam_mix_override",
+    bypassExamMixQuota: requestedOverrideTypes.includes("exam_mix_override"),
     context,
   };
 
@@ -568,10 +578,11 @@ export async function rescheduleBookingInternal(
       (type) => type !== "category_override" && type !== "total_capacity_override"
     );
   }
-  if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
+  if (requestedOverrideTypes.includes("exam_mix_override") && !requiredOverrideTypes.includes("exam_mix_override")) {
     requiredOverrideTypes.push("exam_mix_override");
   }
-  validateFinalOverrideTypeConsistency(requiredOverrideTypes, requestedOverrideType);
+  requiredOverrideTypes = normalizeSchedulingOverrideTypes(requiredOverrideTypes);
+  validateFinalOverrideTypesConsistency(requiredOverrideTypes, requestedOverrideTypes);
 
   if (
     decision.displayStatus === "blocked" &&
@@ -613,6 +624,7 @@ export async function rescheduleBookingInternal(
         override.supervisorUsername,
         override.supervisorPassword
       );
+      if (requiredOverrideTypes.length > 0) validateFinalOverrideRoleAuthority(requiredOverrideTypes, supervisor.role as Role);
       console.info(JSON.stringify({
         type: "appointments_v2_reschedule_override",
         bookingId,
@@ -691,11 +703,8 @@ export async function rescheduleBookingInternal(
     });
   }
 
-  const schedulingAuditOverrideType: SchedulingOverrideType | null =
-      approvedOverrideContext?.overrideType ??
-      (requiredOverrideTypes.length === 1 ? requiredOverrideTypes[0] : null);
-  if (wasOverride && supervisorUserId != null && schedulingAuditOverrideType) {
-    await recordOverrideAudit(client, {
+  if (wasOverride && supervisorUserId != null && requiredOverrideTypes.length > 0) {
+    for (const overrideType of requiredOverrideTypes) await recordOverrideAudit(client, {
       bookingId,
       patientId: booking.patientId,
       modalityId: bookingModalityId,
@@ -704,9 +713,9 @@ export async function rescheduleBookingInternal(
       requestingUserId: approvedOverrideContext?.requesterUserId ?? userId,
       supervisorUserId,
       overrideReason: approvedOverrideContext?.reason ?? override?.reason ?? null,
-      overrideType: schedulingAuditOverrideType,
+      overrideType,
       decisionSnapshot: approvedOverrideContext
-        ? { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId }
+        ? { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId, approvedOverrideTypes: requiredOverrideTypes }
         : { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
       outcome: "approved_and_booked",
     });

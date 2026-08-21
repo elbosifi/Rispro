@@ -198,6 +198,7 @@ export interface CreateBookingRequest {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideTypes?: SchedulingOverrideType[];
     overrideType?: SchedulingOverrideType;
   };
 }
@@ -283,6 +284,7 @@ export interface RescheduleBookingRequest {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideTypes?: SchedulingOverrideType[];
     overrideType?: SchedulingOverrideType;
   };
 }
@@ -325,6 +327,7 @@ export interface SchedulingOverrideRequestDto {
   id: number | string;
   requestType: SchedulingOverrideRequestType;
   overrideType: SchedulingOverrideType;
+  overrideTypes: SchedulingOverrideType[];
   status: SchedulingOverrideRequestStatus;
   requesterUserId: number | string;
   approverUserId: number | string | null;

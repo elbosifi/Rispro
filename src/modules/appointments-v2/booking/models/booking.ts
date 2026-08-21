@@ -67,6 +67,7 @@ export interface CreateBookingPayload {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideTypes?: SchedulingOverrideType[];
     overrideType?: SchedulingOverrideType;
   };
 }

@@ -8,7 +8,8 @@ import { formatOverrideType, formatRequestType } from "../utils/scheduling-overr
 interface Props {
   open: boolean;
   requestType: SchedulingOverrideRequestType;
-  overrideType: SchedulingOverrideType | null;
+  overrideTypes?: SchedulingOverrideType[];
+  overrideType?: SchedulingOverrideType | null;
   patientLabel: string;
   modalityLabel: string;
   examTypeLabel: string;
@@ -24,6 +25,7 @@ interface Props {
 export function SchedulingOverrideRequestModal({
   open,
   requestType,
+  overrideTypes: overrideTypesProp,
   overrideType,
   patientLabel,
   modalityLabel,
@@ -40,6 +42,7 @@ export function SchedulingOverrideRequestModal({
   const [reason, setReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const reasons = decision?.reasons ?? [];
+  const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
 
   async function submit() {
     if (!reason.trim()) {
@@ -69,7 +72,7 @@ export function SchedulingOverrideRequestModal({
             <Summary label={t(language, "overrideRequests.examType")} value={examTypeLabel} />
             <Summary label={t(language, "overrideRequests.requestedDateTime")} value={`${requestedDate}${requestedTime ? ` ${requestedTime}` : ""}`} />
             <Summary label={t(language, "overrideRequests.requestType")} value={formatRequestType(requestType)} />
-            <Summary label={t(language, "overrideRequests.overrideType")} value={formatOverrideType(overrideType)} />
+            <Summary label={t(language, "overrideRequests.overrideType")} value={overrideTypes.map(formatOverrideType).join(", ")} />
           </div>
 
           <Card className="p-3">
@@ -115,7 +118,7 @@ export function SchedulingOverrideRequestModal({
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
             {t(language, "common.cancel")}
           </Button>
-          <Button type="button" onClick={submit} disabled={loading || !overrideType}>
+          <Button type="button" onClick={submit} disabled={loading || overrideTypes.length === 0}>
             {loading ? t(language, "overrideRequests.submitting") : t(language, "overrideRequests.submitRequest")}
           </Button>
         </DialogFooter>

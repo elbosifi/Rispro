@@ -2,6 +2,8 @@ import { useState } from "react";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { Button, Input } from "@/components/shared";
+import type { SchedulingOverrideType } from "../types";
+import { formatOverrideType } from "../utils/scheduling-override-requests";
 
 interface Props {
   open: boolean;
@@ -9,9 +11,10 @@ interface Props {
   onConfirm: (payload: { supervisorUsername: string; supervisorPassword: string; overrideReason: string }) => Promise<void>;
   loading: boolean;
   authError?: string | null;
+  overrideTypes?: SchedulingOverrideType[];
 }
 
-export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, authError }: Props) {
+export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, authError, overrideTypes = [] }: Props) {
   const { language } = useLanguage();
   const [supervisorUsername, setSupervisorUsername] = useState("");
   const [supervisorPassword, setSupervisorPassword] = useState("");
@@ -43,6 +46,11 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-4 sm:p-5 shadow-lg">
         <h3 className="text-lg font-semibold text-foreground">{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
         <p className="mt-1.5 text-sm text-muted-foreground">{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
+        {overrideTypes.length ? (
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-foreground">
+            {overrideTypes.map((overrideType) => <li key={overrideType}>{formatOverrideType(overrideType)}</li>)}
+          </ul>
+        ) : null}
 
         <div className="grid gap-3 mt-4">
           <Input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />

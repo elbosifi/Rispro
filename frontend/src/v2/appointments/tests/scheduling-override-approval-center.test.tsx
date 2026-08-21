@@ -261,6 +261,51 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("shows combined total and exam-mix requests to both roles but only makes them actionable for superadmins", async () => {
+    mockRequests = [request({
+      id: 16,
+      overrideType: "total_capacity_override",
+      overrideTypes: ["total_capacity_override", "exam_mix_override"],
+      decisionContext: {
+        violatedRuleLabel: "Combined capacity restrictions",
+        violatedRuleType: "total_capacity_override",
+        currentCapacity: 18,
+        totalCapacity: 18,
+        remainingCapacity: 0,
+        afterApprovalCapacity: 19,
+        overbookAmount: 1,
+        modalityCapacityBreakdown: null,
+        categoryBreakdown: null,
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: 18,
+        sameDayAppointmentSummary: [],
+        patientPreviousNoShowCount: 0,
+        patientPreviousCancelledCount: 0,
+        patientFutureAppointmentCount: 0,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: 4,
+        approvalNoteRequired: true,
+        approvalConsequenceText: "Combined override requires a note.",
+      },
+    })];
+
+    const { rerender } = renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+    expect(screen.getAllByText("Total modality capacity override").some((element) => element.classList.contains("state-chip"))).toBe(true);
+    expect(screen.getAllByText("Exam mix override").some((element) => element.classList.contains("state-chip"))).toBe(true);
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByLabelText("Approval note for request 16")).toBeNull();
+
+    rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
+    expect(screen.getAllByText("Total modality capacity override").some((element) => element.classList.contains("state-chip"))).toBe(true);
+    expect(screen.getAllByText("Exam mix override").some((element) => element.classList.contains("state-chip"))).toBe(true);
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Approval note for request 16"), { target: { value: "Combined high-risk approval" } });
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("renders patient history fallback safely", async () => {
     mockRequests = [request({
       id: 15,

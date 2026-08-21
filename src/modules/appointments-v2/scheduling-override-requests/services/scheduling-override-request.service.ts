@@ -52,6 +52,7 @@ import type {
   SchedulingOverrideRequestType,
   SchedulingOverrideStoredPayload,
 } from "../models/scheduling-override-request.js";
+import { canRoleApproveSchedulingOverrideTypes, normalizeSchedulingOverrideTypes } from "../../booking/services/override-authority.js";
 
 const DEFAULT_EXPIRY_HOURS = 72;
 const HIGH_RISK_APPROVAL_NOTE_TYPES = new Set<SchedulingOverrideType>([
@@ -198,8 +199,8 @@ function firstViolatedRule(request: SchedulingOverrideRequestRow): { label: stri
   };
 }
 
-function approvalNoteRequiredFor(overrideType: SchedulingOverrideType | null): boolean {
-  return overrideType != null && HIGH_RISK_APPROVAL_NOTE_TYPES.has(overrideType);
+function approvalNoteRequiredFor(overrideTypes: readonly SchedulingOverrideType[]): boolean {
+  return normalizeSchedulingOverrideTypes(overrideTypes).some((type) => HIGH_RISK_APPROVAL_NOTE_TYPES.has(type));
 }
 
 function buildApprovalConsequenceText(
@@ -389,7 +390,7 @@ async function buildDecisionContext(
     requestAgeMinutes: Number.isFinite(new Date(request.createdAt).getTime())
       ? Math.max(0, Math.floor((Date.now() - new Date(request.createdAt).getTime()) / 60000))
       : null,
-    approvalNoteRequired: approvalNoteRequiredFor(request.overrideType),
+    approvalNoteRequired: approvalNoteRequiredFor(request.overrideTypes),
     approvalConsequenceText: buildApprovalConsequenceText(request, contextBase),
   };
 }
@@ -442,12 +443,6 @@ async function canReceptionRequestOverrideFromAvailability(client: PoolClient): 
 
 async function canReceptionistCreateOverrideRequest(client: PoolClient, userId: number): Promise<boolean> {
   return (await canReceptionRequestOverrideFromAvailability(client)) && await getUserSchedulingOverridePermission(userId);
-}
-
-function canApproveOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
-  if (role === "super_admin") return true;
-  if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_restriction_override" || overrideType === "modality_block_override";
 }
 
 function canSeeAll(role: Role | undefined): boolean {
@@ -567,7 +562,7 @@ function normalizeReschedulePayload(payload: Record<string, unknown>): UpdateApp
   };
 }
 
-function inferRequiredOverrideType(decision: BookingDecision): SchedulingOverrideType | null {
+function inferRequiredOverrideTypes(decision: BookingDecision): SchedulingOverrideType[] {
   const codes = new Set(decision.reasons.map((reason) => reason.code));
   const closed =
     codes.has("closed_weekday_override_required") ||
@@ -584,26 +579,20 @@ function inferRequiredOverrideType(decision: BookingDecision): SchedulingOverrid
   const modalityBlock = codes.has("modality_blocked_overridable");
   const examRestriction = decision.requiresSupervisorOverride && decision.matchedExamRuleSummaries?.some((summary) => summary.effectMode === "restriction_overridable");
 
-  if ([closed, total, category, examMix, modalityBlock, examRestriction].filter(Boolean).length > 1) {
-    throw new SchedulingError(
-      409,
-      "Multiple separate override types are required. Create separate requests after resolving the first blocker.",
-      ["multiple_override_types_required"],
-      { decision }
-    );
-  }
-  if (total) return "total_capacity_override";
-  if (category) return "category_override";
-  if (examMix) return "exam_mix_override";
-  if (modalityBlock) return "modality_block_override";
-  if (examRestriction) return "exam_restriction_override";
-  if (closed) return "closed_weekday_override";
-  return null;
+  return normalizeSchedulingOverrideTypes([
+    ...(total ? ["total_capacity_override" as const] : []),
+    ...(category ? ["category_override" as const] : []),
+    ...(examMix ? ["exam_mix_override" as const] : []),
+    ...(modalityBlock ? ["modality_block_override" as const] : []),
+    ...(examRestriction ? ["exam_restriction_override" as const] : []),
+    ...(closed ? ["closed_weekday_override" as const] : []),
+  ]);
 }
 
-function capacityModeForOverride(overrideType: SchedulingOverrideType): CapacityResolutionMode {
-  if (overrideType === "category_override") return "category_override";
-  if (overrideType === "total_capacity_override") return "total_capacity_override";
+function capacityModeForOverrideTypes(overrideTypes: readonly SchedulingOverrideType[]): CapacityResolutionMode {
+  const types = normalizeSchedulingOverrideTypes(overrideTypes);
+  if (types.includes("total_capacity_override")) return "total_capacity_override";
+  if (types.includes("category_override")) return "category_override";
   return "standard";
 }
 
@@ -612,29 +601,18 @@ async function inferApprovalOverrideTypeOrFail(
   requestId: number,
   approverUserId: number,
   decision: BookingDecision
-): Promise<{ requiredOverrideType: SchedulingOverrideType | null; failedRequest?: SchedulingOverrideRequestRow }> {
-  let requiredOverrideType: SchedulingOverrideType | null;
-  try {
-    requiredOverrideType = inferRequiredOverrideType(decision);
-  } catch (error) {
-    const failed = await markSchedulingOverrideRequestFailed(client, requestId, {
-      approverUserId,
-      failureCode: "multiple_override_types_required",
-      failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
-      approvalDecisionSnapshot: decision,
-    });
-    return { requiredOverrideType: null, failedRequest: failed };
-  }
-  if (!requiredOverrideType && !decision.isAllowed) {
+): Promise<{ requiredOverrideTypes: SchedulingOverrideType[]; failedRequest?: SchedulingOverrideRequestRow }> {
+  const requiredOverrideTypes = inferRequiredOverrideTypes(decision);
+  if (requiredOverrideTypes.length === 0 && !decision.isAllowed) {
     const failed = await markSchedulingOverrideRequestFailed(client, requestId, {
       approverUserId,
       failureCode: "unsupported_current_blocker",
       failureMessage: "The current scheduling state has changed and is no longer covered by this override request.",
       approvalDecisionSnapshot: decision,
     });
-    return { requiredOverrideType: null, failedRequest: failed };
+    return { requiredOverrideTypes: [], failedRequest: failed };
   }
-  return { requiredOverrideType };
+  return { requiredOverrideTypes };
 }
 
 function policyVersionId(decision: BookingDecision): number | null {
@@ -772,15 +750,16 @@ export async function createSchedulingOverrideRequest(
       };
     }
 
-    const overrideType = inferRequiredOverrideType(decision);
-    if (!overrideType) {
+    const overrideTypes = inferRequiredOverrideTypes(decision);
+    if (overrideTypes.length === 0) {
       throw new SchedulingError(409, "No supported scheduling override is required for this request.", ["override_not_required"], { decision });
     }
 
     const expiresAt = new Date(Date.now() + DEFAULT_EXPIRY_HOURS * 60 * 60 * 1000);
     const request = await insertSchedulingOverrideRequest(client, {
       requestType,
-      overrideType,
+      overrideType: overrideTypes[0],
+      overrideTypes,
       requesterUserId: userId,
       patientId,
       modalityId,
@@ -884,10 +863,10 @@ export async function approveSchedulingOverrideRequest(
       const expired = await hydrateRequestDisplayName(client, await markSchedulingOverrideRequestExpired(client, id));
       return { request: expired };
     }
-    if (!canApproveOverride(role, request.overrideType)) {
+    if (!canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes)) {
       throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
     }
-    if ((approvalMode === "changed_date" || approvalNoteRequiredFor(request.overrideType)) && !approverReason?.trim()) {
+    if ((approvalMode === "changed_date" || approvalNoteRequiredFor(request.overrideTypes)) && !approverReason?.trim()) {
       throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
     }
 
@@ -899,7 +878,7 @@ export async function approveSchedulingOverrideRequest(
     const approvalReason = approverReason?.trim() || `Deferred scheduling override request #${request.id} approved.`;
     let decision: BookingDecision;
     let booking: unknown;
-    let requiredOverrideType: SchedulingOverrideType | null;
+    let requiredOverrideTypes: SchedulingOverrideType[];
     let finalBookingDate = request.requestedBookingDate;
     let finalBookingTime = request.requestedBookingTime;
 
@@ -914,14 +893,14 @@ export async function approveSchedulingOverrideRequest(
       decision = await evaluateCreatePayload(client, effectiveCreatePayload);
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
-      requiredOverrideType = inferred.requiredOverrideType;
-      if (requiredOverrideType && !canApproveOverride(role, requiredOverrideType)) {
+      requiredOverrideTypes = inferred.requiredOverrideTypes;
+      if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
-      if (approvalNoteRequiredFor(requiredOverrideType) && !approverReason?.trim()) {
+      if (approvalNoteRequiredFor(requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
       }
-      if (approvalMode === "as_requested" && requiredOverrideType && requiredOverrideType !== request.overrideType) {
+      if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {
         const failed = await markSchedulingOverrideRequestFailed(client, id, {
           approverUserId,
           failureCode: "override_type_changed",
@@ -930,7 +909,7 @@ export async function approveSchedulingOverrideRequest(
         });
         return { request: await hydrateRequestDisplayName(client, failed) };
       }
-      const capacityResolutionMode = requiredOverrideType ? capacityModeForOverride(requiredOverrideType) : "standard";
+      const capacityResolutionMode = capacityModeForOverrideTypes(requiredOverrideTypes);
       const createPayload: CreateAppointmentDto = {
         ...effectiveCreatePayload,
         capacityResolutionMode,
@@ -944,8 +923,8 @@ export async function approveSchedulingOverrideRequest(
         approverUserId,
         role,
         payload.policySetKey,
-        requiredOverrideType
-          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: requiredOverrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
+        requiredOverrideTypes.length
+          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideTypes: requiredOverrideTypes, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined,
         { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null, expectedIdentityFingerprint: request.patientIdentityVerificationFingerprint }
       );
@@ -965,14 +944,14 @@ export async function approveSchedulingOverrideRequest(
       finalBookingTime = evaluated.bookingTime;
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
-      requiredOverrideType = inferred.requiredOverrideType;
-      if (requiredOverrideType && !canApproveOverride(role, requiredOverrideType)) {
+      requiredOverrideTypes = inferred.requiredOverrideTypes;
+      if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
-      if (approvalNoteRequiredFor(requiredOverrideType) && !approverReason?.trim()) {
+      if (approvalNoteRequiredFor(requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
       }
-      if (approvalMode === "as_requested" && requiredOverrideType && requiredOverrideType !== request.overrideType) {
+      if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {
         const failed = await markSchedulingOverrideRequestFailed(client, id, {
           approverUserId,
           failureCode: "override_type_changed",
@@ -981,7 +960,7 @@ export async function approveSchedulingOverrideRequest(
         });
         return { request: await hydrateRequestDisplayName(client, failed) };
       }
-      const capacityResolutionMode = requiredOverrideType ? capacityModeForOverride(requiredOverrideType) : undefined;
+      const capacityResolutionMode = requiredOverrideTypes.length ? capacityModeForOverrideTypes(requiredOverrideTypes) : undefined;
       const reschedule = effectiveReschedulePayload;
       const rescheduleResult = await rescheduleBookingInternal(
         client,
@@ -1002,8 +981,8 @@ export async function approveSchedulingOverrideRequest(
         reschedule.requiresReport,
         reschedule.studyInstanceUid ?? undefined,
         payload.policySetKey,
-        requiredOverrideType
-          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: requiredOverrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
+        requiredOverrideTypes.length
+          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideTypes: requiredOverrideTypes, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined
       );
       booking = rescheduleResult.booking;
@@ -1031,7 +1010,9 @@ export async function approveSchedulingOverrideRequest(
               finalBookingDate,
               finalBookingTime,
               originalOverrideType: request.overrideType,
-              finalRequiredOverrideType: requiredOverrideType,
+              originalOverrideTypes: request.overrideTypes,
+              finalRequiredOverrideTypes: requiredOverrideTypes,
+              finalRequiredOverrideType: requiredOverrideTypes[0] ?? null,
               approverUserId,
             }
           : {
@@ -1041,7 +1022,9 @@ export async function approveSchedulingOverrideRequest(
               finalBookingDate,
               finalBookingTime,
               originalOverrideType: request.overrideType,
-              finalRequiredOverrideType: requiredOverrideType,
+              originalOverrideTypes: request.overrideTypes,
+              finalRequiredOverrideTypes: requiredOverrideTypes,
+              finalRequiredOverrideType: requiredOverrideTypes[0] ?? null,
             },
       },
     });
@@ -1110,7 +1093,7 @@ export async function rejectSchedulingOverrideRequest(
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
-    if (!canApproveOverride(role, request.overrideType)) {
+    if (!canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes)) {
       throw new SchedulingError(403, "You do not have permission to reject this override type.", ["override_rejection_forbidden"]);
     }
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim()));
