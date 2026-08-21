@@ -13,9 +13,10 @@ const mocks = vi.hoisted(() => ({
   fetchAppointmentLookups: vi.fn(),
   fetchPatientDirectorySummary: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
+  fetchPublicSchedulingCapacitySettings: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
-  userRole: "super_admin" as "super_admin" | "receptionist",
+  userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist",
   availabilityRows: [] as AvailabilityRowViewModel[],
   availabilitySettings: "enabled" as "enabled" | "disabled",
 }));
@@ -25,13 +26,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => mocks.fetchAppointmentLookups(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => mocks.fetchPatientDirectorySummary(...args),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => mocks.fetchPublicAppointmentReportStatus(...args),
-  fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => {
-    void args;
-    return Promise.resolve({
-    allow_reception_override_requests_from_availability: mocks.availabilitySettings,
-    can_request_scheduling_override: "enabled",
-    });
-  },
+  fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => mocks.fetchPublicSchedulingCapacitySettings(...args),
   getAppointmentById: (...args: unknown[]) => mocks.getAppointmentById(...args),
   updateAppointmentStatus: (...args: unknown[]) => mocks.updateAppointmentStatus(...args),
 }));
@@ -158,6 +153,11 @@ beforeEach(() => {
   });
   mocks.fetchPublicAppointmentReportStatus.mockReset();
   mocks.fetchPublicAppointmentReportStatus.mockResolvedValue({ enabled: true, state: "final", canViewReport: true, message: "Report is ready.", checkButtonLabel: "Check report status", viewButtonLabel: "Open report" });
+  mocks.fetchPublicSchedulingCapacitySettings.mockReset();
+  mocks.fetchPublicSchedulingCapacitySettings.mockImplementation(async () => ({
+    allow_reception_override_requests_from_availability: mocks.availabilitySettings,
+    can_request_scheduling_override: mocks.availabilitySettings,
+  }));
   mocks.updateAppointmentStatus.mockReset();
   mocks.updateAppointmentStatus.mockResolvedValue(undefined);
   mocks.rescheduleV2Booking.mockReset();
@@ -436,6 +436,7 @@ describe("AppointmentManageModal", () => {
   });
 
   it("sends the exam restriction override type for supervisor rescheduling", async () => {
+    mocks.userRole = "supervisor";
     mocks.availabilityRows = [{
       date: "2026-09-01",
       dayLabel: "Tue, Sep 1",
@@ -450,6 +451,7 @@ describe("AppointmentManageModal", () => {
       nonOncologyFilled: 0,
       nonOncologyRemaining: null,
       specialQuotaRemaining: null,
+      hasSpecialQuotaPath: false,
       matchedExamRuleSummary: {
         ruleId: "exam-rule-1",
         title: "Exam restriction",
@@ -481,9 +483,8 @@ describe("AppointmentManageModal", () => {
     });
   });
 
-  it("does not open a supervisor modal for a receptionist when reschedule requests are disabled", async () => {
-    mocks.userRole = "receptionist";
-    mocks.availabilitySettings = "disabled";
+  it("does not open a single override path when a reschedule has multiple override types", async () => {
+    mocks.userRole = "supervisor";
     mocks.availabilityRows = [{
       date: "2026-09-01",
       dayLabel: "Tue, Sep 1",
@@ -505,14 +506,54 @@ describe("AppointmentManageModal", () => {
         effectMode: "restriction_overridable",
         isBlocking: false,
       },
+      reasonText: "Exam restriction and category capacity",
+      requiresSupervisorOverride: true,
+      reasonCodes: ["exam_type_not_allowed_for_rule", "category_capacity_exhausted"],
+    }];
+    renderModal({ initialTab: "reschedule" });
+
+    await userEvent.click(await screen.findByRole("button", { name: /2026-09-01 restricted/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
+
+    expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+    expect(screen.queryByText("Request Approval")).toBeNull();
+    expect(mocks.rescheduleV2Booking).not.toHaveBeenCalled();
+  });
+
+  it("does not open a supervisor modal for a receptionist when reschedule requests are disabled", async () => {
+    mocks.userRole = "receptionist";
+    mocks.availabilitySettings = "disabled";
+    mocks.availabilityRows = [{
+      date: "2026-09-01",
+      dayLabel: "Tue, Sep 1",
+      status: "restricted",
+      bucketMode: "total_only",
+      remainingCapacity: 1,
+      dailyCapacity: 10,
+      oncologyReserved: null,
+      oncologyFilled: 0,
+      oncologyRemaining: null,
+      nonOncologyReserved: null,
+      nonOncologyFilled: 0,
+      nonOncologyRemaining: null,
+      specialQuotaRemaining: null,
+      hasSpecialQuotaPath: false,
+      matchedExamRuleSummary: {
+        ruleId: "exam-rule-1",
+        title: "Exam restriction",
+        effectLabel: "Restricted unless supervisor approves",
+        effectMode: "restriction_overridable",
+        isBlocking: false,
+      },
       reasonText: "Exam restriction",
       requiresSupervisorOverride: true,
       reasonCodes: ["exam_type_not_allowed_for_rule"],
     }];
     renderModal({ initialTab: "reschedule" });
 
-    await userEvent.click(await screen.findByRole("button", { name: /2026-09-01 restricted/i }));
-    await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
+    const restrictedDateButton = await screen.findByRole("button", { name: /2026-09-01 restricted/i }) as HTMLButtonElement;
+    await waitFor(() => expect(restrictedDateButton.disabled).toBe(true));
+    expect((screen.getByRole("button", { name: "Reschedule" }) as HTMLButtonElement).disabled).toBe(true);
 
     expect(screen.queryByText("Supervisor Override Required")).toBeNull();
     expect(screen.queryByText("Request Approval")).toBeNull();

@@ -1022,6 +1022,43 @@ describe("CreateAppointmentTab UI interactions", () => {
     }
   });
 
+  it("does not use stale soft exam row metadata after a fresh evaluation finds multiple overrides", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [softExamRestrictionRow];
+    const evaluateDecision: SchedulingDecisionDto = {
+      isAllowed: false,
+      requiresSupervisorOverride: true,
+      displayStatus: "blocked",
+      suggestedBookingMode: "override",
+      consumedCapacityMode: "override",
+      remainingStandardCapacity: 0,
+      remainingSpecialQuota: null,
+      matchedRuleIds: [901, 902],
+      matchedExamRuleSummaries: [{ ruleId: "901", title: "Exam restriction", ruleType: "specific_date", effectMode: "restriction_overridable", isBlocking: false }],
+      reasons: [
+        { code: "exam_type_not_allowed_for_rule", severity: "warning", message: "Exam restriction" },
+        { code: "exam_mix_quota_exhausted", severity: "error", message: "Exam mix limit" },
+      ],
+      policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+      decisionTrace: { evaluatedAt: "", input: {} },
+    };
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "supervisor", [], evaluateDecision);
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      expect(await screen.findByText("Availability changed before save")).toBeTruthy();
+      expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Request override approval" })).toBeNull();
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
   it("offers receptionist approval for a soft exam restriction but not direct booking", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = [softExamRestrictionRow];

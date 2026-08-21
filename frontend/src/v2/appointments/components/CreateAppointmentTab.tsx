@@ -36,7 +36,7 @@ import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
-import { formatOverrideType, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
+import { formatOverrideType, hasMultipleSupportedOverrideTypesFromDecision, inferSupportedOverrideTypeFromDecision, inferSupportedOverrideTypeFromExamRuleMetadata } from "../utils/scheduling-override-requests";
 import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -680,8 +680,12 @@ export function CreateAppointmentTab({
         includeOverrideEvaluation: true,
       });
 
-      const supportedOverrideType =
-        inferSupportedOverrideTypeFromDecision(decision) ?? inferRowOverrideType(availabilitySelectedRow);
+      if (hasMultipleSupportedOverrideTypesFromDecision(decision)) {
+        setPageError(t(language, "appointments.create.availabilityChanged"));
+        return;
+      }
+
+      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision);
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !supportedOverrideType) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
@@ -736,7 +740,7 @@ export function CreateAppointmentTab({
         supervisorUsername: payload.supervisorUsername,
         supervisorPassword: payload.supervisorPassword,
         reason: payload.overrideReason,
-        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? inferRowOverrideType(availabilitySelectedRow) ?? undefined,
+        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? undefined,
       });
 
       setShowOverrideModal(false);

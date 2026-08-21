@@ -22,9 +22,9 @@ function decision(effectMode: string, requiresSupervisorOverride: boolean): Sche
   };
 }
 
-function decisionWithReason(effectMode: string, reasonCode: string): SchedulingDecisionDto {
+function decisionWithReasons(effectMode: string, reasonCodes: string[]): SchedulingDecisionDto {
   const value = decision(effectMode, true);
-  value.reasons = [{ code: reasonCode, severity: "error", message: reasonCode }];
+  value.reasons = reasonCodes.map((code) => ({ code, severity: "error", message: code }));
   return value;
 }
 
@@ -40,7 +40,16 @@ describe("exam restriction scheduling override", () => {
     "exam_mix_quota_exhausted",
     "closed_weekday_override_required",
   ])("does not mask a concurrent %s blocker", (reasonCode) => {
-    expect(inferSupportedOverrideTypeFromDecision(decisionWithReason("restriction_overridable", reasonCode))).toBeNull();
+    expect(inferSupportedOverrideTypeFromDecision(decisionWithReasons("restriction_overridable", [reasonCode]))).toBeNull();
+  });
+
+  it.each([
+    ["category_capacity_exhausted", "exam_mix_quota_exhausted"],
+    ["closed_weekday_override_required", "category_capacity_exhausted"],
+  ])("does not mask multiple concurrent blockers: %s and %s", (firstReasonCode, secondReasonCode) => {
+    expect(inferSupportedOverrideTypeFromDecision(
+      decisionWithReasons("restriction_overridable", [firstReasonCode, secondReasonCode])
+    )).toBeNull();
   });
 
   it("allows supervisors and super admins but not receptionists to approve it", () => {
