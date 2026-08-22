@@ -52,4 +52,17 @@ describe("SonicDICOM report settings browser URLs", () => {
     expect(payload.entries[0]?.value.sonicDicomLocalBaseUrl).toBe("");
     expect(payload.entries[0]?.value.sonicDicomPublicBaseUrl).toBe("https://public.example/viewer");
   });
+
+  it("defaults and saves SQL no-report status codes", async () => {
+    renderSection();
+    const noReportInput = await screen.findByLabelText("No-report status codes") as HTMLInputElement;
+    expect(noReportInput.value).toBe("7");
+
+    fireEvent.change(noReportInput, { target: { value: "7, 17" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledTimes(1));
+    const payload = mocks.saveSettings.mock.calls[0]?.[1] as { entries: Array<{ value: Record<string, unknown> }> };
+    expect(payload.entries[0]?.value.sonicDicomSqlNoReportStatusCodes).toEqual([7, 17]);
+  });
 });

@@ -298,8 +298,13 @@ function mapStatusCode(settings: SonicDicomReportSettings, statusCode: number | 
   if (settings.sonicDicomSqlDraftStatusCodes.includes(statusCode)) {
     return { state: "draft", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
   }
+  if (settings.sonicDicomSqlNoReportStatusCodes.includes(statusCode)) {
+    return { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
+  }
   return { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
 }
+
+export const __mapSonicDicomSqlStatusCodeForTest = mapStatusCode;
 
 async function resolveSqlReadiness(
   settings: SonicDicomReportSettings,

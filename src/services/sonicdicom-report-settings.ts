@@ -47,6 +47,7 @@ export interface SonicDicomReportSettings {
   sonicDicomReportDatabaseName: string;
   sonicDicomSqlFinalStatusCodes: number[];
   sonicDicomSqlDraftStatusCodes: number[];
+  sonicDicomSqlNoReportStatusCodes: number[];
 }
 
 export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
@@ -91,6 +92,7 @@ export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
   sonicDicomReportDatabaseName: "report",
   sonicDicomSqlFinalStatusCodes: [6],
   sonicDicomSqlDraftStatusCodes: [1],
+  sonicDicomSqlNoReportStatusCodes: [7],
 };
 
 function readRawValue(value: unknown): unknown {
@@ -205,6 +207,7 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     sonicDicomReportDatabaseName: asString(record.sonicDicomReportDatabaseName, defaults.sonicDicomReportDatabaseName),
     sonicDicomSqlFinalStatusCodes: asNumberArray(record.sonicDicomSqlFinalStatusCodes, defaults.sonicDicomSqlFinalStatusCodes),
     sonicDicomSqlDraftStatusCodes: asNumberArray(record.sonicDicomSqlDraftStatusCodes, defaults.sonicDicomSqlDraftStatusCodes),
+    sonicDicomSqlNoReportStatusCodes: asNumberArray(record.sonicDicomSqlNoReportStatusCodes, defaults.sonicDicomSqlNoReportStatusCodes),
   };
 }
 

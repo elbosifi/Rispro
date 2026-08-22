@@ -45,6 +45,7 @@ const DEFAULTS: SonicSettings = {
   sonicDicomReportDatabaseName: "report",
   sonicDicomSqlFinalStatusCodes: [6],
   sonicDicomSqlDraftStatusCodes: [1],
+  sonicDicomSqlNoReportStatusCodes: [7],
 };
 
 type SonicSettingsFormOverride = {
@@ -224,6 +225,11 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
           label="Draft status codes"
           value={formatCodeList(form.sonicDicomSqlDraftStatusCodes)}
           onChange={(value) => setValue("sonicDicomSqlDraftStatusCodes", parseCodeList(value))}
+        />
+        <Input
+          label="No-report status codes"
+          value={formatCodeList(form.sonicDicomSqlNoReportStatusCodes)}
+          onChange={(value) => setValue("sonicDicomSqlNoReportStatusCodes", parseCodeList(value))}
         />
       </FieldCard>
 

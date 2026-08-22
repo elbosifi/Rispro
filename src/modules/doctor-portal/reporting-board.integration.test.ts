@@ -662,6 +662,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     assert.equal(after.status, 200, JSON.stringify(after.data));
     assert.equal(after.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "no_report");
+    const cache = await pool.query<{ report_status: string; last_success_at: Date | null }>(
+      `select report_status, last_success_at from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`,
+      [appointmentId]
+    );
+    assert.equal(cache.rows[0]?.report_status, "no_report");
+    assert.ok(cache.rows[0]?.last_success_at && cache.rows[0].last_success_at > new Date("2026-05-01T08:00:00.000Z"));
   });
 
   it("queues every eligible SonicDICOM cache row without clearing cached statuses or calling SonicDICOM", async () => {
