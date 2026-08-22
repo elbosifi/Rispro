@@ -89,23 +89,8 @@ function validate(policy: ActionPinPolicy): string | null {
   return null;
 }
 
-function formatUserIds(ids: number[] | undefined): string {
-  return (ids ?? []).join(", ");
-}
-
-function parseUserIds(value: string): number[] {
-  const result: number[] = [];
-  for (const raw of value.split(",")) {
-    const id = Number(raw.trim());
-    if (Number.isInteger(id) && id > 0 && !result.includes(id)) result.push(id);
-  }
-  return result;
-}
-
 type ActionPinPolicyForm = {
   draft: ActionPinPolicy;
-  idleIncludedUserIdsText: string;
-  idleExcludedUserIdsText: string;
 };
 
 type ActionPinPolicyFormOverride = {
@@ -116,9 +101,56 @@ type ActionPinPolicyFormOverride = {
 function actionPinPolicyForm(policy: ActionPinPolicy): ActionPinPolicyForm {
   return {
     draft: policy,
-    idleIncludedUserIdsText: formatUserIds(policy.idleLockUserIds),
-    idleExcludedUserIdsText: formatUserIds(policy.idleLockExcludedUserIds),
   };
+}
+
+function IdleLockUserSelector({
+  label,
+  selectedUserIds,
+  users,
+  onChange,
+}: {
+  label: string;
+  selectedUserIds: number[];
+  users: ActionPinAdminUser[];
+  onChange: (userId: number, selected: boolean) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleUsers = users.filter((user) => {
+    if (!normalizedSearch) return true;
+    return [user.fullName, user.username, user.role].some((value) => value.toLowerCase().includes(normalizedSearch));
+  });
+
+  return (
+    <div className="space-y-2">
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        aria-label={`Search ${label}`}
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search users"
+        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+      />
+      <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-stone-200 p-2 dark:border-stone-700">
+        {visibleUsers.map((user) => (
+          <label key={user.userId} className="flex items-start gap-2 rounded p-1 text-sm hover:bg-stone-50 dark:hover:bg-stone-800">
+            <input
+              aria-label={`${label} ${user.fullName}`}
+              type="checkbox"
+              checked={selectedUserIds.includes(user.userId)}
+              onChange={(event) => onChange(user.userId, event.target.checked)}
+            />
+            <span>
+              <span className="block font-medium">{user.fullName}</span>
+              <span className="block text-xs text-stone-500 dark:text-stone-400">{user.username} · {user.role}</span>
+            </span>
+          </label>
+        ))}
+        {visibleUsers.length === 0 ? <p className="p-1 text-sm text-stone-500">No users match the search.</p> : null}
+      </div>
+    </div>
+  );
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -304,7 +336,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
     formOverride?.baseUpdatedAt === query.dataUpdatedAt
       ? formOverride.value
       : serverForm;
-  const { draft, idleIncludedUserIdsText, idleExcludedUserIdsText } = form;
+  const { draft } = form;
   const updateForm = (updater: (current: ActionPinPolicyForm) => ActionPinPolicyForm) => {
     setFormOverride((currentOverride) => {
       const currentForm =
@@ -323,6 +355,11 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
     staleTime: 1000 * 60,
     retry: false,
   });
+  const adminUsersQuery = useQuery({
+    queryKey: ["action-pin", "admin", "users"],
+    queryFn: fetchActionPinAdminUsers,
+    retry: false,
+  });
 
   useEffect(() => {
     if (query.error && isReAuthRequiredError(query.error)) {
@@ -335,6 +372,24 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
       ...current,
       draft: { ...current.draft, [key]: value },
     }));
+    setMessage("");
+  };
+
+  const updateIdleLockUser = (key: "idleLockUserIds" | "idleLockExcludedUserIds", userId: number, selected: boolean) => {
+    const otherKey = key === "idleLockUserIds" ? "idleLockExcludedUserIds" : "idleLockUserIds";
+    updateForm((current) => {
+      const selectedUserIds = selected
+        ? [...new Set([...current.draft[key], userId])]
+        : current.draft[key].filter((id) => id !== userId);
+      return {
+        ...current,
+        draft: {
+          ...current.draft,
+          [key]: selectedUserIds,
+          [otherKey]: selected ? current.draft[otherKey].filter((id) => id !== userId) : current.draft[otherKey],
+        },
+      };
+    });
     setMessage("");
   };
 
@@ -449,46 +504,18 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
               <option value="exclude">All except selected roles</option>
             </select>
           </label>
-          <label className="space-y-1">
-            <FieldLabel>Idle lock included user IDs</FieldLabel>
-            <input
-              aria-label="Idle lock included user IDs"
-              value={idleIncludedUserIdsText}
-              onChange={(event) => {
-                const value = event.target.value;
-                updateForm((current) => ({
-                  ...current,
-                  idleIncludedUserIdsText: value,
-                  draft: {
-                    ...current.draft,
-                    idleLockUserIds: parseUserIds(value),
-                  },
-                }));
-                setMessage("");
-              }}
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
-            />
-          </label>
-          <label className="space-y-1">
-            <FieldLabel>Idle lock excluded user IDs</FieldLabel>
-            <input
-              aria-label="Idle lock excluded user IDs"
-              value={idleExcludedUserIdsText}
-              onChange={(event) => {
-                const value = event.target.value;
-                updateForm((current) => ({
-                  ...current,
-                  idleExcludedUserIdsText: value,
-                  draft: {
-                    ...current.draft,
-                    idleLockExcludedUserIds: parseUserIds(value),
-                  },
-                }));
-                setMessage("");
-              }}
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
-            />
-          </label>
+          <IdleLockUserSelector
+            label="Always include specific users"
+            selectedUserIds={draft.idleLockUserIds}
+            users={adminUsersQuery.data ?? []}
+            onChange={(userId, selected) => updateIdleLockUser("idleLockUserIds", userId, selected)}
+          />
+          <IdleLockUserSelector
+            label="Exclude specific users"
+            selectedUserIds={draft.idleLockExcludedUserIds}
+            users={adminUsersQuery.data ?? []}
+            onChange={(userId, selected) => updateIdleLockUser("idleLockExcludedUserIds", userId, selected)}
+          />
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {ACTION_PIN_ROLES.map((role) => (

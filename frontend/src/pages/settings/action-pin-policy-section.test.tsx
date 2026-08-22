@@ -174,12 +174,37 @@ describe("ActionPinPolicySection", () => {
     expect(policy.lockoutMinutes).toBe(20);
   });
 
-  it("saves idle-lock role and user eligibility settings", async () => {
+  it("renders existing idle-lock user exceptions as selected users", async () => {
     const fetchMock = mockPolicyFetch({
       ...basePolicy(),
       idleLockEnabled: true,
       idleLockRoleMode: "include",
       idleLockRoles: ["receptionist"],
+      idleLockUserIds: [1],
+      idleLockExcludedUserIds: [2],
+    });
+
+    renderSection();
+    await screen.findByText("Action PIN Policy");
+
+    expect((screen.getByLabelText("Always include specific users Front Desk") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Exclude specific users Locked User") as HTMLInputElement).checked).toBe(true);
+
+    await userEvent.selectOptions(screen.getByLabelText("Idle lock role eligibility"), "exclude");
+    await userEvent.click(screen.getByLabelText("Idle lock role Doctor"));
+    await userEvent.click(screen.getByRole("button", { name: "Save Action PIN Policy" }));
+
+    const policy = await savedPolicy(fetchMock);
+    expect(policy.idleLockRoleMode).toBe("exclude");
+    expect(policy.idleLockRoles).toContain("doctor");
+    expect(policy.idleLockUserIds).toEqual([1]);
+    expect(policy.idleLockExcludedUserIds).toEqual([2]);
+  });
+
+  it("updates numeric idle-lock user exception arrays and prevents conflicting selections", async () => {
+    const fetchMock = mockPolicyFetch({
+      ...basePolicy(),
+      idleLockEnabled: true,
       idleLockUserIds: [1],
       idleLockExcludedUserIds: [],
     });
@@ -187,19 +212,18 @@ describe("ActionPinPolicySection", () => {
     renderSection();
     await screen.findByText("Action PIN Policy");
 
-    await userEvent.selectOptions(screen.getByLabelText("Idle lock role eligibility"), "exclude");
-    await userEvent.click(screen.getByLabelText("Idle lock role Doctor"));
-    await userEvent.clear(screen.getByLabelText("Idle lock included user IDs"));
-    await userEvent.type(screen.getByLabelText("Idle lock included user IDs"), "2, 3");
-    await userEvent.clear(screen.getByLabelText("Idle lock excluded user IDs"));
-    await userEvent.type(screen.getByLabelText("Idle lock excluded user IDs"), "4");
+    await userEvent.click(screen.getByLabelText("Always include specific users Locked User"));
+    await userEvent.click(screen.getByLabelText("Exclude specific users Front Desk"));
+    expect((screen.getByLabelText("Always include specific users Front Desk") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("Exclude specific users Front Desk") as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(screen.getByLabelText("Always include specific users Front Desk"));
+    expect((screen.getByLabelText("Exclude specific users Front Desk") as HTMLInputElement).checked).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: "Save Action PIN Policy" }));
 
     const policy = await savedPolicy(fetchMock);
-    expect(policy.idleLockRoleMode).toBe("exclude");
-    expect(policy.idleLockRoles).toContain("doctor");
-    expect(policy.idleLockUserIds).toEqual([2, 3]);
-    expect(policy.idleLockExcludedUserIds).toEqual([4]);
+    expect(policy.idleLockUserIds).toEqual([2, 1]);
+    expect(policy.idleLockExcludedUserIds).toEqual([]);
+    expect(policy.idleLockUserIds.every((id: unknown) => typeof id === "number")).toBe(true);
   });
 
   it("saves role/action matrix changes and reason-required mode", async () => {
@@ -273,7 +297,7 @@ describe("ActionPinPolicySection", () => {
     expect(await screen.findByText("User PIN Readiness / User PIN Management")).toBeTruthy();
     expect(screen.getByText("Admins cannot view user PINs.")).toBeTruthy();
     expect(screen.getByText("Active without PIN")).toBeTruthy();
-    expect(screen.getByText("Front Desk")).toBeTruthy();
+    expect(screen.getAllByText("Front Desk").length).toBeGreaterThan(0);
     expect(screen.getByText("Not set")).toBeTruthy();
     expect(JSON.stringify(document.body.textContent)).not.toContain("1234");
   });
@@ -283,7 +307,7 @@ describe("ActionPinPolicySection", () => {
     const fetchMock = mockPolicyFetch(basePolicy());
 
     renderSection();
-    await screen.findByText("Front Desk");
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Reset PIN" }).length).toBe(2));
     await userEvent.click(screen.getAllByRole("button", { name: "Reset PIN" })[0]!);
 
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/action-pin/admin/users/1/reset")).toBe(true));
@@ -294,7 +318,7 @@ describe("ActionPinPolicySection", () => {
     mockPolicyFetch(basePolicy());
 
     renderSection();
-    await screen.findByText("Front Desk");
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Unlock PIN" }).length).toBe(2));
     const unlockButtons = screen.getAllByRole("button", { name: "Unlock PIN" });
 
     expect((unlockButtons[0] as HTMLButtonElement).disabled).toBe(true);
@@ -306,7 +330,7 @@ describe("ActionPinPolicySection", () => {
     const fetchMock = mockPolicyFetch(basePolicy());
 
     renderSection();
-    await screen.findByText("Locked User");
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Force expire PIN" }).length).toBe(2));
     await userEvent.click(screen.getAllByRole("button", { name: "Force expire PIN" })[1]!);
 
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/action-pin/admin/users/2/expire")).toBe(true));

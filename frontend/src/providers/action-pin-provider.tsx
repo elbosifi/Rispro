@@ -301,7 +301,7 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!enabled) return;
-    const events = ["mousemove", "mousedown", "click", "keydown", "touchstart", "touchmove", "rispro-api-activity"];
+    const events = ["mousemove", "mousedown", "click", "keydown", "touchstart", "touchmove"];
     for (const eventName of events) window.addEventListener(eventName, resetTimer, { passive: true });
     return () => {
       for (const eventName of events) window.removeEventListener(eventName, resetTimer);

@@ -591,6 +591,19 @@ describe("ActionPinIdleLock", () => {
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/action-pin/idle-lock")).toBe(true);
   });
 
+  it("does not treat background API activity as idle timer activity", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
+    renderIdleLock();
+    await flushIdleQueries();
+
+    await delay(40);
+    window.dispatchEvent(new Event("rispro-api-activity"));
+    await delay(40);
+    window.dispatchEvent(new Event("rispro-api-activity"));
+
+    expect(await screen.findByText("Session locked", {}, { timeout: 1_000 })).toBeTruthy();
+  });
+
   it("submits unlock PIN only to verify and hides overlay on success", async () => {
     const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
     const fetchMock = mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
