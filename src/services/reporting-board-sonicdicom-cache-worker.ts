@@ -8,7 +8,7 @@ import {
 } from "./reporting-board-sonicdicom-cache-service.js";
 
 const DEFAULT_INTERVAL_MS = 45_000;
-const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_BATCH_SIZE = 200;
 const ADVISORY_LOCK_KEY = 712364091;
 
 export interface ReportingBoardSonicDicomCacheWorker { stop(): Promise<void>; }

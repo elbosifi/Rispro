@@ -739,6 +739,46 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(after.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "no_report");
   });
 
+  it("refreshes only the requested Reporting Board appointment and retains cached status when SonicDICOM is unavailable", async () => {
+    guard();
+    const date = addDays(83);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "single Sonic refresh" });
+    const otherAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "other Sonic refresh" });
+    await seedSonicDicomCache(appointmentId, "final", "2026-05-01T08:00:00.000Z");
+    await seedSonicDicomCache(otherAppointmentId, "final", "2026-05-01T08:00:00.000Z");
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "no_report");
+    Map.prototype.set.call(statusByAppointmentId, otherAppointmentId, "draft");
+
+    const denied = await api(receptionistCookie, `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
+    assert.equal(denied.status, 403, JSON.stringify(denied.data));
+    const noReport = await api<{ ok: boolean; appointmentId: number; successful: boolean; previousStatus: string; reportStatus: string; changed: boolean; cachedStatusRetained: boolean; checkedAt: string }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
+    assert.equal(noReport.status, 200, JSON.stringify(noReport.data));
+    assert.deepEqual(noReport.data, { ok: true, appointmentId, successful: true, previousStatus: "final", reportStatus: "no_report", changed: true, cachedStatusRetained: false, checkedAt: noReport.data.checkedAt });
+
+    const other = await pool.query<{ report_status: string }>(`select report_status from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [otherAppointmentId]);
+    assert.equal(other.rows[0]?.report_status, "final");
+
+    await seedSonicDicomCache(appointmentId, "final", "2026-05-01T08:00:00.000Z");
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "draft");
+    const draft = await api<{ successful: boolean; reportStatus: string; changed: boolean }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
+    assert.equal(draft.status, 200, JSON.stringify(draft.data));
+    assert.equal(draft.data.reportStatus, "draft");
+    assert.equal(draft.data.changed, true);
+
+    await seedSonicDicomCache(appointmentId, "final", "2026-05-01T08:00:00.000Z");
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "final");
+    const unchanged = await api<{ successful: boolean; reportStatus: string; changed: boolean }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
+    assert.equal(unchanged.status, 200, JSON.stringify(unchanged.data));
+    assert.equal(unchanged.data.successful, true);
+    assert.equal(unchanged.data.reportStatus, "final");
+    assert.equal(unchanged.data.changed, false);
+
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "throw");
+    const unavailable = await api<{ successful: boolean; reportStatus: string; changed: boolean; cachedStatusRetained: boolean }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
+    assert.equal(unavailable.status, 200, JSON.stringify(unavailable.data));
+    assert.deepEqual({ successful: unavailable.data.successful, reportStatus: unavailable.data.reportStatus, changed: unavailable.data.changed, cachedStatusRetained: unavailable.data.cachedStatusRetained }, { successful: false, reportStatus: "final", changed: false, cachedStatusRetained: true });
+  });
+
   after(async () => {
     reportingBoardService?.__setReportingBoardAssignmentBatchCheckerForTest(null);
     if (app) await app.close();

@@ -665,6 +665,62 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
   return { ok: true, checked: contexts.length, successful, failed, checkedAt: new Date().toISOString() };
 }
 
+export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, appointmentId: number): Promise<{
+  ok: true;
+  appointmentId: number;
+  successful: boolean;
+  previousStatus: string;
+  reportStatus: string;
+  changed: boolean;
+  cachedStatusRetained: boolean;
+  checkedAt: string;
+}> {
+  const { row } = await getAuthorizedReportingBoardAppointment(
+    actor,
+    appointmentId,
+    "You are not allowed to refresh this Reporting Board case."
+  );
+  if (row.caseType !== "appointment" || row.appointmentStatus !== "completed" || !row.requiresReport) {
+    throw new HttpError(409, "Only completed Reporting Board appointments that require reports can be refreshed.");
+  }
+  if (row.manualFinalOverrideId) throw new HttpError(409, "This Reporting Board case has an active manual final override.");
+
+  const context: ReportLookupContext = {
+    bookingId: row.appointmentId,
+    accessionNumber: row.accessionNumber,
+    studyInstanceUid: row.studyInstanceUid,
+    requiresReport: row.requiresReport,
+    status: row.appointmentStatus,
+  };
+  const previousStatus = row.reportStatus ?? "unavailable";
+  let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
+  let failure: unknown = null;
+  try {
+    statuses = await assignmentBatchChecker([context], { audit: false });
+  } catch (error) {
+    failure = error;
+  }
+  const result = statuses.get(appointmentId) ?? null;
+  const successful = Boolean(result && ["final", "draft", "no_report", "study_not_found"].includes(result.state));
+  const settings = await readSonicDicomReportSettings();
+  const persisted = await persistReportingBoardSonicDicomCacheResults([{
+    context,
+    result,
+    error: failure ?? (!successful ? "SonicDICOM unavailable during single Reporting Board refresh" : null),
+  }], settings);
+  const cache = persisted[0] ?? { changed: false, status: previousStatus };
+  return {
+    ok: true,
+    appointmentId,
+    successful,
+    previousStatus,
+    reportStatus: cache.status,
+    changed: cache.changed,
+    cachedStatusRetained: !successful,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 export async function queueFullReportingBoardSonicDicomResyncForManager(actor: Actor): Promise<{ ok: true; queued: number; requestedAt: string }> {
   const manager = await requireRosterManager(actor);
   const requestedAt = new Date().toISOString();

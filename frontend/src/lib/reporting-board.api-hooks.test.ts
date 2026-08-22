@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
-import { fetchFullReportingBoardSonicDicomResyncStatus, fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicom } from "./api-hooks";
+import { fetchFullReportingBoardSonicDicomResyncStatus, fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardCaseSonicDicomStatus, refreshReportingBoardSonicDicom } from "./api-hooks";
 
 vi.mock("@/lib/api-client", () => ({
   api: vi.fn(),
@@ -56,5 +56,13 @@ describe("reporting board api hooks", () => {
     await fetchFullReportingBoardSonicDicomResyncStatus("2026-08-23T10:00:00.000Z");
 
     expect(api).toHaveBeenCalledWith("/doctor/reporting-board/resync-sonicdicom/status?requestedAt=2026-08-23T10%3A00%3A00.000Z");
+  });
+
+  it("posts a single Reporting Board appointment SonicDICOM refresh", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, appointmentId: 42, successful: true, previousStatus: "final", reportStatus: "final", changed: false, cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" });
+
+    await refreshReportingBoardCaseSonicDicomStatus(42);
+
+    expect(api).toHaveBeenCalledWith("/doctor/reporting-board/cases/42/refresh-sonicdicom", { method: "POST" });
   });
 });

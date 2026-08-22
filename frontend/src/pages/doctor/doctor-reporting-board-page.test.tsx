@@ -11,6 +11,7 @@ const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
 const fetchReportingBoardStatsMock = vi.fn();
 const refreshReportingBoardSonicDicomMock = vi.fn();
+const refreshReportingBoardCaseSonicDicomStatusMock = vi.fn();
 const queueFullReportingBoardSonicDicomResyncMock = vi.fn();
 const fetchFullReportingBoardSonicDicomResyncStatusMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
@@ -50,6 +51,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
   fetchReportingBoardStats: (...args: unknown[]) => fetchReportingBoardStatsMock(...args),
   refreshReportingBoardSonicDicom: (...args: unknown[]) => refreshReportingBoardSonicDicomMock(...args),
+  refreshReportingBoardCaseSonicDicomStatus: (...args: unknown[]) => refreshReportingBoardCaseSonicDicomStatusMock(...args),
   queueFullReportingBoardSonicDicomResync: (...args: unknown[]) => queueFullReportingBoardSonicDicomResyncMock(...args),
   fetchFullReportingBoardSonicDicomResyncStatus: (...args: unknown[]) => fetchFullReportingBoardSonicDicomResyncStatusMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
@@ -234,6 +236,7 @@ describe("DoctorReportingBoardPage", () => {
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
     refreshReportingBoardSonicDicomMock.mockResolvedValue({ ok: true, checked: 1, successful: 1, failed: 0, checkedAt: "2026-08-19T10:00:00.000Z" });
+    refreshReportingBoardCaseSonicDicomStatusMock.mockResolvedValue({ ok: true, appointmentId: 42, successful: true, previousStatus: "final", reportStatus: "final", changed: false, cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" });
     queueFullReportingBoardSonicDicomResyncMock.mockResolvedValue({ ok: true, queued: 1234, requestedAt: "2026-08-22T10:00:00.000Z" });
     fetchFullReportingBoardSonicDicomResyncStatusMock.mockResolvedValue({ ok: true, remaining: 0, failed: 0 });
     fetchReportingBoardCasesMock.mockResolvedValue({
@@ -667,6 +670,24 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("V2-000042"));
     expect(await screen.findByText("Accession copied.")).toBeTruthy();
     expect(screen.getByText("View appointment")).toBeTruthy();
+  });
+
+  it("refreshes one report status and distinguishes changed, unchanged, and unavailable results", async () => {
+    refreshReportingBoardCaseSonicDicomStatusMock
+      .mockResolvedValueOnce({ ok: true, appointmentId: 42, successful: true, previousStatus: "final", reportStatus: "no_report", changed: true, cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" })
+      .mockResolvedValueOnce({ ok: true, appointmentId: 42, successful: true, previousStatus: "final", reportStatus: "final", changed: false, cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" })
+      .mockResolvedValueOnce({ ok: true, appointmentId: 42, successful: false, previousStatus: "final", reportStatus: "final", changed: false, cachedStatusRetained: true, checkedAt: "2026-08-23T10:00:00.000Z" });
+    renderPage();
+    await screen.findByText("V2-000042");
+    const row = screen.getByText("V2-000042").closest("tr")!;
+
+    for (const message of ["Report status refreshed: Final → No report.", "Report status refreshed. SonicDICOM still reports Final.", "Could not refresh this report status. SonicDICOM is unavailable; cached Final status was retained."]) {
+      fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refresh report status" }));
+      await waitFor(() => expect(refreshReportingBoardCaseSonicDicomStatusMock).toHaveBeenCalledTimes(["Report status refreshed: Final → No report.", "Report status refreshed. SonicDICOM still reports Final.", "Could not refresh this report status. SonicDICOM is unavailable; cached Final status was retained."].indexOf(message) + 1));
+      expect(await screen.findByText(message)).toBeTruthy();
+    }
+    expect(refreshReportingBoardCaseSonicDicomStatusMock).toHaveBeenCalledWith(42);
   });
 
   it("shows RadiAnt actions only on Windows and builds tag search URLs", async () => {

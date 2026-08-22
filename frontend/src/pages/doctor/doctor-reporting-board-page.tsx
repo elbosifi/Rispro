@@ -27,6 +27,7 @@ import {
   fetchReportingBoardStats,
   fetchFullReportingBoardSonicDicomResyncStatus,
   queueFullReportingBoardSonicDicomResync,
+  refreshReportingBoardCaseSonicDicomStatus,
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
   finalizeComparisonRequest,
@@ -82,6 +83,10 @@ function storedFullResync(): FullResyncState | null {
     window.sessionStorage.removeItem(FULL_RESCAN_STORAGE_KEY);
     return null;
   }
+}
+
+function reportStatusFeedbackLabel(status: string): string {
+  return status === "no_report" ? "No report" : status === "study_not_found" ? "Study not found" : status === "unavailable" ? "Unavailable" : status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 import {
   buildRadiantPacsTagUrl,
@@ -761,6 +766,8 @@ function RowActionMenu({
   onMarkManualFinal,
   onClearManualFinal,
   onDiscontinue,
+  onRefreshReportStatus,
+  refreshingReportStatus,
   ohifAvailability,
 }: {
   row: ReportingBoardCaseRow;
@@ -772,6 +779,8 @@ function RowActionMenu({
   onMarkManualFinal: (row: ReportingBoardCaseRow) => void;
   onClearManualFinal: (row: ReportingBoardCaseRow) => void;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
+  onRefreshReportStatus: (row: ReportingBoardCaseRow) => Promise<void>;
+  refreshingReportStatus: boolean;
   ohifAvailability: OhifViewerAvailability | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -902,6 +911,11 @@ function RowActionMenu({
       ) : (
         <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
           Open patient list in SonicDICOM
+        </button>
+      )}
+      {row.caseType === "appointment" && (
+        <button type="button" role="menuitem" disabled={refreshingReportStatus} onClick={() => { setOpen(false); void onRefreshReportStatus(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">
+          {refreshingReportStatus ? "Refreshing report status…" : "Refresh report status"}
         </button>
       )}
       {showRadiantActions && accessionNumber && (
@@ -1672,6 +1686,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [boardRefreshing, setBoardRefreshing] = useState(false);
   const [fullResyncPending, setFullResyncPending] = useState(false);
   const [fullResync, setFullResync] = useState<FullResyncState | null>(storedFullResync);
+  const [refreshingReportAppointmentId, setRefreshingReportAppointmentId] = useState<number | null>(null);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
@@ -2217,6 +2232,25 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     }
   };
 
+  const refreshCaseReportStatus = async (row: ReportingBoardCaseRow) => {
+    setRefreshingReportAppointmentId(row.appointmentId);
+    try {
+      const result = await refreshReportingBoardCaseSonicDicomStatus(row.appointmentId);
+      if (!result.successful) {
+        setBoardActionMessage({ tone: "error", text: `Could not refresh this report status. SonicDICOM is unavailable; cached ${reportStatusFeedbackLabel(result.reportStatus)} status was retained.` });
+      } else if (result.changed) {
+        setBoardActionMessage({ tone: "success", text: `Report status refreshed: ${reportStatusFeedbackLabel(result.previousStatus)} → ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+      } else {
+        setBoardActionMessage({ tone: "success", text: `Report status refreshed. SonicDICOM still reports ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+      }
+      await Promise.all([casesQuery.refetch(), statsQuery.refetch()]);
+    } catch (error) {
+      setBoardActionMessage({ tone: "error", text: error instanceof Error ? error.message : "Could not refresh this report status." });
+    } finally {
+      setRefreshingReportAppointmentId(null);
+    }
+  };
+
   const queueFullResync = async () => {
     if (!window.confirm("Recheck all completed cases requiring reports against SonicDICOM. This runs in the background and may take time.")) return;
     setFullResyncPending(true);
@@ -2617,6 +2651,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                               setDiscontinueReason("");
                               setDiscontinueTarget(target);
                             }}
+                            onRefreshReportStatus={refreshCaseReportStatus}
+                            refreshingReportStatus={refreshingReportAppointmentId === row.appointmentId}
                           />
                         </td>
                       </tr>

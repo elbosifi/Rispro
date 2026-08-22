@@ -35,6 +35,7 @@ import {
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
   refreshReportingBoardSonicDicomStatuses,
+  refreshReportingBoardCaseSonicDicomStatus,
   queueFullReportingBoardSonicDicomResyncForManager,
   resumeScheduledReportingBoardBulkAssignmentJob,
   revokeReportingBoardSavedView,
@@ -217,6 +218,13 @@ router.post(
   "/resync-sonicdicom",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await queueFullReportingBoardSonicDicomResyncForManager(actor(req)));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/refresh-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await refreshReportingBoardCaseSonicDicomStatus(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId")));
   })
 );
 
