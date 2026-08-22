@@ -25,6 +25,7 @@ import {
   fetchOhifViewerAvailability,
   fetchOhifRetrievalJob,
   fetchReportingBoardStats,
+  fetchFullReportingBoardSonicDicomResyncStatus,
   queueFullReportingBoardSonicDicomResync,
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
@@ -63,6 +64,25 @@ import type {
   ReportingBoardSettings,
   OhifViewerAvailability,
 } from "@/types/api";
+
+const FULL_RESCAN_STORAGE_KEY = "rispro.reporting-board.sonicdicom-resync";
+type FullResyncState = { queued: number; requestedAt: string; remaining: number; failed: number };
+
+function storedFullResync(): FullResyncState | null {
+  try {
+    const value = window.sessionStorage.getItem(FULL_RESCAN_STORAGE_KEY);
+    if (!value) return null;
+    const parsed = JSON.parse(value) as { queued?: unknown; requestedAt?: unknown };
+    if (!Number.isInteger(parsed.queued) || !Number.isFinite(parsed.queued) || (parsed.queued as number) < 0 || typeof parsed.requestedAt !== "string") {
+      window.sessionStorage.removeItem(FULL_RESCAN_STORAGE_KEY);
+      return null;
+    }
+    return { queued: parsed.queued as number, requestedAt: parsed.requestedAt, remaining: parsed.queued as number, failed: 0 };
+  } catch {
+    window.sessionStorage.removeItem(FULL_RESCAN_STORAGE_KEY);
+    return null;
+  }
+}
 import {
   buildRadiantPacsTagUrl,
   buildReportingBoardPrintUrl,
@@ -1651,6 +1671,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
   const [boardRefreshing, setBoardRefreshing] = useState(false);
   const [fullResyncPending, setFullResyncPending] = useState(false);
+  const [fullResync, setFullResync] = useState<FullResyncState | null>(storedFullResync);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
@@ -1683,6 +1704,22 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     enabled: isManager(me),
     refetchInterval: 30_000,
   });
+  const fullResyncStatusQuery = useQuery({
+    queryKey: ["doctor", "reporting-board", "resync-sonicdicom", fullResync?.requestedAt],
+    queryFn: () => fetchFullReportingBoardSonicDicomResyncStatus(fullResync!.requestedAt),
+    enabled: Boolean(fullResync && fullResync.remaining > 0),
+    refetchInterval: fullResync?.remaining ? 2_000 : false,
+    retry: false,
+  });
+
+  useEffect(() => {
+    const status = fullResyncStatusQuery.data;
+    if (!status) return;
+    if (status.remaining === 0) window.sessionStorage.removeItem(FULL_RESCAN_STORAGE_KEY);
+    setFullResync((current) => current && current.requestedAt === fullResync?.requestedAt && (current.remaining !== status.remaining || current.failed !== status.failed)
+      ? { ...current, remaining: status.remaining, failed: status.failed }
+      : current);
+  }, [fullResync?.requestedAt, fullResyncStatusQuery.data]);
 
   const refreshScheduledJobsAndBoard = async () => {
     await Promise.all([
@@ -2185,6 +2222,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     setFullResyncPending(true);
     try {
       const result = await queueFullReportingBoardSonicDicomResync();
+      window.sessionStorage.setItem(FULL_RESCAN_STORAGE_KEY, JSON.stringify({ queued: result.queued, requestedAt: result.requestedAt }));
+      setFullResync({ queued: result.queued, requestedAt: result.requestedAt, remaining: result.queued, failed: 0 });
       setBoardActionMessage({ tone: "success", text: `Full SonicDICOM resync queued for ${result.queued.toLocaleString()} cases.` });
     } catch (error) {
       setBoardActionMessage({ tone: "error", text: error instanceof Error ? error.message : "Could not queue the full SonicDICOM resync." });
@@ -2233,7 +2272,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
           </button>
-          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
+          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending || Boolean(fullResync && fullResync.remaining > 0)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={fullResyncPending ? "animate-spin" : undefined} /> {fullResyncPending ? "Queueing..." : "Resync all reports"}
           </button>}
           <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
@@ -2254,6 +2293,20 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <p className="font-semibold">{boardActionMessage.text}</p>
           {boardActionMessage.detail && <p className="mt-1 text-xs">{boardActionMessage.detail}</p>}
         </div>
+      )}
+      {fullResync && (
+        <section className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }} aria-live="polite">
+          {fullResync.remaining > 0 ? <>
+            <p className="font-semibold">SonicDICOM resync in progress</p>
+            <progress className="mt-2 h-2 w-full" value={Math.max(0, fullResync.queued - fullResync.remaining)} max={Math.max(fullResync.queued, 1)} aria-label="SonicDICOM resync progress" />
+            <p className="mt-1">{(fullResync.queued - fullResync.remaining).toLocaleString()} / {fullResync.queued.toLocaleString()}</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{fullResync.remaining.toLocaleString()} remaining · {fullResync.failed.toLocaleString()} failed</p>
+            {fullResyncStatusQuery.isError && <p className="mt-1 text-xs text-amber-700">Progress temporarily unavailable. Resync continues in the background.</p>}
+          </> : <>
+            <p className="font-semibold">SonicDICOM resync complete</p>
+            <p>{Math.max(0, fullResync.queued - fullResync.failed).toLocaleString()} processed successfully · {fullResync.failed.toLocaleString()} failed</p>
+          </>}
+        </section>
       )}
 
       {canManage && (

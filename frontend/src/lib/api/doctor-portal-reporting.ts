@@ -614,6 +614,10 @@ export async function queueFullReportingBoardSonicDicomResync(): Promise<{ ok: t
   return api("/doctor/reporting-board/resync-sonicdicom", { method: "POST" });
 }
 
+export async function fetchFullReportingBoardSonicDicomResyncStatus(requestedAt: string): Promise<{ ok: true; remaining: number; failed: number }> {
+  return api(`/doctor/reporting-board/resync-sonicdicom/status?requestedAt=${encodeURIComponent(requestedAt)}`);
+}
+
 export async function fetchReportingBoardMobileView(token: string, filters: ReportingBoardFilters = {}): Promise<ReportingBoardMobileResponse> {
   const params = reportingBoardParams(filters);
   const query = params.toString();

@@ -43,26 +43,36 @@ export async function enqueueReportingBoardSonicDicomCacheRows(appointmentIds: n
 }
 
 /** Queues the complete eligible Reporting Board scope without altering cached results. */
-export async function queueFullReportingBoardSonicDicomResync(db: Queryable = pool): Promise<number> {
+export async function queueFullReportingBoardSonicDicomResync(requestedAt: string, db: Queryable = pool): Promise<number> {
   const result = await db.query<{ queued: string }>(`
     with queued as (
       insert into doctor_portal.reporting_board_sonicdicom_cache (
         appointment_id, report_status, next_check_at, study_instance_uid_snapshot, accession_number_snapshot
       )
-      select b.id, 'unavailable', now(), b.study_instance_uid, ('V2-' || lpad(b.id::text, 6, '0'))
+      select b.id, 'unavailable', $1::timestamptz, b.study_instance_uid, ('V2-' || lpad(b.id::text, 6, '0'))
       from appointments_v2.bookings b
       left join doctor_portal.reporting_board_manual_final_overrides manual
         on manual.appointment_id = b.id and manual.cleared_at is null
       where b.status = 'completed' and b.requires_report = true and manual.id is null
       on conflict (appointment_id) do update set
-        next_check_at = now(),
+        next_check_at = $1::timestamptz,
         study_instance_uid_snapshot = excluded.study_instance_uid_snapshot,
         accession_number_snapshot = excluded.accession_number_snapshot,
         updated_at = now()
       returning appointment_id
     ) select count(*)::text as queued from queued
-  `);
+  `, [requestedAt]);
   return Number(result.rows[0]?.queued ?? 0);
+}
+
+export async function getFullReportingBoardSonicDicomResyncStatus(requestedAt: string, db: Queryable = pool): Promise<{ remaining: number; failed: number }> {
+  const result = await db.query<{ remaining: string; failed: string }>(`
+    select
+      count(*) filter (where next_check_at = $1::timestamptz)::text as remaining,
+      count(*) filter (where last_attempt_at >= $1::timestamptz and last_error is not null)::text as failed
+    from doctor_portal.reporting_board_sonicdicom_cache
+  `, [requestedAt]);
+  return { remaining: Number(result.rows[0]?.remaining ?? 0), failed: Number(result.rows[0]?.failed ?? 0) };
 }
 
 export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: number, db: Queryable = pool): Promise<ReportingBoardSonicDicomCacheCandidate[]> {

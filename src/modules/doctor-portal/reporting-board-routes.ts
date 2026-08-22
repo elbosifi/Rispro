@@ -21,6 +21,7 @@ import {
   getReportingBoardSonicDicomStudyRedirect,
   getScheduledReportingBoardBulkAssignmentJobs,
   getReportingBoardSettings,
+  getFullReportingBoardSonicDicomResyncStatusForManager,
   getReportingBoardStats,
   getMyReportingBoardNotifications,
   getMyDoctorReportingWorklist,
@@ -202,6 +203,13 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
     res.json(await refreshReportingBoardSonicDicomStatuses(actor(req), filtersFromBody(body.filters)));
+  })
+);
+
+router.get(
+  "/resync-sonicdicom/status",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await getFullReportingBoardSonicDicomResyncStatusForManager(actor(req), asOptionalString(req.query.requestedAt)));
   })
 );
 

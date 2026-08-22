@@ -688,18 +688,31 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.ok(response.data.queued >= 4);
     assert.ok(response.data.requestedAt);
 
-    const rows = await pool.query<{ appointment_id: string; report_status: string; due: boolean }>(`
-      select appointment_id::text, report_status, next_check_at <= now() as due
+    const deniedStatus = await api(doctor.cookie, `/api/doctor/reporting-board/resync-sonicdicom/status?requestedAt=${encodeURIComponent(response.data.requestedAt)}`);
+    assert.equal(deniedStatus.status, 403, JSON.stringify(deniedStatus.data));
+    const initialStatus = await api<{ remaining: number; failed: number }>(supervisor.cookie, `/api/doctor/reporting-board/resync-sonicdicom/status?requestedAt=${encodeURIComponent(response.data.requestedAt)}`);
+    assert.equal(initialStatus.status, 200, JSON.stringify(initialStatus.data));
+    assert.equal(initialStatus.data.remaining, response.data.queued);
+    assert.equal(initialStatus.data.failed, 0);
+
+    const rows = await pool.query<{ appointment_id: string; report_status: string; marker: boolean }>(`
+      select appointment_id::text, report_status, next_check_at = $2::timestamptz as marker
       from doctor_portal.reporting_board_sonicdicom_cache
       where appointment_id = any($1::bigint[])
-    `, [[finalId, draftId, noReportId, missingId, incompleteId, noRequirementId, manualId]]);
+    `, [[finalId, draftId, noReportId, missingId, incompleteId, noRequirementId, manualId], response.data.requestedAt]);
     const byId = new Map(rows.rows.map((row) => [Number(row.appointment_id), row]));
-    assert.deepEqual([finalId, draftId, noReportId, missingId].map((id) => byId.get(id)?.due), [true, true, true, true]);
+    assert.deepEqual([finalId, draftId, noReportId, missingId].map((id) => byId.get(id)?.marker), [true, true, true, true]);
     assert.deepEqual([byId.get(finalId)?.report_status, byId.get(draftId)?.report_status, byId.get(noReportId)?.report_status, byId.get(missingId)?.report_status], ["final", "draft", "no_report", "unavailable"]);
     assert.equal(byId.has(incompleteId), false);
     assert.equal(byId.has(noRequirementId), false);
     assert.equal(byId.has(manualId), true);
-    assert.equal(byId.get(manualId)?.due, false);
+    assert.equal(byId.get(manualId)?.marker, false);
+
+    await pool.query(`update doctor_portal.reporting_board_sonicdicom_cache set next_check_at = now() + interval '1 hour', last_attempt_at = now(), last_error = case when appointment_id = $2 then 'SonicDICOM unavailable' else null end where appointment_id = any($1::bigint[])`, [[finalId, draftId], draftId]);
+    const progressed = await api<{ remaining: number; failed: number }>(supervisor.cookie, `/api/doctor/reporting-board/resync-sonicdicom/status?requestedAt=${encodeURIComponent(response.data.requestedAt)}`);
+    assert.equal(progressed.status, 200, JSON.stringify(progressed.data));
+    assert.equal(progressed.data.remaining, initialStatus.data.remaining - 2);
+    assert.equal(progressed.data.failed, 1);
   });
 
   it("preserves a successful cached status when manual SonicDICOM refresh is unavailable", async () => {

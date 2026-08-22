@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
-import { fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicom } from "./api-hooks";
+import { fetchFullReportingBoardSonicDicomResyncStatus, fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicom } from "./api-hooks";
 
 vi.mock("@/lib/api-client", () => ({
   api: vi.fn(),
@@ -48,5 +48,13 @@ describe("reporting board api hooks", () => {
     await queueFullReportingBoardSonicDicomResync();
 
     expect(api).toHaveBeenCalledWith("/doctor/reporting-board/resync-sonicdicom", { method: "POST" });
+  });
+
+  it("reads full SonicDICOM resync progress by its request timestamp", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, remaining: 12, failed: 3 });
+
+    await fetchFullReportingBoardSonicDicomResyncStatus("2026-08-23T10:00:00.000Z");
+
+    expect(api).toHaveBeenCalledWith("/doctor/reporting-board/resync-sonicdicom/status?requestedAt=2026-08-23T10%3A00%3A00.000Z");
   });
 });
