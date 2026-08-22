@@ -638,14 +638,14 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const date = addDays(80);
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual Sonic refresh" });
     statusByAppointmentId.set(appointmentId, "no_report");
-    await seedSonicDicomCache(appointmentId, "study_not_found");
+    await seedSonicDicomCache(appointmentId, "final", "2026-05-01T08:00:00.000Z");
 
     const before = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
       supervisor.cookie,
       `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`
     );
     assert.equal(before.status, 200, JSON.stringify(before.data));
-    assert.equal(before.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "study_not_found");
+    assert.equal(before.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "final");
 
     const refresh = await api<{ checked: number; successful: number; failed: number }>(supervisor.cookie, "/api/doctor/reporting-board/refresh-sonicdicom", {
       method: "POST",
@@ -662,6 +662,44 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     assert.equal(after.status, 200, JSON.stringify(after.data));
     assert.equal(after.data.cases.find((row) => row.appointmentId === appointmentId)?.reportStatus, "no_report");
+  });
+
+  it("queues every eligible SonicDICOM cache row without clearing cached statuses or calling SonicDICOM", async () => {
+    guard();
+    const date = addDays(82);
+    const finalId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "full-resync final" });
+    const draftId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "full-resync draft" });
+    const noReportId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "full-resync none" });
+    const missingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "full-resync missing" });
+    const incompleteId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, status: "scheduled", patientName: "full-resync scheduled" });
+    const noRequirementId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, requiresReport: false, patientName: "full-resync not-required" });
+    const manualId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "full-resync manual" });
+    await seedSonicDicomCache(finalId, "final", "2026-05-01T08:00:00.000Z");
+    await seedSonicDicomCache(draftId, "draft");
+    await seedSonicDicomCache(noReportId, "no_report");
+    await pool.query(`delete from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [missingId]);
+    await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'test override', $2, $3)`, [manualId, supervisor.id, supervisor.doctorId]);
+
+    const denied = await api(doctor.cookie, "/api/doctor/reporting-board/resync-sonicdicom", { method: "POST" });
+    assert.equal(denied.status, 403, JSON.stringify(denied.data));
+    const response = await api<{ ok: boolean; queued: number; requestedAt: string }>(supervisor.cookie, "/api/doctor/reporting-board/resync-sonicdicom", { method: "POST" });
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(response.data.ok, true);
+    assert.ok(response.data.queued >= 4);
+    assert.ok(response.data.requestedAt);
+
+    const rows = await pool.query<{ appointment_id: string; report_status: string; due: boolean }>(`
+      select appointment_id::text, report_status, next_check_at <= now() as due
+      from doctor_portal.reporting_board_sonicdicom_cache
+      where appointment_id = any($1::bigint[])
+    `, [[finalId, draftId, noReportId, missingId, incompleteId, noRequirementId, manualId]]);
+    const byId = new Map(rows.rows.map((row) => [Number(row.appointment_id), row]));
+    assert.deepEqual([finalId, draftId, noReportId, missingId].map((id) => byId.get(id)?.due), [true, true, true, true]);
+    assert.deepEqual([byId.get(finalId)?.report_status, byId.get(draftId)?.report_status, byId.get(noReportId)?.report_status, byId.get(missingId)?.report_status], ["final", "draft", "no_report", "unavailable"]);
+    assert.equal(byId.has(incompleteId), false);
+    assert.equal(byId.has(noRequirementId), false);
+    assert.equal(byId.has(manualId), true);
+    assert.equal(byId.get(manualId)?.due, false);
   });
 
   it("preserves a successful cached status when manual SonicDICOM refresh is unavailable", async () => {

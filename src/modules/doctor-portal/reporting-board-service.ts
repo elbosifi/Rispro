@@ -8,7 +8,7 @@ import {
   type ReportLookupContext,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResults } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -663,6 +663,22 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
   }
 
   return { ok: true, checked: contexts.length, successful, failed, checkedAt: new Date().toISOString() };
+}
+
+export async function queueFullReportingBoardSonicDicomResyncForManager(actor: Actor): Promise<{ ok: true; queued: number; requestedAt: string }> {
+  const manager = await requireRosterManager(actor);
+  const queued = await queueFullReportingBoardSonicDicomResync();
+  const requestedAt = new Date().toISOString();
+  await insertDoctorAuditEvent(pool, {
+    actorUserId: actor.userId,
+    actorDoctorId: manager.profile!.id,
+    eventType: "reporting_board_sonicdicom_full_resync_queued",
+    targetType: "reporting_board",
+    targetId: null,
+    metadata: { queued, requestedAt },
+    reason: null,
+  });
+  return { ok: true, queued, requestedAt };
 }
 
 type SonicDicomOpenScope = "study" | "patient";

@@ -11,6 +11,7 @@ const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
 const fetchReportingBoardStatsMock = vi.fn();
 const refreshReportingBoardSonicDicomMock = vi.fn();
+const queueFullReportingBoardSonicDicomResyncMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
@@ -48,6 +49,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
   fetchReportingBoardStats: (...args: unknown[]) => fetchReportingBoardStatsMock(...args),
   refreshReportingBoardSonicDicom: (...args: unknown[]) => refreshReportingBoardSonicDicomMock(...args),
+  queueFullReportingBoardSonicDicomResync: (...args: unknown[]) => queueFullReportingBoardSonicDicomResyncMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
@@ -229,6 +231,7 @@ describe("DoctorReportingBoardPage", () => {
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
     refreshReportingBoardSonicDicomMock.mockResolvedValue({ ok: true, checked: 1, successful: 1, failed: 0, checkedAt: "2026-08-19T10:00:00.000Z" });
+    queueFullReportingBoardSonicDicomResyncMock.mockResolvedValue({ ok: true, queued: 1234, requestedAt: "2026-08-22T10:00:00.000Z" });
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [caseRow],
       filters: {
@@ -966,6 +969,26 @@ describe("DoctorReportingBoardPage", () => {
     expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("MRN-7");
     expect(screen.getByText(/Board refreshed:/)).toBeTruthy();
     expect(screen.queryByText(/Last refreshed:/)).toBeNull();
+  });
+
+  it("keeps Refresh unchanged and lets managers confirm one full report resync request", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Refresh" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Resync all reports" }));
+    expect(confirm).toHaveBeenCalledWith("Recheck all completed cases requiring reports against SonicDICOM. This runs in the background and may take time.");
+    expect(queueFullReportingBoardSonicDicomResyncMock).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Resync all reports" }));
+    await waitFor(() => expect(queueFullReportingBoardSonicDicomResyncMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Full SonicDICOM resync queued for 1/)).toBeTruthy();
+  });
+
+  it("does not show full report resync to non-managers", async () => {
+    renderPage("/doctor/reporting-board", ordinaryDoctorMe);
+    await screen.findByRole("button", { name: "Refresh" });
+    expect(screen.queryByRole("button", { name: "Resync all reports" })).toBeNull();
   });
 
   it("clears an incomplete SonicDICOM refresh warning after a successful retry", async () => {

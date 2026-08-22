@@ -25,6 +25,7 @@ import {
   fetchOhifViewerAvailability,
   fetchOhifRetrievalJob,
   fetchReportingBoardStats,
+  queueFullReportingBoardSonicDicomResync,
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
   finalizeComparisonRequest,
@@ -1649,6 +1650,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [boardActionMessage, setBoardActionMessage] = useState<{ tone: "success" | "error"; text: string; detail?: string | null } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
   const [boardRefreshing, setBoardRefreshing] = useState(false);
+  const [fullResyncPending, setFullResyncPending] = useState(false);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
@@ -2178,6 +2180,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     }
   };
 
+  const queueFullResync = async () => {
+    if (!window.confirm("Recheck all completed cases requiring reports against SonicDICOM. This runs in the background and may take time.")) return;
+    setFullResyncPending(true);
+    try {
+      const result = await queueFullReportingBoardSonicDicomResync();
+      setBoardActionMessage({ tone: "success", text: `Full SonicDICOM resync queued for ${result.queued.toLocaleString()} cases.` });
+    } catch (error) {
+      setBoardActionMessage({ tone: "error", text: error instanceof Error ? error.message : "Could not queue the full SonicDICOM resync." });
+    } finally {
+      setFullResyncPending(false);
+    }
+  };
+
   const copySavedViewLink = async () => {
     if (!savedViewLink) return;
     try {
@@ -2218,6 +2233,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
           </button>
+          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
+            <RefreshCw size={16} className={fullResyncPending ? "animate-spin" : undefined} /> {fullResyncPending ? "Queueing..." : "Resync all reports"}
+          </button>}
           <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             <Settings size={16} /> Board settings
           </button>
