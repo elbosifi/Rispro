@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   fetchPublicAppointmentReportStatus: vi.fn(),
   fetchPublicSchedulingCapacitySettings: vi.fn(),
   createSchedulingOverrideRequest: vi.fn(),
+  deleteAppointment: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
   userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist",
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api-hooks", () => ({
   cancelAppointment: vi.fn(),
+  deleteAppointment: (...args: unknown[]) => mocks.deleteAppointment(...args),
   fetchAppointmentLookups: (...args: unknown[]) => mocks.fetchAppointmentLookups(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => mocks.fetchPatientDirectorySummary(...args),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => mocks.fetchPublicAppointmentReportStatus(...args),
@@ -163,6 +165,8 @@ beforeEach(() => {
   mocks.updateAppointmentStatus.mockResolvedValue(undefined);
   mocks.createSchedulingOverrideRequest.mockReset();
   mocks.createSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
+  mocks.deleteAppointment.mockReset();
+  mocks.deleteAppointment.mockResolvedValue(undefined);
   mocks.rescheduleV2Booking.mockReset();
   mocks.rescheduleV2Booking.mockResolvedValue(undefined);
   mocks.userRole = "super_admin";
@@ -174,6 +178,7 @@ afterEach(() => {
   cleanup();
   localStorage.removeItem("rispro-language");
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("AppointmentManageModal", () => {
@@ -673,7 +678,7 @@ describe("AppointmentManageModal", () => {
     expect((screen.getAllByText("ACC-UPDATED")).length).toBeGreaterThan(0);
   });
 
-  it("renders the authorized Void action only inside the separated More menu", async () => {
+  it("opens Void in a separate dialog, requires and clears its reason, and submits the trimmed reason", async () => {
     renderModal({ initialTab: "details" });
     await screen.findByRole("heading", { name: "Appointment details" });
     expect(screen.queryByRole("button", { name: "Void appointment" })).toBeNull();
@@ -682,7 +687,35 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("menu").parentElement).toBe(document.body);
     fireEvent.click(screen.getByRole("menuitem", { name: "Void appointment" }));
     expect(screen.getByRole("heading", { name: "Void appointment" })).toBeTruthy();
-    expect(screen.getByLabelText(/void reason/i)).toBeTruthy();
+    expect(screen.getAllByRole("dialog")).toHaveLength(2);
+    const reason = screen.getByLabelText(/void reason/i) as HTMLTextAreaElement;
+    reason.focus();
+    expect(document.activeElement).toBe(reason);
+    expect(screen.getByRole("button", { name: "Void appointment" })).toHaveProperty("disabled", true);
+    fireEvent.change(reason, { target: { value: "  Duplicate booking  " } });
+    expect(screen.getByRole("button", { name: "Void appointment" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Void appointment" }));
+    await waitFor(() => expect(mocks.deleteAppointment).toHaveBeenCalledWith(42, "Duplicate booking"));
+  });
+
+  it("clears the Void reason when cancelled and keeps the field usable on mobile", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+    fireEvent.click(screen.getAllByRole("button", { name: "More actions" }).at(-1)!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Void appointment" }));
+
+    const reason = screen.getByLabelText(/void reason/i) as HTMLTextAreaElement;
+    reason.focus();
+    expect(document.activeElement).toBe(reason);
+    fireEvent.change(reason, { target: { value: "Mobile reason" } });
+    expect(reason.value).toBe("Mobile reason");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Void appointment" })).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "More actions" }).at(-1)!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Void appointment" }));
+    expect((screen.getByLabelText(/void reason/i) as HTMLTextAreaElement).value).toBe("");
   });
 
   it("closes from the close button and Escape", async () => {

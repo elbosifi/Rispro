@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -338,15 +339,19 @@ function checkDicomWorklistSideEffects() {
   const worklistDir = path.join(repoRoot, "storage/dicom/worklist-source");
   if (!existsSync(worklistDir)) return;
 
-  const tracked = readGitIndexPaths();
-  if (!tracked) {
-    errors.push("Unable to inspect .git/index for DICOM worklist-source tracking state");
+  let sideEffects;
+  try {
+    sideEffects = execFileSync(
+      "git",
+      ["ls-files", "--others", "--exclude-standard", "--", "storage/dicom/worklist-source"],
+      { cwd: repoRoot, encoding: "utf8" },
+    )
+      .split(/\r?\n/)
+      .filter(Boolean);
+  } catch (error) {
+    errors.push(`Unable to inspect ignored-aware Git working-tree state for DICOM worklist-source: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
-
-  const sideEffects = walkFiles(worklistDir)
-    .map(relative)
-    .filter((file) => !tracked.has(file));
 
   if (sideEffects.length) {
     errors.push(`Generated DICOM worklist-source files are untracked. Remove them unless this task intentionally updates those artifacts:\n${sideEffects.slice(0, 25).join("\n")}${sideEffects.length > 25 ? `\n... ${sideEffects.length - 25} more` : ""}`);
@@ -360,16 +365,6 @@ function walkMarkdown(dir) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walkMarkdown(fullPath));
     if (entry.isFile() && entry.name.endsWith(".md")) files.push(fullPath);
-  }
-  return files;
-}
-
-function walkFiles(dir) {
-  const files = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...walkFiles(fullPath));
-    if (entry.isFile()) files.push(fullPath);
   }
   return files;
 }
@@ -388,42 +383,4 @@ function loadEnv(filePath) {
 
 function relative(file) {
   return path.relative(repoRoot, file).split(path.sep).join("/");
-}
-
-function readGitIndexPaths() {
-  const indexPath = path.join(repoRoot, ".git/index");
-  if (!existsSync(indexPath)) return null;
-
-  const buffer = readFileSync(indexPath);
-  if (buffer.length < 12 || buffer.toString("utf8", 0, 4) !== "DIRC") return null;
-
-  const version = buffer.readUInt32BE(4);
-  if (![2, 3].includes(version)) return null;
-
-  const entryCount = buffer.readUInt32BE(8);
-  const paths = new Set();
-  let offset = 12;
-
-  for (let index = 0; index < entryCount; index += 1) {
-    if (offset + 62 > buffer.length) return null;
-    const flags = buffer.readUInt16BE(offset + 60);
-    const pathLength = flags & 0x0fff;
-    const pathStart = offset + 62;
-    let pathEnd = pathStart;
-
-    if (pathLength < 0x0fff) {
-      pathEnd = pathStart + pathLength;
-    } else {
-      while (pathEnd < buffer.length && buffer[pathEnd] !== 0) pathEnd += 1;
-    }
-
-    const entryPath = buffer.toString("utf8", pathStart, pathEnd);
-    paths.add(entryPath);
-
-    let entryLength = 62 + (pathEnd - pathStart) + 1;
-    entryLength = Math.ceil(entryLength / 8) * 8;
-    offset += entryLength;
-  }
-
-  return paths;
 }
