@@ -103,7 +103,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -129,6 +129,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           layout={options.layout}
           supplementaryPanel={options.supplementaryPanel}
           workspaceRailSize={options.workspaceRailSize}
+          compactMobileWorkspace={options.compactMobileWorkspace}
           supplementaryPanelPlacement={options.supplementaryPanelPlacement}
           hideSatisfiedProtocolEligibilityStatus={options.hideSatisfiedProtocolEligibilityStatus}
           enableAnnotations={options.enableAnnotations}
@@ -785,6 +786,25 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(await screen.findByText("No request documents yet.")).toBeTruthy();
     expect(screen.getByText("Upload request document")).toBeTruthy();
     expect(screen.getAllByText("No request documents yet.")).toHaveLength(1);
+  });
+
+  it("uses compact, non-scrolling mobile workspace geometry only when opted in", async () => {
+    setMobileViewport(true);
+    renderPanel({ layout: "workspace", compactMobileWorkspace: true });
+
+    const emptyState = (await screen.findByText("No request documents yet.")).parentElement;
+    expect(emptyState?.className).not.toContain("min-h-64");
+    expect(screen.getByTestId("document-rail").className).not.toContain("overflow-y-auto");
+    expect(screen.queryByRole("button", { name: "Collapse document rail" })).toBeNull();
+    expect(screen.getByText("Upload request document")).toBeTruthy();
+  });
+
+  it("keeps default workspace geometry when compact mobile mode is not enabled", async () => {
+    renderPanel({ layout: "workspace" });
+
+    const emptyState = (await screen.findByText("No request documents yet.")).parentElement;
+    expect(emptyState?.className).toContain("min-h-64");
+    expect(screen.getByTestId("document-rail").className).toContain("overflow-y-auto");
   });
 
   it("selects the first document once and preserves selection after refetch", async () => {

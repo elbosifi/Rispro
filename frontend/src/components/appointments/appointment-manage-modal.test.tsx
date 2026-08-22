@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   deleteAppointment: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
-  userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist",
+  userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist" | "doctor",
   availabilityRows: [] as AvailabilityRowViewModel[],
   availabilitySettings: "enabled" as "enabled" | "disabled",
 }));
@@ -68,8 +68,8 @@ vi.mock("@/components/appointments/appointment-editor", () => ({
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
-  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange, workspaceRailSize, supplementaryPanelPlacement, pdfUtilityToolbarPlacement, pdfInitialSizingMode, hideSatisfiedProtocolEligibilityStatus, supplementaryPanel }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; workspaceRailSize?: string; supplementaryPanelPlacement?: string; pdfUtilityToolbarPlacement?: string; pdfInitialSizingMode?: string; hideSatisfiedProtocolEligibilityStatus?: boolean; supplementaryPanel?: ReactNode }) => (
-    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"} data-workspace-rail-size={workspaceRailSize} data-supplementary-panel-placement={supplementaryPanelPlacement} data-pdf-utility-toolbar-placement={pdfUtilityToolbarPlacement} data-pdf-initial-sizing-mode={pdfInitialSizingMode} data-hide-satisfied-protocol-eligibility-status={hideSatisfiedProtocolEligibilityStatus ? "true" : "false"}>
+  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange, workspaceRailSize, compactMobileWorkspace, supplementaryPanelPlacement, pdfUtilityToolbarPlacement, pdfInitialSizingMode, hideSatisfiedProtocolEligibilityStatus, supplementaryPanel }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; workspaceRailSize?: string; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: string; pdfUtilityToolbarPlacement?: string; pdfInitialSizingMode?: string; hideSatisfiedProtocolEligibilityStatus?: boolean; supplementaryPanel?: ReactNode }) => (
+    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"} data-workspace-rail-size={workspaceRailSize} data-compact-mobile-workspace={compactMobileWorkspace ? "true" : "false"} data-supplementary-panel-placement={supplementaryPanelPlacement} data-pdf-utility-toolbar-placement={pdfUtilityToolbarPlacement} data-pdf-initial-sizing-mode={pdfInitialSizingMode} data-hide-satisfied-protocol-eligibility-status={hideSatisfiedProtocolEligibilityStatus ? "true" : "false"}>
       Request documents content
       {supplementaryPanel}
       <button type="button" onClick={() => onExpandedChange?.(!expanded)}>{expanded ? "Exit expanded review" : "Expand review"}</button>
@@ -241,6 +241,7 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-patient-id")).toBe("7");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-preview-mode")).toBe("inline");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-workspace-rail-size")).toBe("wide");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-compact-mobile-workspace")).toBe("true");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-supplementary-panel-placement")).toBe("before-documents");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-utility-toolbar-placement")).toBe("top");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-pdf-initial-sizing-mode")).toBe("fit-width");
@@ -696,6 +697,38 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("button", { name: "Void appointment" })).toHaveProperty("disabled", false);
     fireEvent.click(screen.getByRole("button", { name: "Void appointment" }));
     await waitFor(() => expect(mocks.deleteAppointment).toHaveBeenCalledWith(42, "Duplicate booking"));
+  });
+
+  it("uses the compact mobile document workspace, collapses an empty protocol panel, and keeps one More action in the footer", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderModal({ initialTab: "documents" });
+
+    expect((await screen.findByTestId("request-documents-panel")).getAttribute("data-compact-mobile-workspace")).toBe("true");
+    await waitFor(() => expect(screen.getByText("Protocol and notes").closest("details")?.open).toBe(false));
+    expect(screen.getAllByRole("button", { name: "More actions" })).toHaveLength(1);
+  });
+
+  it("keeps meaningful protocol content open on mobile and retains header More when no footer is available", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    mocks.userRole = "doctor";
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      notes: "Patient needs contrast preparation.",
+      protocolAssignmentSummary: {
+        assignmentId: 1,
+        protocolName: "CT Head",
+        versionNumber: "1.0",
+        scannerName: "CT A",
+        assignedBy: "Doctor",
+        assignedAt: null,
+        protocolNotes: null,
+        contrastNotes: null,
+      },
+    });
+    renderModal({ initialTab: "documents" });
+
+    await waitFor(() => expect(screen.getByText("Protocol and notes").closest("details")?.open).toBe(true));
+    expect(screen.getAllByRole("button", { name: "More actions" })).toHaveLength(1);
   });
 
   it("clears the Void reason when cancelled and keeps the field usable on mobile", async () => {
