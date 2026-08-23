@@ -827,6 +827,16 @@ export async function assignReportingBoardCase(
   });
 }
 
+export async function reconcileReportingBoardAssignmentToSonicFinalizer(
+  appointmentId: number,
+  payload: { expectedAssignedDoctorId: number; expectedSonicDicomLatestDocumentId: string }
+): Promise<{ previousAssignmentId: number; newAssignmentId: number; finalizedDoctorId: number }> {
+  return api<{ previousAssignmentId: number; newAssignmentId: number; finalizedDoctorId: number }>(`/doctor/reporting-board/cases/${appointmentId}/reconcile-finalizer-assignment`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function unassignReportingBoardCase(
   appointmentId: number,
   payload: { reason: string }

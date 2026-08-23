@@ -10,6 +10,7 @@ const fetchRosterDoctorsMock = vi.fn();
 const assignReportingBoardMobileCaseToMeMock = vi.fn();
 const reassignReportingBoardMobileCaseMock = vi.fn();
 const unassignReportingBoardMobileCaseMock = vi.fn();
+const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchReportingBoardMobilePushConfigMock = vi.fn();
 const subscribeReportingBoardMobilePushMock = vi.fn();
 const unsubscribeReportingBoardMobilePushMock = vi.fn();
@@ -22,6 +23,7 @@ vi.mock("@/lib/api-hooks", () => ({
   assignReportingBoardMobileCaseToMe: (...args: unknown[]) => assignReportingBoardMobileCaseToMeMock(...args),
   reassignReportingBoardMobileCase: (...args: unknown[]) => reassignReportingBoardMobileCaseMock(...args),
   unassignReportingBoardMobileCase: (...args: unknown[]) => unassignReportingBoardMobileCaseMock(...args),
+  reconcileReportingBoardAssignmentToSonicFinalizer: (...args: unknown[]) => reconcileReportingBoardAssignmentToSonicFinalizerMock(...args),
   fetchReportingBoardMobilePushConfig: (...args: unknown[]) => fetchReportingBoardMobilePushConfigMock(...args),
   subscribeReportingBoardMobilePush: (...args: unknown[]) => subscribeReportingBoardMobilePushMock(...args),
   unsubscribeReportingBoardMobilePush: (...args: unknown[]) => unsubscribeReportingBoardMobilePushMock(...args),
@@ -56,9 +58,11 @@ const mobileResponse: ReportingBoardMobileResponse = {
       category: "oncology",
       assignedDoctor: "Dr. Seraj Alsaifi",
       assignedDoctorId: 5,
+      assignmentOrigin: "rispro",
       finalizedByDoctorId: null,
       finalizedByDoctorName: null,
       sonicDicomFinalizedByAccount: null,
+      assignmentMatch: "not_applicable",
       priority: "Urgent",
       priorityCode: "urgent",
       reportStatus: "draft",
@@ -86,9 +90,11 @@ const mobileResponse: ReportingBoardMobileResponse = {
       category: "oncology",
       assignedDoctor: null,
       assignedDoctorId: null,
+      assignmentOrigin: "rispro",
       finalizedByDoctorId: null,
       finalizedByDoctorName: null,
       sonicDicomFinalizedByAccount: null,
+      assignmentMatch: "not_applicable",
       priority: "Normal",
       priorityCode: null,
       reportStatus: "draft",
@@ -116,9 +122,11 @@ const mobileResponse: ReportingBoardMobileResponse = {
       category: "comparison",
       assignedDoctor: null,
       assignedDoctorId: null,
+      assignmentOrigin: "rispro",
       finalizedByDoctorId: null,
       finalizedByDoctorName: null,
       sonicDicomFinalizedByAccount: null,
+      assignmentMatch: "not_applicable",
       priority: "Normal",
       priorityCode: null,
       reportStatus: "draft",
@@ -165,6 +173,7 @@ describe("ReportingBoardMobilePage", () => {
     assignReportingBoardMobileCaseToMeMock.mockResolvedValue({ assignmentId: 1 });
     reassignReportingBoardMobileCaseMock.mockResolvedValue({ assignmentId: 2 });
     unassignReportingBoardMobileCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 2 });
+    reconcileReportingBoardAssignmentToSonicFinalizerMock.mockResolvedValue({ previousAssignmentId: 1, newAssignmentId: 2, finalizedDoctorId: 9 });
     fetchReportingBoardMobilePushConfigMock.mockResolvedValue({ enabled: true, publicKey: "AAAA" });
     subscribeReportingBoardMobilePushMock.mockResolvedValue({ subscriptionId: 7 });
     fetchReportingBoardMobilePushStatusMock.mockResolvedValue({ enabled: false, lastSuccessAt: null });
@@ -213,6 +222,39 @@ describe("ReportingBoardMobilePage", () => {
 
     const card = (await screen.findByText("Mohammed Bashir Meftah")).closest("article")!;
     expect(within(card).getByText("legacy.account@nccb.ly · Unmapped SonicDICOM account")).toBeTruthy();
+  });
+
+  it("filters mobile cases by finalized doctor and assignment mismatch", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByTestId("reporting-board-filter-button"));
+    const finalized = await screen.findByLabelText("Finalized Doctor");
+    await waitFor(() => expect(within(finalized).getByRole("option", { name: "Dr Target" })).toBeTruthy());
+    fireEvent.change(finalized, { target: { value: "5" } });
+    fireEvent.change(await screen.findByLabelText("Assignment Match"), { target: { value: "mismatch" } });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ finalizedByDoctorId: 5, assignmentMatch: "mismatch" })));
+  });
+
+  it("renders compact SonicDICOM auto-assignment provenance on mobile", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      cases: [{ ...mobileResponse.cases[0], assignmentOrigin: "sonic_auto" }],
+    });
+    renderPage();
+    expect(await screen.findByLabelText("Assignment inferred from SonicDICOM finalizer")).toBeTruthy();
+  });
+
+  it("offers mobile reconciliation only for a mapped SonicDICOM mismatch", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      allowedActions: { ...mobileResponse.allowedActions, authenticated: true, accessLevel: "supervisor", readOnly: false, readOnlyReason: null, reassign: true },
+      cases: [{ ...mobileResponse.cases[0], reportStatus: "final", reportStatusSource: "sonicdicom", assignedDoctor: "Dr Assigned", assignedDoctorId: 5, finalizedByDoctorId: 9, finalizedByDoctorName: "Dr Finalized", sonicDicomLatestDocumentId: "901", assignmentMatch: "mismatch", canReassign: true, actionDisabledReason: null }],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText("Mohammed Bashir Meftah"));
+    fireEvent.click(await screen.findByRole("button", { name: "Reconcile assignment to finalized doctor" }));
+    expect(screen.getByText(/This preserves the previous assignment/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+    await waitFor(() => expect(reconcileReportingBoardAssignmentToSonicFinalizerMock).toHaveBeenCalledWith(42, { expectedAssignedDoctorId: 5, expectedSonicDicomLatestDocumentId: "901" }));
   });
 
   it("renders the shared worklist data as a dense desktop table at desktop width", async () => {

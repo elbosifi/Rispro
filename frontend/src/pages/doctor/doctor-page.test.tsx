@@ -404,6 +404,8 @@ function reportingBoardCase(overrides: Partial<ReportingBoardCaseRow> = {}): Rep
     sonicDicomFinalizedByAccount: overrides.sonicDicomFinalizedByAccount ?? null,
     sonicDicomLatestDocumentId: overrides.sonicDicomLatestDocumentId ?? null,
     sonicDicomCorrelationMethod: overrides.sonicDicomCorrelationMethod ?? null,
+    assignmentOrigin: overrides.assignmentOrigin ?? "rispro",
+    assignmentMatch: overrides.assignmentMatch ?? "not_applicable",
   };
 }
 

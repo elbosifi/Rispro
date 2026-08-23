@@ -27,6 +27,7 @@ import {
   fetchReportingBoardStats,
   fetchFullReportingBoardSonicDicomResyncStatus,
   queueFullReportingBoardSonicDicomResync,
+  reconcileReportingBoardAssignmentToSonicFinalizer,
   refreshReportingBoardCaseSonicDicomStatus,
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
@@ -54,6 +55,7 @@ import type {
   ReportingBoardBulkAssignmentJob,
   ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
+  ReportingBoardAssignmentMatch,
   ReportingBoardCaseSource,
   ReportingBoardDoctorStatsRow,
   ReportingBoardFilters,
@@ -123,6 +125,18 @@ const CASE_SOURCE_OPTIONS: Array<{ value: ReportingBoardCaseSource; label: strin
   { value: "appointments", label: "Appointments" },
   { value: "comparisons", label: "Comparisons" },
 ];
+
+const ASSIGNMENT_MATCH_OPTIONS: Array<{ value: ReportingBoardAssignmentMatch; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "matched", label: "Matched" },
+  { value: "mismatch", label: "Mismatch" },
+  { value: "finalized_unassigned", label: "Finalized while unassigned" },
+  { value: "unmapped_finalizer", label: "Unmapped SonicDICOM account" },
+];
+
+function assignmentMatchLabel(value: ReportingBoardFilters["assignmentMatch"]): string {
+  return ASSIGNMENT_MATCH_OPTIONS.find((option) => option.value === (value ?? "all"))?.label ?? "All";
+}
 
 type ManualFinalMutationResult =
   | { ok: true; appointmentId: number; status: "manual_final" }
@@ -596,6 +610,24 @@ function PriorityBadge({ row }: { row: ReportingBoardCaseRow }) {
   );
 }
 
+function AssignedDoctorDisplay({ row }: { row: ReportingBoardCaseRow }) {
+  const provenance = row.assignmentOrigin === "sonic_auto"
+    ? "Assignment inferred from SonicDICOM finalizer"
+    : row.assignmentOrigin === "sonic_reconciled"
+      ? "Assignment reconciled to SonicDICOM finalizer"
+      : null;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span>{row.assignedDoctorName ?? "Unassigned"}</span>
+      {provenance && (
+        <span aria-label={provenance} title={provenance} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-teal-200 bg-teal-50 text-teal-700">
+          <RefreshCw size={11} aria-hidden="true" />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function categoryLabel(category: string): string {
   if (category === "oncology") return "Onc";
   if (category === "non_oncology") return "Non-onc";
@@ -790,6 +822,7 @@ function RowActionMenu({
   onFinalize,
   onMarkManualFinal,
   onClearManualFinal,
+  onReconcileFinalizerAssignment,
   onDiscontinue,
   onRefreshReportStatus,
   refreshingReportStatus,
@@ -803,6 +836,7 @@ function RowActionMenu({
   onFinalize: (row: ReportingBoardCaseRow, finalText: string) => Promise<void>;
   onMarkManualFinal: (row: ReportingBoardCaseRow) => void;
   onClearManualFinal: (row: ReportingBoardCaseRow) => void;
+  onReconcileFinalizerAssignment: (row: ReportingBoardCaseRow) => void;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
   onRefreshReportStatus: (row: ReportingBoardCaseRow) => Promise<void>;
   refreshingReportStatus: boolean;
@@ -821,6 +855,7 @@ function RowActionMenu({
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientDicomId = String(row.patientDicomId || "").trim();
   const showRadiantActions = isWindowsWorkstation();
+  const canReconcileFinalizerAssignment = canManage && row.caseType === "appointment" && row.reportStatus === "final" && row.reportStatusSource === "sonicdicom" && !row.manualFinalOverrideId && row.assignedDoctorId !== null && row.finalizedByDoctorId !== null && row.assignedDoctorId !== row.finalizedByDoctorId && Boolean(row.sonicDicomLatestDocumentId);
   const copyAccession = async () => {
     if (!accessionNumber) return;
     try {
@@ -978,6 +1013,11 @@ function RowActionMenu({
       {canManage && row.caseType === "appointment" && row.manualFinalOverrideId && (
         <button type="button" role="menuitem" onClick={() => { setOpen(false); onClearManualFinal(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
           Clear manual final override
+        </button>
+      )}
+      {canReconcileFinalizerAssignment && (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onReconcileFinalizerAssignment(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
+          Reconcile assignment to finalized doctor
         </button>
       )}
       {canManage && row.caseType === "appointment" && (
@@ -1717,6 +1757,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [manualFinalMode, setManualFinalMode] = useState<"mark" | "clear">("mark");
   const [manualFinalReason, setManualFinalReason] = useState("");
+  const [reconcileTarget, setReconcileTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
@@ -1966,6 +2007,21 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
   });
+  const reconcileFinalizerAssignmentMutation = useMutation({
+    mutationFn: () => reconcileReportingBoardAssignmentToSonicFinalizer(reconcileTarget!.appointmentId, {
+      expectedAssignedDoctorId: reconcileTarget!.assignedDoctorId!,
+      expectedSonicDicomLatestDocumentId: reconcileTarget!.sonicDicomLatestDocumentId!,
+    }),
+    onSuccess: async () => {
+      setReconcileTarget(null);
+      setBoardActionMessage({ tone: "success", text: "Reporting assignment reconciled to the SonicDICOM finalizer." });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not reconcile the reporting assignment." }),
+  });
   const discontinueMutation = useMutation({
     mutationFn: () => markReportingBoardCaseDiscontinued(discontinueTarget!.appointmentId, { reason: discontinueReason.trim() }),
     onSuccess: async (result) => {
@@ -2078,6 +2134,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const selectedAssignedDoctor = filters.assignedDoctorId
     ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === filters.assignedDoctorId) ?? null
     : null;
+  const selectedFinalizedDoctor = filters.finalizedByDoctorId
+    ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === filters.finalizedByDoctorId) ?? null
+    : null;
   const printUrl = buildReportingBoardPrintUrl({
     filters: effectiveFilters,
     savedViewToken: loadedSavedView?.token ?? null,
@@ -2145,6 +2204,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       } else if (key === "assignment") {
         next.assignedDoctorId = null;
         next.assignmentStatus = "all";
+      } else if (key === "finalizedByDoctorId") {
+        next.finalizedByDoctorId = null;
+      } else if (key === "assignmentMatch") {
+        next.assignmentMatch = "all";
       } else if (key === "reportStatus") {
         next.reportStatus = boardDefaults.reportStatus;
       } else if (key === "requiresReport") {
@@ -2198,6 +2261,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     filters.dateTo ? { key: "dateTo", label: "Date to", value: filters.dateTo, onRemove: () => clearFilter("dateTo") } : null,
     filters.modalityId || filters.modalityCode ? { key: "modality", label: "Modality", value: modalityChipValue, onRemove: () => clearFilter("modality") } : null,
     filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all") ? { key: "assignment", label: "Assigned", value: assignmentChipValue, onRemove: () => clearFilter("assignment") } : null,
+    filters.finalizedByDoctorId ? { key: "finalizedByDoctorId", label: "Finalized Doctor", value: selectedFinalizedDoctor?.displayName ?? `Doctor ${filters.finalizedByDoctorId}`, onRemove: () => clearFilter("finalizedByDoctorId") } : null,
+    filters.assignmentMatch && filters.assignmentMatch !== "all" ? { key: "assignmentMatch", label: "Assignment Match", value: assignmentMatchLabel(filters.assignmentMatch), onRemove: () => clearFilter("assignmentMatch") } : null,
     (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus ? { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus), onRemove: () => clearFilter("reportStatus") } : null,
     (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport ? { key: "requiresReport", label: "Requires report", value: requiresReportValue, onRemove: () => clearFilter("requiresReport") } : null,
     filters.caseCategory ? { key: "caseCategory", label: "Category", value: labelStatus(filters.caseCategory), onRemove: () => clearFilter("caseCategory") } : null,
@@ -2213,6 +2278,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     Boolean(filters.dateTo),
     Boolean(filters.modalityId || filters.modalityCode),
     Boolean(filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all")),
+    Boolean(filters.finalizedByDoctorId),
+    Boolean(filters.assignmentMatch && filters.assignmentMatch !== "all"),
     (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus,
     (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport,
     Boolean(filters.caseCategory),
@@ -2385,7 +2452,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       )}
 
       <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-8">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-10">
           <Field label="Search">
             <div className="relative">
               <Search size={16} className="absolute left-3 top-3" style={{ color: "var(--text-muted)" }} />
@@ -2404,6 +2471,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </button>
               )}
             </div>
+          </Field>
+          <Field label="Finalized Doctor">
+            <select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}>
+              <option value="">All</option>
+              {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+            </select>
+          </Field>
+          <Field label="Assignment Match">
+            <select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>
+              {ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
           </Field>
           <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
           <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
@@ -2643,7 +2721,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         <td className="px-3 py-2"><IdsCell row={row} /></td>
                         <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
                         <td className="px-3 py-2"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
-                        {showAssignedDoctorColumn && <td className="px-3 py-2"><span className="block text-[10px] uppercase text-slate-500">Assigned</span>{row.assignedDoctorName ?? "Unassigned"}</td>}
+                        {showAssignedDoctorColumn && <td className="px-3 py-2"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
                         <td className="px-3 py-2"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-2"><CompactStatusCell row={row} /></td>
                         <td className="px-2 py-2 text-right">
@@ -2670,6 +2748,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                               setManualFinalMode("clear");
                               setManualFinalReason("");
                               setManualFinalTarget(target);
+                            }}
+                            onReconcileFinalizerAssignment={(target) => {
+                              setBoardActionMessage(null);
+                              setReconcileTarget(target);
                             }}
                             onDiscontinue={(target) => {
                               setBoardActionMessage(null);
@@ -2910,6 +2992,20 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               >
                 {manualFinalMode === "mark" ? "Mark final in RISpro" : "Clear manual final"}
               </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {reconcileTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <h3 className="text-lg font-semibold text-foreground">Reconcile reporting assignment?</h3>
+            <p className="mt-3 text-sm text-foreground">Current assigned doctor: <strong>{reconcileTarget.assignedDoctorName}</strong></p>
+            <p className="mt-1 text-sm text-foreground">SonicDICOM finalized by: <strong>{reconcileTarget.finalizedByDoctorName}</strong></p>
+            <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>This preserves the previous assignment in the audit history and changes the current RISpro reporting assignment to the SonicDICOM finalizer.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setReconcileTarget(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+              <button type="button" disabled={reconcileFinalizerAssignmentMutation.isPending} onClick={() => reconcileFinalizerAssignmentMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-300">Reconcile</button>
             </div>
           </section>
         </div>

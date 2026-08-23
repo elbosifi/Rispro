@@ -41,6 +41,7 @@ const finalizeComparisonRequestMock = vi.fn();
 const markReportingBoardCaseDiscontinuedMock = vi.fn();
 const markReportingBoardCaseManualFinalMock = vi.fn();
 const clearReportingBoardCaseManualFinalMock = vi.fn();
+const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchOhifViewerAvailabilityMock = vi.fn();
 const launchReportingBoardCaseInOhifMock = vi.fn();
 const fetchOhifRetrievalJobMock = vi.fn();
@@ -81,6 +82,7 @@ vi.mock("@/lib/api-hooks", () => ({
   markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
   markReportingBoardCaseManualFinal: (...args: unknown[]) => markReportingBoardCaseManualFinalMock(...args),
   clearReportingBoardCaseManualFinal: (...args: unknown[]) => clearReportingBoardCaseManualFinalMock(...args),
+  reconcileReportingBoardAssignmentToSonicFinalizer: (...args: unknown[]) => reconcileReportingBoardAssignmentToSonicFinalizerMock(...args),
   fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
   launchReportingBoardCaseInOhif: (...args: unknown[]) => launchReportingBoardCaseInOhifMock(...args),
   fetchOhifRetrievalJob: (...args: unknown[]) => fetchOhifRetrievalJobMock(...args),
@@ -146,11 +148,13 @@ const caseRow: ReportingBoardCaseRow = {
   reportingPrioritySortOrder: 0,
   assignedDoctorId: null,
   assignedDoctorName: null,
+  assignmentOrigin: "rispro",
   finalizedByDoctorId: null,
   finalizedByDoctorName: null,
   sonicDicomFinalizedByAccount: null,
   sonicDicomLatestDocumentId: null,
   sonicDicomCorrelationMethod: null,
+  assignmentMatch: "not_applicable",
   assignmentStatus: "unassigned",
   completedAt: "2026-05-29T08:00:00.000Z",
   currentAssignedAt: null,
@@ -332,6 +336,7 @@ describe("DoctorReportingBoardPage", () => {
     markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
     markReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
     clearReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final_cleared" });
+    reconcileReportingBoardAssignmentToSonicFinalizerMock.mockResolvedValue({ previousAssignmentId: 1, newAssignmentId: 2, finalizedDoctorId: 8 });
     fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
     launchReportingBoardCaseInOhifMock.mockResolvedValue({
       status: "ready", launchUrl: "/api/ohif/launch/test-token", openMode: "new_tab",
@@ -575,7 +580,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
-    await screen.findByRole("option", { name: "Dr Target" });
+    await waitFor(() => expect(within(screen.getByLabelText("Assigned doctor")).getByRole("option", { name: "Dr Target" })).toBeTruthy());
     expect(screen.getByRole("columnheader", { name: "Assigned doctor" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Assigned doctor"), { target: { value: "doctor:5" } });
 
@@ -611,6 +616,53 @@ describe("DoctorReportingBoardPage", () => {
 
     fireEvent.change(selector, { target: { value: "all" } });
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "all", assignedDoctorId: null, offset: 0 })));
+  });
+
+  it("keeps Assigned Doctor separate from Finalized Doctor and serializes mismatch filtering", async () => {
+    renderPage();
+    expect(await screen.findByLabelText("Assigned doctor")).toBeTruthy();
+    const finalized = screen.getByLabelText("Finalized Doctor");
+    await waitFor(() => expect(within(finalized).getByRole("option", { name: "Dr Target" })).toBeTruthy());
+    fireEvent.change(finalized, { target: { value: "5" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ finalizedByDoctorId: 5 })));
+
+    fireEvent.change(screen.getByLabelText("Assignment Match"), { target: { value: "mismatch" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ finalizedByDoctorId: 5, assignmentMatch: "mismatch" })));
+    expect(screen.getByText("Finalized Doctor:")).toBeTruthy();
+    expect(screen.getByText("Assignment Match:")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filter: Assignment Match" }));
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentMatch: "all" })));
+  });
+
+  it("renders compact SonicDICOM auto-assignment provenance", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned", assignmentOrigin: "sonic_auto" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+    expect(await screen.findByLabelText("Assignment inferred from SonicDICOM finalizer")).toBeTruthy();
+  });
+
+  it("reconciles only a genuine mapped SonicDICOM mismatch and refreshes board data", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, appointmentStatus: "completed", reportStatus: "final", reportStatusSource: "sonicdicom", assignedDoctorId: 5, assignedDoctorName: "Dr Assigned", assignmentStatus: "assigned", finalizedByDoctorId: 8, finalizedByDoctorName: "Dr Finalized", sonicDicomLatestDocumentId: "900", assignmentMatch: "mismatch" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+    const row = (await screen.findByText("V2-000042")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reconcile assignment to finalized doctor" }));
+    expect(screen.getByText("Current assigned doctor:")).toBeTruthy();
+    expect(screen.getByText("SonicDICOM finalized by:")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+    await waitFor(() => expect(reconcileReportingBoardAssignmentToSonicFinalizerMock).toHaveBeenCalledWith(42, { expectedAssignedDoctorId: 5, expectedSonicDicomLatestDocumentId: "900" }));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("renders reconciled SonicDICOM provenance", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({ cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned", assignmentOrigin: "sonic_reconciled" }], filters: { reportStatus: "all", limit: 100, offset: 0 } });
+    renderPage();
+    expect(await screen.findByLabelText("Assignment reconciled to SonicDICOM finalizer")).toBeTruthy();
   });
 
   it("allows manager assignment controls for final cases but hides return to waiting pool", async () => {

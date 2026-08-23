@@ -9,6 +9,7 @@ import {
   fetchReportingBoardMobileView,
   fetchRosterDoctors,
   reassignReportingBoardMobileCase,
+  reconcileReportingBoardAssignmentToSonicFinalizer,
   sendReportingBoardMobileTestPush,
   subscribeReportingBoardMobilePush,
   unsubscribeReportingBoardMobilePush,
@@ -106,6 +107,10 @@ function normalizePacsNote(note: string | null | undefined): string {
     .join("\n");
 }
 
+function canReconcileFinalizerAssignment(row: ReportingBoardMobileCase): boolean {
+  return row.caseType === "appointment" && row.reportStatus === "final" && row.reportStatusSource === "sonicdicom" && !row.manualFinalOverrideId && row.assignedDoctorId !== null && row.finalizedByDoctorId !== null && row.assignedDoctorId !== row.finalizedByDoctorId && Boolean(row.sonicDicomLatestDocumentId);
+}
+
 function finalizerDisplay(row: ReportingBoardMobileCase): { label: string; relationship: string } | null {
   const doctorName = row.finalizedByDoctorName?.trim();
   const label = doctorName
@@ -156,7 +161,7 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
           <Info icon={<Calendar size={15} />} label="Date/Time" value={dateTime(row)} />
-          <Info icon={<UserCheck size={15} />} label="Assigned" value={row.assignedDoctor ?? "Unassigned"} />
+          <Info icon={<UserCheck size={15} />} label="Assigned" value={<span className="inline-flex items-center gap-1">{row.assignedDoctor ?? "Unassigned"}{row.assignmentOrigin === "sonic_auto" && <span aria-label="Assignment inferred from SonicDICOM finalizer" title="Assignment inferred from SonicDICOM finalizer" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-teal-50 text-teal-700 ring-1 ring-teal-200"><RefreshCw size={11} aria-hidden="true" /></span>}</span>} />
           {finalizer && <Info icon={<UserCheck size={15} />} label="Finalized by" value={`${finalizer.label} · ${finalizer.relationship}`} />}
           <Info icon={<FileText size={15} />} label="Report" value={labelStatus(row.reportStatus)} />
           <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(row.appointmentStatus)} />
@@ -173,11 +178,11 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
   );
 }
 
-function Info({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Info({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">{icon}{label}</p>
-      <p className="mt-1 truncate font-semibold text-slate-950">{value}</p>
+      <div className="mt-1 truncate font-semibold text-slate-950">{value}</div>
     </div>
   );
 }
@@ -194,6 +199,7 @@ export function ReportingBoardMobilePage() {
   const [reason, setReason] = useState("");
   const [unassignOpen, setUnassignOpen] = useState(false);
   const [unassignReason, setUnassignReason] = useState("");
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -211,7 +217,7 @@ export function ReportingBoardMobilePage() {
   const doctorsQuery = useQuery({
     queryKey: ["doctor", "roster", "doctors"],
     queryFn: fetchRosterDoctors,
-    enabled: Boolean(viewQuery.data?.allowedActions.reassign),
+    enabled: Boolean(viewQuery.data?.allowedActions.reassign || filterDrawerOpen),
   });
   const pushConfigQuery = useQuery({
     queryKey: ["reporting-board", "mobile", token, "push-config"],
@@ -325,6 +331,19 @@ export function ReportingBoardMobilePage() {
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Return to waiting pool failed."),
   });
+  const reconcileMutation = useMutation({
+    mutationFn: () => reconcileReportingBoardAssignmentToSonicFinalizer(selectedCase!.appointmentId, {
+      expectedAssignedDoctorId: selectedCase!.assignedDoctorId!,
+      expectedSonicDicomLatestDocumentId: selectedCase!.sonicDicomLatestDocumentId!,
+    }),
+    onSuccess: async () => {
+      setMessage("Reporting assignment reconciled to the SonicDICOM finalizer.");
+      setReconcileOpen(false);
+      setSelectedCase(null);
+      await invalidate();
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Could not reconcile the reporting assignment."),
+  });
   const pushSubscribeMutation = useMutation({
     mutationFn: async () => {
       if (!pushSupported()) throw new Error("Browser notifications are not supported on this device.");
@@ -417,7 +436,7 @@ export function ReportingBoardMobilePage() {
   const unassignedLocked = lockedFilters.assignmentStatus === "assigned" || Boolean(lockedFilters.assignedDoctorId);
   const urgentLocked = Boolean(lockedFilters.priorityCode && !["urgent", "stat"].includes(String(lockedFilters.priorityCode).toLowerCase()));
   const overdueLocked = ["final", "no_report"].includes(String(lockedFilters.reportStatus ?? "").toLowerCase());
-  const activeTemporaryFilterCount = [filters.q, filters.caseCategory, filters.caseSource, filters.sortBy && filters.sortBy !== "priority_study_date", filters.modalityCode, filters.modalityId, filters.priorityCode, filters.reportStatus && filters.reportStatus !== lockedFilters.reportStatus, filters.urgentOrStat, filters.overdue]
+  const activeTemporaryFilterCount = [filters.q, filters.caseCategory, filters.caseSource, filters.sortBy && filters.sortBy !== "priority_study_date", filters.modalityCode, filters.modalityId, filters.priorityCode, filters.reportStatus && filters.reportStatus !== lockedFilters.reportStatus, filters.urgentOrStat, filters.overdue, filters.finalizedByDoctorId, filters.assignmentMatch && filters.assignmentMatch !== "all"]
     .filter((value) => value !== null && value !== undefined && value !== false && value !== "").length;
   const selectedAssigned = filters.mobileQuickTab === "assigned";
   const scopeSummary = data.filterSummary.filter((item) => !(selectedAssigned && /assigned/i.test(item)));
@@ -505,6 +524,8 @@ export function ReportingBoardMobilePage() {
               <div className="flex items-center justify-between"><div><h2 className="font-bold">Filters</h2><p className="text-xs text-slate-500">Temporary filters narrow this saved-view scope only.</p></div><button type="button" onClick={() => setFilterDrawerOpen(false)} className="rounded-lg border px-3 py-1 text-sm">Close</button></div>
               <p className="text-xs font-semibold text-slate-500">Locked saved-view criteria: {data.filterSummary.join(", ") || "None"}</p>
               <label className="grid gap-1 text-sm">Assignment state<select value={filters.assignmentStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), assignmentStatus: (event.target.value || null) as ReportingBoardFilters["assignmentStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></label>
+              <label className="grid gap-1 text-sm">Finalized Doctor<select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), finalizedByDoctorId: event.target.value ? Number(event.target.value) : null }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option>{(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></label>
+              <label className="grid gap-1 text-sm">Assignment Match<select value={filters.assignmentMatch ?? "all"} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), assignmentMatch: event.target.value as ReportingBoardFilters["assignmentMatch"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="all">All</option><option value="matched">Matched</option><option value="mismatch">Mismatch</option><option value="finalized_unassigned">Finalized while unassigned</option><option value="unmapped_finalizer">Unmapped SonicDICOM account</option></select></label>
               <label className="grid gap-1 text-sm">Priority<select value={filters.priorityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), priorityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option></select></label>
               <label className="grid gap-1 text-sm">Modality code<input disabled={Boolean(lockedFilters.modalityCode || lockedFilters.modalityId)} value={filters.modalityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), modalityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100" placeholder="Any modality" /></label>
               <label className="grid gap-1 text-sm">Category<input value={filters.caseCategory ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), caseCategory: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3" placeholder="Any category" /></label>
@@ -581,6 +602,20 @@ export function ReportingBoardMobilePage() {
                       </select>
                       <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason" className="h-10 rounded-xl border border-slate-200 px-3 text-sm" />
                       <button type="button" disabled={!reassignDoctorId || !reason.trim() || reassignMutation.isPending} onClick={() => { if (window.confirm("Reassign this case?")) reassignMutation.mutate(); }} className="h-10 rounded-xl border border-slate-200 text-sm font-bold disabled:opacity-50">Reassign</button>
+                    </div>
+                  )}
+                  {selectedCase.canReassign && canReconcileFinalizerAssignment(selectedCase) && (
+                    <div className="grid gap-2 rounded-2xl border border-teal-200 bg-teal-50 p-3">
+                      {!reconcileOpen ? (
+                        <button type="button" onClick={() => setReconcileOpen(true)} className="h-10 rounded-xl border border-teal-300 bg-white text-sm font-bold text-teal-800">Reconcile assignment to finalized doctor</button>
+                      ) : (
+                        <>
+                          <p className="text-sm text-teal-900">Current assigned doctor: <strong>{selectedCase.assignedDoctor}</strong></p>
+                          <p className="text-sm text-teal-900">SonicDICOM finalized by: <strong>{selectedCase.finalizedByDoctorName}</strong></p>
+                          <p className="text-sm text-teal-900">This preserves the previous assignment in the audit history and changes the current RISpro reporting assignment to the SonicDICOM finalizer.</p>
+                          <div className="flex gap-2"><button type="button" onClick={() => setReconcileOpen(false)} className="h-10 flex-1 rounded-xl border border-teal-300 bg-white text-sm font-bold">Cancel</button><button type="button" disabled={reconcileMutation.isPending} onClick={() => reconcileMutation.mutate()} className="h-10 flex-1 rounded-xl bg-teal-700 text-sm font-bold text-white disabled:opacity-50">Reconcile</button></div>
+                        </>
+                      )}
                     </div>
                   )}
                   {selectedCase.actionDisabledReason && <p className="text-sm text-slate-500">{selectedCase.actionDisabledReason}</p>}

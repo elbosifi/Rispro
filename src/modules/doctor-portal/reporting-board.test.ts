@@ -144,6 +144,50 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repository, /finalized_doctor\.display_name as "finalizedByDoctorName"/);
   });
 
+  it("adds Sonic assignment provenance, no-reassign auto sync, protected TAT, and independent finalizer filters", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/178_reporting_board_sonic_assignment_provenance.sql`, "utf8");
+    const cacheService = readFileSync(`${root}/src/services/reporting-board-sonicdicom-cache-service.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(migration, /assignment_origin text not null default 'rispro'/);
+    assert.match(migration, /'rispro', 'sonic_auto', 'sonic_reconciled'/);
+    assert.match(cacheService, /for update of b/);
+    assert.match(cacheService, /on conflict \(appointment_id, assignment_type\) where status = 'active' do nothing/);
+    assert.match(cacheService, /assignment_origin[\s\S]*'sonic_auto'/);
+    assert.doesNotMatch(cacheService, /status = 'corrected'/);
+    assert.match(cacheService, /reporting_assignment_sonic_auto/);
+    assert.match(cacheService, /actorUserId: null/);
+    assert.match(cacheService, /reporting_board_sonic_assignment_sync_failed/);
+    assert.doesNotMatch(cacheService, /createAssignedToMeNotifications/);
+    assert.match(repository, /cache\.finalized_by_doctor_id = \$\$\{values\.length\}/);
+    assert.match(repository, /assignmentMatch === "mismatch"/);
+    assert.match(service, /postHocAssignment/);
+    assert.match(service, /completedToAssignedMinutes: null, assignedToFinalMinutes: null/);
+    assert.match(routes, /finalizedByDoctorId: optionalPositiveInteger/);
+    assert.match(routes, /assignmentMatch: optionalAssignmentMatch/);
+  });
+
+  it("adds case-by-case SonicDICOM finalizer reconciliation with optimistic guards", () => {
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(routes, /"\/cases\/:appointmentId\/reconcile-finalizer-assignment"/);
+    assert.match(routes, /expectedAssignedDoctorId/);
+    assert.match(routes, /expectedSonicDicomLatestDocumentId/);
+    assert.match(service, /requireRosterManager\(actor\)/);
+    assert.match(repository, /reconcileReportingAssignmentToSonicFinalizer/);
+    assert.match(repository, /for update/);
+    assert.match(repository, /Assignment changed; refresh and try again\./);
+    assert.match(repository, /SonicDICOM report changed; refresh and try again\./);
+    assert.match(repository, /status = 'corrected'/);
+    assert.match(repository, /assignment_origin[\s\S]*'sonic_reconciled'/);
+    assert.match(repository, /reporting_assignment_sonic_reconciled/);
+    assert.match(repository, /Reporting assignment reconciled to SonicDICOM finalizer/);
+  });
+
   it("adds authenticated no-credential SonicDICOM study redirect for Reporting Board cases", () => {
     const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");

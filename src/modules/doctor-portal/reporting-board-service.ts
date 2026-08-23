@@ -47,6 +47,7 @@ import {
   markReportingBoardNotificationRead,
   readReportingBoardSettings,
   readReportingBoardPushConfig,
+  reconcileReportingAssignmentToSonicFinalizer,
   revokeSavedView,
   rotateSavedViewToken,
   sendReportingBoardSavedViewTestPush,
@@ -188,6 +189,8 @@ async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Effe
       settings.includedCaseSources.length === 1 ? settings.includedCaseSources[0] : "all"
     ),
     assignedDoctorId: input.assignedDoctorId ?? null,
+    finalizedByDoctorId: input.finalizedByDoctorId ?? null,
+    assignmentMatch: input.assignmentMatch ?? "all",
     modalityId: input.modalityId ?? null,
     modalityCodes: input.modalityCodes ?? null,
     sortBy: normalizeSortBy(input.sortBy ?? settings.defaultSortBy),
@@ -200,6 +203,8 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
   const narrowed: ReportingBoardFilters = { ...savedViewFilters };
   const keys: Array<keyof ReportingBoardFilters> = [
     "assignedDoctorId",
+    "finalizedByDoctorId",
+    "assignmentMatch",
     "caseCategory",
     "reportStatus",
     "priorityCode",
@@ -227,12 +232,33 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
   return narrowed;
 }
 
+function derivedAssignmentMatch(row: ReportingBoardCaseRow): ReportingBoardCaseRow["assignmentMatch"] {
+  if (row.finalizedByDoctorId && row.assignedDoctorId) return row.finalizedByDoctorId === row.assignedDoctorId ? "matched" : "mismatch";
+  if (row.finalizedByDoctorId && !row.assignedDoctorId) return "finalized_unassigned";
+  if (row.sonicDicomFinalizedByAccount && !row.finalizedByDoctorId) return "unmapped_finalizer";
+  return "not_applicable";
+}
+
+function withProtectedTimelineMetrics(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
+  const resolved = withTimelineMetrics({ ...row, assignmentMatch: derivedAssignmentMatch(row) });
+  if (resolved.assignmentOrigin === "sonic_auto" || resolved.assignmentOrigin === "sonic_reconciled") {
+    return { ...resolved, completedToAssignedMinutes: null, assignedToFinalMinutes: null };
+  }
+  return resolved;
+}
+
+function matchesAssignmentFilters(row: ReportingBoardCaseRow, filters: ReportingBoardFilters): boolean {
+  if (filters.finalizedByDoctorId && row.finalizedByDoctorId !== filters.finalizedByDoctorId) return false;
+  if (filters.assignmentMatch && filters.assignmentMatch !== "all" && row.assignmentMatch !== filters.assignmentMatch) return false;
+  return true;
+}
+
 async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: ReportingBoardFilters["reportStatus"]) {
   const resolved: ReportingBoardCaseRow[] = [];
   for (const row of rows) {
     if (row.caseType === "comparison") {
       const canAssign = row.canAssign && row.reportStatus !== "final";
-      resolved.push(withTimelineMetrics({
+      resolved.push(withProtectedTimelineMetrics({
         ...row,
         canAssign,
         exclusionReason: canAssign ? null : row.exclusionReason ?? (row.reportStatus === "final" ? "report_final" : null),
@@ -240,7 +266,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
       continue;
     }
     if (row.manualFinalOverrideId) {
-      resolved.push(withTimelineMetrics({
+      resolved.push(withProtectedTimelineMetrics({
         ...row,
         reportStatus: "final",
         reportStatusSource: "manual",
@@ -252,7 +278,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     }
     const status = row.reportStatus ?? "unavailable";
     const canAssign = row.canAssign;
-    resolved.push(withTimelineMetrics({
+    resolved.push(withProtectedTimelineMetrics({
       ...row,
       reportStatus: status,
       canAssign,
@@ -269,7 +295,11 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
 
 function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
   const requestedWindow = filters.limit + filters.offset;
-  const needsPostFilter = Boolean(filters.reportStatus && filters.reportStatus !== "all");
+  const needsPostFilter = Boolean(
+    (filters.reportStatus && filters.reportStatus !== "all") ||
+    filters.finalizedByDoctorId ||
+    (filters.assignmentMatch && filters.assignmentMatch !== "all")
+  );
   const multiplier = needsPostFilter ? 5 : 2;
   return Math.min(MAX_UNIFIED_CANDIDATE_FETCH, Math.max(100, requestedWindow * multiplier));
 }
@@ -410,6 +440,7 @@ async function listUnifiedReportingBoardCases(
     ]);
     const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
     return resolved
+      .filter((row) => matchesAssignmentFilters(row, filters))
       .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
       .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()))
       .sort(compareReportingBoardRows(filters));
@@ -421,6 +452,7 @@ async function listUnifiedReportingBoardCases(
     sourceAllowsComparisons(filters.caseSource) ? listComparisonReportingBoardRows(sourceFilters) : Promise.resolve([]),
   ]);
   const resolved = (await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus))
+    .filter((row) => matchesAssignmentFilters(row, filters))
     .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
     .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
   const visibleRows = resolved
@@ -524,9 +556,10 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     else if (status === "study_not_found") summary.studyNotFound += 1;
     else if (status === "unavailable") summary.unavailable += 1;
 
-    const completedToAssignedMinutes = minutesBetween(row.completedAt, row.firstAssignedAt);
+    const postHocAssignment = row.assignmentOrigin === "sonic_auto" || row.assignmentOrigin === "sonic_reconciled";
+    const completedToAssignedMinutes = postHocAssignment ? null : minutesBetween(row.completedAt, row.firstAssignedAt);
     if (completedToAssignedMinutes !== null) completedToAssignedValues.push(completedToAssignedMinutes);
-    const assignedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.currentAssignedAt, row.reportFinalAt) : null;
+    const assignedToFinalMinutes = postHocAssignment || !row.reportFinalAt ? null : minutesBetween(row.currentAssignedAt, row.reportFinalAt);
     if (assignedToFinalMinutes !== null) assignedToFinalValues.push(assignedToFinalMinutes);
     const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" ? minutesSince(row.currentAssignedAt, nowMs) : null;
     if (activeAssignmentAge !== null) activeAssignmentAges.push(activeAssignmentAge);
@@ -605,7 +638,7 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  if (filters.reportStatus && filters.reportStatus !== "all") {
+  if ((filters.reportStatus && filters.reportStatus !== "all") || filters.finalizedByDoctorId || (filters.assignmentMatch && filters.assignmentMatch !== "all")) {
     const cases = await listUnifiedReportingBoardCases({ ...scopedFilters, limit: MAX_UNIFIED_CANDIDATE_FETCH, offset: 0 });
     return { filters, ...aggregateReportingBoardStats(cases) };
   }
@@ -932,12 +965,17 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
     category: row.caseCategory,
     assignedDoctor: row.assignedDoctorName,
     assignedDoctorId: row.assignedDoctorId,
+    assignmentOrigin: row.assignmentOrigin,
     finalizedByDoctorId: row.finalizedByDoctorId,
     finalizedByDoctorName: row.finalizedByDoctorName,
     sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount,
+    sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId,
+    assignmentMatch: row.assignmentMatch,
     priority: row.reportingPriorityName || row.reportingPriorityCode,
     priorityCode: row.reportingPriorityCode,
     reportStatus: row.reportStatus,
+    reportStatusSource: row.reportStatusSource ?? null,
+    manualFinalOverrideId: row.manualFinalOverrideId ?? null,
     appointmentStatus: row.appointmentStatus,
     assignmentStatus: row.assignmentStatus,
     canAssign: row.canAssign,
@@ -1054,6 +1092,8 @@ function filterSummary(filters: ReportingBoardFilters): string[] {
     filters.dateFrom && filters.dateTo ? `${filters.dateFrom} to ${filters.dateTo}` : filters.dateFrom ?? null,
     filters.priorityCode ? `priority ${filters.priorityCode}` : null,
     filters.assignmentStatus && filters.assignmentStatus !== "all" ? filters.assignmentStatus : null,
+    filters.finalizedByDoctorId ? `finalized doctor ${filters.finalizedByDoctorId}` : null,
+    filters.assignmentMatch && filters.assignmentMatch !== "all" ? filters.assignmentMatch.replaceAll("_", " ") : null,
   ].filter(Boolean) as string[];
 }
 
@@ -2114,6 +2154,17 @@ export async function assignReportingBoardCaseToDoctor(
     appointmentNotes: { [input.appointmentId]: input.reason ?? null },
   });
   return result;
+}
+
+export async function reconcileReportingBoardAssignmentToSonicFinalizer(
+  actor: Actor,
+  input: { appointmentId: number; expectedAssignedDoctorId: number; expectedSonicDicomLatestDocumentId: string }
+) {
+  const manager = await requireRosterManager(actor);
+  return reconcileReportingAssignmentToSonicFinalizer({
+    ...input,
+    actor: { userId: actor.userId, doctorId: manager.profile!.id },
+  });
 }
 
 export async function getMyReportingBoardNotifications(actor: Actor) {

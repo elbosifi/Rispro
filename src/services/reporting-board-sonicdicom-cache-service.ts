@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { readSonicDicomReportSettings, type SonicDicomReportSettings } from "./sonicdicom-report-settings.js";
 import { checkSonicDicomReportStatusesBatch, type ReportLookupContext, type ReportStatusResult } from "./sonicdicom-report-service.js";
+import { insertDoctorAuditEvent } from "../modules/doctor-portal/profile-repository.js";
 
 export type ReportingBoardCacheStatus = "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
 
@@ -22,7 +23,91 @@ export interface ReportingBoardSonicDicomCacheTickResult {
 
 type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
 
+interface PersistedCacheRow {
+  appointmentId: number;
+  changed: boolean;
+  status: ReportingBoardCacheStatus;
+  successful: boolean;
+  finalizedByDoctorId: number | null;
+  sonicDicomFinalizedByAccount: string | null;
+  sonicDicomLatestDocumentId: string | null;
+  reportFinalAt: string | null;
+  sonicDicomCorrelationMethod: "study_instance_uid" | "accession_fallback" | null;
+}
+
 export const FINAL_RECHECK_MS = 5 * 60 * 1000;
+
+async function tryCreateSonicAutoAssignment(row: PersistedCacheRow): Promise<boolean> {
+  if (!row.successful || row.status !== "final" || !row.finalizedByDoctorId) return false;
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const booking = await client.query<{ appointmentId: number; modalityId: number; bookingDate: string }>(`
+      select b.id as "appointmentId", b.modality_id as "modalityId", b.booking_date::text as "bookingDate"
+      from appointments_v2.bookings b
+      where b.id = $1
+        and b.requires_report = true
+        and b.status not in ('cancelled', 'discontinued', 'voided')
+      for update of b
+    `, [row.appointmentId]);
+    if (!booking.rows[0]) {
+      await client.query("commit");
+      return false;
+    }
+    const doctor = await client.query(`select 1 from doctor_portal.doctor_profiles where id = $1`, [row.finalizedByDoctorId]);
+    if (!doctor.rows[0]) {
+      await client.query("commit");
+      return false;
+    }
+    const existing = await client.query(`
+      select id from doctor_portal.case_team_assignments
+      where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+      for update
+    `, [row.appointmentId]);
+    if (existing.rows[0]) {
+      await client.query("commit");
+      return false;
+    }
+    const inserted = await client.query<{ id: number }>(`
+      insert into doctor_portal.case_team_assignments (
+        appointment_id, roster_assignment_id, assigned_doctor_id, modality_id,
+        assignment_type, expected_reporting_date, status, assignment_origin
+      ) values ($1, null, $2, $3, 'reporting', $4::date, 'active', 'sonic_auto')
+      on conflict (appointment_id, assignment_type) where status = 'active' do nothing
+      returning id
+    `, [row.appointmentId, row.finalizedByDoctorId, booking.rows[0].modalityId, booking.rows[0].bookingDate]);
+    const assignmentId = Number(inserted.rows[0]?.id ?? 0);
+    if (!assignmentId) {
+      await client.query("commit");
+      return false;
+    }
+    await insertDoctorAuditEvent(client, {
+      actorUserId: null,
+      actorDoctorId: null,
+      eventType: "reporting_assignment_sonic_auto",
+      targetType: "case_team_assignment",
+      targetId: assignmentId,
+      metadata: {
+        appointmentId: row.appointmentId,
+        assignmentId,
+        doctorId: row.finalizedByDoctorId,
+        sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount,
+        sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId,
+        reportFinalAt: row.reportFinalAt,
+        sonicDicomCorrelationMethod: row.sonicDicomCorrelationMethod,
+        source: "sonicdicom",
+      },
+      reason: "Auto-assigned from SonicDICOM finalizer on previously unassigned case",
+    });
+    await client.query("commit");
+    return true;
+  } catch (error) {
+    await client.query("rollback").catch(() => null);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 function accessionFor(appointmentId: number): string { return `V2-${String(appointmentId).padStart(6, "0")}`; }
 function normalizedState(state: string): ReportingBoardCacheStatus {
@@ -130,7 +215,7 @@ export async function persistReportingBoardSonicDicomCacheResults(
       finalRecheckSeconds: Math.floor(FINAL_RECHECK_MS / 1000),
     };
   });
-  const updated = await db.query<{ appointmentId: number; changed: boolean; status: ReportingBoardCacheStatus }>(`
+  const updated = await db.query<PersistedCacheRow>(`
     with input as (
       select * from jsonb_to_recordset($1::jsonb) as x(
         "appointmentId" bigint, status text, "reportFinalAt" timestamptz, "latestDocumentId" text,
@@ -170,8 +255,25 @@ export async function persistReportingBoardSonicDicomCacheResults(
         status_changed_at = case when excluded.last_success_at is not null and doctor_portal.reporting_board_sonicdicom_cache.report_status is distinct from excluded.report_status then now() else doctor_portal.reporting_board_sonicdicom_cache.status_changed_at end,
         failure_count = excluded.failure_count, last_error = excluded.last_error, study_instance_uid_snapshot = excluded.study_instance_uid_snapshot, accession_number_snapshot = excluded.accession_number_snapshot, updated_at = now()
       returning appointment_id as "appointmentId", report_status as status, last_success_at
-    ) select u."appointmentId", u.status, (u.last_success_at is not null and p.successful and p.previous_status is distinct from p.status) as changed from upserted u join prepared p on p."appointmentId" = u."appointmentId"
+    ) select u."appointmentId", u.status,
+      (u.last_success_at is not null and p.successful and p.previous_status is distinct from p.status) as changed,
+      p.successful,
+      p.finalized_by_doctor_id as "finalizedByDoctorId",
+      p."finalizedByAccount" as "sonicDicomFinalizedByAccount",
+      p."latestDocumentId" as "sonicDicomLatestDocumentId",
+      p."reportFinalAt" as "reportFinalAt",
+      p."correlationMethod" as "sonicDicomCorrelationMethod"
+    from upserted u join prepared p on p."appointmentId" = u."appointmentId"
   `, [JSON.stringify(payload)]);
+  for (const row of updated.rows) {
+    await tryCreateSonicAutoAssignment(row).catch((error) => {
+      console.warn(JSON.stringify({
+        type: "reporting_board_sonic_assignment_sync_failed",
+        appointmentId: Number(row.appointmentId),
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    });
+  }
   return updated.rows.map((row) => ({ ...row, appointmentId: Number(row.appointmentId) }));
 }
 

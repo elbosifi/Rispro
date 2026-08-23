@@ -413,6 +413,7 @@ export async function assignCaseToDoctor(
         left join exam_types et on et.id = b.exam_type_id
         where b.id = $1
         limit 1
+        for update of b
       `,
       [input.appointmentId]
     );

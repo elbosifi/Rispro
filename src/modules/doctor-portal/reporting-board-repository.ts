@@ -940,8 +940,16 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
     values.push(input.assignedDoctorId);
     where.push(`cta.assigned_doctor_id = $${values.length}`);
   }
+  if (input.finalizedByDoctorId) {
+    values.push(input.finalizedByDoctorId);
+    where.push(`cache.finalized_by_doctor_id = $${values.length}`);
+  }
   if (input.assignmentStatus === "unassigned") where.push(`cta.id is null`);
   if (input.assignmentStatus === "assigned") where.push(`cta.id is not null`);
+  if (input.assignmentMatch === "matched") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id`);
+  if (input.assignmentMatch === "mismatch") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id`);
+  if (input.assignmentMatch === "finalized_unassigned") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null`);
+  if (input.assignmentMatch === "unmapped_finalizer") where.push(`cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null`);
   if (input.caseCategory) {
     values.push(input.caseCategory);
     where.push(`b.case_category = $${values.length}`);
@@ -1090,11 +1098,19 @@ export async function listReportingBoardCaseCandidates(
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         cache.finalized_by_doctor_id as "finalizedByDoctorId",
         finalized_doctor.display_name as "finalizedByDoctorName",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
+        case
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id then 'matched'
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id then 'mismatch'
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
+          when cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null then 'unmapped_finalizer'
+          else 'not_applicable'
+        end as "assignmentMatch",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
@@ -1172,11 +1188,13 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    assignmentOrigin: row.assignmentOrigin ?? "rispro",
     finalizedByDoctorId: nullableNumber(row.finalizedByDoctorId),
     finalizedByDoctorName: row.finalizedByDoctorName ?? null,
     sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount ?? null,
     sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId ?? null,
     sonicDicomCorrelationMethod: row.sonicDicomCorrelationMethod ?? null,
+    assignmentMatch: row.assignmentMatch ?? "not_applicable",
     completedAt: nullableIsoString(row.completedAt),
     currentAssignedAt: nullableIsoString(row.currentAssignedAt),
     firstAssignedAt: nullableIsoString(row.firstAssignedAt),
@@ -1206,6 +1224,7 @@ function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoard
     appointmentId: Number(row.appointmentId),
     comparisonRequestId: nullableNumber(row.comparisonRequestId),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    assignmentOrigin: row.assignmentOrigin ?? "rispro",
     completedAt: nullableIsoString(row.completedAt),
     currentAssignedAt: nullableIsoString(row.currentAssignedAt),
     firstAssignedAt: nullableIsoString(row.firstAssignedAt),
@@ -1234,6 +1253,7 @@ export async function listReportingBoardStatsRows(
         rp.name_en as "reportingPriorityName",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
@@ -1304,11 +1324,19 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         cache.finalized_by_doctor_id as "finalizedByDoctorId",
         finalized_doctor.display_name as "finalizedByDoctorName",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
+        case
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id then 'matched'
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id then 'mismatch'
+          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
+          when cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null then 'unmapped_finalizer'
+          else 'not_applicable'
+        end as "assignmentMatch",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
@@ -1961,6 +1989,140 @@ export async function unassignReportingCase(input: {
     });
     await client.query("commit");
     return { unassigned: true, appointmentId: input.appointmentId, assignmentId: assignment.id };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function reconcileReportingAssignmentToSonicFinalizer(input: {
+  appointmentId: number;
+  expectedAssignedDoctorId: number;
+  expectedSonicDicomLatestDocumentId: string;
+  actor: AssignmentActor;
+}): Promise<{ previousAssignmentId: number; newAssignmentId: number; finalizedDoctorId: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const bookingResult = await client.query<{
+      id: number;
+      requiresReport: boolean;
+      modalityId: number;
+      bookingDate: string;
+    }>(
+      `
+        select id, requires_report as "requiresReport", modality_id as "modalityId", booking_date::text as "bookingDate"
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const booking = bookingResult.rows[0];
+    if (!booking) throw new HttpError(404, "Appointment not found.");
+    if (!booking.requiresReport) throw new HttpError(409, "Report is not required for this case.");
+
+    const assignmentResult = await client.query<{
+      id: number;
+      assignedDoctorId: number;
+    }>(
+      `
+        select id, assigned_doctor_id as "assignedDoctorId"
+        from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+        limit 1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const assignment = assignmentResult.rows[0];
+    if (!assignment) throw new HttpError(409, "No active reporting assignment found.");
+    if (Number(assignment.assignedDoctorId) !== input.expectedAssignedDoctorId) {
+      throw new HttpError(409, "Assignment changed; refresh and try again.");
+    }
+
+    const cacheResult = await client.query<{
+      reportStatus: string | null;
+      finalizedDoctorId: number | null;
+      finalizedByAccount: string | null;
+      latestDocumentId: string | null;
+      reportFinalAt: string | null;
+      correlationMethod: "study_instance_uid" | "accession_fallback" | null;
+    }>(
+      `
+        select
+          report_status as "reportStatus",
+          finalized_by_doctor_id as "finalizedDoctorId",
+          sonicdicom_finalized_by_account as "finalizedByAccount",
+          sonicdicom_latest_document_id as "latestDocumentId",
+          report_final_at as "reportFinalAt",
+          correlation_method as "correlationMethod"
+        from doctor_portal.reporting_board_sonicdicom_cache
+        where appointment_id = $1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const cache = cacheResult.rows[0];
+    if (!cache || cache.reportStatus !== "final" || cache.finalizedDoctorId === null || !cache.latestDocumentId) {
+      throw new HttpError(409, "SonicDICOM report changed; refresh and try again.");
+    }
+    if (cache.latestDocumentId !== input.expectedSonicDicomLatestDocumentId) {
+      throw new HttpError(409, "SonicDICOM report changed; refresh and try again.");
+    }
+    if (Number(assignment.assignedDoctorId) === Number(cache.finalizedDoctorId)) {
+      throw new HttpError(409, "Reporting assignment already matches the SonicDICOM finalizer.");
+    }
+
+    const targetDoctor = await client.query<{ id: number }>(
+      `select id from doctor_portal.doctor_profiles where id = $1 limit 1`,
+      [cache.finalizedDoctorId]
+    );
+    if (!targetDoctor.rows[0]) throw new HttpError(409, "SonicDICOM finalizer is no longer a RISpro doctor.");
+
+    await client.query(
+      `update doctor_portal.case_team_assignments set status = 'corrected', updated_at = now() where id = $1`,
+      [assignment.id]
+    );
+    const inserted = await client.query<{ id: number }>(
+      `
+        insert into doctor_portal.case_team_assignments (
+          appointment_id, roster_assignment_id, assigned_doctor_id, modality_id,
+          assignment_type, expected_reporting_date, status, assignment_origin
+        )
+        values ($1, null, $2, $3, 'reporting', $4, 'active', 'sonic_reconciled')
+        returning id
+      `,
+      [input.appointmentId, cache.finalizedDoctorId, booking.modalityId, booking.bookingDate]
+    );
+    const newAssignmentId = Number(inserted.rows[0].id);
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_assignment_sonic_reconciled",
+      targetType: "case_team_assignment",
+      targetId: newAssignmentId,
+      metadata: {
+        appointmentId: input.appointmentId,
+        previousAssignmentId: Number(assignment.id),
+        previousDoctorId: Number(assignment.assignedDoctorId),
+        newAssignmentId,
+        finalizedDoctorId: Number(cache.finalizedDoctorId),
+        sonicDicomFinalizedByAccount: cache.finalizedByAccount,
+        sonicDicomLatestDocumentId: cache.latestDocumentId,
+        reportFinalAt: cache.reportFinalAt,
+        sonicDicomCorrelationMethod: cache.correlationMethod,
+      },
+      reason: "Reporting assignment reconciled to SonicDICOM finalizer",
+    });
+    await client.query("commit");
+    return {
+      previousAssignmentId: Number(assignment.id),
+      newAssignmentId,
+      finalizedDoctorId: Number(cache.finalizedDoctorId),
+    };
   } catch (error) {
     await client.query("rollback");
     throw error;

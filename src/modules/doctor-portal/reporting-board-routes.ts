@@ -37,6 +37,7 @@ import {
   refreshReportingBoardSonicDicomStatuses,
   refreshReportingBoardCaseSonicDicomStatus,
   queueFullReportingBoardSonicDicomResyncForManager,
+  reconcileReportingBoardAssignmentToSonicFinalizer,
   resumeScheduledReportingBoardBulkAssignmentJob,
   revokeReportingBoardSavedView,
   rotateReportingBoardSavedViewToken,
@@ -127,6 +128,14 @@ function optionalCaseSource(value: unknown): ReportingBoardFilters["caseSource"]
   return parsed as ReportingBoardFilters["caseSource"];
 }
 
+const REPORTING_BOARD_ASSIGNMENT_MATCHES = new Set(["all", "matched", "mismatch", "finalized_unassigned", "unmapped_finalizer"]);
+function optionalAssignmentMatch(value: unknown): ReportingBoardFilters["assignmentMatch"] | null {
+  const parsed = asOptionalString(value);
+  if (!parsed) return null;
+  if (!REPORTING_BOARD_ASSIGNMENT_MATCHES.has(parsed)) throw new HttpError(400, "assignmentMatch is not supported.");
+  return parsed as ReportingBoardFilters["assignmentMatch"];
+}
+
 function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
   return {
     dateFrom: asOptionalString(query.dateFrom) ?? null,
@@ -135,7 +144,9 @@ function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
     modalityId: optionalPositiveInteger(query.modalityId, "modalityId"),
     modalityCode: asOptionalString(query.modalityCode) ?? null,
     assignedDoctorId: optionalPositiveInteger(query.assignedDoctorId, "assignedDoctorId"),
+    finalizedByDoctorId: optionalPositiveInteger(query.finalizedByDoctorId, "finalizedByDoctorId"),
     assignmentStatus: (asOptionalString(query.assignmentStatus) as ReportingBoardFilters["assignmentStatus"]) ?? null,
+    assignmentMatch: optionalAssignmentMatch(query.assignmentMatch),
     caseCategory: asOptionalString(query.caseCategory) ?? null,
     requiresReport: booleanFromQuery(query.requiresReport),
     reportStatus: (asOptionalString(query.reportStatus) as ReportingBoardFilters["reportStatus"]) ?? null,
@@ -156,6 +167,8 @@ function filtersFromBody(value: unknown): ReportingBoardFilters {
     ...body,
     modalityId: optionalPositiveInteger(body.modalityId, "modalityId"),
     assignedDoctorId: optionalPositiveInteger(body.assignedDoctorId, "assignedDoctorId"),
+    finalizedByDoctorId: optionalPositiveInteger(body.finalizedByDoctorId, "finalizedByDoctorId"),
+    assignmentMatch: optionalAssignmentMatch(body.assignmentMatch),
     requiresReport: asOptionalBoolean(body.requiresReport) ?? null,
     caseSource: optionalCaseSource(body.caseSource),
     sortBy: optionalSortBy(body.sortBy),
@@ -409,6 +422,20 @@ router.get(
   "/saved-views/token/:token",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json({ savedView: await loadReportingBoardSavedViewByToken(actor(req), asString(req.params.token)) });
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/reconcile-finalizer-assignment",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const expectedSonicDicomLatestDocumentId = asString(body.expectedSonicDicomLatestDocumentId).trim();
+    if (!expectedSonicDicomLatestDocumentId) throw new HttpError(400, "expectedSonicDicomLatestDocumentId is required.");
+    res.json(await reconcileReportingBoardAssignmentToSonicFinalizer(actor(req), {
+      appointmentId: requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      expectedAssignedDoctorId: requiredPositiveInteger(body.expectedAssignedDoctorId, "expectedAssignedDoctorId"),
+      expectedSonicDicomLatestDocumentId,
+    }));
   })
 );
 

@@ -1,6 +1,9 @@
 import type { SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 
 export type ReportingBoardAssignmentStatus = "all" | "unassigned" | "assigned";
+export type ReportingBoardAssignmentOrigin = "rispro" | "sonic_auto" | "sonic_reconciled";
+export type ReportingBoardAssignmentMatch = "all" | "matched" | "mismatch" | "finalized_unassigned" | "unmapped_finalizer";
+export type ReportingBoardCaseAssignmentMatch = Exclude<ReportingBoardAssignmentMatch, "all"> | "not_applicable";
 export type ReportingBoardCaseSource = "all" | "appointments" | "comparisons";
 export type ReportingBoardReportStatus =
   | "required_not_final"
@@ -35,7 +38,9 @@ export interface ReportingBoardFilters {
   modalityCode?: string | null;
   modalityCodes?: string[] | null;
   assignedDoctorId?: number | null;
+  finalizedByDoctorId?: number | null;
   assignmentStatus?: ReportingBoardAssignmentStatus | null;
+  assignmentMatch?: ReportingBoardAssignmentMatch | null;
   caseCategory?: string | null;
   requiresReport?: boolean | null;
   reportStatus?: ReportingBoardReportStatus | null;
@@ -143,11 +148,13 @@ export interface ReportingBoardCaseRow {
   reportingPrioritySortOrder: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignmentOrigin: ReportingBoardAssignmentOrigin;
   finalizedByDoctorId: number | null;
   finalizedByDoctorName: string | null;
   sonicDicomFinalizedByAccount: string | null;
   sonicDicomLatestDocumentId: string | null;
   sonicDicomCorrelationMethod: "study_instance_uid" | "accession_fallback" | null;
+  assignmentMatch: ReportingBoardCaseAssignmentMatch;
   assignmentStatus: "assigned" | "unassigned";
   completedAt: string | null;
   currentAssignedAt: string | null;
@@ -185,6 +192,7 @@ export interface ReportingBoardStatsBaseRow {
   reportingPriorityName: string | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignmentOrigin: ReportingBoardAssignmentOrigin;
   assignmentStatus: "assigned" | "unassigned";
   completedAt: string | null;
   currentAssignedAt: string | null;
