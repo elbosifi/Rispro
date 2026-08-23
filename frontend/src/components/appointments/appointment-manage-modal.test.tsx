@@ -249,6 +249,23 @@ describe("AppointmentManageModal", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
+  it("opens a finalized report in a protected new tab without navigating the modal", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const currentHref = window.location.href;
+    renderModal({ initialTab: "documents" });
+
+    await userEvent.click(await screen.findByRole("button", { name: /Check report/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open report" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/public/appointments/report-open?t=report-token",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(window.location.href).toBe(currentHref);
+    expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+  });
+
   it("makes mobile Documents the modal scroll owner without constraining its wrapper", async () => {
     vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     renderModal({ initialTab: "documents" });

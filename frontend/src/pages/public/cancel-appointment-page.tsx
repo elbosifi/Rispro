@@ -683,7 +683,11 @@ function ReportCard(props: {
           <ActionButton
             tone="neutral"
             onClick={() => {
-              window.location.href = `/api/public/appointments/report-open?t=${encodeURIComponent(props.token)}`;
+              window.open(
+                `/api/public/appointments/report-open?t=${encodeURIComponent(props.token)}`,
+                "_blank",
+                "noopener,noreferrer",
+              );
             }}
             icon={<ExternalLink className="h-4 w-4" />}
           >

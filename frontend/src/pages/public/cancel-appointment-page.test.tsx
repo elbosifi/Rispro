@@ -335,6 +335,38 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.queryByText("العودة للرئيسية")).toBeNull();
   });
 
+  it("opens a finalized report in a protected new tab without navigating the patient page", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const currentHref = window.location.href;
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        currentStatus: "completed",
+        requiresReport: true,
+        patientQrSettings: baseSettings({ allowReportAccess: true }),
+      })
+    );
+    vi.mocked(fetchPublicAppointmentReportStatus).mockResolvedValueOnce({
+      enabled: true,
+      state: "final",
+      canViewReport: true,
+      message: "Your report is ready.",
+      checkButtonLabel: "Check report",
+      viewButtonLabel: "View report",
+    });
+
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Check report" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View report" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/public/appointments/report-open?t=test-token",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(window.location.href).toBe(currentHref);
+    expect(screen.getAllByText("Test Patient")).toHaveLength(2);
+  });
+
   it("renders a compact other appointments section when other appointments exist", async () => {
     vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
       preview({

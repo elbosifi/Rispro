@@ -586,7 +586,13 @@ export function AppointmentManageModal({
   const openReport = () => {
     if (!appointment) return;
     const token = publicAppointmentToken(appointment);
-    if (token) window.location.href = `/api/public/appointments/report-open?t=${encodeURIComponent(token)}`;
+    if (token) {
+      window.open(
+        `/api/public/appointments/report-open?t=${encodeURIComponent(token)}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+    }
   };
 
   useEffect(() => {
