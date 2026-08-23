@@ -37,6 +37,7 @@ let fetchJson: typeof import("../appointments-v2/tests/integration/helpers.js").
 let canReachDatabase: typeof import("../appointments-v2/tests/integration/helpers.js").canReachDatabase;
 let app: { baseUrl: string; close: () => Promise<void> };
 let reportingBoardService: typeof import("./reporting-board-service.js");
+let sonicDicomCacheService: typeof import("../../services/reporting-board-sonicdicom-cache-service.js");
 
 let originalReportingBoardSetting: unknown = null;
 let policyVersionId = 0;
@@ -560,6 +561,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     originalReportingBoardSetting = stored.rows[0]?.setting_value ?? null;
     reportingBoardService = await import("./reporting-board-service.js");
+    sonicDicomCacheService = await import("../../services/reporting-board-sonicdicom-cache-service.js");
     reportingBoardService.__setReportingBoardAssignmentBatchCheckerForTest(async (contexts) => new Map(contexts.map((context) => {
       const state = statusByAppointmentId.get(context.bookingId) ?? "draft";
       return [context.bookingId, state === "throw"
@@ -668,6 +670,77 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     assert.equal(cache.rows[0]?.report_status, "no_report");
     assert.ok(cache.rows[0]?.last_success_at && cache.rows[0].last_success_at > new Date("2026-05-01T08:00:00.000Z"));
+  });
+
+  it("maps a trimmed case-insensitive SonicDICOM email while preserving the assigned doctor and schedules Final recheck near five minutes", async () => {
+    guard();
+    const date = addDays(84);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sonic finalizer mapping" });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    const finalizerEmail = `rbit.finalizer.${randomUUID().slice(0, 8)}@nccb.ly`.toLowerCase();
+    await pool.query(`update users set username = $2 where id = $1`, [otherDoctor.id, finalizerEmail]);
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: "1.2.840.1", requiresReport: true, status: "completed" },
+      { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "501", finalizedByAccount: `  ${finalizerEmail.toUpperCase()}  `, correlationMethod: "study_instance_uid" }
+    );
+
+    const cached = await pool.query<{ finalized_by_doctor_id: string | null; sonicdicom_finalized_by_account: string | null; seconds_until_check: string }>(`
+      select finalized_by_doctor_id::text, sonicdicom_finalized_by_account,
+        extract(epoch from (next_check_at - last_attempt_at))::text as seconds_until_check
+      from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1
+    `, [appointmentId]);
+    assert.equal(Number(cached.rows[0]?.finalized_by_doctor_id), otherDoctor.doctorId);
+    assert.equal(cached.rows[0]?.sonicdicom_finalized_by_account, finalizerEmail.toUpperCase());
+    assert.ok(Number(cached.rows[0]?.seconds_until_check) >= 299 && Number(cached.rows[0]?.seconds_until_check) <= 301);
+
+    const response = await api<{ cases: Array<{ appointmentId: number; assignedDoctorId: number | null; finalizedByDoctorId: number | null; finalizedByDoctorName: string | null; sonicDicomFinalizedByAccount: string | null; sonicDicomLatestDocumentId: string | null; sonicDicomCorrelationMethod: string | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`);
+    const row = response.data.cases.find((item) => item.appointmentId === appointmentId);
+    assert.equal(row?.assignedDoctorId, doctor.doctorId);
+    assert.equal(row?.finalizedByDoctorId, otherDoctor.doctorId);
+    assert.equal(row?.finalizedByDoctorName, `${TEST_PREFIX}other`);
+    assert.equal(row?.sonicDicomFinalizedByAccount, finalizerEmail.toUpperCase());
+    assert.equal(row?.sonicDicomLatestDocumentId, "501");
+    assert.equal(row?.sonicDicomCorrelationMethod, "study_instance_uid");
+  });
+
+  it("clears stale Final attribution on a successful newer Draft and replaces it on re-finalization", async () => {
+    guard();
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(85), patientName: "Sonic reversible final" });
+    const context = { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: "1.2.840.2", requiresReport: true, status: "completed" };
+    const doctorAEmail = `rbit.a.${randomUUID().slice(0, 8)}@nccb.ly`;
+    const doctorBEmail = `rbit.b.${randomUUID().slice(0, 8)}@nccb.ly`;
+    await pool.query(`update users set username = case id when $1 then $3 else $4 end where id = any($2::bigint[])`, [doctor.id, [doctor.id, targetDoctor.id], doctorAEmail, doctorBEmail]);
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T10:00:00.000Z", latestDocumentId: "601", finalizedByAccount: doctorAEmail, correlationMethod: "study_instance_uid" });
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, { state: "draft", canViewReport: false, source: "sonicdicom", reportFinalAt: null, latestDocumentId: "602", finalizedByAccount: null, correlationMethod: "study_instance_uid" });
+    const draft = await pool.query<{ report_status: string; report_final_at: Date | null; sonicdicom_finalized_by_account: string | null; finalized_by_doctor_id: string | null; sonicdicom_latest_document_id: string | null }>(`select report_status, report_final_at, sonicdicom_finalized_by_account, finalized_by_doctor_id::text, sonicdicom_latest_document_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [appointmentId]);
+    assert.deepEqual(draft.rows[0], { report_status: "draft", report_final_at: null, sonicdicom_finalized_by_account: null, finalized_by_doctor_id: null, sonicdicom_latest_document_id: "602" });
+
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "603", finalizedByAccount: doctorBEmail, correlationMethod: "study_instance_uid" });
+    const refinal = await pool.query<{ report_final_at: Date | null; sonicdicom_finalized_by_account: string | null; finalized_by_doctor_id: string | null; sonicdicom_latest_document_id: string | null }>(`select report_final_at, sonicdicom_finalized_by_account, finalized_by_doctor_id::text, sonicdicom_latest_document_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [appointmentId]);
+    assert.equal(refinal.rows[0]?.report_final_at?.toISOString(), "2026-08-23T11:00:00.000Z");
+    assert.equal(refinal.rows[0]?.sonicdicom_finalized_by_account, doctorBEmail);
+    assert.equal(Number(refinal.rows[0]?.finalized_by_doctor_id), targetDoctor.doctorId);
+    assert.equal(refinal.rows[0]?.sonicdicom_latest_document_id, "603");
+  });
+
+  it("preserves unmapped raw accounts and last good attribution on outage, while manual Final creates no SonicDICOM finalizer", async () => {
+    guard();
+    const date = addDays(86);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sonic unmapped finalizer" });
+    const context = { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed" };
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T12:00:00.000Z", latestDocumentId: "701", finalizedByAccount: "Admin", correlationMethod: "accession_fallback" });
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, null, new Error("SonicDICOM unavailable"));
+    const retained = await pool.query<{ report_status: string; account: string | null; doctor_id: string | null }>(`select report_status, sonicdicom_finalized_by_account as account, finalized_by_doctor_id::text as doctor_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [appointmentId]);
+    assert.deepEqual(retained.rows[0], { report_status: "final", account: "Admin", doctor_id: null });
+
+    const manualId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual final no Sonic attribution" });
+    await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'manual test', $2, $3)`, [manualId, supervisor.id, supervisor.doctorId]);
+    const response = await api<{ cases: Array<{ appointmentId: number; reportStatus: string; reportStatusSource: string | null; finalizedByDoctorId: number | null; sonicDicomFinalizedByAccount: string | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`);
+    const manual = response.data.cases.find((row) => row.appointmentId === manualId);
+    assert.equal(manual?.reportStatus, "final");
+    assert.equal(manual?.reportStatusSource, "manual");
+    assert.equal(manual?.finalizedByDoctorId, null);
+    assert.equal(manual?.sonicDicomFinalizedByAccount, null);
   });
 
   it("queues every eligible SonicDICOM cache row without clearing cached statuses or calling SonicDICOM", async () => {

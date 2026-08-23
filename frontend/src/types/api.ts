@@ -505,6 +505,11 @@ export interface ReportingBoardCaseRow {
   reportingPrioritySortOrder: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  finalizedByDoctorId: number | null;
+  finalizedByDoctorName: string | null;
+  sonicDicomFinalizedByAccount: string | null;
+  sonicDicomLatestDocumentId: string | null;
+  sonicDicomCorrelationMethod: "study_instance_uid" | "accession_fallback" | null;
   assignmentStatus: "assigned" | "unassigned";
   completedAt: string | null;
   currentAssignedAt: string | null;
@@ -785,6 +790,10 @@ export interface ReportingBoardMobileCase {
   exam: string | null;
   category: string;
   assignedDoctor: string | null;
+  assignedDoctorId: number | null;
+  finalizedByDoctorId: number | null;
+  finalizedByDoctorName: string | null;
+  sonicDicomFinalizedByAccount: string | null;
   priority: string | null;
   priorityCode: string | null;
   reportStatus: string;

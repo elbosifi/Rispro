@@ -55,6 +55,10 @@ const mobileResponse: ReportingBoardMobileResponse = {
       exam: "CT Chest",
       category: "oncology",
       assignedDoctor: "Dr. Seraj Alsaifi",
+      assignedDoctorId: 5,
+      finalizedByDoctorId: null,
+      finalizedByDoctorName: null,
+      sonicDicomFinalizedByAccount: null,
       priority: "Urgent",
       priorityCode: "urgent",
       reportStatus: "draft",
@@ -81,6 +85,10 @@ const mobileResponse: ReportingBoardMobileResponse = {
       exam: "CT Chest",
       category: "oncology",
       assignedDoctor: null,
+      assignedDoctorId: null,
+      finalizedByDoctorId: null,
+      finalizedByDoctorName: null,
+      sonicDicomFinalizedByAccount: null,
       priority: "Normal",
       priorityCode: null,
       reportStatus: "draft",
@@ -107,6 +115,10 @@ const mobileResponse: ReportingBoardMobileResponse = {
       exam: "Comparison report",
       category: "comparison",
       assignedDoctor: null,
+      assignedDoctorId: null,
+      finalizedByDoctorId: null,
+      finalizedByDoctorName: null,
+      sonicDicomFinalizedByAccount: null,
       priority: "Normal",
       priorityCode: null,
       reportStatus: "draft",
@@ -176,6 +188,31 @@ describe("ReportingBoardMobilePage", () => {
     expect(screen.queryByText("Read-only saved view.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
     expect(screen.queryByAltText(/QR code/i)).toBeNull();
+  });
+
+  it("shows assigned and mapped SonicDICOM finalizer separately on mobile", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      cases: [{ ...mobileResponse.cases[0], reportStatus: "final", assignedDoctor: "Dr Assigned", assignedDoctorId: 5, finalizedByDoctorId: 9, finalizedByDoctorName: "Final Doctor", sonicDicomFinalizedByAccount: "final.doctor@nccb.ly" }],
+    });
+    renderPage();
+
+    const card = (await screen.findByText("Mohammed Bashir Meftah")).closest("article")!;
+    expect(within(card).getByText("Assigned")).toBeTruthy();
+    expect(within(card).getByText("Dr Assigned")).toBeTruthy();
+    expect(within(card).getByText("Finalized by")).toBeTruthy();
+    expect(within(card).getByText("Dr Final Doctor · Different reporter")).toBeTruthy();
+  });
+
+  it("renders an unmapped SonicDICOM finalizer account safely on mobile", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      cases: [{ ...mobileResponse.cases[0], reportStatus: "final", finalizedByDoctorId: null, finalizedByDoctorName: null, sonicDicomFinalizedByAccount: "legacy.account@nccb.ly" }],
+    });
+    renderPage();
+
+    const card = (await screen.findByText("Mohammed Bashir Meftah")).closest("article")!;
+    expect(within(card).getByText("legacy.account@nccb.ly · Unmapped SonicDICOM account")).toBeTruthy();
   });
 
   it("renders the shared worklist data as a dense desktop table at desktop width", async () => {

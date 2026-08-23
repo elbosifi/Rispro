@@ -522,6 +522,21 @@ function reportStatusDisplay(row: ReportingBoardCaseRow): string {
   return row.manualFinalOverrideId && row.reportStatus === "final" ? "Final · manual" : reportStatusView(row).label;
 }
 
+function sonicFinalizerLabel(row: ReportingBoardCaseRow): string | null {
+  if (row.finalizedByDoctorName) {
+    const name = row.finalizedByDoctorName.trim();
+    return /^dr\b/i.test(name) ? name : `Dr ${name}`;
+  }
+  return row.sonicDicomFinalizedByAccount?.trim() || null;
+}
+
+function sonicFinalizerRelationship(row: ReportingBoardCaseRow): string | null {
+  if (!sonicFinalizerLabel(row)) return null;
+  if (!row.finalizedByDoctorId) return "Unmapped SonicDICOM account";
+  if (!row.assignedDoctorId) return "Finalized while unassigned";
+  return row.assignedDoctorId === row.finalizedByDoctorId ? "Matched" : "Different reporter";
+}
+
 function rowStatusLabel(row: ReportingBoardCaseRow): string {
   if (row.caseType === "comparison") {
     return ["Comparison request", reportStatusView(row).label, labelStatus(row.appointmentStatus)].join(", ");
@@ -545,6 +560,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
       `Linked previous study date: ${row.linkedPreviousStudyDate ?? "-"}`,
       `Pool: ${row.modalityCode}`,
       `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+      `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
       `Report: ${reportStatusDisplay(row)}`,
       `Status: ${labelStatus(row.appointmentStatus)}`,
       `Ready at: ${formatTimestamp(row.completedAt)}`,
@@ -559,6 +575,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
     `Study: ${row.modalityCode}${row.examTypeName ? ` - ${row.examTypeName}` : ""}`,
     `Category: ${labelStatus(row.caseCategory)}`,
     `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+    `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
     `Report: ${reportStatusDisplay(row)}`,
     `Appointment: ${labelStatus(row.appointmentStatus)}`,
     `Completed at: ${formatTimestamp(row.completedAt)}`,
@@ -633,6 +650,8 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
 function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
   const view = reportStatusView(row);
   const Icon = view.icon;
+  const finalizer = sonicFinalizerLabel(row);
+  const finalizerRelationship = sonicFinalizerRelationship(row);
   const appointmentLabel = row.caseType === "comparison"
     ? labelStatus(row.appointmentStatus)
     : row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
@@ -651,6 +670,12 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
       {row.manualFinalOverrideId && row.reportStatus === "final" && (
         <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700" title={row.manualFinalReason ?? "Manual final override"}>
           Final · manual
+        </span>
+      )}
+      {finalizer && (
+        <span className="inline-flex max-w-40 flex-col rounded-md border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] text-slate-700" title={`Finalized by ${finalizer}; ${finalizerRelationship}`}>
+          <span className="truncate font-semibold">Finalized by: {finalizer}</span>
+          {finalizerRelationship && <span className="text-[10px] text-slate-500">{finalizerRelationship}</span>}
         </span>
       )}
     </div>
@@ -2618,7 +2643,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         <td className="px-3 py-2"><IdsCell row={row} /></td>
                         <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
                         <td className="px-3 py-2"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
-                        {showAssignedDoctorColumn && <td className="px-3 py-2">{row.assignedDoctorName ?? "Unassigned"}</td>}
+                        {showAssignedDoctorColumn && <td className="px-3 py-2"><span className="block text-[10px] uppercase text-slate-500">Assigned</span>{row.assignedDoctorName ?? "Unassigned"}</td>}
                         <td className="px-3 py-2"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-2"><CompactStatusCell row={row} /></td>
                         <td className="px-2 py-2 text-right">

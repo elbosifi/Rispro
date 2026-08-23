@@ -22,6 +22,8 @@ export interface ReportingBoardSonicDicomCacheTickResult {
 
 type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
 
+export const FINAL_RECHECK_MS = 5 * 60 * 1000;
+
 function accessionFor(appointmentId: number): string { return `V2-${String(appointmentId).padStart(6, "0")}`; }
 function normalizedState(state: string): ReportingBoardCacheStatus {
   return state === "final" || state === "draft" || state === "no_report" || state === "study_not_found" ? state : "unavailable";
@@ -120,30 +122,48 @@ export async function persistReportingBoardSonicDicomCacheResults(
     const errorText = error instanceof Error ? error.message : error ? String(error) : null;
     return {
       appointmentId: context.bookingId, status, reportFinalAt: status === "final" ? result?.reportFinalAt ?? null : null,
+      latestDocumentId: result?.latestDocumentId ?? null,
+      finalizedByAccount: status === "final" ? String(result?.finalizedByAccount ?? "").trim() || null : null,
+      correlationMethod: result?.correlationMethod ?? null,
       studyNote: result?.studyNote ?? null, successful, errorText, studyInstanceUid: context.studyInstanceUid,
       accessionNumber: context.accessionNumber || accessionFor(context.bookingId), ttlSeconds: settings.sonicDicomStatusCacheTtlSeconds,
+      finalRecheckSeconds: Math.floor(FINAL_RECHECK_MS / 1000),
     };
   });
   const updated = await db.query<{ appointmentId: number; changed: boolean; status: ReportingBoardCacheStatus }>(`
     with input as (
       select * from jsonb_to_recordset($1::jsonb) as x(
-        "appointmentId" bigint, status text, "reportFinalAt" timestamptz, "studyNote" text, successful boolean,
-        "errorText" text, "studyInstanceUid" text, "accessionNumber" text, "ttlSeconds" integer
+        "appointmentId" bigint, status text, "reportFinalAt" timestamptz, "latestDocumentId" text,
+        "finalizedByAccount" text, "correlationMethod" text, "studyNote" text, successful boolean,
+        "errorText" text, "studyInstanceUid" text, "accessionNumber" text, "ttlSeconds" integer, "finalRecheckSeconds" integer
       )
     ), prepared as (
-      select input.*, coalesce(cache.failure_count, 0) + 1 as resulting_failure_count,
-        case when successful then now() + case status when 'final' then interval '24 hours' when 'study_not_found' then greatest(make_interval(secs => greatest("ttlSeconds", 300)), interval '5 minutes') else make_interval(secs => greatest("ttlSeconds", 1)) end
+      select input.*, finalizer.doctor_id as finalized_by_doctor_id,
+        coalesce(cache.failure_count, 0) + 1 as resulting_failure_count,
+        case when successful then now() + case status when 'final' then make_interval(secs => "finalRecheckSeconds") when 'study_not_found' then greatest(make_interval(secs => greatest("ttlSeconds", 300)), interval '5 minutes') else make_interval(secs => greatest("ttlSeconds", 1)) end
           else now() + least(interval '30 minutes', greatest(make_interval(secs => greatest("ttlSeconds", 1)), make_interval(secs => greatest("ttlSeconds", 1) * power(2, least(coalesce(cache.failure_count, 0) + 1, 8)::int)))) end as computed_next_check_at,
         cache.report_status as previous_status
       from input left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = input."appointmentId"
+      left join lateral (
+        select case when count(*) = 1 then min(dp.id) else null end as doctor_id
+        from users u
+        join doctor_portal.doctor_profiles dp on dp.user_id = u.id
+        where input.successful and input.status = 'final'
+          and nullif(btrim(input."finalizedByAccount"), '') is not null
+          and lower(btrim(u.username)) = lower(btrim(input."finalizedByAccount"))
+      ) finalizer on true
     ), upserted as (
-      insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, report_final_at, sonicdicom_study_note, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, last_error, study_instance_uid_snapshot, accession_number_snapshot)
-      select "appointmentId", status, "reportFinalAt", "studyNote", case when successful then 'sonicdicom' else null end, case when successful then now() else null end, now(), computed_next_check_at,
+      insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, report_final_at, sonicdicom_latest_document_id, sonicdicom_finalized_by_account, finalized_by_doctor_id, correlation_method, sonicdicom_study_note, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, last_error, study_instance_uid_snapshot, accession_number_snapshot)
+      select "appointmentId", status, "reportFinalAt", "latestDocumentId", "finalizedByAccount", finalized_by_doctor_id, "correlationMethod", "studyNote", case when successful then 'sonicdicom' else null end, case when successful then now() else null end, now(), computed_next_check_at,
         case when successful and previous_status is distinct from status then now() else null end, case when successful then 0 else resulting_failure_count end, case when successful then null else "errorText" end, "studyInstanceUid", "accessionNumber"
       from prepared
       on conflict (appointment_id) do update set
         report_status = case when excluded.last_success_at is not null then excluded.report_status else doctor_portal.reporting_board_sonicdicom_cache.report_status end,
         report_final_at = case when excluded.last_success_at is not null then excluded.report_final_at else doctor_portal.reporting_board_sonicdicom_cache.report_final_at end,
+        sonicdicom_latest_document_id = case when excluded.last_success_at is not null then excluded.sonicdicom_latest_document_id else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id end,
+        sonicdicom_finalized_by_account = case when excluded.last_success_at is not null then excluded.sonicdicom_finalized_by_account else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account end,
+        finalized_by_doctor_id = case when excluded.last_success_at is not null then excluded.finalized_by_doctor_id else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_doctor_id end,
+        correlation_method = case when excluded.last_success_at is not null then excluded.correlation_method else doctor_portal.reporting_board_sonicdicom_cache.correlation_method end,
         sonicdicom_study_note = case when excluded.last_success_at is not null then excluded.sonicdicom_study_note else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_study_note end,
         source = case when excluded.last_success_at is not null then 'sonicdicom' else doctor_portal.reporting_board_sonicdicom_cache.source end,
         last_success_at = coalesce(excluded.last_success_at, doctor_portal.reporting_board_sonicdicom_cache.last_success_at), last_attempt_at = now(), next_check_at = excluded.next_check_at,

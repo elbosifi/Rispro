@@ -399,6 +399,11 @@ function reportingBoardCase(overrides: Partial<ReportingBoardCaseRow> = {}): Rep
     sonicDicomStudyNoteCheckedAt: null,
     sonicDicomStudyNoteSource: null,
     ...overrides,
+    finalizedByDoctorId: overrides.finalizedByDoctorId ?? null,
+    finalizedByDoctorName: overrides.finalizedByDoctorName ?? null,
+    sonicDicomFinalizedByAccount: overrides.sonicDicomFinalizedByAccount ?? null,
+    sonicDicomLatestDocumentId: overrides.sonicDicomLatestDocumentId ?? null,
+    sonicDicomCorrelationMethod: overrides.sonicDicomCorrelationMethod ?? null,
   };
 }
 

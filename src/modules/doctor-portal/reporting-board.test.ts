@@ -122,6 +122,28 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /row\.reportStatus !== "final"/);
   });
 
+  it("persists SonicDICOM finalizer attribution without changing reporting assignment authority", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/177_reporting_board_sonicdicom_finalizer.sql`, "utf8");
+    const cacheService = readFileSync(`${root}/src/services/reporting-board-sonicdicom-cache-service.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+
+    assert.match(migration, /sonicdicom_latest_document_id text/);
+    assert.match(migration, /sonicdicom_finalized_by_account text/);
+    assert.match(migration, /finalized_by_doctor_id bigint/);
+    assert.match(migration, /correlation_method text/);
+    assert.match(migration, /on delete set null/i);
+    assert.match(migration, /correlation_method in \('study_instance_uid', 'accession_fallback'\)/);
+    assert.match(migration, /where report_status = 'final'/);
+
+    assert.match(cacheService, /lower\(btrim\(u\.username\)\) = lower\(btrim\(input\."finalizedByAccount"\)\)/);
+    assert.match(cacheService, /case when count\(\*\) = 1 then min\(dp\.id\) else null end/);
+    assert.doesNotMatch(cacheService, /dp\.active\s*=\s*true/);
+    assert.match(repository, /left join doctor_portal\.doctor_profiles assigned_doctor on assigned_doctor\.id = cta\.assigned_doctor_id/);
+    assert.match(repository, /left join doctor_portal\.doctor_profiles finalized_doctor on finalized_doctor\.id = cache\.finalized_by_doctor_id/);
+    assert.match(repository, /assigned_doctor\.display_name as "assignedDoctorName"/);
+    assert.match(repository, /finalized_doctor\.display_name as "finalizedByDoctorName"/);
+  });
+
   it("adds authenticated no-credential SonicDICOM study redirect for Reporting Board cases", () => {
     const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");

@@ -146,6 +146,11 @@ const caseRow: ReportingBoardCaseRow = {
   reportingPrioritySortOrder: 0,
   assignedDoctorId: null,
   assignedDoctorName: null,
+  finalizedByDoctorId: null,
+  finalizedByDoctorName: null,
+  sonicDicomFinalizedByAccount: null,
+  sonicDicomLatestDocumentId: null,
+  sonicDicomCorrelationMethod: null,
   assignmentStatus: "unassigned",
   completedAt: "2026-05-29T08:00:00.000Z",
   currentAssignedAt: null,
@@ -377,6 +382,19 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByText("STAT")).toBeTruthy();
     expect(within(row!).getByLabelText("Draft report")).toBeTruthy();
     expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
+  });
+
+  it("shows assigned and actual SonicDICOM finalizer as separate desktop facts", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportStatus: "final", assignedDoctorId: 5, assignedDoctorName: "Assigned Doctor", assignmentStatus: "assigned", finalizedByDoctorId: 8, finalizedByDoctorName: "Final Doctor", sonicDicomFinalizedByAccount: "final.doctor@nccb.ly", sonicDicomLatestDocumentId: "900", sonicDicomCorrelationMethod: "study_instance_uid" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(row).getByText("Assigned Doctor")).toBeTruthy();
+    expect(within(row).getByText("Finalized by: Dr Final Doctor")).toBeTruthy();
+    expect(within(row).getByText("Different reporter")).toBeTruthy();
   });
 
   it("does not tint draft, overdue, or unassigned routine rows", async () => {

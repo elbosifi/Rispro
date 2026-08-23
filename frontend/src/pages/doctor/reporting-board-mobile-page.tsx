@@ -106,10 +106,25 @@ function normalizePacsNote(note: string | null | undefined): string {
     .join("\n");
 }
 
+function finalizerDisplay(row: ReportingBoardMobileCase): { label: string; relationship: string } | null {
+  const doctorName = row.finalizedByDoctorName?.trim();
+  const label = doctorName
+    ? (/^dr\b/i.test(doctorName) ? doctorName : `Dr ${doctorName}`)
+    : row.sonicDicomFinalizedByAccount?.trim();
+  if (!label) return null;
+  const relationship = !row.finalizedByDoctorId
+    ? "Unmapped SonicDICOM account"
+    : !row.assignedDoctorId
+      ? "Finalized while unassigned"
+      : row.assignedDoctorId === row.finalizedByDoctorId ? "Matched" : "Different reporter";
+  return { label, relationship };
+}
+
 function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () => void }) {
   const [noteExpanded, setNoteExpanded] = useState(false);
   const pacsNote = normalizePacsNote(row.sonicDicomStudyNote);
   const canExpandNote = pacsNote.length > 100 || pacsNote.includes("\n");
+  const finalizer = finalizerDisplay(row);
   return (
     <article className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
       <button type="button" onClick={onOpen} className="w-full text-left">
@@ -142,6 +157,7 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
         <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
           <Info icon={<Calendar size={15} />} label="Date/Time" value={dateTime(row)} />
           <Info icon={<UserCheck size={15} />} label="Assigned" value={row.assignedDoctor ?? "Unassigned"} />
+          {finalizer && <Info icon={<UserCheck size={15} />} label="Finalized by" value={`${finalizer.label} · ${finalizer.relationship}`} />}
           <Info icon={<FileText size={15} />} label="Report" value={labelStatus(row.reportStatus)} />
           <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(row.appointmentStatus)} />
         </div>
@@ -410,6 +426,7 @@ export function ReportingBoardMobilePage() {
     ? `My assigned ${scopeModalitySummary} cases awaiting final reports`
     : "Cases awaiting reports";
   const notificationsSupported = pushSupported() && window.Notification.permission !== "denied" && Boolean(pushConfigQuery.data?.enabled);
+  const selectedFinalizer = selectedCase ? finalizerDisplay(selectedCase) : null;
 
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-3 text-slate-950">
@@ -518,6 +535,7 @@ export function ReportingBoardMobilePage() {
                 <Info icon={<Clipboard size={15} />} label="Modality" value={selectedCase.modality} />
                 <Info icon={<FileText size={15} />} label="Exam" value={selectedCase.exam ?? "-"} />
                 <Info icon={<UserCheck size={15} />} label="Assigned" value={selectedCase.assignedDoctor ?? "Unassigned"} />
+                {selectedFinalizer && <Info icon={<UserCheck size={15} />} label="Finalized by" value={`${selectedFinalizer.label} · ${selectedFinalizer.relationship}`} />}
                 <Info icon={<Flame size={15} />} label="Priority" value={selectedCase.priority ?? "Normal"} />
                 <Info icon={<FileText size={15} />} label="Report" value={labelStatus(selectedCase.reportStatus)} />
                 <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(selectedCase.appointmentStatus)} />

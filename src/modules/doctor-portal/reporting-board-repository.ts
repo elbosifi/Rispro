@@ -1090,6 +1090,11 @@ export async function listReportingBoardCaseCandidates(
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        cache.finalized_by_doctor_id as "finalizedByDoctorId",
+        finalized_doctor.display_name as "finalizedByDoctorName",
+        cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
+        cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
+        cache.correlation_method as "sonicDicomCorrelationMethod",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
@@ -1135,6 +1140,7 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
@@ -1166,6 +1172,11 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    finalizedByDoctorId: nullableNumber(row.finalizedByDoctorId),
+    finalizedByDoctorName: row.finalizedByDoctorName ?? null,
+    sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount ?? null,
+    sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId ?? null,
+    sonicDicomCorrelationMethod: row.sonicDicomCorrelationMethod ?? null,
     completedAt: nullableIsoString(row.completedAt),
     currentAssignedAt: nullableIsoString(row.currentAssignedAt),
     firstAssignedAt: nullableIsoString(row.firstAssignedAt),
@@ -1293,6 +1304,11 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        cache.finalized_by_doctor_id as "finalizedByDoctorId",
+        finalized_doctor.display_name as "finalizedByDoctorName",
+        cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
+        cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
+        cache.correlation_method as "sonicDicomCorrelationMethod",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
@@ -1338,6 +1354,7 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
