@@ -23,6 +23,10 @@ function mockPrintWindow() {
   return print;
 }
 
+function mockBlockedPrintWindow() {
+  vi.spyOn(window, "open").mockReturnValue(null);
+}
+
 describe("directPrintRegistrationRows", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -46,6 +50,16 @@ describe("directPrintRegistrationRows", () => {
     expect(mockDirectPrintRegistrationList).not.toHaveBeenCalled();
     expect(print).toHaveBeenCalledOnce();
     expect(mockPushToast).not.toHaveBeenCalled();
+  });
+
+  it("shows a centered browser-blocked warning when browser printing is blocked before QZ", async () => {
+    mockBlockedPrintWindow();
+    mockLoadSettings.mockReturnValue({ profiles: [{ ...desktopProfile, enabled: false }] });
+
+    await directPrintRegistrationRows(rows, "today");
+
+    expect(mockDirectPrintRegistrationList).not.toHaveBeenCalled();
+    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ placement: "center", title: "Browser printing blocked" }), 10_000);
   });
 
   it("uses browser printing without QZ when mobile", async () => {
@@ -79,6 +93,16 @@ describe("directPrintRegistrationRows", () => {
     expect(print).toHaveBeenCalledOnce();
     expect(mockPushToast.mock.calls[0][0]).toMatchObject({ placement: "center" });
     expect(mockPushToast.mock.calls[0][0]).not.toHaveProperty("action");
+  });
+
+  it("does not claim browser printing opened when the safe QZ fallback popup is blocked", async () => {
+    mockBlockedPrintWindow();
+    mockDirectPrintRegistrationList.mockResolvedValue({ success: false, errorCode: "QZ_CONNECTION_FAILED", message: "QZ unavailable" });
+
+    await directPrintRegistrationRows(rows, "today");
+
+    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Browser printing blocked", placement: "center" }), 10_000);
+    expect(mockPushToast).not.toHaveBeenCalledWith(expect.objectContaining({ message: "The configured direct printer could not be used. Browser printing has been opened instead." }), 10_000);
   });
 
   it("keeps direct printing when QZ succeeds", async () => {

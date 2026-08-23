@@ -31,7 +31,6 @@ vi.mock("@/services/printing/workstation-printer-settings", async (importOrigina
 });
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
-vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en" }) }));
 
 function setSecureContext(value: boolean) {
   Object.defineProperty(window, "isSecureContext", { configurable: true, value });
@@ -67,7 +66,7 @@ describe("QzTrayPrintingSection", () => {
     expect(screen.getByText("Select a Windows printer queue configured with A4 paper and Landscape as its default orientation. You can create a second Windows queue for the same physical printer.")).toBeTruthy();
     expect((screen.getAllByRole("checkbox", { name: "Enabled" }) as HTMLInputElement[]).every((checkbox) => !checkbox.checked)).toBe(true);
     await waitFor(() => expect((screen.getByRole("button", { name: /Refresh printers/i }) as HTMLButtonElement).disabled).toBe(false));
-    expect((screen.getByRole("checkbox", { name: /Allow browser-print fallback/i }) as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByRole("checkbox", { name: /Allow browser-print fallback/i })).toBeNull();
     expect((screen.getByRole("button", { name: "Reset local printer settings" }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false);
   });

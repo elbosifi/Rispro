@@ -47,27 +47,32 @@ export function printAppointmentListV2(rows: AppointmentWithDetails[], label: st
   printWindow.print();
 }
 
-function printExactAppointmentList(rows: AppointmentWithDetails[], label: string): void {
-  if (rows.length === 0) return;
+function printExactAppointmentList(rows: AppointmentWithDetails[], label: string): boolean {
+  if (rows.length === 0) return false;
   const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
+  if (!printWindow) return false;
   printWindow.document.write(prepareAppointmentListHtml(rows, label));
   printWindow.document.close();
   printWindow.focus();
   printWindow.print();
+  return true;
+}
+
+function showBrowserPrintBlocked(language: "ar" | "en"): void {
+  pushToast({ type: "error", title: t(language, "print.browserBlocked"), message: t(language, "print.browserBlockedMessage"), placement: "center" }, 10_000);
 }
 
 export async function directPrintRegistrationRows(rows: AppointmentWithDetails[], label: string): Promise<void> {
   if (rows.length === 0) return;
   const settings = loadQzPrinterSettings();
   if (shouldUseBrowserPrint(settings, "A4_LANDSCAPE_DOCUMENT")) {
-    printExactAppointmentList(rows, label);
+    if (!printExactAppointmentList(rows, label)) showBrowserPrintBlocked(window.localStorage.getItem("rispro-language") === "ar" ? "ar" : "en");
     return;
   }
   const profile = settings.profiles?.find((candidate) => candidate.documentType === "A4_LANDSCAPE_DOCUMENT");
   if (profile && !profile.printerName.trim()) {
-    printExactAppointmentList(rows, label);
     const language = window.localStorage.getItem("rispro-language") === "ar" ? "ar" : "en";
+    if (!printExactAppointmentList(rows, label)) { showBrowserPrintBlocked(language); return; }
     pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: t(language, "print.directPrinterMissing"), placement: "center" }, 10_000);
     return;
   }
@@ -78,8 +83,8 @@ export async function directPrintRegistrationRows(rows: AppointmentWithDetails[]
   }
   const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
   if (action === "BROWSER_PRINT") {
-    printExactAppointmentList(rows, label);
     const language = window.localStorage.getItem("rispro-language") === "ar" ? "ar" : "en";
+    if (!printExactAppointmentList(rows, label)) { showBrowserPrintBlocked(language); return; }
     pushToast({
       type: "error",
       title: t(language, "print.directUnavailable"),

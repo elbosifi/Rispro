@@ -54,7 +54,7 @@ const mockListProtocolDocumentAnnotations = vi.fn<(documentId?: number) => Promi
 const mockCreateProtocolDocumentAnnotation = vi.fn<(documentId: number, payload: unknown) => Promise<unknown>>(async (documentId, payload) => ({ id: 11, documentId, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
 const mockUpdateProtocolDocumentAnnotation = vi.fn<(documentId: number, annotationId: number, payload: unknown) => Promise<unknown>>(async (documentId, annotationId, payload) => ({ id: annotationId, documentId, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
 const mockDeleteProtocolDocumentAnnotation = vi.fn(async (documentId: number, annotationId: number) => { void documentId; void annotationId; });
-const { mockPushToast } = vi.hoisted(() => ({ mockPushToast: vi.fn() }));
+const { mockDirectPrint, mockLoadQzPrinterSettings, mockPushToast } = vi.hoisted(() => ({ mockDirectPrint: vi.fn(), mockLoadQzPrinterSettings: vi.fn(), mockPushToast: vi.fn() }));
 const mockFetchCurrentSession = vi.fn(async () => ({
   id: 1,
   role: "receptionist",
@@ -98,6 +98,8 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/lib/toast", () => ({ pushToast: mockPushToast }));
+vi.mock("@/services/printing/direct-print-service", () => ({ directPrint: (...args: unknown[]) => mockDirectPrint(...args) }));
+vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => mockLoadQzPrinterSettings() }));
 
 vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
@@ -242,6 +244,8 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockUpdateProtocolDocumentAnnotation.mockReset();
     mockDeleteProtocolDocumentAnnotation.mockReset();
     mockPushToast.mockReset();
+    mockDirectPrint.mockReset();
+    mockLoadQzPrinterSettings.mockReset().mockReturnValue({ profiles: [{ documentType: "A4_DOCUMENT", enabled: false, printerName: "" }] });
     mockFetchCurrentSession.mockClear();
     mockFetchIntegrationStatus.mockClear();
 
@@ -568,6 +572,18 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
     expect(mockDeleteAppointmentDocument).toHaveBeenCalledWith(7);
     confirmSpy.mockRestore();
+  });
+
+  it("shows the centered browser-blocked warning when document browser printing is blocked", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(7, "request.pdf", "application/pdf")]);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderPanel({ previewMode: "link", layout: "workspace" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("button", { name: "Print A4" }));
+
+    await waitFor(() => expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Browser printing blocked", placement: "center" }), 10_000));
+    expect(mockDirectPrint).not.toHaveBeenCalled();
   });
 
   it("passes configured direct NAPS2 endpoint from integration status to scanner adapter", async () => {

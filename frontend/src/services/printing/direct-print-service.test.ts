@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintIrSpecimenLabel, directPrintRegistrationList, directPrintReportCenter, directPrintStatistics, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
-import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
+import { createDefaultQzPrinterSettings as createStoredQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
 const getInstalledPrinters = vi.fn();
@@ -9,6 +9,12 @@ const connectQzTray = vi.fn();
 const auditApi = vi.fn();
 const appointmentSlipFetch = vi.fn();
 const fetchAppointmentSlipSettings = vi.fn();
+
+function createDefaultQzPrinterSettings() {
+  const settings = createStoredQzPrinterSettings();
+  settings.profiles.forEach((profile) => { profile.enabled = true; });
+  return settings;
+}
 
 vi.mock("./qz-tray-service", () => ({
   QzTrayError: class QzTrayError extends Error { constructor(public code: string, message: string) { super(message); } },

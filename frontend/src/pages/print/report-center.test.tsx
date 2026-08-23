@@ -15,6 +15,7 @@ const directPrintReportCenterMock = vi.fn();
 const fetchReportCenterPdfMock = vi.fn();
 const directPrintRegistrationRowsMock = vi.fn();
 const pushToastMock = vi.fn();
+const resolveDirectPrintFailureActionMock = vi.fn();
 let role = "supervisor";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -39,7 +40,7 @@ vi.mock("@/services/printing/direct-print-service", () => ({
   fetchReportCenterPdf: (...args: unknown[]) => fetchReportCenterPdfMock(...args),
 }));
 
-vi.mock("@/services/printing/direct-print-failure-action", () => ({ resolveDirectPrintFailureAction: () => "NONE" }));
+vi.mock("@/services/printing/direct-print-failure-action", () => ({ resolveDirectPrintFailureAction: (...args: unknown[]) => resolveDirectPrintFailureActionMock(...args) }));
 vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => ({ browserPrintFallbackEnabled: true }) }));
 
 vi.mock("@/lib/toast", () => ({
@@ -86,6 +87,7 @@ describe("ReportCenter", () => {
       },
     ]);
     directPrintRegistrationRowsMock.mockResolvedValue(undefined);
+    resolveDirectPrintFailureActionMock.mockReturnValue("NONE");
   });
 
   it("exposes only supported templates, with routine workflows separate from operations", () => {
@@ -199,6 +201,21 @@ describe("ReportCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
     expect(directPrintRegistrationRowsMock).toHaveBeenCalledWith([expect.objectContaining({ id: 1 })], expect.any(String));
     expect(directPrintReportCenterMock).not.toHaveBeenCalledWith(expect.objectContaining({ templateId: "registration-list" }));
+  });
+
+  it("does not claim browser printing opened when the safe-fallback popup is blocked", async () => {
+    directPrintReportCenterMock.mockResolvedValue({ success: false, errorCode: "QZ_CONNECTION_FAILED", message: "QZ unavailable" });
+    resolveDirectPrintFailureActionMock.mockReturnValue("BROWSER_PRINT");
+    const createObjectURL = vi.fn(() => "blob:report");
+    vi.stubGlobal("URL", { ...URL, createObjectURL });
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderCenter();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Print" }));
+
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Browser printing blocked", placement: "center" }), 10_000));
+    expect(pushToastMock).not.toHaveBeenCalledWith(expect.objectContaining({ message: "The configured direct printer could not be used. Browser printing has been opened instead." }), 10_000);
+    vi.unstubAllGlobals();
   });
 
   it("uses the same effective appointment columns for preview, print, and Excel", async () => {

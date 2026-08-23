@@ -126,17 +126,18 @@ export function RequestDocumentsPanel({
     setPrintingDocumentId(document.id);
     try {
       const settings = loadQzPrinterSettings();
-      const browserFallback = () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer");
-      if (shouldUseBrowserPrint(settings, profile)) { browserFallback(); return; }
+      const browserFallback = () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") != null;
+      const showBrowserPrintBlocked = () => pushToast({ type: "error", title: t("print.browserBlocked"), message: t("print.browserBlockedMessage"), placement: "center" }, 10_000);
+      if (shouldUseBrowserPrint(settings, profile)) { if (!browserFallback()) showBrowserPrintBlocked(); return; }
       const directProfile = settings.profiles?.find((item) => item.documentType === profile);
-      if (directProfile && !directProfile.printerName.trim()) { browserFallback(); pushToast({ type: "error", title: t("print.directUnavailable"), message: t("print.directPrinterMissing"), placement: "center" }, 10_000); return; }
+      if (directProfile && !directProfile.printerName.trim()) { if (!browserFallback()) { showBrowserPrintBlocked(); return; } pushToast({ type: "error", title: t("print.directUnavailable"), message: t("print.directPrinterMissing"), placement: "center" }, 10_000); return; }
       const result = await directPrint({ documentType: profile, documentId: String(document.id), appointmentId });
       if (result.success) {
         pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
         return;
       }
       const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
-      if (action === "BROWSER_PRINT") { browserFallback(); pushToast({ type: "error", title: t("print.directUnavailable"), message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t("print.directPrinterMissing") : t("print.browserFallbackOpened"), placement: "center" }, 10_000); return; }
+      if (action === "BROWSER_PRINT") { if (!browserFallback()) { showBrowserPrintBlocked(); return; } pushToast({ type: "error", title: t("print.directUnavailable"), message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t("print.directPrinterMissing") : t("print.browserFallbackOpened"), placement: "center" }, 10_000); return; }
       const toastAction = action === "OPEN_SETTINGS"
         ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
         : null;
