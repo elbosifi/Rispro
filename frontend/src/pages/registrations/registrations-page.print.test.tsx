@@ -345,8 +345,43 @@ describe("RegistrationsPage print actions", () => {
       expect.objectContaining({
         dateFrom: todayIsoDateLy(),
         dateTo: todayIsoDateLy(),
+        sort: "booking-desc",
       })
     );
+  });
+
+  it("requests the selected server-side sort and preserves it for Today and Tomorrow", async () => {
+    const user = userEvent.setup();
+    renderRegistrationsPage();
+
+    const sort = await screen.findByLabelText("Sort:");
+    expect((sort as HTMLSelectElement).value).toBe("booking-desc");
+
+    await user.selectOptions(sort, "booking-asc");
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "booking-asc" }));
+    });
+
+    await user.selectOptions(sort, "patient-asc");
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "patient-asc" }));
+    });
+
+    await user.selectOptions(sort, "time-asc");
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "time-asc" }));
+    });
+
+    await user.selectOptions(sort, "booking-asc");
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "booking-asc" }));
+    });
+
+    await user.click(screen.getByRole("button", { name: "Tomorrow" }));
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "booking-asc" }));
+    });
   });
 
   it("initializes appointment filters from URL params", async () => {
@@ -408,7 +443,7 @@ describe("RegistrationsPage print actions", () => {
   it("supports status[] URL params and preserves appointment deep links", async () => {
     fetchAppointmentsMock.mockResolvedValueOnce([registrationAppointment({ id: 99, accessionNumber: "ACC-99" })]);
     renderRegistrationsPage([
-      "/registrations?appointmentId=7&patientId=1&tab=status&dateMode=single&date=2026-06-30&status[]=scheduled&status[]=waiting",
+      "/registrations?appointmentId=7&patientId=1&tab=status&dateMode=single&date=2026-06-30&status[]=scheduled&status[]=waiting&sort=patient-asc",
     ]);
 
     await waitFor(() => {
@@ -416,6 +451,7 @@ describe("RegistrationsPage print actions", () => {
         expect.objectContaining({
           patientId: "1",
           status: ["scheduled", "waiting"],
+          sort: "patient-asc",
         })
       );
       expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
@@ -528,7 +564,7 @@ describe("RegistrationsPage print actions", () => {
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=other-token",
       },
     ]);
-    renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
+    renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1&sort=time-asc"]);
 
     await waitFor(() => {
       expect(fetchAppointmentsMock).toHaveBeenCalledWith(
@@ -905,6 +941,7 @@ describe("RegistrationsPage print actions", () => {
     await waitFor(() => {
       expect(probe.getAttribute("data-search")).toBe("");
       expect(screen.queryByRole("dialog", { name: "Manage" })).toBeNull();
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "booking-desc" }));
     });
   });
 

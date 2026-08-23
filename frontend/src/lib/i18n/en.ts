@@ -626,6 +626,11 @@ export const en = {
   "queue.refresh": "Refresh",
 
   "registrations.title": "Daily Registrations",
+  "registrations.sort": "Sort:",
+  "registrations.sortBookingNewest": "Booking order — newest first",
+  "registrations.sortBookingOldest": "Booking order — oldest first",
+  "registrations.sortPatientName": "Patient name",
+  "registrations.sortAppointmentTime": "Appointment time",
   "registrations.sectionLabel": "Registrations",
   "registrations.pageTitle": "Appointment Registrations",
   "registrations.filters": "Filters",

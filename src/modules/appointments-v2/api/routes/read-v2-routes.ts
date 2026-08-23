@@ -487,7 +487,9 @@ router.get(
       select *
       from filtered
       order by ${
-        sort === "time-asc"
+        sort === "booking-asc"
+          ? "appointment_date asc, daily_sequence asc, id asc"
+          : sort === "time-asc"
           ? "appointment_date asc, booking_time asc nulls last, daily_sequence asc, id asc"
           : sort === "patient-asc"
             ? "arabic_full_name asc, english_full_name asc, appointment_date asc, id asc"

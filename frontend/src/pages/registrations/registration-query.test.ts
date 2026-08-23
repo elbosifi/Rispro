@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { todayIsoDateLy } from "../../lib/date-format";
-import { buildRegistrationAppointmentQuery } from "./registration-query";
+import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams, type RegistrationsFilters } from "./registration-query";
+
+const defaults: RegistrationsFilters = {
+  dateMode: "single",
+  date: "2026-04-27",
+  dateFrom: "",
+  dateTo: "",
+  modalityId: "",
+  query: "",
+  statuses: ["scheduled"],
+  sort: "booking-desc",
+};
 
 describe("buildRegistrationAppointmentQuery", () => {
   it("single date bounds the appointment query", () => {
@@ -15,6 +26,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         modalityId: "",
         query: "",
         statuses: ["scheduled"],
+        sort: "booking-desc",
       })
     ).toEqual({
       dateFrom: selected,
@@ -22,6 +34,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       modalityId: "",
       q: "",
       status: ["scheduled"],
+      sort: "booking-desc",
     });
   });
 
@@ -36,6 +49,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         patientId: "11",
         query: "abc",
         statuses: ["waiting", "arrived"],
+        sort: "booking-asc",
       })
     ).toEqual({
       dateFrom: "2026-04-20",
@@ -44,6 +58,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       patientId: "11",
       q: "abc",
       status: ["waiting", "arrived"],
+      sort: "booking-asc",
     });
   });
 
@@ -60,6 +75,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         patientId: "11",
         query: "",
         statuses: ["scheduled", "arrived", "waiting"],
+        sort: "patient-asc",
       })
     ).toEqual({
       dateFrom: today,
@@ -68,6 +84,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       patientId: "11",
       q: "",
       status: ["scheduled", "arrived", "waiting"],
+      sort: "patient-asc",
     });
   });
 
@@ -82,12 +99,22 @@ describe("buildRegistrationAppointmentQuery", () => {
         patientId: "11",
         query: "MRN-123",
         statuses: ["scheduled", "waiting"],
+        sort: "time-asc",
       })
     ).toEqual({
       modalityId: "2",
       patientId: "11",
       q: "MRN-123",
       status: ["scheduled", "waiting"],
+      sort: "time-asc",
     });
+  });
+
+  it("accepts valid sort values from URL parameters", () => {
+    expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("sort=booking-asc"), defaults).sort).toBe("booking-asc");
+  });
+
+  it("falls back to the default sort for an invalid URL value", () => {
+    expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("sort=unknown"), defaults).sort).toBe("booking-desc");
   });
 });

@@ -1,3 +1,5 @@
+export type RegistrationSort = "booking-desc" | "booking-asc" | "patient-asc" | "time-asc";
+
 export interface RegistrationsFilters {
   dateMode: "all" | "single" | "range";
   date: string;
@@ -7,6 +9,7 @@ export interface RegistrationsFilters {
   patientId?: string;
   query: string;
   statuses: string[];
+  sort: RegistrationSort;
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -50,6 +53,7 @@ export function parseRegistrationFiltersFromSearchParams(
   const date = firstTrimmed(params, "date");
   const dateFrom = firstTrimmed(params, "dateFrom");
   const dateTo = firstTrimmed(params, "dateTo");
+  const sort = firstTrimmed(params, "sort");
 
   if (modalityId && /^\d+$/.test(modalityId)) {
     next.modalityId = modalityId;
@@ -59,6 +63,9 @@ export function parseRegistrationFiltersFromSearchParams(
   }
   if (statuses.length > 0) {
     next.statuses = statuses;
+  }
+  if (sort === "booking-desc" || sort === "booking-asc" || sort === "patient-asc" || sort === "time-asc") {
+    next.sort = sort;
   }
 
   if (dateMode === "all") {
@@ -85,6 +92,7 @@ export function buildRegistrationAppointmentQuery(filters: RegistrationsFilters)
     modalityId: filters.modalityId,
     q: filters.query,
     status: filters.statuses,
+    sort: filters.sort,
   };
 
   if (filters.patientId) {

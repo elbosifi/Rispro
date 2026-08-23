@@ -30,7 +30,7 @@ import {
 } from "@/lib/print-utils";
 import { directPrintRegistrationRows } from "@/lib/registration-list-printing";
 import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams } from "./registration-query";
-import type { RegistrationsFilters } from "./registration-query";
+import type { RegistrationSort, RegistrationsFilters } from "./registration-query";
 import type { WhatsappTemplate } from "@/lib/whatsapp";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
@@ -41,6 +41,7 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
   modalityId: "",
   query: "",
   statuses: ["scheduled", "arrived", "waiting"],
+  sort: "booking-desc",
 };
 
 const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
@@ -387,6 +388,7 @@ export default function RegistrationsPage() {
       modalityId: filters.modalityId,
       query: filters.query,
       statuses: filters.statuses,
+      sort: filters.sort,
     });
     void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
@@ -403,6 +405,7 @@ export default function RegistrationsPage() {
       modalityId: filters.modalityId,
       query: filters.query,
       statuses: filters.statuses,
+      sort: filters.sort,
     });
     void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
@@ -945,9 +948,25 @@ export default function RegistrationsPage() {
               </span>
             </div>
           </div>
-          <Button type="button" variant="secondary" size="sm" className="h-8 px-3 text-xs" onClick={handlePrintVisibleList}>
-            {t("registrations.print")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="registration-sort" className="text-xs text-muted-foreground">
+              {t("registrations.sort")}
+            </label>
+            <select
+              id="registration-sort"
+              value={filters.sort}
+              onChange={(event) => handleFilterChange("sort", event.target.value as RegistrationSort)}
+              className="input-premium h-8 w-auto min-w-48 px-2 py-1 text-xs"
+            >
+              <option value="booking-desc">{t("registrations.sortBookingNewest")}</option>
+              <option value="booking-asc">{t("registrations.sortBookingOldest")}</option>
+              <option value="patient-asc">{t("registrations.sortPatientName")}</option>
+              <option value="time-asc">{t("registrations.sortAppointmentTime")}</option>
+            </select>
+            <Button type="button" variant="secondary" size="sm" className="h-8 px-3 text-xs" onClick={handlePrintVisibleList}>
+              {t("registrations.print")}
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">

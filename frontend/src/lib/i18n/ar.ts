@@ -667,6 +667,11 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "queue.refresh": "تحديث",
 
   "registrations.title": "التسجيلات اليومية",
+  "registrations.sort": "الترتيب:",
+  "registrations.sortBookingNewest": "ترتيب الحجز — الأحدث أولاً",
+  "registrations.sortBookingOldest": "ترتيب الحجز — الأقدم أولاً",
+  "registrations.sortPatientName": "اسم المريض",
+  "registrations.sortAppointmentTime": "وقت الموعد",
   "registrations.sectionLabel": "التسجيلات",
   "registrations.pageTitle": "تسجيلات المواعيد",
   "registrations.filters": "الفلاتر",
