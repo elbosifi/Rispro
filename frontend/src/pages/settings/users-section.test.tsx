@@ -10,6 +10,7 @@ const users = [
   { id: 2, username: "drstone", full_name: "Dr Stone", role: "doctor", is_active: false, must_change_password: true },
 ];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+let routeFailures: Record<string, string> = {};
 
 function renderSection() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -19,8 +20,11 @@ function renderSection() {
 describe("UsersSection", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    routeFailures = {};
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
+      const failure = routeFailures[`${init?.method ?? "GET"} ${url}`];
+      if (failure) return json({ message: failure }, 400);
       if (url === "/api/users" && !init?.method) return json({ users });
       if (url === "/api/doctor/profiles") return json({ profiles: [{ userId: 2, active: false }] });
       if (url.includes("/temporary-password")) return json({ user: users[0] });
@@ -80,6 +84,42 @@ describe("UsersSection", () => {
     await userEvent.type(screen.getByLabelText("Password"), "safe-password");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users" && (init as RequestInit).method === "POST")).toBe(true));
+  });
+
+  it("clears every create field, including password and role, when Cancel closes the dialog", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getByRole("button", { name: "Add User" }));
+    await userEvent.type(screen.getByLabelText("Username"), "discard-user");
+    await userEvent.type(screen.getByLabelText("Full Name"), "Discard User");
+    await userEvent.type(screen.getByLabelText("Password"), "discard-password");
+    await userEvent.selectOptions(screen.getByLabelText("Role"), "doctor");
+    await userEvent.click(screen.getAllByRole("button", { name: "Cancel" })[1]!);
+    await userEvent.click(screen.getByRole("button", { name: "Add User" }));
+    expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Full Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Role") as HTMLSelectElement).value).toBe("receptionist");
+  });
+
+  it("renders create and manage mutation errors inside their open dialogs", async () => {
+    routeFailures["POST /api/users"] = "Username is already in use.";
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getByRole("button", { name: "Add User" }));
+    await userEvent.type(screen.getByLabelText("Username"), "duplicate");
+    await userEvent.type(screen.getByLabelText("Full Name"), "Duplicate User");
+    await userEvent.type(screen.getByLabelText("Password"), "safe-password");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Username is already in use.");
+    await userEvent.click(screen.getAllByRole("button", { name: "Cancel" })[1]!);
+
+    routeFailures["PUT /api/users/1/active"] = "You cannot deactivate your own account.";
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    await userEvent.click(screen.getByRole("button", { name: "Deactivate account" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("You cannot deactivate your own account.");
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
   it("reactivates inactive users and clears sensitive drafts when the dialog closes", async () => {
