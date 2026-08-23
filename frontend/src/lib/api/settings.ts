@@ -168,3 +168,19 @@ export async function updateUserPassword(userId: number, password: string) {
     body: JSON.stringify({ password })
   });
 }
+
+export async function updateUserActiveState(userId: number, isActive: boolean): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/active`, {
+    method: "PUT",
+    body: JSON.stringify({ isActive })
+  });
+  return mapUser(raw.user);
+}
+
+export async function resetUserTemporaryPassword(userId: number, password: string): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/temporary-password`, {
+    method: "POST",
+    body: JSON.stringify({ password })
+  });
+  return mapUser(raw.user);
+}

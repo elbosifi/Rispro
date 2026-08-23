@@ -44,3 +44,18 @@ describe("forced password-change guardrail", () => {
     assert.ok(protectedApiIndex > forcedPasswordGuardIndex);
   });
 });
+
+describe("users route administration extensions", () => {
+  it("keeps active-state and temporary-password routes behind the existing guarded router", async () => {
+    const fs = await import("node:fs/promises");
+    const route = await fs.readFile("src/routes/users.ts", "utf-8");
+
+    assert.ok(route.includes("usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);"));
+    assert.ok(route.includes('"/:userId/active"'));
+    assert.ok(route.includes("updateUserActiveState"));
+    assert.ok(route.includes('typeof body.isActive !== "boolean"'));
+    assert.ok(route.includes("isActive must be a boolean."));
+    assert.ok(route.includes('"/:userId/temporary-password"'));
+    assert.ok(route.includes("resetUserTemporaryPassword"));
+  });
+});

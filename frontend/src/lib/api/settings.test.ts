@@ -9,6 +9,8 @@ import {
   savePageVisibilityMatrix,
   saveSchedulingEngineConfig,
   saveSettings,
+  resetUserTemporaryPassword,
+  updateUserActiveState,
   updateUserPassword,
   updateUserSchedulingOverridePermission,
 } from "./settings";
@@ -61,6 +63,8 @@ describe("settings API contracts", () => {
     await createUser({ username: "doctor", fullName: "Doctor", password: "secret", role: "doctor" });
     await updateUserSchedulingOverridePermission(7, true);
     await updateUserPassword(7, "replacement");
+    await updateUserActiveState(7, false);
+    await resetUserTemporaryPassword(7, "temporary");
     await deleteUser(7);
 
     expect(api).toHaveBeenNthCalledWith(1, "/users", {
@@ -75,6 +79,14 @@ describe("settings API contracts", () => {
       method: "PUT",
       body: JSON.stringify({ password: "replacement" }),
     });
-    expect(api).toHaveBeenNthCalledWith(4, "/users/7", { method: "DELETE" });
+    expect(api).toHaveBeenNthCalledWith(4, "/users/7/active", {
+      method: "PUT",
+      body: JSON.stringify({ isActive: false }),
+    });
+    expect(api).toHaveBeenNthCalledWith(5, "/users/7/temporary-password", {
+      method: "POST",
+      body: JSON.stringify({ password: "temporary" }),
+    });
+    expect(api).toHaveBeenNthCalledWith(6, "/users/7", { method: "DELETE" });
   });
 });

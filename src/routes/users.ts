@@ -3,7 +3,15 @@ import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from ".
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { createUser, deleteUser, listUsers, updateUserPassword, updateUserSchedulingOverridePermission } from "../services/user-service.js";
+import {
+  createUser,
+  deleteUser,
+  listUsers,
+  resetUserTemporaryPassword,
+  updateUserActiveState,
+  updateUserPassword,
+  updateUserSchedulingOverridePermission
+} from "../services/user-service.js";
 
 export const usersRouter = express.Router();
 
@@ -62,6 +70,32 @@ usersRouter.put(
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
     const user = await updateUserPassword(asString(req.params.userId), asString(body.password), req.user!.sub);
+    res.json({ user });
+  })
+);
+
+usersRouter.post(
+  "/:userId/temporary-password",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const user = await resetUserTemporaryPassword(asString(req.params.userId), asString(body.password), req.user!.sub);
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
+  "/:userId/active",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const isActive = asOptionalBoolean(body.isActive);
+    if (typeof body.isActive !== "boolean" || isActive === undefined) {
+      res.status(400).json({ message: "isActive must be a boolean." });
+      return;
+    }
+    const user = await updateUserActiveState(asString(req.params.userId), isActive, {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
     res.json({ user });
   })
 );
