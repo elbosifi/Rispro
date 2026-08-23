@@ -139,6 +139,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     canAssignProtocols: true,
     canSupervise: false,
   });
+  const [linkUserSelectionChanged, setLinkUserSelectionChanged] =
+    useState(false);
 
   const profilesQuery = useQuery({ queryKey: ["doctor", "profiles"], queryFn: fetchDoctorProfilesForAdmin });
   const usersQuery = useQuery<{ users: User[] }>({ queryKey: ["users"], queryFn: fetchUsers });
@@ -187,24 +189,26 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const profiles = profilesQuery.data ?? EMPTY_DOCTOR_PROFILES;
   const usersById = useMemo(() => new Map((usersQuery.data?.users ?? []).map((user) => [user.id, user])), [usersQuery.data?.users]);
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
-  const requestedLinkUserId = useMemo(() => {
+  const requestedLinkUserId = (() => {
     const value = new URLSearchParams(window.location.search).get("linkUserId");
     const userId = Number(value);
     return Number.isSafeInteger(userId) && userId > 0 ? userId : null;
-  }, []);
-
-  useEffect(() => {
-    if (!requestedLinkUserId) return;
-
-    const user = usersById.get(requestedLinkUserId);
-    if (!user || profilesByUserId.has(user.id)) return;
-
-    setDraft((current) => ({
-      ...current,
-      userId: String(user.id),
-      displayName: user.fullName,
-    }));
-  }, [profilesByUserId, requestedLinkUserId, usersById]);
+  })();
+  const requestedLinkUser = requestedLinkUserId
+    ? usersById.get(requestedLinkUserId)
+    : undefined;
+  const preselectedLinkUser =
+    requestedLinkUser && !profilesByUserId.has(requestedLinkUser.id)
+      ? requestedLinkUser
+      : undefined;
+  const linkDraft =
+    preselectedLinkUser && !linkUserSelectionChanged
+      ? {
+          ...draft,
+          userId: String(preselectedLinkUser.id),
+          displayName: preselectedLinkUser.fullName,
+        }
+      : draft;
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
 
@@ -215,13 +219,13 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const createMutation = useMutation({
     mutationFn: () => createDoctorProfileForAdmin({
-      userId: Number(draft.userId),
-      displayName: draft.displayName,
-      doctorRole: draft.doctorRole,
-      active: draft.active,
-      canFinalizeReports: draft.canFinalizeReports,
-      canAssignProtocols: draft.canAssignProtocols,
-      canSupervise: draft.canSupervise,
+      userId: Number(linkDraft.userId),
+      displayName: linkDraft.displayName,
+      doctorRole: linkDraft.doctorRole,
+      active: linkDraft.active,
+      canFinalizeReports: linkDraft.canFinalizeReports,
+      canAssignProtocols: linkDraft.canAssignProtocols,
+      canSupervise: linkDraft.canSupervise,
     }),
     onSuccess: async (profile) => {
       setSelectedProfileId(profile.id);
@@ -564,8 +568,9 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         <h3 className="font-semibold">Link existing RISpro user to doctor profile</h3>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Uses the selected account’s existing username, password, core role, and active state. No new login credentials are created.</p>
         <div className="mt-3 grid gap-2 md:grid-cols-4">
-          <select value={draft.userId} onChange={(event) => {
+          <select value={linkDraft.userId} onChange={(event) => {
             const user = usersById.get(Number(event.target.value));
+            setLinkUserSelectionChanged(true);
             setDraft((current) => ({ ...current, userId: event.target.value, displayName: user?.fullName ?? current.displayName }));
           }} className="rounded-lg border px-3 py-2 text-sm">
             <option value="">Select user</option>
@@ -573,11 +578,17 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
               <option key={user.id} value={user.id}>{user.fullName} ({user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
             ))}
           </select>
-          <input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
-          <select value={draft.doctorRole} onChange={(event) => setDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
+          <input value={linkDraft.displayName} onChange={(event) => {
+            setLinkUserSelectionChanged(true);
+            setDraft((current) => ({ ...current, displayName: event.target.value }));
+          }} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
+          <select value={linkDraft.doctorRole} onChange={(event) => {
+            setLinkUserSelectionChanged(true);
+            setDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }));
+          }} className="rounded-lg border px-3 py-2 text-sm">
             {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
           </select>
-          <button type="button" disabled={!draft.userId || !draft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+          <button type="button" disabled={!linkDraft.userId || !linkDraft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
             Create profile
           </button>
         </div>

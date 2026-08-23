@@ -89,20 +89,16 @@ export default function UsersSection({
       ),
     [doctorProfilesQuery.data],
   );
-  const filteredUsers = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase();
-    return users.filter(
-      (user) =>
-        (roleFilter === "all" || user.role === roleFilter) &&
-        (statusFilter === "all" ||
-          (statusFilter === "active"
-            ? Boolean(user.isActive)
-            : !user.isActive)) &&
-        (!term ||
-          user.fullName.toLocaleLowerCase().includes(term) ||
-          user.username.toLocaleLowerCase().includes(term)),
-    );
-  }, [roleFilter, search, statusFilter, users]);
+  const term = search.trim().toLocaleLowerCase();
+  const filteredUsers = users.filter(
+    (user) =>
+      (roleFilter === "all" || user.role === roleFilter) &&
+      (statusFilter === "all" ||
+        (statusFilter === "active" ? Boolean(user.isActive) : !user.isActive)) &&
+      (!term ||
+        user.fullName.toLocaleLowerCase().includes(term) ||
+        user.username.toLocaleLowerCase().includes(term)),
+  );
   const filtersActive =
     Boolean(search.trim()) || roleFilter !== "all" || statusFilter !== "all";
   const resetCreate = () =>
