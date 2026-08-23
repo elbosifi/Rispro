@@ -187,6 +187,24 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const profiles = profilesQuery.data ?? EMPTY_DOCTOR_PROFILES;
   const usersById = useMemo(() => new Map((usersQuery.data?.users ?? []).map((user) => [user.id, user])), [usersQuery.data?.users]);
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
+  const requestedLinkUserId = useMemo(() => {
+    const value = new URLSearchParams(window.location.search).get("linkUserId");
+    const userId = Number(value);
+    return Number.isSafeInteger(userId) && userId > 0 ? userId : null;
+  }, []);
+
+  useEffect(() => {
+    if (!requestedLinkUserId) return;
+
+    const user = usersById.get(requestedLinkUserId);
+    if (!user || profilesByUserId.has(user.id)) return;
+
+    setDraft((current) => ({
+      ...current,
+      userId: String(user.id),
+      displayName: user.fullName,
+    }));
+  }, [profilesByUserId, requestedLinkUserId, usersById]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
 

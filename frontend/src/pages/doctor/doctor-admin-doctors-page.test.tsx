@@ -90,6 +90,7 @@ function renderPage(me: DoctorMe = adminMe, options: { advanced?: boolean } = {}
 
 describe("DoctorAdminDoctorsPage", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/doctor/doctors-directory");
     fetchDoctorProfilesForAdminMock.mockResolvedValue(profiles);
     fetchUsersMock.mockResolvedValue({ users });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 5, code: "CT", nameEn: "CT" }], examTypes: [] });
@@ -104,6 +105,33 @@ describe("DoctorAdminDoctorsPage", () => {
     setDoctorIdentityActiveMock.mockResolvedValue({ user: users[0], profile: profiles[0] });
     vi.clearAllMocks();
   });
+
+  it("preselects a requested unlinked user without creating a profile", async () => {
+    window.history.replaceState({}, "", "/doctor/doctors-directory?linkUserId=11");
+    renderPage();
+
+    const select = await screen.findByDisplayValue(
+      "New Profile (new.profile) - doctor - user active",
+    );
+    expect((select as HTMLSelectElement).value).toBe("11");
+    expect((screen.getByPlaceholderText("Display name") as HTMLInputElement).value).toBe(
+      "New Profile",
+    );
+    expect(createDoctorProfileForAdminMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["invalid", "10"])(
+    "leaves the existing link form unchanged for an invalid or linked linkUserId (%s)",
+    async (linkUserId) => {
+      window.history.replaceState({}, "", `/doctor/doctors-directory?linkUserId=${linkUserId}`);
+      renderPage();
+
+      const select = await screen.findByDisplayValue("Select user");
+      expect((select as HTMLSelectElement).value).toBe("");
+      expect((screen.getByPlaceholderText("Display name") as HTMLInputElement).value).toBe("");
+      expect(createDoctorProfileForAdminMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("clearly labels account creation and submits a new user plus profile", async () => {
     renderPage();

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import UsersSection from "./users-section";
@@ -8,25 +9,42 @@ import UsersSection from "./users-section";
 const users = [
   { id: 1, username: "frontdesk", full_name: "Front Desk", role: "receptionist", is_active: true, can_request_scheduling_override: true, updated_at: "2026-08-01T10:00:00.000Z" },
   { id: 2, username: "drstone", full_name: "Dr Stone", role: "doctor", is_active: false, must_change_password: true },
+  { id: 3, username: "supervisor", full_name: "Supervisor", role: "supervisor", is_active: true },
 ];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 let routeFailures: Record<string, string> = {};
+let doctorProfiles: Array<{ userId: number; active: boolean }> = [];
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
 
 function renderSection() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<LanguageProvider><QueryClientProvider client={client}><UsersSection onReAuthRequired={vi.fn()} /></QueryClientProvider></LanguageProvider>);
+  return render(
+    <MemoryRouter>
+      <LanguageProvider>
+        <QueryClientProvider client={client}>
+          <UsersSection onReAuthRequired={vi.fn()} />
+          <LocationProbe />
+        </QueryClientProvider>
+      </LanguageProvider>
+    </MemoryRouter>,
+  );
 }
 
 describe("UsersSection", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     routeFailures = {};
+    doctorProfiles = [{ userId: 2, active: false }];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const failure = routeFailures[`${init?.method ?? "GET"} ${url}`];
       if (failure) return json({ message: failure }, 400);
       if (url === "/api/users" && !init?.method) return json({ users });
-      if (url === "/api/doctor/profiles") return json({ profiles: [{ userId: 2, active: false }] });
+      if (url === "/api/doctor/profiles") return json({ profiles: doctorProfiles });
       if (url.includes("/identity")) return json({ user: users[0] });
       if (url.includes("/temporary-password")) return json({ user: users[0] });
       if (url.includes("/active")) return json({ user: users[0] });
@@ -85,6 +103,51 @@ describe("UsersSection", () => {
     await userEvent.type(screen.getByLabelText("Password"), "safe-password");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users" && (init as RequestInit).method === "POST")).toBe(true));
+  });
+
+  it("uses role-aware Doctor Portal profile status and links unconfigured doctors to Doctors Directory", async () => {
+    doctorProfiles = [];
+    renderSection();
+    expect((await screen.findAllByText("Needs configuration")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No clinical profile").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[1]!);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Configure doctor profile" }),
+    );
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/doctor/doctors-directory?linkUserId=2",
+    );
+  });
+
+  it("shows the Doctor Portal notice only when creating a doctor account", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getByRole("button", { name: "Add User" }));
+    await userEvent.selectOptions(screen.getByLabelText("Role"), "doctor");
+    expect(
+      screen.getByText(
+        "Doctor accounts require a Doctor Portal profile. You can configure it after creating the account in Doctors Directory.",
+      ),
+    ).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText("Role"), "receptionist");
+    expect(
+      screen.queryByText(
+        "Doctor accounts require a Doctor Portal profile. You can configure it after creating the account in Doctors Directory.",
+      ),
+    ).toBeNull();
+  });
+
+  it("shows active and inactive profiles for doctors", async () => {
+    doctorProfiles = [{ userId: 2, active: true }];
+    renderSection();
+    expect((await screen.findAllByText("Active")).length).toBeGreaterThan(0);
+    cleanup();
+
+    doctorProfiles = [{ userId: 2, active: false }];
+    renderSection();
+    expect((await screen.findAllByText("Inactive")).length).toBeGreaterThan(0);
   });
 
   it("clears every create field, including password and role, when Cancel closes the dialog", async () => {

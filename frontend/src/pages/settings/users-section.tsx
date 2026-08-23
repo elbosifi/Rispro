@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/shared/Button";
 import {
   Dialog,
@@ -48,6 +49,7 @@ export default function UsersSection({
   onReAuthRequired: (key: string[]) => void;
 }) {
   const { language, t } = useLanguage();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const usersQuery = useQuery<{ users: User[] }>({
     queryKey: ["users"],
@@ -230,18 +232,28 @@ export default function UsersSection({
         } as const
       )[role],
     );
-  const doctorProfileLabel = (user: User) =>
-    !isDoctorRole(user.role)
-      ? t("settings.users.notAvailable")
-      : doctorProfilesQuery.isLoading
-        ? t("settings.users.doctorProfileLoading")
-        : doctorProfilesQuery.isError
-          ? t("settings.users.doctorProfileUnavailable")
-          : doctorProfilesByUserId.get(user.id)?.active
-            ? t("settings.users.doctorProfileActive")
-            : doctorProfilesByUserId.has(user.id)
-              ? t("settings.users.doctorProfileInactive")
-              : t("settings.users.noDoctorProfile");
+  const doctorProfileLabel = (user: User) => {
+    if (!isDoctorRole(user.role)) return t("settings.users.notAvailable");
+    if (doctorProfilesQuery.isLoading)
+      return t("settings.users.doctorProfileLoading");
+    if (doctorProfilesQuery.isError)
+      return t("settings.users.doctorProfileUnavailable");
+
+    const profile = doctorProfilesByUserId.get(user.id);
+    if (profile)
+      return profile.active
+        ? t("settings.users.doctorProfileActive")
+        : t("settings.users.doctorProfileInactive");
+
+    return user.role === "doctor"
+      ? t("settings.users.needsDoctorProfileConfiguration")
+      : t("settings.users.noClinicalProfile");
+  };
+  const canConfigureDoctorProfile = (user: User) =>
+    user.role === "doctor" &&
+    !doctorProfilesQuery.isLoading &&
+    !doctorProfilesQuery.isError &&
+    !doctorProfilesByUserId.has(user.id);
   const statusBadge = (active: boolean | undefined) => (
     <span
       className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-stone-100 text-stone-600 dark:bg-stone-700 dark:text-stone-300"}`}
@@ -508,6 +520,11 @@ export default function UsersSection({
               </select>
             </label>
           </div>
+          {createForm.role === "doctor" && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+              {t("settings.users.doctorAccountProfileNotice")}
+            </p>
+          )}
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="secondary" onClick={closeCreate}>
               {t("settings.cancel")}
@@ -714,6 +731,20 @@ export default function UsersSection({
                     {t("settings.users.doctorProfile")}
                   </h4>
                   <p className="mt-1">{doctorProfileLabel(selectedUser)}</p>
+                  {canConfigureDoctorProfile(selectedUser) && (
+                    <Button
+                      className="mt-3"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        navigate(
+                          `/doctor/doctors-directory?linkUserId=${selectedUser.id}`,
+                        )
+                      }
+                    >
+                      {t("settings.users.configureDoctorProfile")}
+                    </Button>
+                  )}
                   {doctorProfilesQuery.isError && (
                     <button
                       type="button"
