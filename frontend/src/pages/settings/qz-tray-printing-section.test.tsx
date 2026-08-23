@@ -31,6 +31,7 @@ vi.mock("@/services/printing/workstation-printer-settings", async (importOrigina
 });
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en" }) }));
 
 function setSecureContext(value: boolean) {
   Object.defineProperty(window, "isSecureContext", { configurable: true, value });
@@ -64,6 +65,7 @@ describe("QzTrayPrintingSection", () => {
     expect(screen.getByRole("heading", { name: "A4 Landscape" })).toBeTruthy();
     expect(screen.getByText("Select the normal Windows queue configured for A4 Portrait.")).toBeTruthy();
     expect(screen.getByText("Select a Windows printer queue configured with A4 paper and Landscape as its default orientation. You can create a second Windows queue for the same physical printer.")).toBeTruthy();
+    expect((screen.getAllByRole("checkbox", { name: "Enabled" }) as HTMLInputElement[]).every((checkbox) => !checkbox.checked)).toBe(true);
     await waitFor(() => expect((screen.getByRole("button", { name: /Refresh printers/i }) as HTMLButtonElement).disabled).toBe(false));
     expect((screen.getByRole("checkbox", { name: /Allow browser-print fallback/i }) as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "Reset local printer settings" }) as HTMLButtonElement).disabled).toBe(false);
@@ -74,7 +76,7 @@ describe("QzTrayPrintingSection", () => {
     setSecureContext(false);
     mockSettings = {
       ...mockSettings,
-      profiles: mockSettings.profiles.map((profile, index) => index === 0 ? { ...profile, printerName: "RISPRO A4" } : profile),
+      profiles: mockSettings.profiles.map((profile, index) => index === 0 ? { ...profile, printerName: "RISPRO A4", enabled: true } : profile),
     };
 
     render(<QzTrayPrintingSection />);

@@ -32,6 +32,7 @@ import type { StatisticsRenderModel } from "@/types/printing";
 import { directPrintStatistics } from "@/services/printing/direct-print-service";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
 import { pushToast } from "@/lib/toast";
 
 type QuickRange = "today" | "yesterday" | "last7" | "last31" | "month" | "custom";
@@ -407,15 +408,20 @@ export default function StatisticsPage() {
       modalityBreakdown: modalityBreakdown.map((row) => ({ modality: language === "ar" ? row.modalityNameAr : row.modalityNameEn, total: row.totalCount, scheduled: row.scheduledCount, inQueue: row.inQueueCount, completed: row.completedCount, noShow: row.noShowCount, cancelled: row.cancelledCount, discontinued: row.discontinuedCount })),
       dailyBreakdown: dailyBreakdown.map((row) => ({ date: row.appointmentDate, total: row.totalCount, completed: row.completedCount, noShow: row.noShowCount, cancelled: row.cancelledCount, discontinued: row.discontinuedCount })),
     };
+    const settings = loadQzPrinterSettings();
+    if (shouldUseBrowserPrint(settings, "A4_LANDSCAPE_DOCUMENT")) { window.print(); return; }
+    const profile = settings.profiles?.find((item) => item.documentType === "A4_LANDSCAPE_DOCUMENT");
+    if (profile && !profile.printerName.trim()) { window.print(); pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: t(language, "print.directPrinterMissing"), placement: "center" }, 10_000); return; }
     const result = await directPrintStatistics(model);
     if (result.success) {
       pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
       return;
     }
-    const action = resolveDirectPrintFailureAction(result.errorCode, true, loadQzPrinterSettings().browserPrintFallbackEnabled);
+    const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
+    if (action === "BROWSER_PRINT") { window.print(); pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t(language, "print.directPrinterMissing") : t(language, "print.browserFallbackOpened"), placement: "center" }, 10_000); return; }
     const toastAction = action === "OPEN_SETTINGS"
       ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-      : action === "BROWSER_PRINT" ? { label: "Use browser printing", onClick: () => window.print() } : null;
+      : null;
     pushToast({ type: "error", title: "Print failed", message: result.message, ...(toastAction ? { action: toastAction } : {}) }, 10_000);
   };
 

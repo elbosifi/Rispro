@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { printAccessionLabelById, printAppointmentSlipById, printIrSpecimenLabelById } from "./appointment-printing";
 
 const mockGetAppointmentById = vi.fn();
@@ -7,7 +7,8 @@ const mockPushToast = vi.fn();
 const mockDirectPrint = vi.fn();
 const mockDirectPrintIrSpecimenLabel = vi.fn();
 const mockResolveAppointmentDocumentType = vi.fn();
-let mockPrinterSettings: { browserPrintFallbackEnabled: boolean; profiles: Array<{ documentType: string; enabled: boolean }> };
+let mockPrinterSettings: { browserPrintFallbackEnabled: boolean; profiles: Array<{ documentType: string; enabled: boolean; printerName?: string }> };
+const desktopUserAgent = navigator.userAgent;
 
 vi.mock("@/lib/api-hooks", () => ({
   getAppointmentById: (...args: unknown[]) => mockGetAppointmentById(...args),
@@ -40,10 +41,14 @@ describe("printAppointmentSlipById", () => {
     mockDirectPrintIrSpecimenLabel.mockReset();
     mockResolveAppointmentDocumentType.mockReset();
     mockResolveAppointmentDocumentType.mockResolvedValue("A5_DOCUMENT");
-    mockPrinterSettings = { browserPrintFallbackEnabled: true, profiles: [{ documentType: "A5_DOCUMENT", enabled: true }] };
+    mockPrinterSettings = { browserPrintFallbackEnabled: true, profiles: [{ documentType: "A5_DOCUMENT", enabled: true, printerName: "RISPRO A5" }] };
   });
 
-  it.each(["A4_DOCUMENT", "A5_DOCUMENT"])("uses browser printing directly when the %s profile is disabled and fallback is enabled", async (documentType) => {
+  afterEach(() => {
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: desktopUserAgent });
+  });
+
+  it.each(["A4_DOCUMENT", "A5_DOCUMENT"])("uses browser printing directly when the %s profile is disabled", async (documentType) => {
     const appointment = { id: 42, accessionNumber: "ACC-42" };
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockResolveAppointmentDocumentType.mockResolvedValue(documentType);
@@ -56,15 +61,15 @@ describe("printAppointmentSlipById", () => {
     expect(mockPushToast).not.toHaveBeenCalled();
   });
 
-  it("keeps the settings action when a disabled profile has browser fallback disabled", async () => {
+  it("uses browser printing when a disabled profile has browser fallback disabled", async () => {
     mockGetAppointmentById.mockResolvedValue({ id: 42, accessionNumber: "ACC-42" });
     mockPrinterSettings = { browserPrintFallbackEnabled: false, profiles: [{ documentType: "A5_DOCUMENT", enabled: false }] };
 
     await printAppointmentSlipById(42);
 
-    expect(mockPrintAppointmentSlip).not.toHaveBeenCalled();
+    expect(mockPrintAppointmentSlip).toHaveBeenCalled();
     expect(mockDirectPrint).not.toHaveBeenCalled();
-    expect(mockPushToast.mock.calls[0][0].action.label).toBe("Open Printing settings");
+    expect(mockPushToast).not.toHaveBeenCalled();
   });
 
   it("loads the appointment and submits it through direct printing without navigation", async () => {
@@ -83,16 +88,39 @@ describe("printAppointmentSlipById", () => {
     expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "success", message: "Print job sent to RISPRO-A5." }));
   });
 
-  it("offers browser printing only as an explicit action when QZ is unavailable", async () => {
+  it("automatically uses browser printing with a centered warning when QZ is unavailable", async () => {
     const appointment = { id: 42, accessionNumber: "ACC-42" };
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockDirectPrint.mockResolvedValue({ success: false, errorCode: "QZ_CONNECTION_FAILED", message: "Direct printing is unavailable because QZ Tray is not connected." });
     await printAppointmentSlipById(42);
-    expect(mockPrintAppointmentSlip).not.toHaveBeenCalled();
-    const toast = mockPushToast.mock.calls[0][0];
-    expect(toast.action.label).toBe("Use browser printing");
-    toast.action.onClick();
     expect(mockPrintAppointmentSlip).toHaveBeenCalledWith(appointment);
+    const toast = mockPushToast.mock.calls[0][0];
+    expect(toast).toMatchObject({ placement: "center", title: "Direct printing unavailable" });
+    expect(toast).not.toHaveProperty("action");
+  });
+
+  it("automatically uses browser printing with a centered warning when the enabled profile has no printer", async () => {
+    const appointment = { id: 42, accessionNumber: "ACC-42" };
+    mockGetAppointmentById.mockResolvedValue(appointment);
+    mockPrinterSettings = { browserPrintFallbackEnabled: true, profiles: [{ documentType: "A5_DOCUMENT", enabled: true, printerName: "" }] };
+
+    await printAppointmentSlipById(42);
+
+    expect(mockDirectPrint).not.toHaveBeenCalled();
+    expect(mockPrintAppointmentSlip).toHaveBeenCalledWith(appointment);
+    expect(mockPushToast.mock.calls[0][0]).toMatchObject({ placement: "center", message: "No direct printer is configured. Browser printing has been opened instead." });
+  });
+
+  it("uses browser printing without attempting QZ on mobile", async () => {
+    const appointment = { id: 42, accessionNumber: "ACC-42" };
+    mockGetAppointmentById.mockResolvedValue(appointment);
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 (iPad; CPU OS 17_0) Mobile" });
+
+    await printAppointmentSlipById(42);
+
+    expect(mockDirectPrint).not.toHaveBeenCalled();
+    expect(mockPrintAppointmentSlip).toHaveBeenCalledWith(appointment);
+    expect(mockPushToast).not.toHaveBeenCalled();
   });
 
   it.each([

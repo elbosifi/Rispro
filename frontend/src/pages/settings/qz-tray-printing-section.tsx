@@ -8,6 +8,8 @@ import { directTestPrint } from "@/services/printing/direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import { expectedOrientation } from "@/lib/printing-orientation";
 import type { PrinterProfile, QzPrinterSettings } from "@/types/printing";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
   A4_DOCUMENT: "A4 Portrait",
@@ -22,6 +24,7 @@ const PROFILE_QUEUE_GUIDANCE: Partial<Record<PrinterProfile["documentType"], str
 };
 
 export default function QzTrayPrintingSection() {
+  const { language } = useLanguage();
   const [settings, setSettings] = useState<QzPrinterSettings>(() => loadQzPrinterSettings());
   const [printers, setPrinters] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,7 +132,7 @@ export default function QzTrayPrintingSection() {
         );
       })}
 
-      <label className="flex items-center gap-2 rounded-xl border border-border p-4 text-sm"><input type="checkbox" checked={settings.browserPrintFallbackEnabled} onChange={(event) => setSettings((current) => ({ ...current, browserPrintFallbackEnabled: event.target.checked }))} /><span><strong>Allow browser-print fallback</strong><span className="block text-xs text-muted-foreground">Fallback is offered as a user-selected toast action; RISpro never opens the browser print dialog automatically after a QZ failure.</span></span></label>
+      <label className="flex items-center gap-2 rounded-xl border border-border p-4 text-sm"><input type="checkbox" checked={settings.browserPrintFallbackEnabled} onChange={(event) => setSettings((current) => ({ ...current, browserPrintFallbackEnabled: event.target.checked }))} /><span><strong>Allow browser-print fallback</strong><span className="block text-xs text-muted-foreground">{t(language, "print.browserFallbackSetting")}</span></span></label>
       <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => { if (window.confirm("Reset printer settings for this workstation?")) setSettings(createDefaultQzPrinterSettings()); }}>Reset local printer settings</Button><Button type="button" onClick={() => { const saved = saveQzPrinterSettings(settings); setSettings(saved); pushToast({ type: "success", title: "Printer settings saved", message: "This workstation will use the configured QZ printer mappings." }); }}>Save settings</Button></div>
     </div>
   );

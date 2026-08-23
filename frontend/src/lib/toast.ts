@@ -13,6 +13,7 @@ export interface ToastItem {
   title: string;
   message: string;
   action?: ToastAction;
+  placement?: "corner" | "center";
 }
 
 type ToastInput = Omit<ToastItem, "id" | "message"> & { message?: string };

@@ -6,6 +6,8 @@ import { directPrintRegistrationList } from "@/services/printing/direct-print-se
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import { pushToast } from "@/lib/toast";
+import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
+import { t } from "@/lib/i18n";
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -57,17 +59,37 @@ function printExactAppointmentList(rows: AppointmentWithDetails[], label: string
 
 export async function directPrintRegistrationRows(rows: AppointmentWithDetails[], label: string): Promise<void> {
   if (rows.length === 0) return;
+  const settings = loadQzPrinterSettings();
+  if (shouldUseBrowserPrint(settings, "A4_LANDSCAPE_DOCUMENT")) {
+    printExactAppointmentList(rows, label);
+    return;
+  }
+  const profile = settings.profiles?.find((candidate) => candidate.documentType === "A4_LANDSCAPE_DOCUMENT");
+  if (profile && !profile.printerName.trim()) {
+    printExactAppointmentList(rows, label);
+    const language = window.localStorage.getItem("rispro-language") === "ar" ? "ar" : "en";
+    pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: t(language, "print.directPrinterMissing"), placement: "center" }, 10_000);
+    return;
+  }
   const result = await directPrintRegistrationList(rows.map((row) => row.id), label);
   if (result.success) {
     pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
     return;
   }
-  const settings = loadQzPrinterSettings();
-  const action = resolveDirectPrintFailureAction(result.errorCode, true, settings.browserPrintFallbackEnabled);
+  const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
+  if (action === "BROWSER_PRINT") {
+    printExactAppointmentList(rows, label);
+    const language = window.localStorage.getItem("rispro-language") === "ar" ? "ar" : "en";
+    pushToast({
+      type: "error",
+      title: t(language, "print.directUnavailable"),
+      message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t(language, "print.directPrinterMissing") : t(language, "print.browserFallbackOpened"),
+      placement: "center",
+    }, 10_000);
+    return;
+  }
   const toastAction = action === "OPEN_SETTINGS"
     ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-    : action === "BROWSER_PRINT"
-      ? { label: "Use browser printing", onClick: () => printExactAppointmentList(rows, label) }
-      : null;
+    : null;
   pushToast({ type: "error", title: "Print failed", message: result.message, ...(toastAction ? { action: toastAction } : {}) }, 10_000);
 }

@@ -26,7 +26,7 @@ function profile(documentType: PrinterDocumentType, width: number, height: numbe
     customPaperSize,
     rasterize,
     marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
-    enabled: true,
+    enabled: false,
   };
 }
 
@@ -107,7 +107,8 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
         printerTray: normalizePrinterTray(source.printerTray),
         customPaperSize: standard ? false : true,
         rasterize: source.rasterize == null ? fallback.rasterize : source.rasterize === true,
-        enabled: source.enabled !== false,
+        // Profiles saved before the enabled flag existed were effectively enabled.
+        enabled: source.enabled == null ? true : source.enabled === true,
       };
     }),
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : defaults.updatedAt,

@@ -8,12 +8,13 @@ describe("workstation printer settings", () => {
   it("creates all required document-type profiles with physical defaults", () => {
     const settings = createDefaultQzPrinterSettings();
     expect(settings.profiles.map((profile) => profile.documentType)).toEqual(["A4_DOCUMENT", "A4_LANDSCAPE_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
-    expect(resolvePrinterProfile("A4_DOCUMENT", settings)).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297, orientation: "portrait", customPaperSize: false });
-    expect(resolvePrinterProfile("A4_LANDSCAPE_DOCUMENT", settings)).toMatchObject({ paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false });
-    expect(resolvePrinterProfile("ACCESSION_LABEL", settings)).toMatchObject({ paperWidthMm: 50, paperHeightMm: 30 });
+    expect(settings.profiles[0]).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297, orientation: "portrait", customPaperSize: false });
+    expect(settings.profiles[1]).toMatchObject({ paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false });
+    expect(settings.profiles[3]).toMatchObject({ paperWidthMm: 50, paperHeightMm: 30 });
     expect(settings.profiles[0]).toMatchObject({ customPaperSize: false, rasterize: false });
     expect(settings.profiles[1]).toMatchObject({ customPaperSize: false, rasterize: false });
     expect(settings.profiles[3]).toMatchObject({ customPaperSize: true, rasterize: true, orientation: "landscape" });
+    expect(settings.profiles.every((profile) => profile.enabled === false)).toBe(true);
   });
 
   it("persists exact queue names per browser workstation", () => {
@@ -28,6 +29,7 @@ describe("workstation printer settings", () => {
     const settings = createDefaultQzPrinterSettings();
     const labelProfile = settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!;
     labelProfile.printerName = "RISPRO Label Queue";
+    labelProfile.enabled = true;
     saveQzPrinterSettings(settings);
 
     const freshlyLoaded = loadQzPrinterSettings();
@@ -61,7 +63,7 @@ describe("workstation printer settings", () => {
     const migrated = normalizeQzPrinterSettings({ profiles: [portrait] });
     expect(migrated.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")).toMatchObject({
       id: "A4_LANDSCAPE_DOCUMENT", printerName: "", copies: 1, scaleContent: true, rasterize: false,
-      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 }, enabled: true, paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 }, enabled: false, paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false,
     });
     expect(migrated.profiles.find((profile) => profile.documentType === "A4_DOCUMENT")).toMatchObject({ printerName: "Shared A4", printerTray: "Tray 2", copies: 3, enabled: false });
 
@@ -70,6 +72,18 @@ describe("workstation printer settings", () => {
     const saved = normalizeQzPrinterSettings(migrated);
     expect(saved.profiles.find((profile) => profile.documentType === "A4_DOCUMENT")?.printerName).toBe("Shared A4");
     expect(saved.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")?.printerName).toBe("Independent Landscape");
+  });
+
+  it("preserves explicit enabled choices and legacy profiles without the enabled flag", () => {
+    const defaults = createDefaultQzPrinterSettings();
+    const enabled = normalizeQzPrinterSettings({ profiles: [{ ...defaults.profiles[0], enabled: true }] });
+    const disabled = normalizeQzPrinterSettings({ profiles: [{ ...defaults.profiles[0], enabled: false }] });
+    const legacy = normalizeQzPrinterSettings({ profiles: [{ ...defaults.profiles[0], enabled: undefined }] });
+
+    expect(enabled.profiles[0].enabled).toBe(true);
+    expect(disabled.profiles[0].enabled).toBe(false);
+    expect(legacy.profiles[0].enabled).toBe(true);
+    expect(createDefaultQzPrinterSettings().profiles.every((profile) => !profile.enabled)).toBe(true);
   });
 
   it("replaces a corrupted workstation identifier with a stable UUID", () => {

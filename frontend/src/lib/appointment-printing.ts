@@ -6,6 +6,7 @@ import { directPrint, directPrintIrSpecimenLabel, resolveAppointmentDocumentType
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import type { DirectPrintResult } from "@/types/printing";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
+import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
 
 function resolvePrintLanguage(language?: Language): Language {
   if (language === "ar" || language === "en") {
@@ -28,12 +29,18 @@ export async function printAppointmentSlipById(appointmentId: number, language?:
     const documentType = await resolveAppointmentDocumentType();
     const settings = loadQzPrinterSettings();
     const profile = settings.profiles.find((candidate) => candidate.documentType === documentType);
-    if (profile && !profile.enabled) {
-      if (settings.browserPrintFallbackEnabled) {
-        printAppointmentSlip(appointment);
-        return;
-      }
-      showDirectPrintFailure({ success: false, errorCode: "PRINTER_NOT_CONFIGURED", message: `${documentType === "A4_DOCUMENT" ? "A4" : "A5"} direct printing is disabled for this workstation.` }, () => printAppointmentSlip(appointment), language);
+    if (shouldUseBrowserPrint(settings, documentType)) {
+      printAppointmentSlip(appointment);
+      return;
+    }
+    if (profile && !profile.printerName.trim()) {
+      printAppointmentSlip(appointment);
+      pushToast({
+        type: "error",
+        title: t(resolvePrintLanguage(language), "print.directUnavailable"),
+        message: t(resolvePrintLanguage(language), "print.directPrinterMissing"),
+        placement: "center",
+      }, 10_000);
       return;
     }
     const result = await directPrint({ documentType, appointmentId, accessionNumber: appointment.accessionNumber, appointmentSnapshot: appointment });
@@ -87,12 +94,22 @@ export async function printIrSpecimenLabelById(appointmentId: number, specimenTe
 
 function showDirectPrintFailure(result: Extract<DirectPrintResult, { success: false }>, browserFallback: (() => void) | null, language?: Language): void {
   const settings = loadQzPrinterSettings();
-  const action = resolveDirectPrintFailureAction(result.errorCode, browserFallback != null, settings.browserPrintFallbackEnabled);
+  const action = resolveDirectPrintFailureAction(result.errorCode, browserFallback != null, true);
+  if (action === "BROWSER_PRINT" && browserFallback) {
+    browserFallback();
+    pushToast({
+      type: "error",
+      title: t(resolvePrintLanguage(language), "print.directUnavailable"),
+      message: result.errorCode === "PRINTER_NOT_CONFIGURED"
+        ? t(resolvePrintLanguage(language), "print.directPrinterMissing")
+        : t(resolvePrintLanguage(language), "print.browserFallbackOpened"),
+      placement: "center",
+    }, 10_000);
+    return;
+  }
   const toastAction = action === "OPEN_SETTINGS"
     ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-    : action === "BROWSER_PRINT" && browserFallback
-      ? { label: "Use browser printing", onClick: browserFallback }
-      : null;
+    : null;
   pushToast({
     type: "error",
     title: t(resolvePrintLanguage(language), "print.failed"),

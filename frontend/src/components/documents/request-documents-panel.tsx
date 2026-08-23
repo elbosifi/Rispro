@@ -26,6 +26,7 @@ import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 import { directPrint } from "@/services/printing/direct-print-service";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
 import { resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
 import type { PrinterDocumentType } from "@/types/printing";
 
@@ -124,18 +125,21 @@ export function RequestDocumentsPanel({
     if (printingDocumentId != null) return;
     setPrintingDocumentId(document.id);
     try {
+      const settings = loadQzPrinterSettings();
+      const browserFallback = () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer");
+      if (shouldUseBrowserPrint(settings, profile)) { browserFallback(); return; }
+      const directProfile = settings.profiles?.find((item) => item.documentType === profile);
+      if (directProfile && !directProfile.printerName.trim()) { browserFallback(); pushToast({ type: "error", title: t("print.directUnavailable"), message: t("print.directPrinterMissing"), placement: "center" }, 10_000); return; }
       const result = await directPrint({ documentType: profile, documentId: String(document.id), appointmentId });
       if (result.success) {
         pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
         return;
       }
-      const settings = loadQzPrinterSettings();
-      const action = resolveDirectPrintFailureAction(result.errorCode, true, settings.browserPrintFallbackEnabled);
+      const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
+      if (action === "BROWSER_PRINT") { browserFallback(); pushToast({ type: "error", title: t("print.directUnavailable"), message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t("print.directPrinterMissing") : t("print.browserFallbackOpened"), placement: "center" }, 10_000); return; }
       const toastAction = action === "OPEN_SETTINGS"
         ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-        : action === "BROWSER_PRINT"
-          ? { label: "Use browser printing", onClick: () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") }
-          : null;
+        : null;
       pushToast({
         type: "error",
         title: "Document print failed",

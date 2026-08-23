@@ -8,13 +8,14 @@ import { exportReportXlsx, fetchAppointments, fetchAppointmentLookups, fetchAudi
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AuditEntry } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
-import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
 import { directPrintReportCenter, fetchReportCenterPdf } from "@/services/printing/direct-print-service";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
 import type { ReportCenterRenderModel } from "@/types/printing";
 import { REPORT_TEMPLATES, type AppointmentGrouping } from "./report-center-templates";
 
@@ -103,10 +104,16 @@ export function ReportCenter() {
     if (selectedTemplate.registrationList) { if (await auditOutput("print")) await directPrintRegistrationRows(appointmentRows, dateLabel); return; }
     const model = buildRenderModel(); if (!model) { pushToast({ type: "error", title: "Select an output column", message: "Choose at least one permitted column before printing." }); return; }
     if (!(await auditOutput("print"))) return;
+    const settings = loadQzPrinterSettings();
+    const documentType = model.orientation === "portrait" ? "A4_DOCUMENT" : "A4_LANDSCAPE_DOCUMENT";
+    if (shouldUseBrowserPrint(settings, documentType)) { await browserPrintReport(model); return; }
+    const profile = settings.profiles?.find((item) => item.documentType === documentType);
+    if (profile && !profile.printerName.trim()) { await browserPrintReport(model); pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: t(language, "print.directPrinterMissing"), placement: "center" }, 10_000); return; }
     const result = await directPrintReportCenter(model);
     if (result.success) { pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` }); return; }
-    const action = resolveDirectPrintFailureAction(result.errorCode, true, loadQzPrinterSettings().browserPrintFallbackEnabled);
-    pushToast({ type: "error", title: "Print failed", message: result.message, ...(action === "OPEN_SETTINGS" ? { action: { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") } } : action === "BROWSER_PRINT" ? { action: { label: "Use browser printing", onClick: () => void browserPrintReport(model) } } : {}) }, 10_000);
+    const action = resolveDirectPrintFailureAction(result.errorCode, true, true);
+    if (action === "BROWSER_PRINT") { await browserPrintReport(model); pushToast({ type: "error", title: t(language, "print.directUnavailable"), message: result.errorCode === "PRINTER_NOT_CONFIGURED" ? t(language, "print.directPrinterMissing") : t(language, "print.browserFallbackOpened"), placement: "center" }, 10_000); return; }
+    pushToast({ type: "error", title: "Print failed", message: result.message, ...(action === "OPEN_SETTINGS" ? { action: { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") } } : {}) }, 10_000);
   }
   async function downloadPdf() { const model = buildRenderModel(); if (!model) { pushToast({ type: "error", title: "Select an output column", message: "Choose at least one permitted column before downloading a PDF." }); return; } if (!(await auditOutput("pdf"))) return; try { downloadBlob(await fetchReportCenterPdf(model), `${selectedTemplate.id}-${date}.pdf`); } catch (error) { pushToast({ type: "error", title: "PDF generation failed", message: error instanceof Error ? error.message : "The report PDF could not be generated." }); } }
   async function exportExcel() { try { await exportReportXlsx({ reportTemplate: selectedTemplate.id, filters: selectedTemplate.source === "patients" ? { ...patientParams } : appointmentParams, rows: exportRows, includePhoneNumbers: effectiveIncludePhones, includePatientIdentifiers: effectiveIncludeIdentifiers }); } catch (error) { pushToast({ type: "error", title: "Excel export failed", message: error instanceof Error ? error.message : "Could not generate the workbook." }); } }
