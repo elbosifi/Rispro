@@ -24,7 +24,7 @@ import {
   requestProtocolingPatientIdentityReconciliation,
 } from "./protocoling-repository.js";
 import { requirePatientIdentityReconciliationAccess } from "../../services/patient-identity-reconciliation-service.js";
-import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
+import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingAppointmentStatusFilter, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 
 const router = Router();
 
@@ -34,6 +34,7 @@ interface DoctorRequest extends Request {
 
 const MODALITIES = new Set<ProtocolingModality>(["CT", "MRI"]);
 const STATUS_FILTERS = new Set<ProtocolingStatusFilter>(["NOT_PROTOCOLLED", "ASSIGNED", "ALL"]);
+const APPOINTMENT_STATUS_FILTERS = new Set<ProtocolingAppointmentStatusFilter>(["scheduled", "arrived", "waiting", "completed", "no-show"]);
 const ASSIGNMENT_STATUSES = new Set<ProtocolAssignmentStatus>(["ASSIGNED", "MODIFIED", "CANCELLED"]);
 
 async function requireProtocolingAccess(req: DoctorRequest): Promise<number | null> {
@@ -75,6 +76,21 @@ function statusFilter(value: unknown): ProtocolingStatusFilter | null {
   return parsed as ProtocolingStatusFilter;
 }
 
+function appointmentStatusFilter(value: unknown): ProtocolingAppointmentStatusFilter | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = String(value).toLowerCase();
+  if (parsed === "all") return null;
+  if (!APPOINTMENT_STATUS_FILTERS.has(parsed as ProtocolingAppointmentStatusFilter)) throw new HttpError(400, "appointmentStatus is invalid.");
+  return parsed as ProtocolingAppointmentStatusFilter;
+}
+
+function waitingFirst(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new HttpError(400, "waitingFirst must be true or false.");
+}
+
 function assignmentStatus(value: unknown): ProtocolAssignmentStatus {
   if (value === null || value === undefined || value === "") return "ASSIGNED";
   const parsed = String(value).toUpperCase();
@@ -88,6 +104,8 @@ function filters(req: DoctorRequest) {
     dateTo: asString(req.query.dateTo),
     modality: modality(req.query.modality),
     protocolStatus: statusFilter(req.query.protocolStatus),
+    appointmentStatus: appointmentStatusFilter(req.query.appointmentStatus),
+    waitingFirst: waitingFirst(req.query.waitingFirst),
     search: optionalText(req.query.search),
   };
 }

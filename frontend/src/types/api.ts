@@ -1024,6 +1024,8 @@ export interface DoctorProtocolingFilters {
   dateTo: string;
   modality?: "CT" | "MRI" | null;
   protocolStatus?: "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL" | null;
+  appointmentStatus?: "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | null;
+  waitingFirst?: boolean;
   search?: string | null;
 }
 

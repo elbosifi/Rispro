@@ -123,6 +123,39 @@ describe("Doctor protocoling request documents", () => {
     mockRequestReconciliation.mockReset();mockRequestReconciliation.mockResolvedValue({job:{id:1,status:"queued"}});
   });
 
+  it("filters the worklist by appointment status and preserves waiting-first preference", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    const appointmentStatus = await screen.findByLabelText("Appointment status");
+    expect((appointmentStatus as HTMLSelectElement).value).toBe("");
+    expect(screen.getByText("Scheduled")).toBeTruthy();
+
+    const waitingFirst = screen.getByRole("checkbox", { name: "Waiting patients first" });
+    expect(waitingFirst.hasAttribute("disabled")).toBe(false);
+    await userEvent.click(waitingFirst);
+    await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ appointmentStatus: null, waitingFirst: true })));
+
+    await userEvent.selectOptions(appointmentStatus, "completed");
+    await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ appointmentStatus: "completed", waitingFirst: false })));
+    expect(waitingFirst.hasAttribute("disabled")).toBe(true);
+
+    const protocolStatus = screen.getByLabelText("Protocol status");
+    await userEvent.selectOptions(protocolStatus, "ASSIGNED");
+    await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ protocolStatus: "ASSIGNED", appointmentStatus: "completed", waitingFirst: false })));
+
+    await userEvent.selectOptions(appointmentStatus, "");
+    await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ appointmentStatus: null, waitingFirst: true })));
+  });
+
+  it("refreshes the protocoling appointment worklist after ten seconds", async () => {
+    vi.useFakeTimers();
+    const view = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(mockFetchAppointments.mock.calls.length).toBeGreaterThanOrEqual(2);
+    view.unmount();
+    vi.useRealTimers();
+  });
+
   it("requires explicit confirmation before requesting Patient Identity Reconciliation",async()=>{mockFetchProtocolingPatientHistory.mockResolvedValue({pacsStatus:"available",historicalPacsIndexStatus:"ready",historicalPacsLastSuccessAt:null,canReconcilePatientIdentity:true,currentPatient:{id:9,patientId:"NEW-9",name:"Current Patient",birthDate:"1990-01-02"},items:[{appointmentId:null,orthancStudyId:"study-old",studyInstanceUid:"1.2.3.4",accessionNumber:"OLD-ACC",date:"2024-01-02",time:null,modalities:["CT"],description:"Historical CT",appointmentStatus:null,reportAvailable:false,source:"pacs_only",identityDiscrepancy:null,historicalPatientId:"OLD-9",historicalPatientName:"Old^Patient",historicalPatientBirthDate:"19800102",reconciliation:null}]});render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><DoctorProtocolsPage me={me}/></QueryClientProvider>);await userEvent.click(await screen.findByRole("button",{name:"Assign"}));await userEvent.click(screen.getByRole("button",{name:"Patient history"}));await userEvent.click(await screen.findByRole("button",{name:"Reconcile patient identity"}));const dialog=screen.getByRole("heading",{name:"Patient Identity Reconciliation"}).closest<HTMLElement>('[role="dialog"]')!;expect(within(dialog).getByText(/Old\^Patient/)).toBeTruthy();expect(within(dialog).getByText(/Current Patient/)).toBeTruthy();const submit=within(dialog).getByRole("button",{name:"Reconcile patient identity"});expect(submit.hasAttribute("disabled")).toBe(true);await userEvent.click(within(dialog).getByRole("checkbox"));await userEvent.click(submit);await waitFor(()=>expect(mockRequestReconciliation).toHaveBeenCalledWith(42,"1.2.3.4","OLD-ACC"));expect(mockRequestReconciliation).toHaveBeenCalledTimes(1);});
 
   it("reconciles an automatic historical candidate using the selected study identity", async () => {

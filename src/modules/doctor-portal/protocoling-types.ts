@@ -1,6 +1,7 @@
 export type ProtocolingModality = "CT" | "MRI";
 export type ProtocolAssignmentStatus = "ASSIGNED" | "MODIFIED" | "CANCELLED";
 export type ProtocolingStatusFilter = "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL";
+export type ProtocolingAppointmentStatusFilter = "scheduled" | "arrived" | "waiting" | "completed" | "no-show";
 
 export interface ProtocolAssignmentSummary {
   assignmentId: number;
@@ -91,6 +92,8 @@ export interface ProtocolingFilters {
   dateTo: string;
   modality?: ProtocolingModality | null;
   protocolStatus?: ProtocolingStatusFilter | null;
+  appointmentStatus?: ProtocolingAppointmentStatusFilter | null;
+  waitingFirst?: boolean;
   search?: string | null;
 }
 

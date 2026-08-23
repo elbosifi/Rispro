@@ -64,6 +64,8 @@ import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from "@/components/shared";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
+
+const PROTOCOLING_WORKLIST_REFRESH_MS = 10_000;
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { ProtocolingAppointmentDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
@@ -333,6 +335,18 @@ function ProtocolStatusBadge({ assigned }: { assigned: boolean }) {
       {assigned ? "Protocol assigned" : "Not protocolled"}
     </span>
   );
+}
+
+function AppointmentStatusBadge({ status }: { status: string }) {
+  const presentations: Record<string, { label: string; variant: "info" | "warning" | "success" | "error" | "neutral" }> = {
+    scheduled: { label: "Scheduled", variant: "info" },
+    arrived: { label: "Arrived", variant: "warning" },
+    waiting: { label: "Waiting", variant: "warning" },
+    completed: { label: "Completed", variant: "success" },
+    "no-show": { label: "No-show", variant: "error" },
+  };
+  const presentation = presentations[status] ?? { label: status || "Unknown", variant: "neutral" };
+  return <Badge variant={presentation.variant}>{presentation.label}</Badge>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -1086,6 +1100,8 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
   const [modality, setModality] = useState<"" | "CT" | "MRI">("");
   const [protocolStatus, setProtocolStatus] = useState<"NOT_PROTOCOLLED" | "ASSIGNED" | "ALL">("NOT_PROTOCOLLED");
+  const [appointmentStatus, setAppointmentStatus] = useState<"" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show">("");
+  const [waitingFirst, setWaitingFirst] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
@@ -1095,13 +1111,17 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
     dateTo,
     modality: modality || null,
     protocolStatus,
+    appointmentStatus: appointmentStatus || null,
+    waitingFirst: !appointmentStatus && waitingFirst,
     search: nullableText(search),
-  }), [dateFrom, dateTo, modality, protocolStatus, search]);
+  }), [dateFrom, dateTo, modality, protocolStatus, appointmentStatus, waitingFirst, search]);
 
   const appointmentsQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", filters],
     queryFn: () => fetchDoctorProtocolingAppointments(filters),
     enabled: canAssign,
+    refetchInterval: canAssign ? PROTOCOLING_WORKLIST_REFRESH_MS : false,
+    refetchIntervalInBackground: false,
   });
   const protocolPolicyQuery = useQuery({
     queryKey: ["documents", "protocol-eligibility-policy"],
@@ -1208,6 +1228,8 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
         <label className="text-sm font-medium">To<input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
         <label className="text-sm font-medium">Modality<select value={modality} onChange={(event) => setModality(event.target.value as "" | "CT" | "MRI")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All</option><option value="CT">CT</option><option value="MRI">MRI</option></select></label>
         <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
+        <label className="text-sm font-medium">Appointment status<select value={appointmentStatus} onChange={(event) => setAppointmentStatus(event.target.value as "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All statuses</option><option value="scheduled">Scheduled</option><option value="arrived">Arrived</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="no-show">No-show</option></select></label>
+        <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={waitingFirst} onCheckedChange={(value) => setWaitingFirst(Boolean(value))} disabled={appointmentStatus !== ""} />Waiting patients first</label>
         <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
       </section> : null}
 
@@ -1224,7 +1246,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
           No appointments need protocol assignment.
         </div>
       ) : (
-        <SettingsTable emptyText="No appointments need protocol assignment." headers={["Date/time", "Patient", "Age/sex", "Modality", "Exam", "Category", "Notes", "Protocol status", "Assigned protocol", "Actions"]}>
+        <SettingsTable emptyText="No appointments need protocol assignment." headers={["Date/time", "Patient", "Age/sex", "Modality", "Exam", "Category", "Notes", "Appointment status", "Protocol status", "Assigned protocol", "Actions"]}>
           {appointments.map((appointment) => (
             <tr key={appointment.appointmentId} onClick={() => openAssignmentModal(appointment.appointmentId)} className="cursor-pointer hover:bg-slate-50">
               <Cell>{appointment.appointmentDate} {appointment.appointmentTime ?? ""}</Cell>
@@ -1234,6 +1256,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
               <Cell>{appointment.examTypeName ?? "-"}</Cell>
               <Cell>{appointment.caseCategory ?? "-"}</Cell>
               <Cell><span className="block max-w-[16rem] truncate" title={appointment.clinicalNotes ?? undefined}>{appointment.clinicalNotes ?? "-"}</span></Cell>
+              <Cell><AppointmentStatusBadge status={appointment.appointmentStatus} /></Cell>
               <Cell><div className="flex flex-wrap items-center gap-1"><ProtocolStatusBadge assigned={appointment.assignment !== null} />{appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreeningResult} /> : null}</div></Cell>
               <Cell>{appointment.assignment ? (appointment.assignment.freeTextProtocol ? "Free-text protocol" : `${appointment.assignment.protocolName ?? "Saved protocol"} v${appointment.assignment.versionNumber ?? "-"}`) + (appointment.assignment.scannerName ? ` · ${appointment.assignment.scannerName}` : "") : "-"}</Cell>
               <Cell><button type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>

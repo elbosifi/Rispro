@@ -1113,6 +1113,8 @@ function protocolingParams(filters: DoctorProtocolingFilters): URLSearchParams {
   const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
   if (filters.modality) params.set("modality", filters.modality);
   if (filters.protocolStatus && filters.protocolStatus !== "ALL") params.set("protocolStatus", filters.protocolStatus);
+  if (filters.appointmentStatus) params.set("appointmentStatus", filters.appointmentStatus);
+  if (filters.waitingFirst) params.set("waitingFirst", "true");
   if (filters.search) params.set("search", filters.search);
   return params;
 }

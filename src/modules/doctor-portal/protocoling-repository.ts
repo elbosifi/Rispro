@@ -271,6 +271,10 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
   } else if (filters.protocolStatus === "ASSIGNED") {
     where.push("apa.assignment_id is not null");
   }
+  if (filters.appointmentStatus) {
+    values.push(filters.appointmentStatus);
+    where.push(`b.status = $${values.length}`);
+  }
   if (filters.search) {
     values.push(`%${filters.search}%`);
     where.push(`(
@@ -285,7 +289,7 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
   const result = await pool.query<RawRecord>(
     `${APPOINTMENT_SELECT}
      where ${where.join(" and ")}
-     order by b.booking_date asc, b.booking_time asc nulls first, b.id asc
+     order by ${filters.waitingFirst ? "case when b.status = 'waiting' then 0 else 1 end, " : ""}b.booking_date asc, b.booking_time asc nulls first, b.id asc
      limit 500`,
     values
   );

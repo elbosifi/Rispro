@@ -158,6 +158,35 @@ describe("Doctor Portal protocoling worklist backend", () => {
     }
   });
 
+  it("parameterizes appointment status and applies waiting-first ordering without changing chronological fallback ordering", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes("system_settings")) return { rows: [] };
+      queries.push({ sql, params: params ?? [] });
+      return { rows: [protocolingAppointmentRow()] };
+    });
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", modality: "MRI", appointmentStatus: "completed", search: "Patient", waitingFirst: true });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", waitingFirst: false });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03" });
+
+      assert.match(queries[0]!.sql, /b\.status = \$4/);
+      assert.deepEqual(queries[0]!.params, ["2026-07-03", "2026-07-03", "MRI", "completed", "%Patient%"]);
+      assert.match(queries[0]!.sql, /order by\s+case when b\.status = 'waiting' then 0 else 1 end,\s+b\.booking_date asc,\s+b\.booking_time asc nulls first,\s+b\.id asc/i);
+      assert.match(queries[1]!.sql, /order by\s+b\.booking_date asc, b\.booking_time asc nulls first, b\.id asc/i);
+      assert.doesNotMatch(queries[1]!.sql, /case when b\.status = 'waiting'/i);
+      assert.match(queries[2]!.sql, /order by\s+b\.booking_date asc, b\.booking_time asc nulls first, b\.id asc/i);
+      assert.doesNotMatch(queries[2]!.sql, /case when b\.status = 'waiting'/i);
+    } finally {
+      queryMock.mock.restore();
+    }
+  });
+
   it("includes generated accession number in protocoling search", () => {
     const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
 
