@@ -788,11 +788,22 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getAllByText("No request documents yet.")).toHaveLength(1);
   });
 
-  it("uses compact, non-scrolling mobile workspace geometry only when opted in", async () => {
+  it("uses natural vertical mobile workspace geometry only when opted in", async () => {
     setMobileViewport(true);
     renderPanel({ layout: "workspace", compactMobileWorkspace: true });
 
+    const workspace = await screen.findByTestId("appointment-document-workspace");
+    const mainWorkspace = workspace.firstElementChild as HTMLElement;
+    const documentSection = workspace.querySelector("section[aria-label]") as HTMLElement;
+    const documentArea = documentSection.firstElementChild as HTMLElement;
     const emptyState = (await screen.findByText("No request documents yet.")).parentElement;
+    expect(workspace.className).not.toContain("h-full");
+    expect(mainWorkspace.className).toContain("flex");
+    expect(mainWorkspace.className).not.toContain("grid");
+    expect(mainWorkspace.className).not.toContain("flex-1");
+    expect(documentSection.className).not.toContain("min-h-0");
+    expect(documentArea.className).not.toContain("flex-1");
+    expect(documentArea.className).not.toContain("min-h-0");
     expect(emptyState?.className).not.toContain("min-h-64");
     expect(screen.getByTestId("document-rail").className).not.toContain("overflow-y-auto");
     expect(screen.queryByRole("button", { name: "Collapse document rail" })).toBeNull();
@@ -802,7 +813,13 @@ describe("RequestDocumentsPanel local scan flow", () => {
   it("keeps default workspace geometry when compact mobile mode is not enabled", async () => {
     renderPanel({ layout: "workspace" });
 
+    const workspace = await screen.findByTestId("appointment-document-workspace");
+    const mainWorkspace = workspace.firstElementChild as HTMLElement;
     const emptyState = (await screen.findByText("No request documents yet.")).parentElement;
+    expect(workspace.className).toContain("h-full");
+    expect(mainWorkspace.className).toContain("grid");
+    expect(mainWorkspace.className).toContain("flex-1");
+    expect(mainWorkspace.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]");
     expect(emptyState?.className).toContain("min-h-64");
     expect(screen.getByTestId("document-rail").className).toContain("overflow-y-auto");
   });
@@ -847,6 +864,21 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(await screen.findByText("request.pdf · 2 KB")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Attach Request" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText("Scan Paper")).toBeTruthy();
+  });
+
+  it("keeps the compact mobile upload flow sequential after file selection", async () => {
+    setMobileViewport(true);
+    renderPanel({ layout: "workspace", compactMobileWorkspace: true });
+
+    const file = new File([new Uint8Array(2048)], "request.pdf", { type: "application/pdf" });
+    await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, file);
+
+    expect(await screen.findByText("request.pdf · 2 KB")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Attach Request" }));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(expect.objectContaining({
+      documentType: "appointment_request",
+      source: "manual_upload",
+    })));
   });
 
   it("does not mount scanner controls on mobile and keeps upload available", async () => {

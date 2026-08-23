@@ -249,6 +249,28 @@ describe("AppointmentManageModal", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
+  it("makes mobile Documents the modal scroll owner without constraining its wrapper", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderModal({ initialTab: "documents" });
+
+    const panel = await screen.findByTestId("request-documents-panel");
+    const middle = panel.closest("[aria-busy]") as HTMLElement;
+    expect(middle.className).toContain("overflow-y-auto");
+    expect(middle.className).not.toContain("overflow-hidden");
+    expect(panel.parentElement?.className).not.toContain("h-full");
+    expect(panel.getAttribute("data-compact-mobile-workspace")).toBe("true");
+  });
+
+  it("retains the constrained desktop Documents workspace geometry", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderModal({ initialTab: "documents" });
+
+    const panel = await screen.findByTestId("request-documents-panel");
+    const middle = panel.closest("[aria-busy]") as HTMLElement;
+    expect(middle.className).toContain("overflow-hidden");
+    expect(panel.parentElement?.className).toContain("h-full");
+  });
+
   it("keeps the persistent header badge cluster useful when values are missing", async () => {
     renderModal({ initialTab: "documents" });
     await screen.findByTestId("appointment-header-badge-cluster");
