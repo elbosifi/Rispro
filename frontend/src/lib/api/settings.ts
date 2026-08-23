@@ -169,6 +169,17 @@ export async function updateUserPassword(userId: number, password: string) {
   });
 }
 
+export async function updateUserIdentity(
+  userId: number,
+  payload: { username: string; fullName: string }
+): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/identity`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+  return mapUser(raw.user);
+}
+
 export async function updateUserActiveState(userId: number, isActive: boolean): Promise<User> {
   const raw = await api<{ user: RawRecord }>(`/users/${userId}/active`, {
     method: "PUT",

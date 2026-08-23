@@ -30,6 +30,11 @@ export interface UserCreatePayload {
   canRequestSchedulingOverride?: boolean;
 }
 
+export interface UserIdentityPayload {
+  username?: string;
+  fullName?: string;
+}
+
 interface UserActorContext {
   userId: NullableUserId;
   role: Role;
@@ -146,6 +151,100 @@ export async function createUser(
       throw new HttpError(409, "A user with that username already exists.");
     }
 
+    throw error;
+  }
+}
+
+export async function updateUserIdentity(
+  userId: UserId,
+  { username, fullName }: UserIdentityPayload,
+  actor: UserActorContext = { userId: null, role: "supervisor" }
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+
+  const canonicalUsername = normalizeUsername(username);
+  const cleanFullName = String(fullName ?? "").trim();
+  if (!canonicalUsername) throw new HttpError(400, "username is required.");
+  if (!cleanFullName) throw new HttpError(400, "fullName is required.");
+
+  const currentResult = await pool.query<UserRow>(
+    `
+      select id, username, full_name, role, is_active,
+             coalesce(must_change_password, false) as must_change_password,
+             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+             created_at, updated_at
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+  const previousUser = currentResult.rows[0];
+  if (!previousUser) throw new HttpError(404, "User not found.");
+
+  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "update_super_admin_identity_denied",
+      actorUserId: actor.userId,
+      targetUserId: previousUser.id,
+      details: {
+        reason: "only_super_admin_can_update_super_admin",
+        targetUsername: previousUser.username
+      }
+    });
+    throw new HttpError(403, "Only super_admin can update a super_admin user.");
+  }
+
+  try {
+    const updatedResult = await pool.query<UserRow>(
+      `
+        update users
+        set username = $2, full_name = $3, updated_at = now()
+        where id = $1
+        returning id, username, full_name, role, is_active,
+                  coalesce(must_change_password, false) as must_change_password,
+                  coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  created_at, updated_at
+      `,
+      [cleanUserId, canonicalUsername, cleanFullName]
+    );
+    const updatedUser = updatedResult.rows[0];
+    if (!updatedUser) throw new HttpError(500, "Failed to update user identity.");
+
+    await logAuditEntry({
+      entityType: "user",
+      entityId: updatedUser.id,
+      actionType: "update_identity",
+      oldValues: { username: previousUser.username, fullName: previousUser.full_name },
+      newValues: { username: updatedUser.username, fullName: updatedUser.full_name },
+      changedByUserId: actor.userId
+    });
+
+    if (updatedUser.role === "super_admin") {
+      await auditSuperAdminAttempt({
+        actionType: "update_super_admin_identity_allowed",
+        actorUserId: actor.userId,
+        targetUserId: updatedUser.id,
+        details: {
+          reason: "super_admin_identity_updated",
+          targetUsername: updatedUser.username
+        }
+      });
+    }
+
+    return updatedUser;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String((error as Record<string, unknown>).code) === "23505"
+    ) {
+      throw new HttpError(409, "A user with that username already exists.");
+    }
     throw error;
   }
 }

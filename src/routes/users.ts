@@ -8,6 +8,7 @@ import {
   deleteUser,
   listUsers,
   resetUserTemporaryPassword,
+  updateUserIdentity,
   updateUserActiveState,
   updateUserPassword,
   updateUserSchedulingOverridePermission
@@ -59,6 +60,19 @@ usersRouter.put(
     const user = await updateUserSchedulingOverridePermission(
       asString(req.params.userId),
       asOptionalBoolean(body.canRequestSchedulingOverride) === true,
+      { userId: req.user!.sub, role: req.user!.role }
+    );
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
+  "/:userId/identity",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const user = await updateUserIdentity(
+      asString(req.params.userId),
+      { username: asString(body.username), fullName: asString(body.fullName) },
       { userId: req.user!.sub, role: req.user!.role }
     );
     res.json({ user });

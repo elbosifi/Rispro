@@ -15,6 +15,7 @@ import {
   fetchUsers,
   resetUserTemporaryPassword,
   updateUserActiveState,
+  updateUserIdentity,
   updateUserPassword,
   updateUserSchedulingOverridePermission,
 } from "@/lib/api-hooks";
@@ -66,6 +67,8 @@ export default function UsersSection({
   const [temporaryPasswordDraft, setTemporaryPasswordDraft] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [manageError, setManageError] = useState<string | null>(null);
+  const [identityEditing, setIdentityEditing] = useState(false);
+  const [identityDraft, setIdentityDraft] = useState({ username: "", fullName: "" });
   const [createForm, setCreateForm] = useState({
     username: "",
     fullName: "",
@@ -116,13 +119,26 @@ export default function UsersSection({
     setSelectedUserId(null);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
+    setIdentityEditing(false);
+    setIdentityDraft({ username: "", fullName: "" });
     setManageError(null);
   };
-  const openManage = (userId: number) => {
-    setSelectedUserId(userId);
+  const openManage = (user: User) => {
+    setSelectedUserId(user.id);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
+    setIdentityEditing(false);
+    setIdentityDraft({ username: user.username, fullName: user.fullName });
     setManageError(null);
+  };
+  const startIdentityEditing = (user: User) => {
+    setIdentityDraft({ username: user.username, fullName: user.fullName });
+    setIdentityEditing(true);
+    setManageError(null);
+  };
+  const cancelIdentityEditing = (user: User) => {
+    setIdentityDraft({ username: user.username, fullName: user.fullName });
+    setIdentityEditing(false);
   };
   const invalidateUsers = () =>
     queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -185,6 +201,19 @@ export default function UsersSection({
     onSuccess: () => {
       invalidateUsers();
       closeManage();
+    },
+    onError: (error) => setManageError(mutationErrorMessage(error)),
+  });
+  const identityMutation = useMutation({
+    mutationFn: (payload: { userId: number; username: string; fullName: string }) =>
+      updateUserIdentity(payload.userId, {
+        username: payload.username,
+        fullName: payload.fullName,
+      }),
+    onSuccess: () => {
+      invalidateUsers();
+      setIdentityEditing(false);
+      setManageError(null);
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
@@ -362,7 +391,7 @@ export default function UsersSection({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openManage(user.id)}
+                        onClick={() => openManage(user)}
                       >
                         {t("settings.users.manage")}
                       </Button>
@@ -407,7 +436,7 @@ export default function UsersSection({
                   className="mt-3"
                   variant="outline"
                   size="sm"
-                  onClick={() => openManage(user.id)}
+                  onClick={() => openManage(user)}
                 >
                   {t("settings.users.manage")}
                 </Button>
@@ -525,13 +554,45 @@ export default function UsersSection({
                     <dt className="description-center">
                       {t("settings.fullName")}
                     </dt>
-                    <dd>{selectedUser.fullName}</dd>
+                    <dd>
+                      {identityEditing ? (
+                        <input
+                          aria-label={t("settings.fullName")}
+                          value={identityDraft.fullName}
+                          onChange={(event) =>
+                            setIdentityDraft({
+                              ...identityDraft,
+                              fullName: event.target.value,
+                            })
+                          }
+                          className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                        />
+                      ) : (
+                        selectedUser.fullName
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt className="description-center">
                       {t("settings.username")}
                     </dt>
-                    <dd>@{selectedUser.username}</dd>
+                    <dd>
+                      {identityEditing ? (
+                        <input
+                          aria-label={t("settings.username")}
+                          value={identityDraft.username}
+                          onChange={(event) =>
+                            setIdentityDraft({
+                              ...identityDraft,
+                              username: event.target.value,
+                            })
+                          }
+                          className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                        />
+                      ) : (
+                        `@${selectedUser.username}`
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt className="description-center">
@@ -580,6 +641,49 @@ export default function UsersSection({
                     </dd>
                   </div>
                 </dl>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {identityEditing ? (
+                    <>
+                      <Button
+                        size="sm"
+                        disabled={
+                          identityMutation.isPending ||
+                          !identityDraft.username.trim() ||
+                          !identityDraft.fullName.trim() ||
+                          (identityDraft.username.trim() === selectedUser.username &&
+                            identityDraft.fullName.trim() === selectedUser.fullName)
+                        }
+                        onClick={() =>
+                          identityMutation.mutate({
+                            userId: selectedUser.id,
+                            username: identityDraft.username,
+                            fullName: identityDraft.fullName,
+                          })
+                        }
+                      >
+                        {identityMutation.isPending
+                          ? t("settings.loading")
+                          : t("settings.users.saveChanges")}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={identityMutation.isPending}
+                        onClick={() => cancelIdentityEditing(selectedUser)}
+                      >
+                        {t("settings.users.cancelEditing")}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startIdentityEditing(selectedUser)}
+                    >
+                      {t("settings.users.editDetails")}
+                    </Button>
+                  )}
+                </div>
               </section>
               {selectedUser.role === "receptionist" && (
                 <section>

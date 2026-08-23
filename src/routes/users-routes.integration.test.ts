@@ -29,7 +29,7 @@ async function startServer() {
   };
 }
 
-test("users active-state and temporary-password routes preserve middleware and service wiring", async () => {
+test("users identity, active-state, and temporary-password routes preserve middleware and service wiring", async () => {
   const [{ pool }, { env }] = await Promise.all([
     import("../db/pool.js"),
     import("../config/env.js"),
@@ -42,7 +42,7 @@ test("users active-state and temporary-password routes preserve middleware and s
 
   const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
   const createdIds: number[] = [];
-  const insertUser = async (username: string, role: "supervisor" | "receptionist", isActive: boolean) => {
+  const insertUser = async (username: string, role: "supervisor" | "receptionist" | "super_admin", isActive: boolean) => {
     const result = await pool.query<{ id: number }>(
       `insert into users (username, full_name, password_hash, role, is_active)
        values ($1, $2, $3, $4, $5)
@@ -55,6 +55,8 @@ test("users active-state and temporary-password routes preserve middleware and s
 
   const actorId = await insertUser(`users_route_actor_${suffix}`, "supervisor", true);
   const targetId = await insertUser(`users_route_target_${suffix}`, "receptionist", false);
+  const duplicateId = await insertUser(`users_route_duplicate_${suffix}`, "receptionist", true);
+  const superAdminId = await insertUser(`users_route_super_admin_${suffix}`, "super_admin", true);
   const authToken = jwt.sign({ sub: actorId, role: "supervisor" }, env.jwtSecret);
   const reauthToken = jwt.sign({ sub: actorId, role: "supervisor", purpose: "supervisor-reauth" }, env.jwtSecret);
   const cookie = `${env.cookieName}=${authToken}; ${env.reauthCookieName}=${reauthToken}`;
@@ -65,10 +67,43 @@ test("users active-state and temporary-password routes preserve middleware and s
       headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify(body),
     });
-    return { status: response.status, data: await response.json() as { user?: { id: number; is_active: boolean; must_change_password: boolean }; message?: string; error?: { message: string } } };
+    return { status: response.status, data: await response.json() as { user?: { id: number; username: string; full_name: string; role: string; is_active: boolean; must_change_password: boolean; can_request_scheduling_override: boolean }; message?: string; error?: { message: string } } };
   };
 
   try {
+    const identity = await request(`/${targetId}/identity`, "PUT", {
+      username: `  IDENTITY_TARGET_${suffix}  `,
+      fullName: "  Identity Target  ",
+      role: "super_admin",
+    });
+    assert.equal(identity.status, 200);
+    assert.equal(identity.data.user?.username, `identity_target_${suffix}`);
+    assert.equal(identity.data.user?.full_name, "Identity Target");
+    assert.equal(identity.data.user?.role, "receptionist");
+    assert.equal(identity.data.user?.is_active, false);
+    assert.equal(identity.data.user?.must_change_password, false);
+    assert.equal(identity.data.user?.can_request_scheduling_override, false);
+    const identityAudit = await pool.query<{ changed_by_user_id: number }>(
+      `select changed_by_user_id
+       from audit_log
+       where entity_type = 'user' and entity_id = $1 and action_type = 'update_identity'
+       order by id desc
+       limit 1`,
+      [targetId],
+    );
+    assert.equal(identityAudit.rows[0]?.changed_by_user_id, actorId);
+
+    const emptyUsername = await request(`/${targetId}/identity`, "PUT", { username: "   ", fullName: "Identity Target" });
+    assert.equal(emptyUsername.status, 400);
+    const emptyFullName = await request(`/${targetId}/identity`, "PUT", { username: "identity-target", fullName: "   " });
+    assert.equal(emptyFullName.status, 400);
+    const duplicateUsername = await request(`/${targetId}/identity`, "PUT", { username: `users_route_duplicate_${suffix}`, fullName: "Identity Target" });
+    assert.equal(duplicateUsername.status, 409);
+    assert.match(duplicateUsername.data.error?.message ?? "", /already exists/);
+    const protectedIdentity = await request(`/${superAdminId}/identity`, "PUT", { username: `protected_${suffix}`, fullName: "Protected Admin" });
+    assert.equal(protectedIdentity.status, 403);
+    assert.match(protectedIdentity.data.error?.message ?? "", /Only super_admin/);
+
     const activate = await request(`/${targetId}/active`, "PUT", { isActive: true });
     assert.equal(activate.status, 200);
     assert.equal(activate.data.user?.id, targetId);

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
@@ -27,6 +27,7 @@ describe("UsersSection", () => {
       if (failure) return json({ message: failure }, 400);
       if (url === "/api/users" && !init?.method) return json({ users });
       if (url === "/api/doctor/profiles") return json({ profiles: [{ userId: 2, active: false }] });
+      if (url.includes("/identity")) return json({ user: users[0] });
       if (url.includes("/temporary-password")) return json({ user: users[0] });
       if (url.includes("/active")) return json({ user: users[0] });
       if (url.includes("/password")) return json({ user: users[0] });
@@ -134,5 +135,48 @@ describe("UsersSection", () => {
     expect((screen.getByLabelText("Direct password change") as HTMLInputElement).value).toBe("");
     await userEvent.click(screen.getByRole("button", { name: "Reactivate account" }));
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/2/active" && (init as RequestInit).method === "PUT")).toBe(true));
+  });
+
+  it("keeps account identity read-only until editing, then pre-fills editable details without a role selector", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("textbox", { name: "Full Name" })).toBeNull();
+    expect(within(dialog).queryByRole("textbox", { name: "Username" })).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
+    expect((within(dialog).getByRole("textbox", { name: "Full Name" }) as HTMLInputElement).value).toBe("Front Desk");
+    expect((within(dialog).getByRole("textbox", { name: "Username" }) as HTMLInputElement).value).toBe("frontdesk");
+    expect(within(dialog).queryByRole("combobox", { name: "Role" })).toBeNull();
+    expect((within(dialog).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("saves account identity, discards abandoned drafts, and shows duplicate errors inside Manage", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    let dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Username" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "UpdatedUser");
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Full Name" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Full Name" }), "Updated User");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/identity" && (init as RequestInit).method === "PUT" && String((init as RequestInit).body) === JSON.stringify({ username: "UpdatedUser", fullName: "Updated User" }))).toBe(true));
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "discard");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel editing" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
+    expect((within(dialog).getByRole("textbox", { name: "Username" }) as HTMLInputElement).value).toBe("frontdesk");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel editing" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
+    routeFailures["PUT /api/users/1/identity"] = "A user with that username already exists.";
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "duplicate");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("A user with that username already exists.");
   });
 });
