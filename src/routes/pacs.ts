@@ -310,7 +310,33 @@ function dicomRemapStagingFailureCode(error: unknown): string {
   return "DICOM_REMAP_STAGING_WRITE_FAILED";
 }
 
-async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<ReturnType<typeof createDicomRemapStagingContext>>): Promise<{
+type DicomRemapStagingFailureDependencies = {
+  persistFailure?: typeof failDicomRemapStagingJob;
+  logPersistenceFailure?: (details: { type: string; jobId: number; databaseCode: string }) => void;
+};
+
+async function recordDicomRemapStagingFailureSafely(
+  jobId: number,
+  error: unknown,
+  dependencies: DicomRemapStagingFailureDependencies = {}
+): Promise<void> {
+  try {
+    await (dependencies.persistFailure ?? failDicomRemapStagingJob)(jobId, dicomRemapStagingFailureCode(error));
+  } catch (persistenceError) {
+    const databaseCode = String((persistenceError as { code?: unknown } | null)?.code || "unknown");
+    try {
+      (dependencies.logPersistenceFailure ?? ((details) => console.warn(JSON.stringify(details))))({
+        type: "dicom_remap_staging_failure_persistence_failed",
+        jobId,
+        databaseCode,
+      });
+    } catch {
+      // Logging a secondary persistence failure must never affect the request.
+    }
+  }
+}
+
+async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<ReturnType<typeof createDicomRemapStagingContext>>, failureDependencies: DicomRemapStagingFailureDependencies = {}): Promise<{
   files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[];
   selectedStudyInstanceUID: string | null;
   uploadMode: string | null;
@@ -337,7 +363,7 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
       settled = true;
       req.unpipe(busboy);
       busboy.destroy(error instanceof Error ? error : new Error("DICOM remap staging failed."));
-      void failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).finally(() => reject(error));
+      void recordDicomRemapStagingFailureSafely(context.job.id, error, failureDependencies).then(() => reject(error));
     };
     const busboy = Busboy({ headers: req.headers, limits: { files: 5000 } });
     const interruptUpload = () => {
@@ -867,7 +893,7 @@ pacsRouter.post(
       });
       res.status(202).json(result);
     } catch (error) {
-      await failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).catch(() => undefined);
+      await recordDicomRemapStagingFailureSafely(context.job.id, error);
       await cleanupDicomRemapStagingStorage(context.storageKey).catch(() => undefined);
       throw error;
     }
@@ -889,7 +915,7 @@ pacsRouter.post(
       const result = await finalizeDicomRemapStagingJob({ context, ...staged });
       res.status(202).json(result);
     } catch (error) {
-      await failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).catch(() => undefined);
+      await recordDicomRemapStagingFailureSafely(context.job.id, error);
       await cleanupDicomRemapStagingStorage(context.storageKey).catch(() => undefined);
       throw error;
     }

@@ -1531,6 +1531,41 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(resend.disabled).toBe(false);
   });
 
+  it("keeps a 502 process-multipart failure recoverable without requesting a null job", async () => {
+    FakeXHR.nextResponse = { status: 502, body: { error: { message: "DICOM upload gateway unavailable." } } };
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+
+    expect(await screen.findByRole("heading", { name: "Review" })).toBeTruthy();
+    expect(screen.getByText("DICOM upload gateway unavailable.")).toBeTruthy();
+    expect(screen.getAllByText(/CT Chest/).length).toBeGreaterThan(0);
+    expect(apiMock.mock.calls.some(([path]) => /\/pacs\/remap\/jobs\/(?:null|undefined|NaN|0)(?:$|\/)/.test(String(path)))).toBe(false);
+    expect(screen.queryByText(/could not be refreshed temporarily/i)).toBeNull();
+  });
+
+  it.each([null, undefined, Number.NaN, 0, -1, 1.5])("does not enable the current-job query for invalid job ID %s", async (invalidJobId) => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({
+        job: { id: invalidJobId, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2 },
+        comparison: null,
+      });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      return Promise.resolve({ items: [] });
+    });
+
+    renderPage();
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/active"));
+    expect(apiMock.mock.calls.some(([path]) => /^\/pacs\/remap\/jobs\/(?!active$)/.test(String(path)))).toBe(false);
+  });
+
   it("shows Retry with Orthanc only for an eligible failed processing job", async () => {
     let job = { id: 92, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", processing_error_details: { failedInvariant: "TransferSyntaxUID" }, orthanc_recovery_status: "available", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(), staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null as string | null, send_error_code: null, send_attempt_count: 0, dicom_integrity_version: null as number | null, dicom_integrity_verified_at: null as string | null };
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {

@@ -344,6 +344,15 @@ function toIsoDate(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function isPositiveJobId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function requirePositiveJobId(value: unknown): number {
+  if (!isPositiveJobId(value)) throw new Error("A valid remap job ID is required.");
+  return value;
+}
+
 async function uploadMultipartWithProgress(
   path: string,
   formData: FormData,
@@ -398,6 +407,10 @@ async function uploadMultipartWithProgress(
         const job = (body as { job?: unknown }).job;
         if (!job || typeof job !== "object") {
           reject(new ApiError("Upload response is missing job details.", xhr.status, body));
+          return;
+        }
+        if (!isPositiveJobId((job as { id?: unknown }).id)) {
+          reject(new ApiError("Upload response is missing a valid job ID.", xhr.status, body));
           return;
         }
         resolve(body as unknown as UploadMultipartResult);
@@ -632,6 +645,7 @@ export default function PacsRemapPage() {
   const startupActiveJobCandidate = !autoResumeDismissed && workflowJobId == null && viewedRecentJobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
   const startupActiveJob = isAwaitingStagedJob(startupActiveJobCandidate) ? startupActiveJobCandidate : null;
   const effectiveJobId = viewedRecentJobId ?? workflowJobId ?? startupActiveJob?.id ?? null;
+  const selectedJobId = isPositiveJobId(effectiveJobId) ? effectiveJobId : null;
   const effectiveUiStep: RemapWizardUiStep = startupActiveJob
     ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
     : uiStep;
@@ -654,9 +668,12 @@ export default function PacsRemapPage() {
   });
 
   const currentJobQuery = useQuery({
-    queryKey: ["pacs", "remap", "job", effectiveJobId],
-    queryFn: () => api<{ job: RemapJob; comparison: RemapComparison | null }>(remapApiPath(`/pacs/remap/jobs/${effectiveJobId}`)),
-    enabled: effectiveJobId != null,
+    queryKey: ["pacs", "remap", "job", selectedJobId],
+    queryFn: () => {
+      if (!isPositiveJobId(selectedJobId)) throw new Error("A valid remap job ID is required.");
+      return api<{ job: RemapJob; comparison: RemapComparison | null }>(remapApiPath(`/pacs/remap/jobs/${selectedJobId}`));
+    },
+    enabled: selectedJobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
       const job = (query.state.data as { job?: RemapJob } | undefined)?.job;
@@ -939,7 +956,11 @@ export default function PacsRemapPage() {
       setGatewayUploadLimitRejected(false);
       setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
-      void currentJobQuery.refetch();
+      if (selectedJobId != null) void currentJobQuery.refetch();
+      else {
+        setProcessingStage("idle");
+        setUiStep("review");
+      }
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
   });
@@ -957,13 +978,16 @@ export default function PacsRemapPage() {
       targetJobId: number;
       confirmation: StagedConfirmationSnapshot;
       assignWorkflowJob: boolean;
-    }) => api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/confirm-staged`), {
-      method: "POST",
-      body: JSON.stringify({
-        ...confirmation,
-        confirm: true,
-      }),
-    }),
+    }) => {
+      const validJobId = requirePositiveJobId(targetJobId);
+      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-staged`), {
+        method: "POST",
+        body: JSON.stringify({
+          ...confirmation,
+          confirm: true,
+        }),
+      });
+    },
     onMutate: (variables) => {
       focusHeadingAfterNavigationRef.current = true;
       setUiStep("processing");
@@ -996,10 +1020,13 @@ export default function PacsRemapPage() {
   });
 
   const confirmIncompleteStudyMutation = useMutation({
-    mutationFn: async (targetJobId: number) => api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/confirm-send`), {
-      method: "POST",
-      body: JSON.stringify({ confirm: true, confirmIncompleteStudy: true }),
-    }),
+    mutationFn: async (targetJobId: number) => {
+      const validJobId = requirePositiveJobId(targetJobId);
+      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-send`), {
+        method: "POST",
+        body: JSON.stringify({ confirm: true, confirmIncompleteStudy: true }),
+      });
+    },
     onSuccess: (data) => {
       setIncompleteStudyAcknowledged(false);
       queryClient.setQueryData(["pacs", "remap", "job", data.job.id], { job: data.job, comparison: null });
@@ -1014,7 +1041,8 @@ export default function PacsRemapPage() {
 
   const resetJobMutation = useMutation({
     mutationFn: async ({ targetJobId }: { targetJobId: number }) => {
-      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/reset`), { method: "POST" });
+      const validJobId = requirePositiveJobId(targetJobId);
+      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/reset`), { method: "POST" });
     },
     onSuccess: (data, input) => {
       if (viewedRecentJobIdRef.current === input.targetJobId) {
@@ -1044,7 +1072,8 @@ export default function PacsRemapPage() {
 
   const resendJobMutation = useMutation({
     mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob; confirmDestinationChecked?: boolean }) => {
-      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${input.targetJobId}/resend`), {
+      const validJobId = requirePositiveJobId(input.targetJobId);
+      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/resend`), {
         method: "POST",
         body: JSON.stringify({ confirmDestinationChecked: input.confirmDestinationChecked === true }),
       });
@@ -1266,12 +1295,12 @@ export default function PacsRemapPage() {
       destinationPacsKey: effectiveSelectedDestinationKey,
     });
     if (stagingCompleted) {
-      if (!effectiveJobId) {
+      if (selectedJobId == null) {
         setErrorMessage("Secure staging job is not available.");
         return;
       }
       pendingStagedConfirmationRef.current = confirmation;
-      confirmStagedMutation.mutate({ targetJobId: effectiveJobId, confirmation, assignWorkflowJob: viewedRecentJobId == null });
+      confirmStagedMutation.mutate({ targetJobId: selectedJobId, confirmation, assignWorkflowJob: viewedRecentJobId == null });
       return;
     }
     pendingStagedConfirmationRef.current = confirmation;
@@ -1506,7 +1535,7 @@ export default function PacsRemapPage() {
     } else {
       resetWorkflow();
     }
-    if (!cancellableJobId) return;
+    if (!isPositiveJobId(cancellableJobId)) return;
     void api(remapApiPath(`/pacs/remap/jobs/${cancellableJobId}/cancel`), {
       method: "POST",
       body: JSON.stringify({ reason: "Operator cancelled secure staging before final confirmation." }),

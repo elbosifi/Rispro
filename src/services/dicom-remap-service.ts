@@ -3087,7 +3087,7 @@ export async function finalizeDicomRemapAwaitingConfirmationStagingJob({
 
 export async function failDicomRemapStagingJob(jobId: number, code: string): Promise<void> {
   const safeCode = ["DICOM_REMAP_STAGING_INTERRUPTED", "DICOM_REMAP_STAGING_FILE_LIMIT", "DICOM_REMAP_STAGING_SIZE_LIMIT", "DICOM_REMAP_STAGING_WRITE_FAILED", "DICOM_REMAP_STAGING_MANIFEST_FAILED"].includes(code) ? code : "DICOM_REMAP_STAGING_WRITE_FAILED";
-  await queryDicomRemapDb(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = $2, processing_error_details = jsonb_build_object('code', $2), error_message = 'DICOM staging did not complete. Start a new upload.', processing_lease_owner = null, processing_lease_expires_at = null, updated_at = now() where id = $1`, [jobId, safeCode]);
+  await queryDicomRemapDb(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = $2::text, processing_error_details = jsonb_build_object('code', $2::text), error_message = 'DICOM staging did not complete. Start a new upload.', processing_lease_owner = null, processing_lease_expires_at = null, updated_at = now() where id = $1`, [jobId, safeCode]);
 }
 
 export async function cleanupDicomRemapStagingStorage(storageKey: string): Promise<void> {

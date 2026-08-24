@@ -186,6 +186,46 @@ test("fast durable multipart staging accepts source confirmation without patient
   }
 });
 
+test("durable multipart staging preserves the upload error when failure persistence also fails", async () => {
+  const req = multipartRequest("persistence-failure-boundary");
+  const persistenceError = Object.assign(new Error("database failure with unsafe details"), { code: "42P08" });
+  const logged: Array<{ type: string; jobId: number; databaseCode: string }> = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+
+  try {
+    const promise = __pacsRouteTestables.stageDicomRemapMultipartDurably(req as unknown as Request, {
+      job: { id: 902 } as never,
+      storageKey: "jobs/902-test",
+      directory: path.resolve("storage/dicom/remap-staging/jobs/902-test"),
+    }, {
+      persistFailure: async () => { throw persistenceError; },
+      logPersistenceFailure: (details) => logged.push(details),
+    });
+
+    await waitForListener(req, "aborted");
+    req.emit("aborted");
+    await assert.rejects(
+      promise,
+      (error: unknown) => error instanceof HttpError
+        && error.statusCode === 400
+        && error.message === "DICOM remap upload was interrupted. Please start a new upload."
+    );
+    await setImmediate();
+
+    assert.deepEqual(unhandled, []);
+    assert.deepEqual(logged, [{
+      type: "dicom_remap_staging_failure_persistence_failed",
+      jobId: 902,
+      databaseCode: "42P08",
+    }]);
+    assert.equal(JSON.stringify(logged).includes("unsafe details"), false);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
 test("pacs remap multipart staging keeps normal completed upload staged for service cleanup", async () => {
   const boundary = "normal-boundary";
   const req = multipartRequest(boundary);
