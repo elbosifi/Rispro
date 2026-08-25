@@ -80,6 +80,12 @@ test("comparison-only remap access is request, patient, and job scoped", async (
   assert.doesNotMatch(comparisonScopeMiddleware, /patient-search/);
 });
 
+test("both full DICOM remap multipart parsers use the authoritative configured file limit", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  assert.equal((routeSource.match(/files: DICOM_REMAP_STAGING_MAX_FILES/g) || []).length, 2);
+  assert.doesNotMatch(routeSource, /limits:\s*\{\s*files:\s*5000/);
+});
+
 test("remap patient search keeps patient lookup within the remap authorization boundary", async () => {
   const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
   const patientsRouteSource = await readFile(new URL("./patients.ts", import.meta.url), "utf8");

@@ -18,6 +18,8 @@ import {
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
+  DICOM_REMAP_STAGING_MAX_FILES,
+  DICOM_REMAP_STAGING_MAX_TOTAL_BYTES,
   failStaleDicomRemapSendEnqueues,
   finalizeDicomRemapAwaitingConfirmationStagingJob,
   getMyActiveDicomRemapJob,
@@ -504,6 +506,46 @@ test("failed staging cleanup preserves unexpired Orthanc recovery and permits cl
   assert.match(expiredCalls[0]!.sql, /orthanc_recovery_expires_at > now\(\)/i);
   assert.match(expiredCalls[0]!.sql, /not \(orthanc_recovery_status in \('available', 'processing', 'failed'\)/i);
   await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
+});
+
+test("durable staging allows the 5,428-file sequence and the configured 10,000-file boundary", async () => {
+  assert.equal(DICOM_REMAP_STAGING_MAX_FILES, 10_000);
+  assert.equal(DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
+  const storageKey = `test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await mkdir(path.resolve("storage/dicom/remap-staging", storageKey, "files"), { recursive: true, mode: 0o700 });
+  try {
+    for (const fileIndex of [5_427, 9_999]) {
+      const stream = new PassThrough();
+      const write = writeDicomRemapStagedFile({
+        context: { job: remapJob(), storageKey, directory: path.resolve("storage/dicom/remap-staging", storageKey) },
+        fileIndex,
+        fileName: `${fileIndex + 1}.dcm`,
+        mimeType: "application/dicom",
+        stream,
+      });
+      stream.end(Buffer.from("d"));
+      assert.equal((await write).byteSize, 1);
+    }
+  } finally {
+    await cleanupDicomRemapStagingStorage(storageKey);
+  }
+});
+
+test("durable staging rejects file 10,001 with the stable HTTP 413 code", async () => {
+  const stream = new PassThrough();
+  stream.end(Buffer.from("d"));
+  await assert.rejects(
+    () => writeDicomRemapStagedFile({
+      context: { job: remapJob(), storageKey: "unused", directory: "unused" },
+      fileIndex: 10_000,
+      fileName: "10001.dcm",
+      mimeType: "application/dicom",
+      stream,
+    }),
+    (error: unknown) => error instanceof HttpError
+      && error.statusCode === 413
+      && (error.details as { code?: string } | null)?.code === "DICOM_REMAP_STAGING_FILE_LIMIT"
+  );
 });
 
 test("retention cleanup retries staged PHI removal after an operator-cancel cleanup failure", async () => {

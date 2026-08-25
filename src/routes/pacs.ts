@@ -46,6 +46,7 @@ import {
   createDicomRemapStagingContext,
   createDicomRemapUploadJob,
   DICOM_REMAP_PREVIEW_HEADER_BYTES,
+  DICOM_REMAP_STAGING_MAX_FILES,
   failDicomRemapStagingJob,
   finalizeDicomRemapAwaitingConfirmationStagingJob,
   finalizeDicomRemapStagingJob,
@@ -209,7 +210,7 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
     const busboy = Busboy({
       headers: req.headers,
       limits: {
-        files: 5000,
+        files: DICOM_REMAP_STAGING_MAX_FILES,
       },
     });
 
@@ -283,7 +284,7 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
     });
 
     busboy.on("error", fail);
-    busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.")));
+    busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" })));
     busboy.on("finish", () => {
       uploadFinished = true;
       Promise.all(writes)
@@ -365,7 +366,7 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
       busboy.destroy(error instanceof Error ? error : new Error("DICOM remap staging failed."));
       void recordDicomRemapStagingFailureSafely(context.job.id, error, failureDependencies).then(() => reject(error));
     };
-    const busboy = Busboy({ headers: req.headers, limits: { files: 5000 } });
+    const busboy = Busboy({ headers: req.headers, limits: { files: DICOM_REMAP_STAGING_MAX_FILES } });
     const interruptUpload = () => {
       if (settled || uploadFinished) return;
       fail(new HttpError(400, "DICOM remap upload was interrupted. Please start a new upload.", { code: "DICOM_REMAP_STAGING_INTERRUPTED" }));

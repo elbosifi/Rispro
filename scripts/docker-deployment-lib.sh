@@ -755,8 +755,9 @@ EOF_ENV
     chmod 600 "${safety}"
   fi
 
-  ENV_EXISTING="${ENV_FILE}" ENV_RENDERED="${generated}" ENV_OUTPUT="${temporary}" node <<'EOF_NODE'
+  ENV_DEFAULT_MIGRATIONS="${PROJECT_ROOT}/scripts/docker-env-default-migrations.cjs" ENV_EXISTING="${ENV_FILE}" ENV_RENDERED="${generated}" ENV_OUTPUT="${temporary}" node <<'EOF_NODE'
 const fs = require('fs');
+const { migrateLegacyDockerEnvValue } = require(process.env.ENV_DEFAULT_MIGRATIONS);
 const existingPath = process.env.ENV_EXISTING;
 const renderedPath = process.env.ENV_RENDERED;
 const outputPath = process.env.ENV_OUTPUT;
@@ -776,7 +777,8 @@ for (const line of existing.split(/\r?\n/)) {
   const key = match[1];
   if (emitted.has(key)) continue; // normalize duplicate active definitions
   emitted.add(key);
-  output.push(owned.get(key) || line);
+  const migratedValue = migrateLegacyDockerEnvValue(key, match[2]);
+  output.push(owned.get(key) || (migratedValue !== match[2] ? `${key}=${migratedValue}` : line));
 }
 if (output.length && output.at(-1) !== '') output.push('');
 for (const [key, line] of owned) if (!emitted.has(key)) output.push(line);

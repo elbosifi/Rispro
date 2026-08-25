@@ -100,30 +100,7 @@ export async function enqueueReadyReportEvents(options: { limit?: number } = {})
   if (!(await isPatientWebPushConfigured(settings))) return { checked: 0, enqueued: 0 };
 
   const limit = Math.max(1, Math.min(options.limit ?? env.webPushReportReadyMaxChecksPerRun, env.webPushReportReadyMaxChecksPerRun));
-  const { rows } = await pool.query<{ booking_id: number }>(
-    `
-      select distinct b.id as booking_id
-      from appointments_v2.bookings b
-      join patient_web_push_booking_subscriptions bs
-        on bs.booking_id = b.id
-       and bs.enabled = true
-       and bs.report_ready = true
-      join patient_web_push_subscriptions s
-        on s.id = bs.subscription_id
-       and s.enabled = true
-      where b.status = 'completed'
-        and b.requires_report = true
-        and b.booking_date >= (current_date - $1::int)
-        and not exists (
-          select 1
-          from patient_notification_events e
-          where e.dedupe_key = concat('report_ready:', b.id::text)
-        )
-      order by b.booking_date desc, b.id desc
-      limit $2
-    `,
-    [env.webPushReportReadyLookbackDays, limit]
-  );
+  const rows = await selectReadyReportBookings(env.webPushReportReadyLookbackDays, limit);
 
   let enqueued = 0;
   for (const row of rows) {
@@ -149,6 +126,34 @@ export async function enqueueReadyReportEvents(options: { limit?: number } = {})
   }
 
   return { checked: rows.length, enqueued };
+}
+
+export async function selectReadyReportBookings(lookbackDays: number, limit: number): Promise<Array<{ booking_id: number; booking_date: string }>> {
+  const { rows } = await pool.query<{ booking_id: number; booking_date: string }>(
+    `
+      select distinct b.id as booking_id, b.booking_date
+      from appointments_v2.bookings b
+      join patient_web_push_booking_subscriptions bs
+        on bs.booking_id = b.id
+       and bs.enabled = true
+       and bs.report_ready = true
+      join patient_web_push_subscriptions s
+        on s.id = bs.subscription_id
+       and s.enabled = true
+      where b.status = 'completed'
+        and b.requires_report = true
+        and b.booking_date >= (current_date - $1::int)
+        and not exists (
+          select 1
+          from patient_notification_events e
+          where e.dedupe_key = concat('report_ready:', b.id::text)
+        )
+      order by b.booking_date desc, b.id desc
+      limit $2
+    `,
+    [lookbackDays, limit]
+  );
+  return rows;
 }
 
 export async function runPatientNotificationWorkerTick(): Promise<{

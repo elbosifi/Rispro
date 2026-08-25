@@ -296,8 +296,8 @@ function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
-const DICOM_REMAP_STAGING_MAX_FILES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_FILES, 5_000);
-const DICOM_REMAP_STAGING_MAX_TOTAL_BYTES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
+export const DICOM_REMAP_STAGING_MAX_FILES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_FILES, 10_000);
+export const DICOM_REMAP_STAGING_MAX_TOTAL_BYTES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
 const DICOM_REMAP_ORTHANC_RECOVERY_RETENTION_HOURS = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_ORTHANC_RECOVERY_RETENTION_HOURS, 168);
 const DICOM_REMAP_ORTHANC_RECOVERY_LEASE_SECONDS = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_ORTHANC_RECOVERY_LEASE_SECONDS, 180);
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"];
@@ -2961,7 +2961,9 @@ export async function finalizeDicomRemapStagingJob({
     throw new HttpError(400, "DICOM remap upload mode is invalid.");
   }
   if (!files.length) throw new HttpError(400, "At least one DICOM file is required.");
-  if (files.length > DICOM_REMAP_STAGING_MAX_FILES) throw new HttpError(413, "Too many files in DICOM upload.");
+  if (files.length > DICOM_REMAP_STAGING_MAX_FILES) {
+    throw new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" });
+  }
   const totalBytes = files.reduce((total, file) => total + file.byteSize, 0);
   if (totalBytes <= 0 || totalBytes > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) throw new HttpError(413, "DICOM upload exceeds the configured size limit.");
 

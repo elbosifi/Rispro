@@ -27,7 +27,7 @@ Once queued, the worker records compact per-file outcomes in the private UID pla
 
 Ordinary RISpro API requests remain limited to **75 MiB** at the bundled Nginx gateway. Both full-size remap endpoints, `POST /api/pacs/remap/jobs/process-multipart` and `POST /api/pacs/remap/jobs/stage-multipart`, have exact dedicated routes with a **21 GiB** gateway allowance, 900-second upload/proxy timeouts, and both `proxy_request_buffering off` and `proxy_buffering off`. Nginx therefore streams the browser request to RISpro instead of buffering a full study.
 
-The extra 1 GiB is transport headroom for multipart boundaries and request metadata. It does not expand the accepted DICOM content limit: RISpro remains authoritative and enforces `DICOM_REMAP_STAGING_MAX_FILES=5000` and `DICOM_REMAP_STAGING_MAX_TOTAL_BYTES=21474836480` (20 GiB) by default. Ensure the private persistent staging volume has adequate free space for the configured application limit.
+The extra 1 GiB is transport headroom for multipart boundaries and request metadata. It does not expand the accepted DICOM content limit: RISpro remains authoritative and enforces `DICOM_REMAP_STAGING_MAX_FILES=10000` and `DICOM_REMAP_STAGING_MAX_TOTAL_BYTES=21474836480` (20 GiB) by default. The supported Docker setup/update path upgrades only the former standard file-count value `5000` to `10000`; explicitly customized values are preserved. Ensure the private persistent staging volume has adequate free space for the configured application limit.
 
 The proxy connection is required only until durable staging commits and RISpro returns `202 Accepted`. Rewriting, Orthanc verification, and PACS sending continue through background workers after that response.
 

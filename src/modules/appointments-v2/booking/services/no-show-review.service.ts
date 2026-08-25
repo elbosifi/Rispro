@@ -258,12 +258,12 @@ export async function runManualOldNoShowCleanup(reason: string, userId: number, 
   return { processedIds, processedCount: processedIds.length, skipped, remainingEligibleCount: Number(remaining.rows[0]?.count ?? 0), oldestRemainingDate: remaining.rows[0]?.oldest_date ?? null, cutoffDate: cutoff };
 }
 
-async function recordWorkerState(result: { todayProcessedCount: number; historicalProcessedCount: number; skippedCount: number; error?: string | null }) {
+export async function recordNoShowWorkerState(result: { todayProcessedCount: number; historicalProcessedCount: number; skippedCount: number; error?: string | null }) {
   try {
     await pool.query(`insert into appointments_v2.no_show_worker_state (singleton, last_run_at, last_successful_run_at, last_today_processed_count, last_historical_processed_count, last_skipped_count, last_error, updated_at)
-      values (true, now(), case when $4 is null then now() else null end, $1, $2, $3, $4, now()) on conflict (singleton) do update set
-      last_run_at = now(), last_successful_run_at = case when $4 is null then now() else appointments_v2.no_show_worker_state.last_successful_run_at end,
-      last_today_processed_count = $1, last_historical_processed_count = $2, last_skipped_count = $3, last_error = $4, updated_at = now()`, [result.todayProcessedCount, result.historicalProcessedCount, result.skippedCount, result.error ?? null]);
+      values (true, now(), case when $4::text is null then now() else null end, $1, $2, $3, $4::text, now()) on conflict (singleton) do update set
+      last_run_at = now(), last_successful_run_at = case when $4::text is null then now() else appointments_v2.no_show_worker_state.last_successful_run_at end,
+      last_today_processed_count = $1, last_historical_processed_count = $2, last_skipped_count = $3, last_error = $4::text, updated_at = now()`, [result.todayProcessedCount, result.historicalProcessedCount, result.skippedCount, result.error ?? null]);
   } catch (error) {
     console.error(JSON.stringify({ type: "no_show_worker_state_write_failed", error: error instanceof Error ? error.message : String(error) }));
   }
@@ -278,8 +278,8 @@ export async function runAutomaticNoShowProcessing(now = new Date()): Promise<{ 
       const historical = eligibility.scope === "historical";
       await transitionLockedBooking(client, booking, historical ? "Automatic historical no-show cleanup." : "Automatic no-show after configured review and grace period.", null, historical ? "automatic_old_no_show_cleanup" : "automatic_no_show");
       processedIds.push(Number(booking.id)); if (historical) historicalProcessedCount++; else todayProcessedCount++; }
-    await client.query("commit"); await recordWorkerState({ todayProcessedCount, historicalProcessedCount, skippedCount });
-  } catch (error) { await client.query("rollback"); await recordWorkerState({ todayProcessedCount: 0, historicalProcessedCount: 0, skippedCount, error: error instanceof Error ? error.message : String(error) }); throw error; } finally { client.release(); }
+    await client.query("commit"); await recordNoShowWorkerState({ todayProcessedCount, historicalProcessedCount, skippedCount });
+  } catch (error) { await client.query("rollback"); await recordNoShowWorkerState({ todayProcessedCount: 0, historicalProcessedCount: 0, skippedCount, error: error instanceof Error ? error.message : String(error) }); throw error; } finally { client.release(); }
   processedIds.forEach(scheduleBookingWorklistSync);
   const remaining = cutoff ? await pool.query<{ count: string }>(`select count(*)::text from appointments_v2.bookings where status = 'scheduled' and booking_date <= $1::date`, [cutoff]) : { rows: [{ count: "0" }] };
   console.info(JSON.stringify({ type: "automatic_no_show_run_completed", todayProcessedCount, historicalProcessedCount, skippedCount, remainingHistoricalCount: Number(remaining.rows[0]?.count ?? 0) }));

@@ -106,6 +106,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+node <<'EOF_ENV_MIGRATION'
+const assert = require('node:assert/strict');
+const { migrateLegacyDockerEnvValue } = require('./scripts/docker-env-default-migrations.cjs');
+assert.equal(migrateLegacyDockerEnvValue('DICOM_REMAP_STAGING_MAX_FILES', '5000'), '10000');
+assert.equal(migrateLegacyDockerEnvValue('DICOM_REMAP_STAGING_MAX_FILES', '7500'), '7500');
+assert.equal(migrateLegacyDockerEnvValue('UNRELATED_SETTING', '5000'), '5000');
+EOF_ENV_MIGRATION
+pass 'Docker env merge upgrades only the legacy DICOM remap file-count default'
+
 git -C "${test_root}" init -q
 git -C "${test_root}" config user.email test@example.invalid
 git -C "${test_root}" config user.name 'Deployment Regression Test'

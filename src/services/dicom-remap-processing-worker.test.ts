@@ -19,6 +19,68 @@ test("processing worker uses the durable claim path and is idle when no job is q
   assert.ok(calls.some((sql) => /for update skip locked/i.test(sql)));
 });
 
+test("non-test processing workers cannot claim from the disposable integration database", async () => {
+  let claims = 0;
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
+    cleanup: async () => 0,
+    claim: async () => {
+      claims += 1;
+      return null;
+    },
+  });
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  try {
+    process.env.DATABASE_URL = "postgresql://rispro_test:secret@localhost:5433/rispro_test";
+    for (const nodeEnv of ["development", "production"]) {
+      process.env.NODE_ENV = nodeEnv;
+      await assert.rejects(
+        () => runDicomRemapProcessingWorkerTick({ owner: `misconfigured-${nodeEnv}-worker`, batchSize: 1 }),
+        /cannot run against the disposable rispro_test database outside NODE_ENV=test/i
+      );
+    }
+    await assert.rejects(
+      () => startDicomRemapProcessingWorker({ intervalMs: 10_000, batchSize: 1 }),
+      /cannot run against the disposable rispro_test database outside NODE_ENV=test/i
+    );
+    assert.equal(claims, 0);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousDatabaseUrl;
+  }
+});
+
+test("test processing workers retain the disposable-database claim path", async () => {
+  let claims = 0;
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
+    cleanup: async () => 0,
+    claim: async () => {
+      claims += 1;
+      return null;
+    },
+  });
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  try {
+    process.env.NODE_ENV = "test";
+    process.env.DATABASE_URL = "postgresql://rispro_test:secret@localhost:5433/rispro_test";
+    assert.deepEqual(
+      await runDicomRemapProcessingWorkerTick({ owner: "integration-test-worker", batchSize: 1 }),
+      { claimed: 0, completed: 0, failed: 0 }
+    );
+    assert.equal(claims, 1);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousDatabaseUrl;
+  }
+});
+
 test("processing worker runs failed and abandoned-awaiting staging retention before claiming", async () => {
   let cleanupArgs: [number, number] | null = null;
   __dicomRemapProcessingWorkerTestables.setDependencies({

@@ -21,12 +21,28 @@ let processJob = processClaimedDicomRemapJob;
 let cleanupStaging = cleanupExpiredDicomRemapStaging;
 let releaseExpiredRecoveries = releaseExpiredDicomRemapOrthancRecoveryClaims;
 
+function databaseNameFromUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(new URL(value).pathname.replace(/^\//, ""));
+  } catch {
+    return null;
+  }
+}
+
+function assertWorkerDatabaseIsolation(environment: NodeJS.ProcessEnv = process.env): void {
+  if (environment.NODE_ENV === "test") return;
+  if (databaseNameFromUrl(environment.DATABASE_URL) !== "rispro_test") return;
+  throw new Error("DICOM remap processing worker cannot run against the disposable rispro_test database outside NODE_ENV=test.");
+}
+
 function normalizeProcessingConcurrency(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(1, Math.min(Math.floor(parsed), 8)) : 4;
 }
 
 export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: number; concurrency?: number; leaseSeconds?: number; owner?: string } = {}): Promise<{ claimed: number; completed: number; failed: number }> {
+  assertWorkerDatabaseIsolation();
   if (tickRunning || stopped) return { claimed: 0, completed: 0, failed: 0 };
   tickRunning = true;
   const batchSize = Math.max(1, Math.min(options.batchSize ?? 5, 25));
@@ -93,9 +109,11 @@ export const __dicomRemapProcessingWorkerTestables = {
     stopped = false;
   },
   normalizeProcessingConcurrency,
+  assertWorkerDatabaseIsolation,
 };
 
 export async function startDicomRemapProcessingWorker(options?: { intervalMs?: number; batchSize?: number; concurrency?: number; leaseSeconds?: number }): Promise<DicomRemapProcessingWorker> {
+  assertWorkerDatabaseIsolation();
   const intervalMs = Math.max(1_000, options?.intervalMs ?? Number(process.env.DICOM_REMAP_PROCESSING_WORKER_INTERVAL_MS || 5_000));
   const batchSize = Math.max(1, Math.min(options?.batchSize ?? Number(process.env.DICOM_REMAP_PROCESSING_BATCH_SIZE || 5), 25));
   const concurrency = normalizeProcessingConcurrency(options?.concurrency ?? process.env.DICOM_REMAP_PROCESSING_CONCURRENCY);
