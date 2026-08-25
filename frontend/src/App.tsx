@@ -268,7 +268,7 @@ function AppContent() {
         extraActions={(
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
-            <SchedulingOverrideApprovalCenter user={user} />
+            <SchedulingOverrideApprovalCenter user={user} trigger="desktop-only" />
           </>
         )}
         accountMenuActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
@@ -354,6 +354,7 @@ function AppContent() {
         onClose={() => setMobileNavOpen(false)}
         onToggleLanguage={toggleLanguage}
         onLogout={logout}
+        menuActions={<SchedulingOverrideApprovalCenter user={user} trigger="mobile-menu" />}
         accountActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
       />
 

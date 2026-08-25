@@ -55,7 +55,15 @@ function urlBase64ToUint8Array(value: string): ArrayBuffer {
   return output.buffer;
 }
 
-export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }) {
+type SchedulingOverrideApprovalCenterTrigger = "default" | "desktop-only" | "mobile-menu";
+
+export function SchedulingOverrideApprovalCenter({
+  user,
+  trigger = "default",
+}: {
+  user: User | null;
+  trigger?: SchedulingOverrideApprovalCenterTrigger;
+}) {
   const { language } = useLanguage();
   const [open, setOpen] = useState(false);
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
@@ -71,22 +79,39 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
 
   return (
     <>
-      <span className={actionableCount > 0 ? "inline-flex" : "hidden lg:inline-flex"}>
+      {trigger === "mobile-menu" ? (
         <button
           type="button"
-          className="btn-ghost relative"
+          className="flex w-full items-center justify-start rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
           onClick={() => setOpen(true)}
-          aria-label={t(language, "overrideRequests.title")}
-          title={t(language, "overrideRequests.title")}
+          aria-label={t(language, "nav.notifications")}
         >
-          <Bell className="h-4 w-4" />
+          <Bell className="me-2 h-4 w-4" />
+          <span>{t(language, "nav.notifications")}</span>
           {actionableCount > 0 ? (
-            <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+            <span className="ms-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
               {actionableCount}
             </span>
           ) : null}
         </button>
-      </span>
+      ) : (
+        <span className={trigger === "desktop-only" ? "hidden lg:inline-flex" : actionableCount > 0 ? "inline-flex" : "hidden lg:inline-flex"}>
+          <button
+            type="button"
+            className="btn-ghost relative"
+            onClick={() => setOpen(true)}
+            aria-label={t(language, "overrideRequests.title")}
+            title={t(language, "overrideRequests.title")}
+          >
+            <Bell className="h-4 w-4" />
+            {actionableCount > 0 ? (
+              <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {actionableCount}
+              </span>
+            ) : null}
+          </button>
+        </span>
+      )}
 
       {open ? (
         <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">

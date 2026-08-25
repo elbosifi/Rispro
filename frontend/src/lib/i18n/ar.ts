@@ -96,6 +96,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "role.administrative": "إداري",
 
   "nav.dashboard": "لوحة التحكم",
+  "nav.notifications": "الإشعارات",
   "nav.patients": "المرضى",
   "nav.newPatient": "مريض جديد",
   "nav.newAppointment": "موعد جديد",

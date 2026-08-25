@@ -344,6 +344,27 @@ describe("Navigation governance", () => {
     expect(screen.getByRole("button", { name: "Manage Security PIN" })).toBeTruthy();
   });
 
+  it("renders supplied menu actions in the primary mobile navigation area", () => {
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception User", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+        onClose={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        menuActions={<button type="button">Notifications</button>}
+      />
+    );
+
+    const notifications = screen.getByRole("button", { name: "Notifications" });
+    const dashboard = screen.getByRole("button", { name: "Dashboard" });
+    expect(Boolean(notifications.compareDocumentPosition(dashboard) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+  });
+
   it("shows Override Requests nav for receptionist, supervisor, and superadmin by default", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     for (const role of ["receptionist", "supervisor", "super_admin"] as const) {

@@ -55,6 +55,7 @@ export const en = {
   "role.administrative": "Administrator",
 
   "nav.dashboard": "Dashboard",
+  "nav.notifications": "Notifications",
   "nav.patients": "Patients",
   "nav.newPatient": "New patient",
   "nav.newAppointment": "New appointment",

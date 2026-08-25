@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -376,5 +376,21 @@ describe("SchedulingOverrideApprovalCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send test notification" }));
 
     expect(mockTestPush).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the mobile-menu notification trigger and browser controls available with no actionable requests", async () => {
+    mockRequests = [];
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} trigger="mobile-menu" />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Notifications" }));
+
+    expect(screen.getByText("Browser notifications")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enable this browser" })).toBeTruthy();
+  });
+
+  it("shows the actionable count badge on the mobile-menu notification trigger", () => {
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} trigger="mobile-menu" />);
+
+    expect(within(screen.getByRole("button", { name: "Notifications" })).getByText("1")).toBeTruthy();
   });
 });

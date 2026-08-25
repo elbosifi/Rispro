@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { Role, User } from "@/types/api";
@@ -720,7 +720,8 @@ export function MobileDrawer({
   onClose,
   onToggleLanguage,
   onLogout,
-  accountActions
+  accountActions,
+  menuActions
 }: {
   isOpen: boolean;
   currentRoute: string;
@@ -732,6 +733,7 @@ export function MobileDrawer({
   onToggleLanguage: () => void;
   onLogout: () => void;
   accountActions?: ReactNode;
+  menuActions?: ReactNode;
 }) {
   const { data: pageVisibilityMatrix } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
@@ -778,18 +780,20 @@ export function MobileDrawer({
         {/* Navigation items */}
         <div className="p-2.5 space-y-1.5">
           {visibleItems.map((item, index) => (
-            <NavButton
-              key={item.route}
-              item={item}
-              isActive={currentRoute === item.route}
-              label={t(language, item.labelKey)}
-              isRtl={isRtl}
-              index={index}
-              onClick={() => {
-                onNavigate(item.route);
-                onClose();
-              }}
-            />
+            <Fragment key={item.route}>
+              <NavButton
+                item={item}
+                isActive={currentRoute === item.route}
+                label={t(language, item.labelKey)}
+                isRtl={isRtl}
+                index={index}
+                onClick={() => {
+                  onNavigate(item.route);
+                  onClose();
+                }}
+              />
+              {item.route === "dashboard" ? menuActions : null}
+            </Fragment>
           ))}
         </div>
 
