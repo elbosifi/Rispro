@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
+import { NavigationMenuItem } from "@/components/layout/navigation-menu-item";
 import { Button, Badge, Input } from "@/components/shared";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
@@ -80,20 +81,16 @@ export function SchedulingOverrideApprovalCenter({
   return (
     <>
       {trigger === "mobile-menu" ? (
-        <button
-          type="button"
-          className="flex w-full items-center justify-start rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+        <NavigationMenuItem
+          icon={<Bell className="h-4 w-4" />}
+          label={t(language, "nav.notifications")}
           onClick={() => setOpen(true)}
-          aria-label={t(language, "nav.notifications")}
-        >
-          <Bell className="me-2 h-4 w-4" />
-          <span>{t(language, "nav.notifications")}</span>
-          {actionableCount > 0 ? (
+          trailing={actionableCount > 0 ? (
             <span className="ms-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
               {actionableCount}
             </span>
           ) : null}
-        </button>
+        />
       ) : (
         <span className={trigger === "desktop-only" ? "hidden lg:inline-flex" : actionableCount > 0 ? "inline-flex" : "hidden lg:inline-flex"}>
           <button

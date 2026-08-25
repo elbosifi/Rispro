@@ -362,7 +362,114 @@ describe("Navigation governance", () => {
 
     const notifications = screen.getByRole("button", { name: "Notifications" });
     const dashboard = screen.getByRole("button", { name: "Dashboard" });
+    const frontDesk = screen.getByRole("button", { name: "Front desk" });
     expect(Boolean(notifications.compareDocumentPosition(dashboard) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+    expect(Boolean(frontDesk.compareDocumentPosition(notifications) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+  });
+
+  it("uses the grouped navigation model in the mobile drawer", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+        onClose={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+      />
+    );
+
+    for (const label of ["New", "Front desk", "Clinical workflow", "Reporting", "Administration", "Systems"]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+    expect(screen.getByRole("button", { name: "Dashboard" })).toBeTruthy();
+  });
+
+  it("keeps mobile quick actions permission-filtered and closes after navigation", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={onNavigate}
+        onClose={onClose}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.getByRole("menuitem", { name: "New patient" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "New appointment" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "New appointment" }));
+    expect(onNavigate).toHaveBeenCalledWith("appointments");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps administration entries inside the mobile Administration group", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+        onClose={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+      />
+    );
+
+    const administration = screen.getByRole("button", { name: "Administration" });
+    if (administration.getAttribute("aria-expanded") === "false") await userEvent.click(administration);
+    for (const label of ["Override requests", "Scheduling policy", "Patient merge", "Name dictionary"]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+  });
+
+  it("uses the same page visibility model for desktop and mobile navigation", () => {
+    matrixState.value = { ...DEFAULT_PAGE_VISIBILITY_MATRIX, statistics: [] };
+    const user = { id: 5, username: "sa", fullName: "Super", role: "super_admin" } as const;
+    const { unmount } = render(<SideNav currentRoute="dashboard" user={user} language="en" isRtl={false} onNavigate={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Statistics" })).toBeNull();
+    unmount();
+    render(<MobileDrawer isOpen currentRoute="dashboard" user={user} language="en" isRtl={false} onNavigate={() => {}} onClose={() => {}} onToggleLanguage={() => {}} onLogout={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Statistics" })).toBeNull();
+  });
+
+  it("uses inherited RTL direction and logical row classes in the mobile drawer", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="patients"
+        user={{ id: 5, username: "sa", fullName: "مستخدم", role: "super_admin" }}
+        language="ar"
+        isRtl
+        onNavigate={() => {}}
+        onClose={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+      />
+    );
+
+    const drawerPanel = screen.getByRole("dialog").querySelector('[dir="rtl"]');
+    const patients = screen.getByRole("button", { name: "المرضى" });
+    expect(drawerPanel?.getAttribute("dir")).toBe("rtl");
+    expect(patients.className).toContain("text-start");
+    expect(patients.className).not.toContain("flex-row-reverse");
+    expect(patients.querySelector(".start-0")).toBeTruthy();
   });
 
   it("shows Override Requests nav for receptionist, supervisor, and superadmin by default", () => {
@@ -904,7 +1011,7 @@ describe("Navigation governance", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(<SideNav currentRoute="pacs.remap" user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }} language="ar" isRtl collapsed={false} onToggleCollapsed={() => {}} onNavigate={() => {}} />);
     const active = screen.getByRole("button", { name: "إعادة ربط PACS" });
-    expect(active.querySelector("[aria-hidden='true']")?.className).toContain("right-0");
+    expect(active.querySelector("[aria-hidden='true']")?.className).toContain("start-0");
     expect(screen.getByRole("button", { name: "طي قائمة التنقل" })).toBeTruthy();
     expect(screen.getByText("سير العمل السريري")).toBeTruthy();
   });

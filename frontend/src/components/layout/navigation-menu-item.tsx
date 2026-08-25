@@ -1,0 +1,53 @@
+import type { CSSProperties, ReactNode } from "react";
+
+interface NavigationMenuItemProps {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  collapsed?: boolean;
+  showTooltip?: boolean;
+  animationDelayMs?: number;
+  trailing?: ReactNode;
+  onClick: () => void;
+}
+
+export function NavigationMenuItem({
+  icon,
+  label,
+  active = false,
+  collapsed = false,
+  showTooltip = true,
+  animationDelayMs,
+  trailing,
+  onClick,
+}: NavigationMenuItemProps) {
+  const buttonStyle: CSSProperties = {
+    backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent",
+    color: active ? "var(--accent)" : "var(--foreground)",
+    border: active ? "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))" : "1px solid transparent",
+    boxShadow: active ? "var(--shadow-sm)" : "none",
+    animationDelay: animationDelayMs == null ? undefined : `${animationDelayMs}ms`,
+  };
+
+  return (
+    <button
+      type="button"
+      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors duration-150 ${collapsed ? "justify-center px-2" : ""}`}
+      style={buttonStyle}
+      data-active={active ? "true" : "false"}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      aria-label={label}
+      title={collapsed && showTooltip ? label : undefined}
+    >
+      {active ? <span className="absolute start-0 inset-y-1 w-0.5 rounded-full bg-accent" aria-hidden="true" /> : null}
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-accent transition-colors group-hover:text-foreground" style={{ color: active ? "var(--accent)" : "var(--muted-foreground)" }}>
+        {icon}
+      </span>
+      <span className={`${collapsed ? "sr-only" : "min-w-0 flex-1 truncate"} leading-tight`}>
+        {label}
+      </span>
+      {trailing ? <span className="ms-auto shrink-0">{trailing}</span> : null}
+    </button>
+  );
+}

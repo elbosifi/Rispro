@@ -382,7 +382,11 @@ describe("SchedulingOverrideApprovalCenter", () => {
     mockRequests = [];
     renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} trigger="mobile-menu" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    const notifications = screen.getByRole("button", { name: "Notifications" });
+    expect(notifications.className).toContain("nav-item-reveal");
+    expect(notifications.className).toContain("text-start");
+    expect(notifications.className).not.toContain("flex-row-reverse");
+    await userEvent.click(notifications);
 
     expect(screen.getByText("Browser notifications")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Enable this browser" })).toBeTruthy();

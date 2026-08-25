@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { Role, User } from "@/types/api";
@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { GlobalSearch } from "@/components/search/global-search";
 import { GlobalPrintStatusPill } from "@/components/printing/global-print-status-pill";
+import { NavigationMenuItem } from "@/components/layout/navigation-menu-item";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
 const NAV_ITEMS = APP_NAV_ITEMS;
@@ -172,7 +173,6 @@ function NavButton({
   item,
   isActive,
   label,
-  isRtl,
   collapsed = false,
   showTooltip = true,
   index,
@@ -181,40 +181,21 @@ function NavButton({
   item: AppNavItem;
   isActive: boolean;
   label: string;
-  isRtl: boolean;
   collapsed?: boolean;
   showTooltip?: boolean;
   index: number;
   onClick: () => void;
 }) {
-  const buttonStyle: CSSProperties = {
-    backgroundColor: isActive ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent",
-    color: isActive ? "var(--accent)" : "var(--foreground)",
-    border: isActive ? "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))" : "1px solid transparent",
-    boxShadow: isActive ? "var(--shadow-sm)" : "none",
-    animationDelay: `${index * 40}ms`
-  };
-
   return (
-    <button
-      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-        isRtl ? "flex-row-reverse text-end" : "text-start"
-      } ${collapsed ? "justify-center px-2" : ""}`}
-      style={buttonStyle}
-      data-active={isActive ? "true" : "false"}
-      aria-current={isActive ? "page" : undefined}
+    <NavigationMenuItem
+      icon={<NavIconGlyph icon={item.icon} size={16} />}
+      label={label}
+      active={isActive}
+      collapsed={collapsed}
+      showTooltip={showTooltip}
+      animationDelayMs={index * 40}
       onClick={onClick}
-      aria-label={label}
-      title={collapsed && showTooltip ? label : undefined}
-    >
-      {isActive ? <span className={`absolute inset-y-1 ${isRtl ? "right-0" : "left-0"} w-0.5 rounded-full bg-accent`} aria-hidden="true" /> : null}
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-accent transition-colors group-hover:text-foreground" style={{ color: isActive ? "var(--accent)" : "var(--muted-foreground)" }}>
-        <NavIconGlyph icon={item.icon} size={16} />
-      </span>
-      <span className={`${collapsed ? "sr-only" : "min-w-0 flex-1 truncate"} leading-tight`}>
-        {label}
-      </span>
-    </button>
+    />
   );
 }
 
@@ -252,6 +233,57 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
 
 const SIDEBAR_GROUPS = buildSidebarGroups();
 const DASHBOARD_ITEM = sidebarItem("dashboard");
+
+function useNavigationModel(user: User | null) {
+  const { data: pageVisibilityMatrix } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const visibleGroups = SIDEBAR_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => canAccess({ route: item.accessRoute ?? item.route }, user, matrix)),
+  })).filter((group) => group.items.length > 0);
+  const visibleDashboard = DASHBOARD_ITEM && canAccess(DASHBOARD_ITEM, user, matrix) ? DASHBOARD_ITEM : null;
+
+  return { visibleGroups, visibleDashboard };
+}
+
+function useNavigationGroupState({
+  currentRoute,
+  visibleGroups,
+  persistReportingPreference,
+}: {
+  currentRoute: string;
+  visibleGroups: Array<(typeof SIDEBAR_GROUPS)[number] & { items: SidebarItem[] }>;
+  persistReportingPreference: boolean;
+}) {
+  const reportingPreferenceKey = "rispro-sidebar-section-reporting";
+  const [expandedGroups, setExpandedGroups] = useState<Record<SidebarGroupKey, boolean>>(() => {
+    const savedReporting = persistReportingPreference ? localStorage.getItem(reportingPreferenceKey) : null;
+    return Object.fromEntries(SIDEBAR_GROUPS.map((group) => [
+      group.key,
+      group.key === "reporting" && savedReporting != null ? savedReporting === "true" : group.defaultExpanded,
+    ])) as Record<SidebarGroupKey, boolean>;
+  });
+
+  const activeGroup = visibleGroups.find((group) => group.items.some((item) => item.route === currentRoute));
+  const effectiveExpandedGroups = activeGroup && !expandedGroups[activeGroup.key]
+    ? { ...expandedGroups, [activeGroup.key]: true }
+    : expandedGroups;
+
+  const toggleGroup = (groupKey: SidebarGroupKey) => {
+    setExpandedGroups((current) => {
+      const next = { ...current, [groupKey]: !current[groupKey] };
+      if (persistReportingPreference && groupKey === "reporting") localStorage.setItem(reportingPreferenceKey, String(next[groupKey]));
+      return next;
+    });
+  };
+
+  return { expandedGroups: effectiveExpandedGroups, toggleGroup };
+}
 
 function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, onNavigate, showTooltips = true, idPrefix = "sidebar" }: {
   items: SidebarItem[];
@@ -316,7 +348,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
       )}
       <div id={sectionId} className={`${collapsed || expanded ? "space-y-0.5" : "hidden"}`}>
         {items.map((item, index) => (
-          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} isRtl={isRtl} collapsed={collapsed} showTooltip={showTooltips} index={index} onClick={() => onNavigate(item.route)} />
+          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} collapsed={collapsed} showTooltip={showTooltips} index={index} onClick={() => onNavigate(item.route)} />
         ))}
       </div>
     </section>
@@ -334,7 +366,7 @@ function useCloseOnOutside(ref: RefObject<HTMLElement | null>, onClose: () => vo
   }, [enabled, onClose, ref]);
 }
 
-function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGroups, collapsed, currentRoute, isRtl, language, onToggleGroup, onNavigate, showTooltips, idPrefix }: {
+function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGroups, collapsed, currentRoute, isRtl, language, onToggleGroup, onNavigate, showTooltips, idPrefix, afterDashboard }: {
   visibleGroups: Array<(typeof SIDEBAR_GROUPS)[number] & { items: SidebarItem[] }>;
   visibleDashboard: SidebarItem | null;
   expandedGroups: Record<SidebarGroupKey, boolean>;
@@ -346,12 +378,14 @@ function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGro
   onNavigate: (route: string) => void;
   showTooltips: boolean;
   idPrefix: string;
+  afterDashboard?: ReactNode;
 }) {
   const quickGroup = visibleGroups.find((group) => group.key === "quick");
   return (
     <div className="space-y-2">
       {quickGroup ? <QuickActionsSection items={quickGroup.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} /> : null}
-      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} isRtl={isRtl} collapsed={collapsed} showTooltip={showTooltips} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} collapsed={collapsed} showTooltip={showTooltips} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+      {afterDashboard}
       {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => onToggleGroup(group.key)} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} />)}
     </div>
   );
@@ -558,40 +592,12 @@ export function SideNav({
   onToggleCollapsed?: () => void;
   onNavigate: (route: string) => void;
 }) {
-  const { data: pageVisibilityMatrix } = useQuery({
-    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
-    queryFn: fetchPageVisibilityMatrix,
-    staleTime: 1000 * 60,
-    retry: false,
+  const { visibleGroups, visibleDashboard } = useNavigationModel(user);
+  const { expandedGroups, toggleGroup } = useNavigationGroupState({
+    currentRoute,
+    visibleGroups,
+    persistReportingPreference: true,
   });
-  const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
-  const visibleGroups = SIDEBAR_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => canAccess({ route: item.accessRoute ?? item.route }, user, matrix)),
-  })).filter((group) => group.items.length > 0);
-  const visibleDashboard = DASHBOARD_ITEM && canAccess(DASHBOARD_ITEM, user, matrix) ? DASHBOARD_ITEM : null;
-  const reportingPreferenceKey = "rispro-sidebar-section-reporting";
-  const [expandedGroups, setExpandedGroups] = useState<Record<SidebarGroupKey, boolean>>(() => {
-    const savedReporting = localStorage.getItem(reportingPreferenceKey);
-    return Object.fromEntries(SIDEBAR_GROUPS.map((group) => [
-      group.key,
-      group.key === "reporting" && savedReporting != null ? savedReporting === "true" : group.defaultExpanded,
-    ])) as Record<SidebarGroupKey, boolean>;
-  });
-
-  const activeGroup = visibleGroups.find((group) => group.items.some((item) => item.route === currentRoute));
-  const visibleExpandedGroups =
-    activeGroup && !expandedGroups[activeGroup.key]
-      ? { ...expandedGroups, [activeGroup.key]: true }
-      : expandedGroups;
-
-  const toggleGroup = (groupKey: SidebarGroupKey) => {
-    setExpandedGroups((current) => {
-      const next = { ...current, [groupKey]: !current[groupKey] };
-      if (groupKey === "reporting") localStorage.setItem(reportingPreferenceKey, String(next[groupKey]));
-      return next;
-    });
-  };
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [finePointer, setFinePointer] = useState(() => window.matchMedia?.("(pointer: fine)")?.matches ?? false);
@@ -692,7 +698,7 @@ export function SideNav({
           </button>
         </div> : null}
         <div id="desktop-sidebar-navigation" className="min-h-0 flex-1 overflow-y-auto p-2.5">
-          <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={visibleExpandedGroups} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={!previewVisible} idPrefix="sidebar" />
+          <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={!previewVisible} idPrefix="sidebar" />
         </div>
         <div className={`shrink-0 border-t p-2.5 ${collapsed ? "flex justify-center" : "flex items-center justify-between gap-2"}`} style={{ borderColor: "var(--border)", backgroundColor: "var(--muted)" }}>
           <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />{!collapsed ? <span className="truncate">{t(language, "shell.systemOnline")}</span> : null}</div>
@@ -702,7 +708,7 @@ export function SideNav({
       {previewVisible ? <aside data-testid="desktop-sidebar-preview" className={`absolute inset-y-0 z-40 w-[240px] border bg-background shadow-xl motion-safe:transition-[opacity,transform] motion-safe:duration-200 motion-reduce:transition-none ${isRtl ? "end-full me-2" : "start-full ms-2"}`} style={{ borderColor: "var(--border)" }} aria-label={t(language, "shell.menu")} onPointerEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onPointerLeave={schedulePreviewClose} onMouseEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onMouseLeave={schedulePreviewClose}>
         <div className="flex h-full min-h-0 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-            <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={visibleExpandedGroups} collapsed={false} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={false} idPrefix="sidebar-preview" />
+            <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={false} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={false} idPrefix="sidebar-preview" />
           </div>
         </div>
       </aside> : null}
@@ -735,14 +741,12 @@ export function MobileDrawer({
   accountActions?: ReactNode;
   menuActions?: ReactNode;
 }) {
-  const { data: pageVisibilityMatrix } = useQuery({
-    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
-    queryFn: fetchPageVisibilityMatrix,
-    staleTime: 1000 * 60,
-    retry: false,
+  const { visibleGroups, visibleDashboard } = useNavigationModel(user);
+  const { expandedGroups, toggleGroup } = useNavigationGroupState({
+    currentRoute,
+    visibleGroups,
+    persistReportingPreference: false,
   });
-  const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
-  const visibleItems = NAV_ITEMS.filter((item) => item.route !== "doctor" && canAccess(item, user, matrix));
 
   if (!isOpen) return null;
 
@@ -779,22 +783,23 @@ export function MobileDrawer({
 
         {/* Navigation items */}
         <div className="p-2.5 space-y-1.5">
-          {visibleItems.map((item, index) => (
-            <Fragment key={item.route}>
-              <NavButton
-                item={item}
-                isActive={currentRoute === item.route}
-                label={t(language, item.labelKey)}
-                isRtl={isRtl}
-                index={index}
-                onClick={() => {
-                  onNavigate(item.route);
-                  onClose();
-                }}
-              />
-              {item.route === "dashboard" ? menuActions : null}
-            </Fragment>
-          ))}
+          <SidebarNavigationContent
+            visibleGroups={visibleGroups}
+            visibleDashboard={visibleDashboard}
+            expandedGroups={expandedGroups}
+            collapsed={false}
+            currentRoute={currentRoute}
+            isRtl={isRtl}
+            language={language}
+            onToggleGroup={toggleGroup}
+            onNavigate={(route) => {
+              onNavigate(route);
+              onClose();
+            }}
+            showTooltips={false}
+            idPrefix="mobile-drawer"
+            afterDashboard={menuActions}
+          />
         </div>
 
         <div className="mt-2 space-y-2 border-t p-3" style={{ borderColor: "var(--border)" }}>
