@@ -207,7 +207,8 @@ describe("ReportCenter", () => {
     directPrintReportCenterMock.mockResolvedValue({ success: false, errorCode: "QZ_CONNECTION_FAILED", message: "QZ unavailable" });
     resolveDirectPrintFailureActionMock.mockReturnValue("BROWSER_PRINT");
     const createObjectURL = vi.fn(() => "blob:report");
-    vi.stubGlobal("URL", { ...URL, createObjectURL });
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
     vi.spyOn(window, "open").mockReturnValue(null);
     renderCenter();
 
@@ -215,6 +216,7 @@ describe("ReportCenter", () => {
 
     await waitFor(() => expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Browser printing blocked", placement: "center" }), 10_000));
     expect(pushToastMock).not.toHaveBeenCalledWith(expect.objectContaining({ message: "The configured direct printer could not be used. Browser printing has been opened instead." }), 10_000);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:report");
     vi.unstubAllGlobals();
   });
 

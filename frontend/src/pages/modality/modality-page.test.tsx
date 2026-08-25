@@ -1534,7 +1534,7 @@ describe("ModalityPage modality board", () => {
     expect(within(footer).getByRole("button", { name: "Discontinue" })).toBeTruthy();
   });
 
-  it("renders an attached request document in the read-only clinical workspace", async () => {
+  it("renders an attached request document in the clinical document workspace", async () => {
     const user = await openBoard([appointment({ id: 16, accessionNumber: "ACC-DOCUMENT" })]);
     listAppointmentDocumentsMock.mockResolvedValue([{
       id: 41,
@@ -1557,7 +1557,9 @@ describe("ModalityPage modality board", () => {
     const requestSection = await screen.findByTestId("clinical-request-documents");
     expect(await within(requestSection).findByText("referral.png")).toBeTruthy();
     expect(within(requestSection).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
-    expect(within(requestSection).queryByTestId("document-file-input")).toBeNull();
+    const fileInput = within(requestSection).getByTestId("document-file-input");
+    expect(fileInput).toBeTruthy();
+    expect(within(requestSection).getByText("Upload Clinical Document")).toBeTruthy();
     expect(within(requestSection).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(requestSection).queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
   });
