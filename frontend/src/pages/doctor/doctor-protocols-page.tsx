@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, MoreVertical, Pencil, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MoreVertical, Pencil, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   activateProtocolLibraryVersion,
@@ -83,6 +83,29 @@ function addDays(isoDate: string, days: number): string {
 
 function protocolingPatientName(appointment: DoctorProtocolingAppointment): string {
   return appointment.patientEnglishName || appointment.patientArabicName || appointment.patientMrn || `Patient ${appointment.patientId}`;
+}
+
+function MriPrimarySafetyPanel({ appointment }: { appointment: DoctorProtocolingAppointment }) {
+  if (appointment.modalitySafetyWorkflowType !== "mri_primary_implant_screening") return null;
+
+  if (appointment.mriPrimaryScreeningResult === "no_known_implant_reported") {
+    return <section className="border-b border-emerald-300 bg-emerald-50 px-3 py-3 text-emerald-950 sm:px-4" aria-label="MRI primary screening"><p className="text-sm font-bold uppercase tracking-wide">MRI Primary Screening</p><p className="mt-0.5 text-base font-semibold">No known implant/device reported</p></section>;
+  }
+
+  const reviewRequired = appointment.mriPrimaryScreeningResult === "implant_reported_review_required";
+  return (
+    <section className="border-b border-amber-300 bg-amber-50 px-3 py-3 text-amber-950 sm:px-4" aria-label="MRI primary screening">
+      <div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 shrink-0 text-amber-700" size={22} aria-hidden="true" /><div>
+        <p className="text-sm font-bold uppercase tracking-wide">{reviewRequired ? "MRI SAFETY REVIEW REQUIRED" : "MRI PRIMARY SCREENING NOT RECORDED"}</p>
+        {reviewRequired ? <p className="mt-0.5 text-base font-semibold">Implant/device reported during primary screening</p> : null}
+        {reviewRequired && (appointment.mriPrimaryScreeningImplantSite || appointment.mriPrimaryScreeningImplantDescription || appointment.mriPrimaryScreeningPreviousReviewerNameReported) ? <dl className="mt-2 space-y-1 text-sm">
+          {appointment.mriPrimaryScreeningImplantSite ? <div><dt className="inline font-semibold">Implant/device site: </dt><dd className="inline">{appointment.mriPrimaryScreeningImplantSite}</dd></div> : null}
+          {appointment.mriPrimaryScreeningImplantDescription ? <div><dt className="inline font-semibold">Description: </dt><dd className="inline">{appointment.mriPrimaryScreeningImplantDescription}</dd></div> : null}
+          {appointment.mriPrimaryScreeningPreviousReviewerNameReported ? <div><dt className="inline font-semibold">Previous reviewer reported by patient: </dt><dd className="inline">{appointment.mriPrimaryScreeningPreviousReviewerNameReported}</dd></div> : null}
+        </dl> : null}
+      </div></div>
+    </section>
+  );
 }
 
 function historicalDicomDateToIso(value: string | null | undefined): string | null {
@@ -1592,6 +1615,8 @@ function ProtocolAssignmentModal({
             </div>
           </div>
         </header>
+
+        <MriPrimarySafetyPanel appointment={appointment} />
 
         {loading ? (
           <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>

@@ -27,6 +27,9 @@ const appointment: DoctorProtocolingAppointment = {
   modalityName: "CT",
   modalitySafetyWorkflowType: "standard_acknowledgement",
   mriPrimaryScreeningResult: null,
+  mriPrimaryScreeningImplantSite: null,
+  mriPrimaryScreeningImplantDescription: null,
+  mriPrimaryScreeningPreviousReviewerNameReported: null,
   examTypeId: 10,
   examTypeName: "CT Chest",
   caseCategory: "non_oncology",
@@ -575,8 +578,8 @@ describe("Doctor protocoling request documents", () => {
     expect(within(modal).getByRole("button", { name: "Patient history" })).toBeTruthy();
   });
 
-  it("renders MRI primary-screening badges in the worklist and assignment header only for the MRI workflow", async () => {
-    const mriAppointment = { ...appointment, modalityCode: "MRI" as const, modalityName: "MRI", modalitySafetyWorkflowType: "mri_primary_implant_screening" as const, mriPrimaryScreeningResult: "implant_reported_review_required" as const };
+  it("shows the MRI review warning and patient-reported screening details in the assignment modal", async () => {
+    const mriAppointment = { ...appointment, modalityCode: "MRI" as const, modalityName: "MRI", modalitySafetyWorkflowType: "mri_primary_implant_screening" as const, mriPrimaryScreeningResult: "implant_reported_review_required" as const, mriPrimaryScreeningImplantSite: "Left hip", mriPrimaryScreeningImplantDescription: "Orthopedic fixation hardware", mriPrimaryScreeningPreviousReviewerNameReported: "Dr. Previous" };
     mockFetchAppointments.mockResolvedValue([mriAppointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment: mriAppointment, assignmentDetail: null });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -585,8 +588,32 @@ describe("Doctor protocoling request documents", () => {
     expect(await screen.findByText("MRI primary screening complete")).toBeTruthy();
     expect(screen.getByText("Implant reported — MRI staff review required")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Assign" }));
-    expect(within(screen.getByRole("dialog", { name: "Assign protocol" })).getAllByText("MRI primary screening complete").length).toBeGreaterThan(0);
+    const modal = screen.getByRole("dialog", { name: "Assign protocol" });
+    expect(within(modal).getByText("MRI SAFETY REVIEW REQUIRED")).toBeTruthy();
+    expect(within(modal).getByText("Implant/device site:").parentElement?.textContent).toContain("Left hip");
+    expect(within(modal).getByText("Description:").parentElement?.textContent).toContain("Orthopedic fixation hardware");
+    expect(within(modal).getByText("Previous reviewer reported by patient:").parentElement?.textContent).toContain("Dr. Previous");
     expect(appointment.modalitySafetyWorkflowType).toBe("standard_acknowledgement");
+  });
+
+  it("shows the negative primary-screening result without claiming MRI clearance", async () => {
+    const mriAppointment = { ...appointment, modalityCode: "MRI" as const, modalityName: "MRI", modalitySafetyWorkflowType: "mri_primary_implant_screening" as const, mriPrimaryScreeningResult: "no_known_implant_reported" as const };
+    mockFetchAppointments.mockResolvedValue([mriAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: mriAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    const modal = screen.getByRole("dialog", { name: "Assign protocol" });
+    expect(within(modal).getByText("No known implant/device reported")).toBeTruthy();
+    expect(within(modal).queryByText(/MRI cleared|Cleared for MRI|MRI safe/i)).toBeNull();
+  });
+
+  it("shows an MRI primary-screening warning when no screening is recorded", async () => {
+    const mriAppointment = { ...appointment, modalityCode: "MRI" as const, modalityName: "MRI", modalitySafetyWorkflowType: "mri_primary_implant_screening" as const };
+    mockFetchAppointments.mockResolvedValue([mriAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: mriAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect(within(screen.getByRole("dialog", { name: "Assign protocol" })).getByText("MRI PRIMARY SCREENING NOT RECORDED")).toBeTruthy();
   });
 
   it("does not render an MRI primary-screening badge for standard CT workflow", async () => {
@@ -596,6 +623,8 @@ describe("Doctor protocoling request documents", () => {
     await screen.findByRole("button", { name: "Assign" });
     expect(screen.queryByText("MRI primary screening complete")).toBeNull();
     expect(screen.queryByText("MRI primary screening not recorded")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Assign" }));
+    expect(within(screen.getByRole("dialog", { name: "Assign protocol" })).queryByLabelText("MRI primary screening")).toBeNull();
   });
 
   it("shows and edits No report required through the V2 appointment update", async () => {

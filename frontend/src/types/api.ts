@@ -990,6 +990,9 @@ export interface DoctorProtocolingAppointment {
   modalityName: string | null;
   modalitySafetyWorkflowType: "standard_acknowledgement" | "mri_primary_implant_screening";
   mriPrimaryScreeningResult: "no_known_implant_reported" | "implant_reported_review_required" | null;
+  mriPrimaryScreeningImplantSite: string | null;
+  mriPrimaryScreeningImplantDescription: string | null;
+  mriPrimaryScreeningPreviousReviewerNameReported: string | null;
   examTypeId: number | null;
   examTypeName: string | null;
   caseCategory: string | null;

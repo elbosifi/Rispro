@@ -126,6 +126,9 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     mriPrimaryScreeningResult: row.mri_primary_screening_result === "no_known_implant_reported" || row.mri_primary_screening_result === "implant_reported_review_required"
       ? row.mri_primary_screening_result
       : null,
+    mriPrimaryScreeningImplantSite: stringOrNull(row.mri_primary_screening_implant_site),
+    mriPrimaryScreeningImplantDescription: stringOrNull(row.mri_primary_screening_implant_description),
+    mriPrimaryScreeningPreviousReviewerNameReported: stringOrNull(row.mri_primary_screening_previous_reviewer_name_reported),
     examTypeId: numberOrNull(row.exam_type_id),
     examTypeName: stringOrNull(row.exam_type_name),
     caseCategory: stringOrNull(row.case_category),
@@ -189,6 +192,9 @@ const APPOINTMENT_SELECT = `
     m.name_en as modality_name,
     m.safety_workflow_type as modality_safety_workflow_type,
     screening.result as mri_primary_screening_result,
+    screening.implant_site as mri_primary_screening_implant_site,
+    screening.implant_description as mri_primary_screening_implant_description,
+    screening.previous_reviewer_name_reported as mri_primary_screening_previous_reviewer_name_reported,
     b.exam_type_id,
     et.name_en as exam_type_name,
     b.case_category,

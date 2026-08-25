@@ -24,6 +24,9 @@ function protocolingAppointmentRow(overrides: Record<string, unknown> = {}) {
     modality_name: "MR",
     modality_safety_workflow_type: "mri_primary_implant_screening",
     mri_primary_screening_result: "no_known_implant_reported",
+    mri_primary_screening_implant_site: "Left hip",
+    mri_primary_screening_implant_description: "Orthopedic fixation hardware",
+    mri_primary_screening_previous_reviewer_name_reported: "Dr. Previous",
     exam_type_id: 3,
     exam_type_name: "MRI Brain",
     case_category: null,
@@ -127,6 +130,9 @@ describe("Doctor Portal protocoling worklist backend", () => {
       assert.equal(rows[0].requiresReport, true);
       assert.equal(rows[0].modalitySafetyWorkflowType, "mri_primary_implant_screening");
       assert.equal(rows[0].mriPrimaryScreeningResult, "no_known_implant_reported");
+      assert.equal(rows[0].mriPrimaryScreeningImplantSite, "Left hip");
+      assert.equal(rows[0].mriPrimaryScreeningImplantDescription, "Orthopedic fixation hardware");
+      assert.equal(rows[0].mriPrimaryScreeningPreviousReviewerNameReported, "Dr. Previous");
     } finally {
       queryMock.mock.restore();
     }
