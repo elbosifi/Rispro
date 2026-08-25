@@ -523,7 +523,6 @@ function ProtocolLibraryPanel() {
         </div>
         {section === "protocols" && !selectedVersion && <AddButton label="Add protocol" onClick={() => setProtocolDraft(EMPTY_PROTOCOL)} />}
         {section === "anatomy" && <AddButton label="Add region" onClick={() => { setEditingRegionId(null); setRegionDraft(EMPTY_REGION); }} />}
-        {section === "scanners" && <AddButton label="Add scanner" onClick={() => { setEditingScannerId(null); setScannerDraft(EMPTY_SCANNER); }} />}
         {section === "ctPhases" && <AddButton label="Add CT phase" onClick={() => { setEditingCtPhaseId(null); setCtPhaseDraft(EMPTY_CT_PHASE); }} />}
         {section === "mriSequences" && <AddButton label="Add MRI sequence" onClick={() => { setEditingMriSequenceId(null); setMriSequenceDraft(EMPTY_MRI_SEQUENCE); }} />}
       </div>
@@ -601,12 +600,7 @@ function ProtocolLibraryPanel() {
           {anatomy.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{item.modalityScope}</Cell><Cell>{item.bodySystem ?? "-"}</Cell><Cell>{item.defaultCoverageNote ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startRegionEdit(item)} onToggle={() => updateRegionMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
         </SettingsTable>
       )}
-      {section === "scanners" && (
-        <SettingsTable emptyText="No scanners yet" headers={["Display name", "Modality", "Vendor", "Details", "Status", "Actions"]}>
-          {scannerDraft && <ScannerForm draft={scannerDraft} setDraft={setScannerDraft} saving={createScannerMutation.isPending || updateScannerMutation.isPending} onCancel={() => { setScannerDraft(null); setEditingScannerId(null); }} onSave={() => editingScannerId ? updateScannerMutation.mutate({ id: editingScannerId, payload: scannerDraft }) : createScannerMutation.mutate(scannerDraft)} />}
-          {scanners.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{item.modality}</Cell><Cell>{item.vendor ?? "-"}</Cell><Cell>{item.modality === "MRI" ? item.fieldStrength ?? item.model ?? "-" : item.ctSliceDetectorSpecification ?? item.model ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startScannerEdit(item)} onToggle={() => updateScannerMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
-        </SettingsTable>
-      )}
+      {section === "scanners" && <p className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)" }}>Scanner equipment is managed in Settings → Equipment.</p>}
       {section === "ctPhases" && (
         <SettingsTable emptyText="No CT phase presets yet" headers={["Name", "Contrast", "Timing", "Delay", "Coverage", "Status", "Actions"]}>
           {ctPhaseDraft && <CtPhaseForm draft={ctPhaseDraft} setDraft={setCtPhaseDraft} saving={createCtPhaseMutation.isPending || updateCtPhaseMutation.isPending} onCancel={() => { setCtPhaseDraft(null); setEditingCtPhaseId(null); }} onSave={() => editingCtPhaseId ? updateCtPhaseMutation.mutate({ id: editingCtPhaseId, payload: ctPhaseDraft }) : createCtPhaseMutation.mutate(ctPhaseDraft)} />}

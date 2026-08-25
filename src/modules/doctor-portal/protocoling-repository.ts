@@ -249,7 +249,7 @@ const APPOINTMENT_SELECT = `
     from appointment_protocol_assignments assignment
     left join protocols protocol on protocol.id = assignment.protocol_id
     left join protocol_versions version on version.id = assignment.protocol_version_id
-    left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+    left join equipment scanner on scanner.id = assignment.scanner_id
     where assignment.appointment_id = b.id
       and assignment.status <> 'CANCELLED'
     order by assignment.updated_at desc, assignment.id desc
@@ -359,7 +359,7 @@ async function getAssignmentDetail(assignment: ProtocolAssignmentSummary): Promi
         sequence.notes_override,
         sequence.is_required
       from protocol_mri_sequences sequence
-      left join imaging_scanners scanner on scanner.id = sequence.scanner_id
+      left join equipment scanner on scanner.id = sequence.scanner_id
       left join mri_sequence_presets preset on preset.id = sequence.mri_sequence_preset_id
       where sequence.protocol_version_id = $1
       order by sequence.order_index asc, sequence.id asc
@@ -404,7 +404,7 @@ async function activeProtocol(protocolId: number) {
 
 async function scannerModality(scannerId: number): Promise<ProtocolingModality | null> {
   const result = await pool.query<{ modality: ProtocolingModality }>(
-    "select modality from imaging_scanners where id = $1 and is_active = true limit 1",
+    "select modality from equipment where id = $1 and is_active = true limit 1",
     [scannerId]
   );
   return result.rows[0]?.modality ?? null;

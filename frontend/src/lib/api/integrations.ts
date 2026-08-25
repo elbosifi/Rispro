@@ -35,6 +35,22 @@ export async function fetchPacsConnection(): Promise<RawRecord> {
   return raw;
 }
 
+export async function fetchEquipment(includeInactive = false) {
+  return api<{ equipment: RawRecord[] }>(`/settings/equipment${includeInactive ? "?includeInactive=true" : ""}`);
+}
+
+export async function createEquipment(payload: RawRecord) {
+  return api<{ equipment: RawRecord }>("/settings/equipment", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function updateEquipment(id: number, payload: RawRecord) {
+  return api<{ equipment: RawRecord }>(`/settings/equipment/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function deactivateEquipment(id: number) {
+  return api<{ equipment: RawRecord }>(`/settings/equipment/${id}/deactivate`, { method: "POST" });
+}
+
 // -- PACS --
 export async function searchPacs(patientNationalId: string) {
   return api<RawRecord>("/integrations/pacs-search", {

@@ -19,6 +19,7 @@ export type SettingsSection =
   | "audit_log"
   | "exam_types"
   | "modalities"
+  | "equipment"
   | "name_dictionary"
   | "not_allowed_name_words"
   | "appointment_slip"
@@ -56,6 +57,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "audit_log",
   "exam_types",
   "modalities",
+  "equipment",
   "not_allowed_name_words",
   "appointment_slip",
   "qz_tray",
@@ -76,6 +78,7 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   patient_duplicate_resolver: "clinical",
   exam_types: "clinical",
   modalities: "clinical",
+  equipment: "clinical",
   name_dictionary: "clinical",
   not_allowed_name_words: "clinical",
   appointment_slip: "clinical",

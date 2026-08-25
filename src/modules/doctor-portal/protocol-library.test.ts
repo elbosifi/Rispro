@@ -270,8 +270,8 @@ describe("Protocol library read repository", () => {
     assert.match(routes, /"\/protocols"/);
     assert.match(routes, /router\.post\(\s*"\/anatomy-regions"/);
     assert.match(routes, /router\.patch\(\s*"\/anatomy-regions\/:id"/);
-    assert.match(routes, /router\.post\(\s*"\/scanners"/);
-    assert.match(routes, /router\.patch\(\s*"\/scanners\/:id"/);
+    assert.doesNotMatch(routes, /router\.post\(\s*"\/scanners"/);
+    assert.doesNotMatch(routes, /router\.patch\(\s*"\/scanners\/:id"/);
     assert.match(routes, /router\.post\(\s*"\/ct-phase-presets"/);
     assert.match(routes, /router\.patch\(\s*"\/ct-phase-presets\/:id"/);
     assert.match(routes, /router\.post\(\s*"\/mri-sequence-presets"/);
@@ -303,8 +303,8 @@ describe("Protocol library read repository", () => {
     assert.match(routes, /Protocol Library administration access is required/);
     assert.match(routes, /router\.post\(\s*"\/protocols"[^]*requireProtocolLibraryAdminAccess\(req\)/);
     assert.match(routes, /router\.patch\(\s*"\/protocols\/:id"[^]*requireProtocolLibraryAdminAccess\(req\)/);
-    assert.match(routes, /router\.post\(\s*"\/scanners"[^]*requireProtocolLibraryAdminAccess\(req\)/);
-    assert.match(routes, /router\.patch\(\s*"\/scanners\/:id"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+    assert.doesNotMatch(routes, /router\.post\(\s*"\/scanners"/);
+    assert.doesNotMatch(routes, /router\.patch\(\s*"\/scanners\/:id"/);
     assert.match(routes, /router\.post\(\s*"\/protocol-versions\/:versionId\/activate"[^]*requireProtocolLibraryAdminAccess\(req\)/);
   });
 

@@ -165,7 +165,7 @@ export async function getModalityProtocolAssignment(
       join appointment_protocol_assignments assignment on assignment.appointment_id = booking.id
       left join protocols protocol on protocol.id = assignment.protocol_id
       left join protocol_versions version on version.id = assignment.protocol_version_id
-      left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+      left join equipment scanner on scanner.id = assignment.scanner_id
       left join users assigned_user on assigned_user.id = assignment.assigned_by
       left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
       where booking.id = $1
@@ -236,8 +236,8 @@ export async function getModalityProtocolAssignment(
           sequence.is_required
         from protocol_mri_sequences sequence
         left join mri_sequence_presets preset on preset.id = sequence.mri_sequence_preset_id
-        left join imaging_scanners sequence_scanner on sequence_scanner.id = sequence.scanner_id
-        left join imaging_scanners preset_scanner on preset_scanner.id = preset.scanner_id
+        left join equipment sequence_scanner on sequence_scanner.id = sequence.scanner_id
+        left join equipment preset_scanner on preset_scanner.id = preset.scanner_id
         left join mri_sequence_scanner_aliases alias
           on alias.mri_sequence_preset_id = preset.id
          and alias.scanner_id = coalesce(sequence.scanner_id, $2::bigint, preset.scanner_id)

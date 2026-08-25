@@ -259,7 +259,7 @@ async function existingSequences(): Promise<Map<string, ExistingSequence>> {
 }
 
 async function scannerMap(): Promise<Map<string, ScannerRow>> {
-  const result = await pool.query(`select id, name from imaging_scanners where modality = 'MRI'`);
+  const result = await pool.query(`select id, name from equipment where modality = 'MRI'`);
   return new Map(result.rows.map((row: Record<string, unknown>) => [keyOf(String(row.name)), { id: Number(row.id), name: String(row.name) }]));
 }
 
@@ -269,7 +269,7 @@ async function existingAliases(): Promise<Map<string, ExistingAlias>> {
            scanner.name as scanner_display_name, alias.vendor_sequence_name, alias.notes
     from mri_sequence_scanner_aliases alias
     join mri_sequence_presets preset on preset.id = alias.mri_sequence_preset_id
-    join imaging_scanners scanner on scanner.id = alias.scanner_id
+    join equipment scanner on scanner.id = alias.scanner_id
     where preset.sequence_key is not null
   `);
   return new Map(result.rows.map((row: Record<string, unknown>) => [`${keyOf(String(row.sequence_key))}|${keyOf(String(row.scanner_display_name))}`, {
@@ -504,7 +504,7 @@ export async function exportMriSequencePresetsXlsx(): Promise<{ buffer: Buffer; 
            scanner.name as scanner_display_name, alias.vendor_sequence_name, alias.notes as alias_notes
     from mri_sequence_scanner_aliases alias
     join mri_sequence_presets preset on preset.id = alias.mri_sequence_preset_id
-    join imaging_scanners scanner on scanner.id = alias.scanner_id
+    join equipment scanner on scanner.id = alias.scanner_id
     order by preset.name asc, scanner.name asc
   `);
   const keyById = new Map<number, string>();

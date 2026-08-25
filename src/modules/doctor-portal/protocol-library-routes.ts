@@ -11,7 +11,6 @@ import {
   addProtocolMriSequence,
   createCtPhasePreset,
   createDraftFromActiveVersion,
-  createImagingScanner,
   createMriSequencePreset,
   createProtocolWithDraft,
   createProtocolAnatomyRegion,
@@ -26,7 +25,6 @@ import {
   removeProtocolMriSequence,
   reorderProtocolRows,
   updateCtPhasePreset,
-  updateImagingScanner,
   updateMriSequencePreset,
   updateProtocol,
   updateProtocolCtPhase,
@@ -313,46 +311,6 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireDoctorPortalAccess(req);
     res.json({ scanners: await listImagingScanners() });
-  })
-);
-
-router.post(
-  "/scanners",
-  asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireProtocolLibraryAdminAccess(req);
-    const body = asUnknownRecord(req.body);
-    const scanner = await createImagingScanner({
-      name: requiredText(body.name, "name"),
-      modality: oneOf(body.modality, "modality", ["CT", "MRI"] as const),
-      vendor: optionalText(body.vendor),
-      model: optionalText(body.model),
-      fieldStrength: optionalText(body.fieldStrength ?? body.field_strength),
-      ctSliceDetectorSpecification: optionalText(body.ctSliceDetectorSpecification ?? body.ct_slice_detector_specification),
-      location: optionalText(body.location),
-      notes: optionalText(body.notes),
-      isActive: requiredBoolean(body.isActive ?? body.is_active, true),
-    });
-    res.status(201).json({ scanner });
-  })
-);
-
-router.patch(
-  "/scanners/:id",
-  asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireProtocolLibraryAdminAccess(req);
-    const body = asUnknownRecord(req.body);
-    const scanner = await updateImagingScanner(positiveInteger(req.params.id, "scanner id"), {
-      name: maybe(body, "name", (value) => requiredText(value, "name")),
-      modality: optionalOneOf(body.modality, "modality", ["CT", "MRI"] as const),
-      vendor: maybe(body, "vendor", optionalText),
-      model: maybe(body, "model", optionalText),
-      fieldStrength: maybeEither(body, "fieldStrength", "field_strength", optionalText),
-      ctSliceDetectorSpecification: maybeEither(body, "ctSliceDetectorSpecification", "ct_slice_detector_specification", optionalText),
-      location: maybe(body, "location", optionalText),
-      notes: maybe(body, "notes", optionalText),
-      isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
-    });
-    res.json({ scanner: requireFound(scanner, "Scanner not found.") });
   })
 );
 

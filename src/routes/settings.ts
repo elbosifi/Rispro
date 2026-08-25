@@ -35,6 +35,7 @@ import {
   reconcileMwlProtocolPolicyChange,
   updateDicomDevice
 } from "../services/dicom-service.js";
+import { createEquipment, deactivateEquipment, listEquipment, updateEquipment } from "../services/equipment-service.js";
 import {
   deleteNameDictionaryEntry,
   listNameDictionary,
@@ -122,6 +123,7 @@ interface SettingsRequest {
     modalityId?: string;
     examTypeId?: string;
     deviceId?: string;
+    equipmentId?: string;
     batchId?: string;
     patientAId?: string;
     patientBId?: string;
@@ -593,6 +595,38 @@ settingsRouter.post(
     const fileContentBase64 = asString(body.fileContentBase64).trim();
     const summary = await importCatalogWorkbook(fileContentBase64, request.user.sub as UserId);
     res.json({ summary });
+  })
+);
+
+settingsRouter.get(
+  "/equipment",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    res.json({ equipment: await listEquipment(asBooleanFlag(request.query?.includeInactive)) });
+  })
+);
+
+settingsRouter.post(
+  "/equipment",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    res.status(201).json({ equipment: await createEquipment(asUnknownRecord(request.body ?? {}), request.user.sub as UserId) });
+  })
+);
+
+settingsRouter.patch(
+  "/equipment/:equipmentId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    res.json({ equipment: await updateEquipment(asString(request.params?.equipmentId), asUnknownRecord(request.body ?? {}), request.user.sub as UserId) });
+  })
+);
+
+settingsRouter.post(
+  "/equipment/:equipmentId/deactivate",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    res.json({ equipment: await deactivateEquipment(asString(request.params?.equipmentId), request.user.sub as UserId) });
   })
 );
 

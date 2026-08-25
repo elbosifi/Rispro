@@ -61,7 +61,7 @@ describe("MRI sequence preset XLSX import/export", () => {
     const poolModule = await import("../../db/pool.js");
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string) => {
       if (/from mri_sequence_presets/i.test(sql)) return { rows: [] };
-      if (/from imaging_scanners/i.test(sql)) return { rows: [{ id: 2, name: "MRI A" }] };
+      if (/from equipment/i.test(sql)) return { rows: [{ id: 2, name: "MRI A" }] };
       if (/from mri_sequence_scanner_aliases/i.test(sql)) return { rows: [] };
       return { rows: [] };
     });
@@ -103,7 +103,7 @@ describe("MRI sequence preset XLSX import/export", () => {
     const poolModule = await import("../../db/pool.js");
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string) => {
       if (/from mri_sequence_presets/i.test(sql)) return { rows: [{ id: 9, sequence_key: "existing", name: "Old", is_active: false }] };
-      if (/from imaging_scanners/i.test(sql)) return { rows: [{ id: 2, name: "MRI A" }] };
+      if (/from equipment/i.test(sql)) return { rows: [{ id: 2, name: "MRI A" }] };
       if (/from mri_sequence_scanner_aliases/i.test(sql)) return { rows: [{ id: 4, sequence_key: "existing", mri_sequence_preset_id: 9, scanner_id: 2, scanner_display_name: "MRI A", vendor_sequence_name: "old" }] };
       return { rows: [] };
     });
@@ -158,7 +158,7 @@ describe("MRI sequence preset XLSX import/export", () => {
       if (/from mri_sequence_presets/i.test(sql)) {
         return { rows: [{ id: 7, sequence_key: null, name: "Axial T2", default_plane: "Axial", weighting: "T2", fat_suppression: "None", acquisition_type: "2D", contrast_relation: "Non-contrast", default_coverage: null, default_b_values: null, default_dynamic_timing: null, estimated_scan_time_minutes: 4, notes: null, is_active: true }] };
       }
-      if (/from imaging_scanners/i.test(sql)) return { rows: [] };
+      if (/from equipment/i.test(sql)) return { rows: [] };
       if (/from mri_sequence_scanner_aliases/i.test(sql)) return { rows: [] };
       return { rows: [] };
     });

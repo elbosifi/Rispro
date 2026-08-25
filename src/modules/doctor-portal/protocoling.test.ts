@@ -79,20 +79,24 @@ describe("Doctor Portal protocoling worklist backend", () => {
 
   it("preserves canonical currentPatient identity in degraded Patient History", () => {
     const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    const helperStart = repo.indexOf("async function getPatientHistoryForContext");
     const historyStart = repo.indexOf("export async function getProtocolingPatientHistory");
     const historyEnd = repo.indexOf("export async function requestProtocolingPatientIdentityReconciliation", historyStart);
-    const history = repo.slice(historyStart, historyEnd);
-    const patientRowIndex = history.indexOf("const patientRow=");
-    const currentPatientIndex = history.indexOf("const currentPatient=");
-    const tryIndex = history.indexOf("  try {");
-    const catchIndex = history.indexOf("  } catch {");
+    const helper = repo.slice(helperStart, historyStart);
+    const historyWrapper = repo.slice(historyStart, historyEnd);
+    const patientRowIndex = helper.indexOf("const patientRow=");
+    const currentPatientIndex = helper.indexOf("const currentPatient=");
+    const tryIndex = helper.indexOf("  try {");
+    const catchIndex = helper.indexOf("  } catch {");
 
+    assert.ok(helperStart >= 0 && helperStart < historyStart);
     assert.ok(patientRowIndex >= 0 && patientRowIndex < tryIndex);
     assert.ok(currentPatientIndex > patientRowIndex && currentPatientIndex < tryIndex);
-    assert.match(history.slice(tryIndex, catchIndex), /currentPatient,/);
-    assert.match(history.slice(catchIndex), /historicalPacsLastSuccessAt: null, currentPatient/);
-    assert.match(history, /coalesce\(nullif\(trim\(pi\.value\),''\),nullif\(trim\(p\.identifier_value\),''\),nullif\(trim\(p\.national_id\),''\)\)/);
-    assert.doesNotMatch(history, /patientRow[\s\S]*?mrn/i);
+    assert.match(helper.slice(tryIndex, catchIndex), /currentPatient,/);
+    assert.match(helper.slice(catchIndex), /historicalPacsLastSuccessAt: null, currentPatient/);
+    assert.match(helper, /coalesce\(nullif\(trim\(pi\.value\),''\),nullif\(trim\(p\.identifier_value\),''\),nullif\(trim\(p\.national_id\),''\)\)/);
+    assert.doesNotMatch(helper, /patientRow[\s\S]*?mrn/i);
+    assert.match(historyWrapper, /return getPatientHistoryForContext\(current\);/);
   });
 
   it("lists CT and MRI appointments with assignment state from protocol library tables", () => {
@@ -263,9 +267,17 @@ describe("Doctor Portal protocoling worklist backend", () => {
   it("keeps fast history and fuzzy historical candidates on independently authorized GET routes", () => {
     const routes = readFileSync(`${root}/src/modules/doctor-portal/protocoling-routes.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    const helperStart = repo.indexOf("async function getPatientHistoryForContext");
+    const historyStart = repo.indexOf("export async function getProtocolingPatientHistory");
+    const historyEnd = repo.indexOf("export async function requestProtocolingPatientIdentityReconciliation", historyStart);
+    const historyHelper = repo.slice(helperStart, historyStart);
+    const historyWrapper = repo.slice(historyStart, historyEnd);
     assert.match(routes, /router\.get\(\s*"\/appointments\/:appointmentId\/history"[\s\S]*?requireProtocolingAccess\(req\)[\s\S]*?getProtocolingPatientHistory/);
     assert.match(routes, /router\.get\(\s*"\/appointments\/:appointmentId\/history\/historical-candidates"[\s\S]*?requireProtocolingAccess\(req\)[\s\S]*?getProtocolingHistoricalPacsCandidates/);
-    assert.match(repo, /getProtocolingPatientHistory[\s\S]*?getHistoricalPacsReconciliationForPatient/);
+    assert.ok(helperStart >= 0 && helperStart < historyStart);
+    assert.match(historyHelper, /reconcileProtocolingPatientHistory/);
+    assert.match(historyHelper, /getHistoricalPacsReconciliationForPatient/);
+    assert.match(historyWrapper, /return getPatientHistoryForContext\(current\);/);
     assert.match(repo, /getProtocolingHistoricalPacsCandidates[\s\S]*?discoverHistoricalPacsCandidatesForPatient/);
   });
 });

@@ -469,7 +469,8 @@ export async function listProtocolAnatomyRegions(): Promise<ProtocolAnatomyRegio
 export async function listImagingScanners(): Promise<ImagingScannerRow[]> {
   const result = await pool.query(`
     select id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
-    from imaging_scanners
+    from equipment
+    where equipment_type in ('CT', 'MRI')
     order by is_active desc, modality asc, name asc
   `);
   return result.rows.map(mapScanner);
@@ -494,7 +495,7 @@ export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> 
            msp.is_active, msp.created_at, msp.updated_at,
            coalesce(aliases.items, '[]'::json) as scanner_aliases
     from mri_sequence_presets msp
-    left join imaging_scanners s on s.id = msp.scanner_id
+    left join equipment s on s.id = msp.scanner_id
     left join lateral (
       select json_agg(json_build_object(
         'id', alias.id,
@@ -507,7 +508,7 @@ export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> 
         'updated_at', alias.updated_at
       ) order by alias_scanner.name asc, alias.id asc) as items
       from mri_sequence_scanner_aliases alias
-      left join imaging_scanners alias_scanner on alias_scanner.id = alias.scanner_id
+      left join equipment alias_scanner on alias_scanner.id = alias.scanner_id
       where alias.mri_sequence_preset_id = msp.id
     ) aliases on true
     order by msp.is_active desc, coalesce(s.name, ''), msp.name asc
@@ -576,57 +577,6 @@ export async function updateProtocolAnatomyRegion(id: number, input: Partial<Pro
     ]
   );
   return result.rows[0] ? mapAnatomyRegion(result.rows[0]) : null;
-}
-
-export async function createImagingScanner(input: ImagingScannerInput): Promise<ImagingScannerRow> {
-  const result = await pool.query(
-    `
-      insert into imaging_scanners (name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, notes, is_active)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      returning id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
-    `,
-    [input.name, input.modality, input.vendor, input.model, input.fieldStrength, input.ctSliceDetectorSpecification, input.location, input.notes, input.isActive]
-  );
-  return mapScanner(result.rows[0]);
-}
-
-export async function updateImagingScanner(id: number, input: Partial<ImagingScannerInput>): Promise<ImagingScannerRow | null> {
-  const result = await pool.query(
-    `
-      update imaging_scanners
-      set
-        name = coalesce($2, name),
-        modality = coalesce($3, modality),
-        vendor = case when $4::boolean then $5 else vendor end,
-        model = case when $6::boolean then $7 else model end,
-        field_strength = case when $8::boolean then $9 else field_strength end,
-        ct_slice_detector_specification = case when $10::boolean then $11 else ct_slice_detector_specification end,
-        location = case when $12::boolean then $13 else location end,
-        notes = case when $14::boolean then $15 else notes end,
-        is_active = coalesce($16, is_active)
-      where id = $1
-      returning id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
-    `,
-    [
-      id,
-      input.name,
-      input.modality,
-      "vendor" in input,
-      input.vendor ?? null,
-      "model" in input,
-      input.model ?? null,
-      "fieldStrength" in input,
-      input.fieldStrength ?? null,
-      "ctSliceDetectorSpecification" in input,
-      input.ctSliceDetectorSpecification ?? null,
-      "location" in input,
-      input.location ?? null,
-      "notes" in input,
-      input.notes ?? null,
-      input.isActive,
-    ]
-  );
-  return result.rows[0] ? mapScanner(result.rows[0]) : null;
 }
 
 export async function createCtPhasePreset(input: CtPhasePresetInput): Promise<CtPhasePresetRow> {
@@ -903,7 +853,7 @@ async function mriSequencesForVersion(client: DbClient, versionId: number): Prom
              pms.plane_override, pms.coverage_override, pms.b_values_override, pms.timing_override,
              pms.notes_override, pms.is_required, pms.created_at, pms.updated_at
       from protocol_mri_sequences pms
-      left join imaging_scanners s on s.id = pms.scanner_id
+      left join equipment s on s.id = pms.scanner_id
       left join mri_sequence_presets msp on msp.id = pms.mri_sequence_preset_id
       left join mri_sequence_scanner_aliases msa on msa.mri_sequence_preset_id = msp.id and msa.scanner_id = pms.scanner_id
       where pms.protocol_version_id = $1

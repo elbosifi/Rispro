@@ -92,7 +92,7 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
           from appointment_protocol_assignments assignment
           left join protocols protocol on protocol.id = assignment.protocol_id
           left join protocol_versions version on version.id = assignment.protocol_version_id
-          left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+          left join equipment scanner on scanner.id = assignment.scanner_id
           left join users assigned_user on assigned_user.id = assignment.assigned_by
           left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
           where assignment.appointment_id = b.id
@@ -1403,7 +1403,7 @@ router.get(
         from appointment_protocol_assignments assignment
         left join protocols protocol on protocol.id = assignment.protocol_id
         left join protocol_versions version on version.id = assignment.protocol_version_id
-        left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+        left join equipment scanner on scanner.id = assignment.scanner_id
         left join users assigned_user on assigned_user.id = assignment.assigned_by
         left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
         where assignment.appointment_id = b.id

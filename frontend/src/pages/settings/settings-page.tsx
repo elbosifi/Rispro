@@ -28,6 +28,7 @@ import QzTrayPrintingSection from "./qz-tray-printing-section";
 import ExamTypesSection from "./exam-types-section";
 import UsersSection from "./users-section";
 import ModalitiesSection from "./modalities-section";
+import EquipmentSection from "./equipment-section";
 import NameDictionarySection from "./name-dictionary-section";
 import NotAllowedNameWordsSection from "./not-allowed-name-words-section";
 import PatientImportSection from "./patient-import-section";
@@ -246,6 +247,7 @@ export default function SettingsPage() {
             {section === "audit_log" && <AuditLogSection onReAuthRequired={requestReAuth} />}
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
+            {section === "equipment" && <EquipmentSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "not_allowed_name_words" && <NotAllowedNameWordsSection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
