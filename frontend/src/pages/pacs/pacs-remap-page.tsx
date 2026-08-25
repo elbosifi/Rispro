@@ -432,7 +432,11 @@ async function uploadMultipartWithProgress(
           reject(new ApiError("Upload response is missing a valid job ID.", xhr.status, body));
           return;
         }
-        resolve({ ...(body as UploadMultipartResult), job: normalizedJob });
+        const result: UploadMultipartResult = {
+          job: normalizedJob,
+          ...(typeof body.skippedFilesCount === "number" ? { skippedFilesCount: body.skippedFilesCount } : {}),
+        };
+        resolve(result);
         return;
       }
       const message = (body?.error as { message?: string } | undefined)?.message || (body?.message as string | undefined) || xhr.statusText || "Upload failed.";

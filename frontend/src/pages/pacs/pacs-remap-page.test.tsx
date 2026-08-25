@@ -1089,7 +1089,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByText(/75%|90%/)).toBeNull();
   });
 
-  it.each([["93", "numeric-string"], [93, "numeric"]])("accepts a %s multipart job ID and polls the normalized job", async (jobId) => {
+  it.each(["93", 93])("accepts a %s multipart job ID and polls the normalized job", async (jobId) => {
     const job = { id: jobId, status: "processing", processing_stage: "uploading_to_orthanc", staged_file_count: 5425, processed_file_count: 4 };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });

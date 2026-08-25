@@ -30,7 +30,7 @@ test("super admin can manage the protocol MWL gate in English and Arabic", async
   await page.getByText("Require protocol before modality worklist", { exact: true }).click();
   await expect(policySwitch).toBeChecked();
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("status")).toContainText("Modality worklist policy saved");
+  await expect(page.getByRole("status").filter({ hasText: "Modality worklist policy saved" })).toContainText("Modality worklist policy saved");
   await page.reload();
   await expect(policySwitch).toBeChecked();
 
@@ -44,7 +44,7 @@ test("super admin can manage the protocol MWL gate in English and Arabic", async
   await page.getByText("اشتراط البروتوكول قبل قائمة عمل الأجهزة", { exact: true }).click();
   await expect(arabicSwitch).not.toBeChecked();
   await page.getByRole("button", { name: "حفظ" }).click();
-  await expect(page.getByRole("status")).toContainText("تم حفظ سياسة قائمة عمل الأجهزة");
+  await expect(page.getByRole("status").filter({ hasText: "تم حفظ سياسة قائمة عمل الأجهزة" })).toContainText("تم حفظ سياسة قائمة عمل الأجهزة");
 });
 
 test("worklist monitor exposes the waiting-for-protocol status", async ({ page }) => {

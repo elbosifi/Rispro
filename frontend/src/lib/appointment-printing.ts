@@ -93,7 +93,6 @@ export async function printIrSpecimenLabelById(appointmentId: number, specimenTe
 }
 
 function showDirectPrintFailure(result: Extract<DirectPrintResult, { success: false }>, browserFallback: (() => void) | null, language?: Language): void {
-  const settings = loadQzPrinterSettings();
   const action = resolveDirectPrintFailureAction(result.errorCode, browserFallback != null, true);
   if (action === "BROWSER_PRINT" && browserFallback) {
     browserFallback();
