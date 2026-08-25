@@ -593,6 +593,7 @@ describe("Doctor protocoling request documents", () => {
     expect(within(modal).getByText("Implant/device site:").parentElement?.textContent).toContain("Left hip");
     expect(within(modal).getByText("Description:").parentElement?.textContent).toContain("Orthopedic fixation hardware");
     expect(within(modal).getByText("Previous reviewer reported by patient:").parentElement?.textContent).toContain("Dr. Previous");
+    expect(within(modal).getByTestId("protocol-entry-pane").contains(within(modal).getByTestId("mri-primary-safety-panel"))).toBe(true);
     expect(appointment.modalitySafetyWorkflowType).toBe("standard_acknowledgement");
   });
 

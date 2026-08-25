@@ -89,15 +89,15 @@ function MriPrimarySafetyPanel({ appointment }: { appointment: DoctorProtocoling
   if (appointment.modalitySafetyWorkflowType !== "mri_primary_implant_screening") return null;
 
   if (appointment.mriPrimaryScreeningResult === "no_known_implant_reported") {
-    return <section className="border-b border-emerald-300 bg-emerald-50 px-3 py-3 text-emerald-950 sm:px-4" aria-label="MRI primary screening"><p className="text-sm font-bold uppercase tracking-wide">MRI Primary Screening</p><p className="mt-0.5 text-base font-semibold">No known implant/device reported</p></section>;
+    return <section className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-2 text-emerald-950" aria-label="MRI primary screening" data-testid="mri-primary-safety-panel"><p className="text-xs font-bold uppercase tracking-wide">MRI Primary Screening</p><p className="mt-0.5 text-sm font-semibold">No known implant/device reported</p></section>;
   }
 
   const reviewRequired = appointment.mriPrimaryScreeningResult === "implant_reported_review_required";
   return (
-    <section className="border-b border-amber-300 bg-amber-50 px-3 py-3 text-amber-950 sm:px-4" aria-label="MRI primary screening">
+    <section className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-amber-950" aria-label="MRI primary screening" data-testid="mri-primary-safety-panel">
       <div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 shrink-0 text-amber-700" size={22} aria-hidden="true" /><div>
-        <p className="text-sm font-bold uppercase tracking-wide">{reviewRequired ? "MRI SAFETY REVIEW REQUIRED" : "MRI PRIMARY SCREENING NOT RECORDED"}</p>
-        {reviewRequired ? <p className="mt-0.5 text-base font-semibold">Implant/device reported during primary screening</p> : null}
+        <p className="text-xs font-bold uppercase tracking-wide">{reviewRequired ? "MRI SAFETY REVIEW REQUIRED" : "MRI PRIMARY SCREENING NOT RECORDED"}</p>
+        {reviewRequired ? <p className="mt-0.5 text-sm font-semibold">Implant/device reported during primary screening</p> : null}
         {reviewRequired && (appointment.mriPrimaryScreeningImplantSite || appointment.mriPrimaryScreeningImplantDescription || appointment.mriPrimaryScreeningPreviousReviewerNameReported) ? <dl className="mt-2 space-y-1 text-sm">
           {appointment.mriPrimaryScreeningImplantSite ? <div><dt className="inline font-semibold">Implant/device site: </dt><dd className="inline">{appointment.mriPrimaryScreeningImplantSite}</dd></div> : null}
           {appointment.mriPrimaryScreeningImplantDescription ? <div><dt className="inline font-semibold">Description: </dt><dd className="inline">{appointment.mriPrimaryScreeningImplantDescription}</dd></div> : null}
@@ -1616,8 +1616,6 @@ function ProtocolAssignmentModal({
           </div>
         </header>
 
-        <MriPrimarySafetyPanel appointment={appointment} />
-
         {loading ? (
           <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
             Loading appointment protocol details...
@@ -1673,7 +1671,8 @@ function ProtocolAssignmentModal({
                   {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="manual_candidate" manualSearchPatientId={oldPacsPatientIdMutation.variables} onReconcile={setReconciliationStudy} /></div> : null}
                 </section> : null}
                </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
-                 <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                 <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="protocol-entry-pane">
+                <MriPrimarySafetyPanel appointment={appointment} />
                 {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}
                 <div className="mb-3 flex rounded-lg border p-1" role="radiogroup" aria-label="Protocol entry mode" style={{ borderColor: "var(--border)" }}>
                   <button type="button" role="radio" aria-checked={protocolMode === "saved"} onClick={() => { setModeTouched(true); setProtocolModeOverride("saved"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "saved" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Saved protocol</button>
