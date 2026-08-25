@@ -344,13 +344,31 @@ function toIsoDate(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function isPositiveJobId(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+function normalizePositiveJobId(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function normalizeRemapJob(value: unknown): RemapJob | null {
+  if (!value || typeof value !== "object") return null;
+  const id = normalizePositiveJobId((value as { id?: unknown }).id);
+  return id == null ? null : { ...(value as RemapJob), id };
+}
+
+function requireNormalizedRemapJob(value: unknown): RemapJob {
+  const job = normalizeRemapJob(value);
+  if (!job) throw new Error("Response is missing a valid remap job ID.");
+  return job;
 }
 
 function requirePositiveJobId(value: unknown): number {
-  if (!isPositiveJobId(value)) throw new Error("A valid remap job ID is required.");
-  return value;
+  const jobId = normalizePositiveJobId(value);
+  if (jobId == null) throw new Error("A valid remap job ID is required.");
+  return jobId;
 }
 
 async function uploadMultipartWithProgress(
@@ -409,11 +427,12 @@ async function uploadMultipartWithProgress(
           reject(new ApiError("Upload response is missing job details.", xhr.status, body));
           return;
         }
-        if (!isPositiveJobId((job as { id?: unknown }).id)) {
+        const normalizedJob = normalizeRemapJob(job);
+        if (!normalizedJob) {
           reject(new ApiError("Upload response is missing a valid job ID.", xhr.status, body));
           return;
         }
-        resolve(body as unknown as UploadMultipartResult);
+        resolve({ ...(body as UploadMultipartResult), job: normalizedJob });
         return;
       }
       const message = (body?.error as { message?: string } | undefined)?.message || (body?.message as string | undefined) || xhr.statusText || "Upload failed.";
@@ -627,7 +646,10 @@ export default function PacsRemapPage() {
 
   const jobsQuery = useQuery({
     queryKey: ["pacs", "remap", "jobs"],
-    queryFn: () => api<{ jobs: RemapJob[] }>(remapApiPath("/pacs/remap/jobs?limit=20")),
+    queryFn: async () => {
+      const response = await api<{ jobs?: unknown }>(remapApiPath("/pacs/remap/jobs?limit=20"));
+      return { ...response, jobs: Array.isArray(response.jobs) ? response.jobs.map(normalizeRemapJob).filter((job): job is RemapJob => job != null) : [] };
+    },
     enabled: !comparisonRequestId,
     refetchInterval: (query) => {
       const jobs = (query.state.data as { jobs?: RemapJob[] } | undefined)?.jobs || [];
@@ -637,7 +659,10 @@ export default function PacsRemapPage() {
 
   const activeJobQuery = useQuery({
     queryKey: ["pacs", "remap", "active-job"],
-    queryFn: () => api<{ job: RemapJob | null; comparison: RemapComparison | null }>(remapApiPath("/pacs/remap/jobs/active")),
+    queryFn: async () => {
+      const response = await api<{ job?: unknown; comparison: RemapComparison | null }>(remapApiPath("/pacs/remap/jobs/active"));
+      return { ...response, job: normalizeRemapJob(response.job) };
+    },
     enabled: !comparisonRequestId,
     retry: 0,
   });
@@ -645,7 +670,7 @@ export default function PacsRemapPage() {
   const startupActiveJobCandidate = !autoResumeDismissed && workflowJobId == null && viewedRecentJobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
   const startupActiveJob = isAwaitingStagedJob(startupActiveJobCandidate) ? startupActiveJobCandidate : null;
   const effectiveJobId = viewedRecentJobId ?? workflowJobId ?? startupActiveJob?.id ?? null;
-  const selectedJobId = isPositiveJobId(effectiveJobId) ? effectiveJobId : null;
+  const selectedJobId = normalizePositiveJobId(effectiveJobId);
   const effectiveUiStep: RemapWizardUiStep = startupActiveJob
     ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
     : uiStep;
@@ -669,9 +694,10 @@ export default function PacsRemapPage() {
 
   const currentJobQuery = useQuery({
     queryKey: ["pacs", "remap", "job", selectedJobId],
-    queryFn: () => {
-      if (!isPositiveJobId(selectedJobId)) throw new Error("A valid remap job ID is required.");
-      return api<{ job: RemapJob; comparison: RemapComparison | null }>(remapApiPath(`/pacs/remap/jobs/${selectedJobId}`));
+    queryFn: async () => {
+      const validJobId = requirePositiveJobId(selectedJobId);
+      const response = await api<{ job: unknown; comparison: RemapComparison | null }>(remapApiPath(`/pacs/remap/jobs/${validJobId}`));
+      return { ...response, job: requireNormalizedRemapJob(response.job) };
     },
     enabled: selectedJobId != null,
     refetchInterval: (query) => {
@@ -980,13 +1006,14 @@ export default function PacsRemapPage() {
       assignWorkflowJob: boolean;
     }) => {
       const validJobId = requirePositiveJobId(targetJobId);
-      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-staged`), {
+      const response = await api<{ job: unknown }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-staged`), {
         method: "POST",
         body: JSON.stringify({
           ...confirmation,
           confirm: true,
         }),
       });
+      return { ...response, job: requireNormalizedRemapJob(response.job) };
     },
     onMutate: (variables) => {
       focusHeadingAfterNavigationRef.current = true;
@@ -1022,10 +1049,11 @@ export default function PacsRemapPage() {
   const confirmIncompleteStudyMutation = useMutation({
     mutationFn: async (targetJobId: number) => {
       const validJobId = requirePositiveJobId(targetJobId);
-      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-send`), {
+      const response = await api<{ job: unknown }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/confirm-send`), {
         method: "POST",
         body: JSON.stringify({ confirm: true, confirmIncompleteStudy: true }),
       });
+      return { ...response, job: requireNormalizedRemapJob(response.job) };
     },
     onSuccess: (data) => {
       setIncompleteStudyAcknowledged(false);
@@ -1073,10 +1101,11 @@ export default function PacsRemapPage() {
   const resendJobMutation = useMutation({
     mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob; confirmDestinationChecked?: boolean }) => {
       const validJobId = requirePositiveJobId(input.targetJobId);
-      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/resend`), {
+      const response = await api<{ job: unknown }>(remapApiPath(`/pacs/remap/jobs/${validJobId}/resend`), {
         method: "POST",
         body: JSON.stringify({ confirmDestinationChecked: input.confirmDestinationChecked === true }),
       });
+      return { ...response, job: requireNormalizedRemapJob(response.job) };
     },
     onMutate: (input) => {
       if (input.viewTargetJob) {
@@ -1124,7 +1153,8 @@ export default function PacsRemapPage() {
 
   const orthancRecoveryMutation = useMutation({
     mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob }) => {
-      return retryDicomRemapWithOrthanc<RemapJob>(input.targetJobId, comparisonRequestId);
+      const response = await retryDicomRemapWithOrthanc<unknown>(input.targetJobId, comparisonRequestId);
+      return { ...response, job: requireNormalizedRemapJob(response.job) };
     },
     onMutate: (input) => {
       if (input.viewTargetJob) {
@@ -1535,8 +1565,9 @@ export default function PacsRemapPage() {
     } else {
       resetWorkflow();
     }
-    if (!isPositiveJobId(cancellableJobId)) return;
-    void api(remapApiPath(`/pacs/remap/jobs/${cancellableJobId}/cancel`), {
+    const validCancellableJobId = normalizePositiveJobId(cancellableJobId);
+    if (validCancellableJobId == null) return;
+    void api(remapApiPath(`/pacs/remap/jobs/${validCancellableJobId}/cancel`), {
       method: "POST",
       body: JSON.stringify({ reason: "Operator cancelled secure staging before final confirmation." }),
     }).then(() => {

@@ -127,6 +127,17 @@ async function scanOne() {
   return file;
 }
 
+async function submitStandardProcessUpload() {
+  await scanOne();
+  fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+  fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+  await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+  fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+}
+
 async function reachReviewDuringUnresolvedSecureStaging() {
   FakeXHR.autoRespond = false;
   previewMock.mockResolvedValue({ ...result(), previewOnly: true });
@@ -1076,6 +1087,78 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
     expect(screen.getByText(/Sending to PACS/)).toBeTruthy();
     expect(screen.queryByText(/75%|90%/)).toBeNull();
+  });
+
+  it.each([["93", "numeric-string"], [93, "numeric"]])("accepts a %s multipart job ID and polls the normalized job", async (jobId) => {
+    const job = { id: jobId, status: "processing", processing_stage: "uploading_to_orthanc", staged_file_count: 5425, processed_file_count: 4 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, english_full_name: "John Doe", national_id: "N1" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+    FakeXHR.nextResponse = { status: 202, body: { job } };
+
+    renderPage();
+    await submitStandardProcessUpload();
+
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/93"));
+    expect(screen.queryByText("Upload response is missing a valid job ID.")).toBeNull();
+    expect(apiMock.mock.calls.some(([path]) => /\/pacs\/remap\/jobs\/(?:null|undefined|NaN|\[object Object\])(?:$|\/)/.test(String(path)))).toBe(false);
+  });
+
+  it.each([null, "null", 0, "0", "abc", "1.5", "9007199254740992"])("rejects invalid multipart job ID %s without a current-job request", async (jobId) => {
+    FakeXHR.nextResponse = { status: 202, body: { job: { id: jobId, status: "uploaded" } } };
+    renderPage();
+
+    await submitStandardProcessUpload();
+
+    expect(await screen.findByText("Upload response is missing a valid job ID.")).toBeTruthy();
+    expect(apiMock.mock.calls.some(([path]) => /^\/pacs\/remap\/jobs\/(?!active$)/.test(String(path)))).toBe(false);
+  });
+
+  it("normalizes a Recent Jobs string ID before selecting and requesting the job", async () => {
+    const job = { id: "93", status: "processing", processing_stage: "uploading_to_orthanc", staged_file_count: 5425, processed_file_count: 4 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#93.*Processing/i }));
+
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/93"));
+    expect(apiMock.mock.calls.some(([path]) => /\/pacs\/remap\/jobs\/(?:null|undefined|NaN|\[object Object\])(?:$|\/)/.test(String(path)))).toBe(false);
+  });
+
+  it("normalizes an active staged job string ID before auto-resuming it", async () => {
+    const job = {
+      id: "93",
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      provisional_source_identity: { studyInstanceUid: "1.2.93", patientId: "SOURCE-93", patientName: "Source^NinetyThree", patientBirthDate: "19900101", patientSex: "M", modality: "CT", studyDate: "20260101" },
+    };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Existing remap job #93 resumed automatically.")).toBeTruthy();
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/93"));
   });
 
   it("does not reinterpret an upload error as a singular active-job attachment", async () => {
