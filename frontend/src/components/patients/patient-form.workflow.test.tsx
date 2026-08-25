@@ -137,6 +137,35 @@ describe("PatientForm workflow hardening", () => {
     vi.mocked(deletePatient).mockResolvedValue({ ok: true });
   });
 
+  it("keeps the English name readonly for receptionists", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    const englishInput = screen.getByLabelText(/English Full Name/i) as HTMLInputElement;
+    expect(englishInput.readOnly).toBe(true);
+
+    await user.type(englishInput, "Manual English Name");
+    expect(englishInput.value).toBe("");
+  });
+
+  it("keeps the English name readonly for supervisors", () => {
+    authMock.user = { role: "supervisor" };
+    renderPatientForm({ mode: "create" });
+
+    expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).readOnly).toBe(true);
+  });
+
+  it("allows super admins to manually edit the English name", async () => {
+    const user = userEvent.setup();
+    authMock.user = { role: "super_admin" };
+    renderPatientForm({ mode: "create" });
+
+    const englishInput = screen.getByLabelText(/English Full Name/i) as HTMLInputElement;
+    expect(englishInput.readOnly).toBe(false);
+    await user.type(englishInput, "Manual English Name");
+    expect(englishInput.value).toBe("Manual English Name");
+  });
+
   it("shows post-success modal with 3 actions after create", async () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
@@ -572,6 +601,7 @@ describe("PatientForm workflow hardening", () => {
 
   it("allows save after manual English-name correction even when transliteration has unresolved tokens", async () => {
     const user = userEvent.setup();
+    authMock.user = { role: "super_admin" };
     vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({
       entries: [
         { arabicText: "محمد", englishText: "Mohamed" },

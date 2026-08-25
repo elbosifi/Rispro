@@ -339,6 +339,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   });
   const mutation = isEdit ? updateMutation : createMutation;
   const canDeletePatient = user?.role === "super_admin";
+  const canEditEnglishName = user?.role === "super_admin";
 
   const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
   const normalizeIdentifierForType = (type: IdentifierType, value: string) => {
@@ -626,8 +627,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       const tokensLabel = fullNameGeneration.missingTokens.join(", ");
       showToast(
         language === "ar"
-          ? `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس أو حرر الاسم الإنجليزي يدوياً.`
-          : `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary or edit English name manually.`,
+          ? canEditEnglishName
+            ? `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس أو حرر الاسم الإنجليزي يدوياً.`
+            : `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس.`
+          : canEditEnglishName
+            ? `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary or edit English name manually.`
+            : `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary.`,
         "error"
       );
       englishFullNameRef.current?.focus();
@@ -795,9 +800,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               aria-label={language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}
               value={form.englishFullName}
               onChange={(e) => {
+                if (!canEditEnglishName) return;
                 setDuplicateFocusField("englishFullName");
                 handleEnglishNameChange(e.target.value);
               }}
+              readOnly={!canEditEnglishName}
               onKeyDown={handleEnterNavigation("englishFullName")}
               dir="ltr"
               ref={englishFullNameRef}
@@ -811,7 +818,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 <button type="button" onClick={handleRegenerateEnglishName} className="ml-2 text-accent hover:underline">{language === "ar" ? "إعادة توليد" : "Regenerate"}</button>
               </p>
             )}
-            {englishNameManuallyEdited && (
+            {englishNameManuallyEdited && canEditEnglishName && (
               <p className="mt-2 text-sm font-medium text-amber-600">{language === "ar" ? "تم التحرير يدوياً. لن تؤثر التغييرات على الاسم العربي." : "Manually edited. Changes to Arabic name will not override this."}</p>
             )}
           </div>
