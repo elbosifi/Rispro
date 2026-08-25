@@ -10,31 +10,37 @@ export interface NameGenerationResult {
   missingTokens: string[];
 }
 
-export function generateEnglishFromDictionary(
-  arabicFullName: string,
-  dictionary: NameDictionaryLookup[]
-): NameGenerationResult {
-  const input = String(arabicFullName || "").trim();
-  if (!input) return { englishName: "", missingTokens: [] };
+export type CompiledNameDictionaryLookup = Map<string, string>;
 
-  const tokens = input.split(/\s+/);
-  const normalizedDict = new Map<string, string>();
+export function buildNameDictionaryLookup(dictionary: NameDictionaryLookup[]): CompiledNameDictionaryLookup {
+  const lookup = new Map<string, string>();
 
   for (const entry of dictionary) {
     const normalizedKey = normalizeArabicName(entry.arabic_text);
     const compactKey = normalizeArabicNameCompact(entry.arabic_text);
 
-    normalizedDict.set(normalizedKey, entry.english_text);
-    normalizedDict.set(compactKey, entry.english_text);
+    lookup.set(normalizedKey, entry.english_text);
+    lookup.set(compactKey, entry.english_text);
   }
 
+  return lookup;
+}
+
+export function generateEnglishFromDictionaryLookup(
+  arabicFullName: string,
+  lookup: CompiledNameDictionaryLookup
+): NameGenerationResult {
+  const input = String(arabicFullName || "").trim();
+  if (!input) return { englishName: "", missingTokens: [] };
+
+  const tokens = input.split(/\s+/);
   const englishParts: string[] = [];
   const missingTokens: string[] = [];
 
   for (let index = 0; index < tokens.length; index += 1) {
     const twoTokenPhrase = tokens.slice(index, index + 2).join(" ");
-    const phraseMatch = normalizedDict.get(normalizeArabicName(twoTokenPhrase))
-      || normalizedDict.get(normalizeArabicNameCompact(twoTokenPhrase));
+    const phraseMatch = lookup.get(normalizeArabicName(twoTokenPhrase))
+      || lookup.get(normalizeArabicNameCompact(twoTokenPhrase));
 
     if (phraseMatch) {
       englishParts.push(phraseMatch);
@@ -43,8 +49,8 @@ export function generateEnglishFromDictionary(
     }
 
     const token = tokens[index] || "";
-    const englishMatch = normalizedDict.get(normalizeArabicName(token))
-      || normalizedDict.get(normalizeArabicNameCompact(token));
+    const englishMatch = lookup.get(normalizeArabicName(token))
+      || lookup.get(normalizeArabicNameCompact(token));
 
     if (englishMatch) {
       englishParts.push(englishMatch);
@@ -57,4 +63,11 @@ export function generateEnglishFromDictionary(
     englishName: englishParts.join(" "),
     missingTokens
   };
+}
+
+export function generateEnglishFromDictionary(
+  arabicFullName: string,
+  dictionary: NameDictionaryLookup[]
+): NameGenerationResult {
+  return generateEnglishFromDictionaryLookup(arabicFullName, buildNameDictionaryLookup(dictionary));
 }

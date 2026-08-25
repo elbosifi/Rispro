@@ -5,6 +5,7 @@ import {
   applyNameDictionaryToPatients,
   deleteNameDictionaryEntry,
   fetchNameDictionary,
+  fetchUnresolvedNameDictionaryPatients,
   importNameDictionary,
   upsertNameDictionaryEntry,
 } from "@/lib/api-hooks";
@@ -34,6 +35,12 @@ export default function NameDictionaryPage() {
   const dictionaryQuery = useQuery({
     queryKey: ["name-dictionary"],
     queryFn: fetchNameDictionary,
+    retry: false,
+  });
+
+  const unresolvedPatientsQuery = useQuery({
+    queryKey: ["name-dictionary", "unresolved-patients"],
+    queryFn: fetchUnresolvedNameDictionaryPatients,
     retry: false,
   });
 
@@ -71,7 +78,8 @@ export default function NameDictionaryPage() {
 
   const applyMutation = useMutation({
     mutationFn: applyNameDictionaryToPatients,
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      await invalidate();
       pushToast({
         type: "success",
         title: t("nameDictionary.applied"),
@@ -156,6 +164,53 @@ export default function NameDictionaryPage() {
           <input value={englishText} onChange={(event) => setEnglishText(event.target.value)} className="input-premium input-ltr h-10" placeholder={t("nameDictionary.englishPlaceholder")} />
           <Button type="submit" disabled={saveMutation.isPending || !arabicText.trim() || !englishText.trim()}>{t("nameDictionary.addOrUpdate")}</Button>
         </form>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-foreground">{t("nameDictionary.unresolvedTitle")}</h3>
+            <p className="text-sm text-muted-foreground">{t("nameDictionary.unresolvedDescription")}</p>
+          </div>
+          <span className="text-sm text-muted-foreground">{t("nameDictionary.unresolvedCount", { count: unresolvedPatientsQuery.data?.unresolvedCount ?? 0 })}</span>
+        </div>
+
+        {unresolvedPatientsQuery.isLoading ? (
+          <p className="mt-4 text-sm text-muted-foreground">{t("settings.loading")}</p>
+        ) : unresolvedPatientsQuery.isError ? (
+          <p className="mt-4 text-sm text-muted-foreground">{t("nameDictionary.unresolvedLoadFailed")}</p>
+        ) : unresolvedPatientsQuery.data?.patients.length ? (
+          <div className="mt-4 overflow-auto rounded-lg border border-border">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-muted/50 text-muted-foreground">
+                <tr>
+                  <th className="p-2 text-start">{t("nameDictionary.patientId")}</th>
+                  <th className="p-2 text-start">{t("nameDictionary.arabic")}</th>
+                  <th className="p-2 text-start">{t("nameDictionary.currentEnglish")}</th>
+                  <th className="p-2 text-start">{t("nameDictionary.missingWords")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {unresolvedPatientsQuery.data.patients.map((patient) => (
+                  <tr key={patient.id} className="hover:bg-muted/30">
+                    <td className="p-2">{patient.id}</td>
+                    <td className="p-2 input-rtl">{patient.arabicFullName}</td>
+                    <td className="p-2 input-ltr">{patient.englishFullName || "—"}</td>
+                    <td className="p-2">
+                      <div className="flex flex-wrap gap-1">
+                        {patient.missingTokens.map((token, index) => (
+                          <span key={`${token}-${index}`} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{token}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted-foreground">{t("nameDictionary.unresolvedEmpty")}</p>
+        )}
       </Card>
 
       <Card className="p-4">

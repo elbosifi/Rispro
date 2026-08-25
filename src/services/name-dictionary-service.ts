@@ -1,7 +1,10 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
-import { generateEnglishFromDictionary } from "../utils/name-generation.js";
+import {
+  buildNameDictionaryLookup,
+  generateEnglishFromDictionaryLookup
+} from "../utils/name-generation.js";
 import type { UserId } from "../types/http.js";
 
 export interface NameDictionaryRow {
@@ -234,12 +237,13 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
         where coalesce(arabic_full_name, '') <> ''
       `
     );
+    const dictionaryLookup = buildNameDictionaryLookup(dictionaryRows);
 
     let updatedCount = 0;
     let skippedMissingTokensCount = 0;
 
     for (const patient of patientRows) {
-      const generated = generateEnglishFromDictionary(patient.arabic_full_name, dictionaryRows);
+      const generated = generateEnglishFromDictionaryLookup(patient.arabic_full_name, dictionaryLookup);
       if (generated.missingTokens.length > 0 || !generated.englishName.trim()) {
         skippedMissingTokensCount += 1;
         continue;
@@ -277,4 +281,49 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
   } finally {
     client.release();
   }
+}
+
+export async function listUnresolvedNameDictionaryPatients(): Promise<{
+  scannedCount: number;
+  unresolvedCount: number;
+  patients: Array<{
+    id: number;
+    arabicFullName: string;
+    englishFullName: string | null;
+    missingTokens: string[];
+  }>;
+}> {
+  const { rows: dictionaryRows } = await pool.query<NameDictionaryRow>(
+    `
+      select id, arabic_text, english_text, is_active, created_at
+      from name_dictionary
+      where is_active = true
+      order by arabic_text asc
+    `
+  );
+  const { rows: patientRows } = await pool.query<{ id: number; arabic_full_name: string; english_full_name: string | null }>(
+    `
+      select id, arabic_full_name, english_full_name
+      from patients
+      where coalesce(arabic_full_name, '') <> ''
+    `
+  );
+  const dictionaryLookup = buildNameDictionaryLookup(dictionaryRows);
+  const patients = patientRows.flatMap((patient) => {
+    const generated = generateEnglishFromDictionaryLookup(patient.arabic_full_name, dictionaryLookup);
+    return generated.missingTokens.length > 0
+      ? [{
+        id: patient.id,
+        arabicFullName: patient.arabic_full_name,
+        englishFullName: patient.english_full_name,
+        missingTokens: generated.missingTokens
+      }]
+      : [];
+  });
+
+  return {
+    scannedCount: patientRows.length,
+    unresolvedCount: patients.length,
+    patients
+  };
 }

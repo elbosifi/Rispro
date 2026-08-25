@@ -49,6 +49,23 @@ export async function fetchNameDictionary(): Promise<{ entries: PersistedDiction
   };
 }
 
+export interface UnresolvedNameDictionaryPatient {
+  id: number;
+  arabicFullName: string;
+  englishFullName: string | null;
+  missingTokens: string[];
+}
+
+export interface UnresolvedNameDictionaryResponse {
+  scannedCount: number;
+  unresolvedCount: number;
+  patients: UnresolvedNameDictionaryPatient[];
+}
+
+export async function fetchUnresolvedNameDictionaryPatients(): Promise<UnresolvedNameDictionaryResponse> {
+  return api<UnresolvedNameDictionaryResponse>("/settings/name-dictionary/unresolved-patients");
+}
+
 export async function upsertNameDictionaryEntry(arabicText: string, englishText: string) {
   return api<{ entry: RawRecord }>("/settings/name-dictionary", {
     method: "POST",
@@ -64,7 +81,7 @@ export async function applyNameDictionaryToPatients() {
   return api<{ scannedCount: number; updatedCount: number; skippedMissingTokensCount: number }>("/settings/name-dictionary/apply-to-patients", {
     method: "POST",
     body: JSON.stringify({})
-  });
+  }, 120_000);
 }
 
 export async function importNameDictionary(entries: { arabicText: string; englishText: string }[]) {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
 import {
+  applyNameDictionaryToPatients,
   applyCatalogWorkbookImport,
   createModality,
   deactivateModality,
@@ -10,6 +11,7 @@ import {
   fetchExamTypes,
   fetchModalitiesSettings,
   fetchNameDictionary,
+  fetchUnresolvedNameDictionaryPatients,
   fetchPatientNotAllowedNameWords,
   previewCatalogWorkbookImport,
   updateModality,
@@ -56,6 +58,19 @@ describe("settings catalog API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(4, "/settings/not-allowed-name-words");
     expect(api).toHaveBeenNthCalledWith(5, "/settings/not-allowed-name-words", { method: "POST", body: JSON.stringify({ arabicText: "test" }) });
     expect(api).toHaveBeenNthCalledWith(6, "/settings/not-allowed-name-words/5", { method: "DELETE" });
+  });
+
+  it("uses the unresolved-patients route and extended Apply timeout", async () => {
+    vi.mocked(api).mockResolvedValue({ patients: [], scannedCount: 0, unresolvedCount: 0 });
+
+    await fetchUnresolvedNameDictionaryPatients();
+    await applyNameDictionaryToPatients();
+
+    expect(api).toHaveBeenNthCalledWith(1, "/settings/name-dictionary/unresolved-patients");
+    expect(api).toHaveBeenNthCalledWith(2, "/settings/name-dictionary/apply-to-patients", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }, 120_000);
   });
 
   it("preserves catalog preview/apply payloads and 180-second timeout", async () => {

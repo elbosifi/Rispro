@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateEnglishFromDictionary } from "./name-generation.js";
+import {
+  buildNameDictionaryLookup,
+  generateEnglishFromDictionary,
+  generateEnglishFromDictionaryLookup
+} from "./name-generation.js";
 
 test("generateEnglishFromDictionary matches Arabic compound aliases with or without spaces", () => {
   const dictionary = [
@@ -21,4 +25,19 @@ test("generateEnglishFromDictionary matches Arabic compound aliases with or with
     englishName: "Nuruddin",
     missingTokens: [],
   });
+});
+
+test("compiled dictionary lookup preserves phrase matching and unresolved tokens", () => {
+  const dictionary = [
+    { arabic_text: "عبد الرحمن", english_text: "Abdulrahman" },
+    { arabic_text: "محمد", english_text: "Mohamed" },
+  ];
+  const arabicFullName = "عبد الرحمن محمد مجهول";
+  const expected = {
+    englishName: "Abdulrahman Mohamed",
+    missingTokens: ["مجهول"],
+  };
+
+  assert.deepEqual(generateEnglishFromDictionary(arabicFullName, dictionary), expected);
+  assert.deepEqual(generateEnglishFromDictionaryLookup(arabicFullName, buildNameDictionaryLookup(dictionary)), expected);
 });

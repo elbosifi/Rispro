@@ -38,6 +38,7 @@ import {
 import {
   deleteNameDictionaryEntry,
   listNameDictionary,
+  listUnresolvedNameDictionaryPatients,
   updateNameDictionaryEntry,
   upsertNameDictionary,
   applyNameDictionaryToPatients
@@ -174,6 +175,14 @@ settingsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const result = await applyNameDictionaryToPatients(request.user.sub as UserId);
+    res.json(result);
+  })
+);
+
+settingsRouter.get(
+  "/name-dictionary/unresolved-patients",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const result = await listUnresolvedNameDictionaryPatients();
     res.json(result);
   })
 );
