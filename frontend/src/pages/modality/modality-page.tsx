@@ -1600,8 +1600,10 @@ export default function ModalityPage() {
                       appointmentRefType="v2_booking"
                       previewMode="inline"
                       layout="workspace"
-                      readOnly
+                      enableLocalScan
+                      newDocumentType="clinical_document"
                       title={chooseLocalized(language, "وثائق طلب الفحص", "Examination request documents")}
+                      onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] })}
                     />
                   </section>
                 </div>

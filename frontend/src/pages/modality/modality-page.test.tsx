@@ -1440,8 +1440,35 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByTestId("clinical-appointment-notes").textContent).toContain("Needs interpreter");
   });
 
-  it("opens the read-only clinical workspace with an empty request-document state", async () => {
-    const user = await openBoard([appointment({ id: 6, accessionNumber: "ACC-WORKSPACE" })]);
+  it("lets modality staff ingest clinical documents from the selected appointment workspace", async () => {
+    const user = await openBoard(
+      [appointment({ id: 6, accessionNumber: "ACC-WORKSPACE" })],
+      [],
+      {
+        role: "modality_staff",
+        scanner: {
+          naps2WebScanEnabled: true,
+          naps2WebScanEndpoint: "http://127.0.0.1:18622",
+          scannerAppEnabled: true,
+        },
+      },
+    );
+    listAppointmentDocumentsMock.mockResolvedValue([{
+      id: 41,
+      patientId: 10,
+      appointmentId: null,
+      v2BookingId: 6,
+      documentType: "appointment_request",
+      originalFilename: "referral.png",
+      storedPath: "documents/referral.png",
+      mimeType: "image/png",
+      fileSize: 64,
+      storageLocationType: "local_fallback",
+      source: "manual_upload",
+      lastMoveAttemptAt: null,
+      lastMoveError: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }]);
 
     await user.click(screen.getByTestId("modality-board-row-6"));
 
@@ -1449,9 +1476,22 @@ describe("ModalityPage modality board", () => {
     expect(workspace).toBeTruthy();
     expect(within(workspace).getByTestId("clinical-protocol")).toBeTruthy();
     expect(within(workspace).getByTestId("clinical-request-documents")).toBeTruthy();
-    expect(within(workspace).getByText("No request documents yet.")).toBeTruthy();
-    expect(within(workspace).queryByTestId("document-file-input")).toBeNull();
-    expect(within(workspace).queryByRole("button", { name: "Attach Request" })).toBeNull();
+    expect(await within(workspace).findByText("referral.png")).toBeTruthy();
+    expect(within(workspace).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
+    const fileInput = within(workspace).getByTestId("document-file-input") as HTMLInputElement;
+    expect(within(workspace).getByText("Upload Clinical Document")).toBeTruthy();
+    expect(within(workspace).getByRole("button", { name: "Scan Paper" })).toBeTruthy();
+
+    await user.upload(fileInput, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
+    await user.click(within(workspace).getByRole("button", { name: "Attach Clinical Document" }));
+    await waitFor(() => expect(uploadAppointmentDocumentMock).toHaveBeenCalledWith(expect.objectContaining({
+      appointmentId: 6,
+      appointmentRefType: "v2_booking",
+      documentType: "clinical_document",
+      source: "manual_upload",
+    })));
+
+    expect(screen.getByTestId("clinical-workspace")).toBeTruthy();
     expect(within(workspace).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(workspace.className).toContain("lg:grid-cols-1");
   });
