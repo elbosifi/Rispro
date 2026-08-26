@@ -27,4 +27,4 @@ create index department_incidents_equipment_idx on department_incidents(equipmen
 create index department_incidents_patient_idx on department_incidents(patient_id);
 alter table documents add column incident_id bigint references department_incidents(id) on delete restrict;
 create index documents_incident_id_idx on documents(incident_id);
-create trigger trg_department_incidents_updated_at before update on department_incidents for each row execute function set_updated_at();
+create trigger trg_department_incidents_updated_at before update on department_incidents for each row execute function touch_protocol_management_updated_at();
