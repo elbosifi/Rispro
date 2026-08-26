@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../../../db/pool.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { logAuditEntry } from "../../../services/audit-service.js";
+import { PROTOCOLING_MODALITY_SQL } from "../../../services/protocoling-modality.js";
 
 export type ComplementaryRecallStatus = "pending_scheduling" | "scheduled" | "completed" | "cancelled";
 
@@ -18,6 +19,16 @@ export interface ComplementaryRecall {
   scheduledAt: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
+  patientDisplayName?: string | null;
+  patientMrn?: string | null;
+  patientIdentifier?: string | null;
+  originalAccession?: string;
+  originalExam?: string | null;
+  modalityName?: string | null;
+  modalityCode?: string | null;
+  requesterDisplayName?: string | null;
+  recallAppointmentAccession?: string | null;
+  recallAppointmentDate?: string | null;
 }
 export interface ComplementaryRecallBookingContext extends ComplementaryRecall { patientId: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; }
 
@@ -30,17 +41,27 @@ type RecallRow = {
 type Queryable = Pick<PoolClient, "query">;
 
 function map(row: RecallRow): ComplementaryRecall {
-  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at };
+  const extra = row as RecallRow & Record<string, unknown>;
+  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at, patientDisplayName: extra.patient_display_name == null ? null : String(extra.patient_display_name), patientMrn: extra.patient_mrn == null ? null : String(extra.patient_mrn), patientIdentifier: extra.patient_identifier == null ? null : String(extra.patient_identifier), originalAccession: extra.original_accession == null ? undefined : String(extra.original_accession), originalExam: extra.original_exam == null ? null : String(extra.original_exam), modalityName: extra.modality_name == null ? null : String(extra.modality_name), modalityCode: extra.modality_code == null ? null : String(extra.modality_code), requesterDisplayName: extra.requester_display_name == null ? null : String(extra.requester_display_name), recallAppointmentAccession: extra.recall_appointment_accession == null ? null : String(extra.recall_appointment_accession), recallAppointmentDate: extra.recall_appointment_date == null ? null : String(extra.recall_appointment_date) };
 }
 
 const SELECT = `id, original_appointment_id, recall_appointment_id, reception_instruction, technologist_instruction, status, requested_by_user_id, requested_at, reception_seen_at, scheduled_at, completed_at, cancelled_at`;
 
 export async function createComplementaryRecall(client: PoolClient, input: { originalAppointmentId: number; receptionInstruction: string | null; technologistInstruction: string; requestedByUserId: number }): Promise<ComplementaryRecall> {
-  const original = await client.query<{ id: number }>("select id from appointments_v2.bookings where id = $1 for update", [input.originalAppointmentId]);
+  const original = await client.query<{ id: number; status: string; exam_type_id: number | null; protocoling_modality: string | null }>(`select b.id, b.status, b.exam_type_id, ${PROTOCOLING_MODALITY_SQL} as protocoling_modality from appointments_v2.bookings b join modalities m on m.id = b.modality_id where b.id = $1 for update`, [input.originalAppointmentId]);
   if (!original.rows[0]) throw new HttpError(404, "Original appointment not found.");
+  if (original.rows[0].protocoling_modality == null) throw new HttpError(409, "Only CT or MRI protocoling appointments can receive a complementary recall.");
+  if (["cancelled", "discontinued", "voided"].includes(original.rows[0].status)) throw new HttpError(409, "The original appointment is not eligible for a complementary recall.");
+  if (original.rows[0].exam_type_id == null) throw new HttpError(409, "The original appointment requires an exam type before a complementary recall can be requested.");
   const text = input.technologistInstruction.trim();
   if (!text) throw new HttpError(400, "Technologist instruction is required.");
-  const result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, status, requested_by_user_id) values ($1,$2,$3,'pending_scheduling',$4) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, input.requestedByUserId]);
+  let result;
+  try {
+    result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, status, requested_by_user_id) values ($1,$2,$3,'pending_scheduling',$4) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, input.requestedByUserId]);
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") throw new HttpError(409, "An active complementary recall already exists for this appointment.");
+    throw error;
+  }
   const recall = map(result.rows[0]!);
   await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_requested", newValues: { originalAppointmentId: recall.originalAppointmentId, status: recall.status }, changedByUserId: input.requestedByUserId }, client);
   return recall;
@@ -60,17 +81,23 @@ export async function getComplementaryRecallBookingContext(id: number, client: Q
 }
 
 export async function listComplementaryRecalls(client: Queryable = pool): Promise<ComplementaryRecall[]> {
-  const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests order by requested_at desc, id desc`);
+  const result = await client.query<RecallRow>(`select r.${SELECT.replaceAll(", ", ", r.")}, coalesce(nullif(trim(p.english_full_name), ''), nullif(trim(p.arabic_full_name), '')) as patient_display_name, p.mrn as patient_mrn, coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_identifier, ('V2-' || lpad(original_booking.id::text, 6, '0')) as original_accession, et.name_en as original_exam, m.name_en as modality_name, m.code as modality_code, coalesce(nullif(trim(requester.full_name), ''), requester.username) as requester_display_name, case when return_booking.id is null then null else ('V2-' || lpad(return_booking.id::text, 6, '0')) end as recall_appointment_accession, return_booking.booking_date::text as recall_appointment_date from appointments_v2.complementary_recall_requests r join appointments_v2.bookings original_booking on original_booking.id = r.original_appointment_id join patients p on p.id = original_booking.patient_id join modalities m on m.id = original_booking.modality_id left join exam_types et on et.id = original_booking.exam_type_id left join users requester on requester.id = r.requested_by_user_id left join appointments_v2.bookings return_booking on return_booking.id = r.recall_appointment_id left join lateral (select pi.value from patient_identifiers pi where pi.patient_id = p.id and pi.is_primary = true order by pi.id asc limit 1) primary_identifier on true order by r.requested_at desc, r.id desc`);
   return result.rows.map(map);
 }
 
 export async function complementaryRecallUnseenCount(client: Queryable = pool): Promise<number> {
-  const result = await client.query<{ count: string }>("select count(*)::text as count from appointments_v2.complementary_recall_requests where reception_seen_at is null and status = 'pending_scheduling'");
+  const result = await client.query<{ count: string }>("select count(*)::text as count from appointments_v2.complementary_recall_requests where reception_seen_at is null and status in ('pending_scheduling', 'scheduled')");
   return Number(result.rows[0]?.count ?? 0);
 }
 
 export async function markComplementaryRecallSeen(client: PoolClient, id: number, userId: number): Promise<void> {
   await client.query("update appointments_v2.complementary_recall_requests set reception_seen_at = coalesce(reception_seen_at, now()), reception_seen_by_user_id = coalesce(reception_seen_by_user_id, $2) where id = $1", [id, userId]);
+}
+
+export async function markComplementaryRecallsSeen(client: PoolClient, ids: number[], userId: number): Promise<void> {
+  const validIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!validIds.length) return;
+  await client.query("update appointments_v2.complementary_recall_requests set reception_seen_at = coalesce(reception_seen_at, now()), reception_seen_by_user_id = coalesce(reception_seen_by_user_id, $2) where id = any($1::bigint[])", [validIds, userId]);
 }
 
 export async function lockComplementaryRecallForBooking(client: PoolClient, recallId: number, payload: { patientId: number; modalityId: number; examTypeId: number | null }): Promise<ComplementaryRecall> {

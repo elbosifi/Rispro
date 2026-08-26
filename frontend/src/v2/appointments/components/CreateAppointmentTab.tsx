@@ -881,22 +881,26 @@ export function CreateAppointmentTab({
         {/* Patient & Form Panel */}
         <div data-testid="appointment-form-region" className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
-            {complementaryRecallContext ? <div><label className="block text-sm font-semibold mb-2 text-foreground">Patient</label><div className="rounded-md border border-border bg-muted/30 p-3 text-sm">{form.patient ? formatAppointmentPatientName(language, form.patient, "Patient") : "Loading patient…"}</div><div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">Complementary recall</span><p className="mt-1 text-muted-foreground">{complementaryRecallContext.originalAccession} · {complementaryRecallContext.originalExam ?? "Original exam"}</p>{complementaryRecallContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{complementaryRecallContext.receptionInstruction}</p> : null}</div></div> : <PatientSearchSection
+            <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
               onSelectPatient={(patient: SelectedPatient) => {
+                if (complementaryRecallContext) return;
                 actions.setPatient(patient);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
                 setSafetyAcknowledged(false);
               }}
               onClearPatient={() => {
+                if (complementaryRecallContext) return;
                 actions.setPatient(null);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
                 setSafetyAcknowledged(false);
               }}
-            />}
+              locked={Boolean(complementaryRecallContext)}
+            />
+            {complementaryRecallContext ? <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">Complementary recall</span><p className="mt-1 text-muted-foreground">{complementaryRecallContext.originalAccession} · {complementaryRecallContext.originalExam ?? "Original exam"}</p>{complementaryRecallContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{complementaryRecallContext.receptionInstruction}</p> : null}</div> : null}
 
             {form.patientId != null && (patientNoShows.length > 0 || patientNoShowSummary?.bookingRestricted) && (
               <div className="mt-4 sm:mt-5 space-y-3">

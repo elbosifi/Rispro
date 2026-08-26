@@ -126,6 +126,9 @@ export async function createBookingInternal(
   approvedOverrideContext?: ApprovedOverrideContext,
   identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
+  if (payload.complementaryRecallRequestId != null && String(payload.studyInstanceUid ?? "").trim()) {
+    throw new HttpError(400, "Complementary recall bookings must not reuse a StudyInstanceUID.");
+  }
   const recall = payload.complementaryRecallRequestId == null
     ? null
     : await lockComplementaryRecallForBooking(client, Number(payload.complementaryRecallRequestId), {

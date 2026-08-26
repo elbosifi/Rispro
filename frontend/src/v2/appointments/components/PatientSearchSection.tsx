@@ -8,9 +8,10 @@ interface Props {
   onSelectPatient: (patient: SelectedPatient) => void;
   onClearPatient: () => void;
   caseCategory: "oncology" | "non_oncology";
+  locked?: boolean;
 }
 
-export function PatientSearchSection({ value, onSelectPatient, onClearPatient, caseCategory }: Props) {
+export function PatientSearchSection({ value, onSelectPatient, onClearPatient, caseCategory, locked = false }: Props) {
   const { language } = useLanguage();
   return (
     <div>
@@ -43,6 +44,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
         }}
         selectedPatient={value}
         onClear={onClearPatient}
+        locked={locked}
       />
     </div>
   );

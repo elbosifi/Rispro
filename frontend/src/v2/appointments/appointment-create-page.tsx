@@ -11,7 +11,10 @@ import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
 export function AppointmentCreatePage() {
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
-  const recallRequestId = Number(searchParams.get("recallRequestId"));
+  const recallRequestIdParam = searchParams.get("recallRequestId");
+  const recallMode = recallRequestIdParam !== null;
+  const recallRequestId = Number(recallRequestIdParam);
+  const hasValidRecallRequestId = Number.isInteger(recallRequestId) && recallRequestId > 0;
   const { user } = useAuth();
   const { language } = useLanguage();
   const lookups = useV2Lookups();
@@ -23,8 +26,8 @@ export function AppointmentCreatePage() {
     enabled: Boolean(user),
     staleTime: 60_000,
   });
-  const recallContextQuery = useQuery({ queryKey: ["complementary-recall", "booking-context", recallRequestId], queryFn: () => fetchComplementaryRecallBookingContext(recallRequestId), enabled: Number.isInteger(recallRequestId) && recallRequestId > 0, staleTime: 60_000 });
-  const parsedPatientId = recallContextQuery.data?.patientId ?? (urlPatientId ? Number(urlPatientId) : null);
+  const recallContextQuery = useQuery({ queryKey: ["complementary-recall", "booking-context", recallRequestId], queryFn: () => fetchComplementaryRecallBookingContext(recallRequestId), enabled: recallMode && hasValidRecallRequestId, staleTime: 60_000 });
+  const parsedPatientId = recallMode ? (recallContextQuery.data?.patientId ?? null) : (urlPatientId ? Number(urlPatientId) : null);
   const hasValidPatientId = Number.isInteger(parsedPatientId) && (parsedPatientId as number) > 0;
 
   const preloadPatientQuery = useQuery({
@@ -54,6 +57,17 @@ export function AppointmentCreatePage() {
         patientIdentitySelectionSource: "url_preselect"
       }
     : null;
+
+  if (recallMode) {
+    if (!hasValidRecallRequestId || recallContextQuery.isLoading || (recallContextQuery.isSuccess && preloadPatientQuery.isLoading)) {
+      return <div style={{ padding: "24px 16px" }}>Loading complementary recall context…</div>;
+    }
+
+    if (recallContextQuery.isError || preloadPatientQuery.isError || !recallContextQuery.data || !initialSelectedPatient) {
+      const error = recallContextQuery.error ?? preloadPatientQuery.error;
+      return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Unable to load the complementary recall booking context. {(error as Error | undefined)?.message ?? "Please return to Recall Requests and try again."}</div>;
+    }
+  }
 
   if (lookups.isLoading) {
     return <div style={{ padding: "24px 16px" }}>{t(language, "appointments.create.loadingLookups")}</div>;

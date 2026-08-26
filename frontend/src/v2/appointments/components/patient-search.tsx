@@ -48,6 +48,7 @@ interface PatientSearchProps {
   onClear: () => void;
   caseCategory: "oncology" | "non_oncology";
   transliterateMissingEnglish?: boolean;
+  locked?: boolean;
 }
 
 function getPrimaryIdentifier(patient: Patient, language: "ar" | "en"): { label: string; value: string | null } {
@@ -156,6 +157,7 @@ export function PatientSearch({
   onClear,
   caseCategory,
   transliterateMissingEnglish = false,
+  locked = false,
 }: PatientSearchProps) {
   const { language } = useLanguage();
   const [query, setQuery] = useState("");
@@ -282,7 +284,7 @@ export function PatientSearch({
           </div>
           {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationMethod(selectedPatient.availableVerificationMethods?.[0] ?? null); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
         </div>
-        <button
+        {!locked ? <button
           type="button"
           onClick={onClear}
           style={{
@@ -295,7 +297,7 @@ export function PatientSearch({
           title={t(language, "appointments.create.clearSelection")}
         >
           <X size={18} />
-        </button>
+        </button> : null}
       </div>
       <IdentityVerificationDialog language={language} patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
       </>
