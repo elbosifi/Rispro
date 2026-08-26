@@ -10,7 +10,7 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
-import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallUnseenCount } from "@/lib/api-hooks";
+import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallReceptionSummary } from "@/lib/api-hooks";
 import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
@@ -176,6 +176,7 @@ function NavButton({
   label,
   collapsed = false,
   showTooltip = true,
+  language,
   index,
   onClick
 }: {
@@ -184,10 +185,26 @@ function NavButton({
   label: string;
   collapsed?: boolean;
   showTooltip?: boolean;
+  language: Language;
   index: number;
   onClick: () => void;
 }) {
-  const { data: recallUnseen } = useQuery({ queryKey: ["complementary-recalls", "unseen-count"], queryFn: fetchComplementaryRecallUnseenCount, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
+  const { data: recallSummary } = useQuery({ queryKey: ["complementary-recalls", "reception-summary"], queryFn: fetchComplementaryRecallReceptionSummary, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
+  const previousSummary = useRef<typeof recallSummary>();
+  const pulseTimer = useRef<number>();
+  const [attentionPulse, setAttentionPulse] = useState(false);
+  useEffect(() => {
+    if (!recallSummary) return;
+    const previous = previousSummary.current;
+    previousSummary.current = recallSummary;
+    if (!previous || (recallSummary.pendingCount <= previous.pendingCount && !(previous.unseenPendingCount === 0 && recallSummary.unseenPendingCount > 0) && recallSummary.unseenPendingCount <= previous.unseenPendingCount)) return;
+    setAttentionPulse(true);
+    if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
+    pulseTimer.current = window.setTimeout(() => { setAttentionPulse(false); pulseTimer.current = undefined; }, 4_000);
+  }, [recallSummary]);
+  useEffect(() => () => { if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current); }, []);
+  const countLabel = language === "ar" ? `${recallSummary?.pendingCount ?? 0} طلبات تصوير إضافي بحاجة إلى حجز` : `${recallSummary?.pendingCount ?? 0} additional imaging requests need booking`;
+  const newLabel = language === "ar" ? "طلب تصوير إضافي جديد" : "New additional imaging request";
   return (
     <NavigationMenuItem
       icon={<NavIconGlyph icon={item.icon} size={16} />}
@@ -196,7 +213,8 @@ function NavButton({
       collapsed={collapsed}
       showTooltip={showTooltip}
       animationDelayMs={index * 40}
-      trailing={item.route === "recall.requests" && (recallUnseen ?? 0) > 0 ? <span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-foreground">{recallUnseen}</span> : null}
+      attentionPulse={item.route === "recall.requests" && attentionPulse}
+      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-foreground" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : null}
       onClick={onClick}
     />
   );
@@ -351,7 +369,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
       )}
       <div id={sectionId} className={`${collapsed || expanded ? "space-y-0.5" : "hidden"}`}>
         {items.map((item, index) => (
-          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} collapsed={collapsed} showTooltip={showTooltips} index={index} onClick={() => onNavigate(item.route)} />
+          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={index} onClick={() => onNavigate(item.route)} />
         ))}
       </div>
     </section>
@@ -387,7 +405,7 @@ function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGro
   return (
     <div className="space-y-2">
       {quickGroup ? <QuickActionsSection items={quickGroup.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} /> : null}
-      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} collapsed={collapsed} showTooltip={showTooltips} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
       {afterDashboard}
       {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => onToggleGroup(group.key)} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} />)}
     </div>

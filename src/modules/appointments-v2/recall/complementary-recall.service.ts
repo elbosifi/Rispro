@@ -91,6 +91,11 @@ export async function complementaryRecallUnseenCount(client: Queryable = pool): 
   return Number(result.rows[0]?.count ?? 0);
 }
 
+export async function complementaryRecallReceptionSummary(client: Queryable = pool): Promise<{ pendingCount: number; unseenPendingCount: number }> {
+  const result = await client.query<{ pending_count: string; unseen_pending_count: string }>("select count(*) filter (where status = 'pending_scheduling')::text as pending_count, count(*) filter (where status = 'pending_scheduling' and reception_seen_at is null)::text as unseen_pending_count from appointments_v2.complementary_recall_requests");
+  return { pendingCount: Number(result.rows[0]?.pending_count ?? 0), unseenPendingCount: Number(result.rows[0]?.unseen_pending_count ?? 0) };
+}
+
 export async function markComplementaryRecallSeen(client: PoolClient, id: number, userId: number): Promise<void> {
   await client.query("update appointments_v2.complementary_recall_requests set reception_seen_at = coalesce(reception_seen_at, now()), reception_seen_by_user_id = coalesce(reception_seen_by_user_id, $2) where id = $1", [id, userId]);
 }

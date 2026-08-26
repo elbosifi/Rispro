@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
-import { completeComplementaryRecallForBooking, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
@@ -65,6 +65,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
 
   it("joins the reception work queue and keeps unseen independent of scheduled state", async () => {
     if (!testData) return;
+    const summaryBefore = await complementaryRecallReceptionSummary();
     const unseenBefore = await complementaryRecallUnseenCount();
     const originalId = await originalBooking();
     const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Call before booking", technologistInstruction: "Repeat delayed phase", requestedByUserId: testData.userId }));
@@ -76,9 +77,11 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(row?.receptionInstruction, "Call before booking");
     assert.equal(row?.technologistInstruction, "Repeat delayed phase");
     assert.ok(row?.originalAccession);
+    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBefore.pendingCount + 1, unseenPendingCount: summaryBefore.unseenPendingCount + 1 });
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore + 1);
     await transaction((client) => markComplementaryRecallsSeen(client, [recall.id], testData.userId));
     assert.equal((await getComplementaryRecall(recall.id))?.status, "pending_scheduling");
+    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBefore.pendingCount + 1, unseenPendingCount: summaryBefore.unseenPendingCount });
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore);
   });
 
@@ -86,11 +89,13 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     if (!testData) return;
     const originalId = await originalBooking();
     const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat contrast phase", requestedByUserId: testData.userId }));
+    const summaryAfterCreate = await complementaryRecallReceptionSummary();
     await assert.rejects(() => createBooking({ complementaryRecallRequestId: recall.id, patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-13", bookingTime: "10:00", caseCategory: "non_oncology", studyInstanceUid: "1.2.3" }, testData.userId, "supervisor", testData.policySetKey), { statusCode: 400 });
     const created = await createBooking({ complementaryRecallRequestId: recall.id, patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-13", bookingTime: "10:00", caseCategory: "non_oncology" }, testData.userId, "supervisor", testData.policySetKey);
     const returnBookingId = Number(created.booking.id);
     const scheduled = await getComplementaryRecall(recall.id);
     assert.equal(scheduled?.recallAppointmentId, returnBookingId);
+    assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryAfterCreate.pendingCount - 1);
     const assignment = await pool.query<{ free_text_protocol: string; scanner_id: number | null }>("select free_text_protocol, scanner_id from appointment_protocol_assignments where appointment_id = $1", [returnBookingId]);
     assert.deepEqual(assignment.rows[0], { free_text_protocol: "Repeat contrast phase", scanner_id: null });
     const eligibility = await resolveMwlEligibilityForBooking(returnBookingId);
@@ -108,13 +113,17 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     if (!testData) return;
     const originalId = await originalBooking();
     const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", requestedByUserId: testData.userId }));
+    await transaction((client) => markComplementaryRecallsSeen(client, [recall.id], testData.userId));
     const returnId = await originalBooking();
     await transaction((client) => linkComplementaryRecallBooking(client, recall, returnId, testData.userId));
     await assert.rejects(() => transaction((client) => withdrawComplementaryRecall(client, recall.id, testData.userId)), { statusCode: 409 });
+    const summaryBeforeReopen = await complementaryRecallReceptionSummary();
     await transaction((client) => reopenComplementaryRecallForUncompletedBooking(client, returnId, testData.userId, "no-show"));
     const reopened = await getComplementaryRecall(recall.id);
     assert.equal(reopened?.status, "pending_scheduling");
     assert.equal(reopened?.recallAppointmentId, null);
+    assert.equal(reopened?.receptionSeenAt, null);
+    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBeforeReopen.pendingCount + 1, unseenPendingCount: summaryBeforeReopen.unseenPendingCount + 1 });
     const cancelled = await transaction((client) => withdrawComplementaryRecall(client, recall.id, testData.userId));
     assert.equal(cancelled.status, "cancelled");
     assert.equal(cancelled.recallAppointmentId, null);
@@ -123,6 +132,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
 
   it("edits only pending instructions and makes the request unseen again", async () => {
     if (!testData) return;
+    const summaryBefore = await complementaryRecallReceptionSummary();
     const unseenBefore = await complementaryRecallUnseenCount();
     const pendingOriginalId = await originalBooking();
     const pending = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: pendingOriginalId, receptionInstruction: "Old reception", technologistInstruction: "Old technologist", requestedByUserId: testData.userId }));
@@ -134,6 +144,8 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(updated.status, "pending_scheduling");
     assert.equal(updated.recallAppointmentId, null);
     assert.equal((await getComplementaryRecall(pending.id))?.receptionSeenAt, null);
+    assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryBefore.pendingCount + 1);
+    assert.equal((await complementaryRecallReceptionSummary()).unseenPendingCount, summaryBefore.unseenPendingCount + 1);
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore + 1);
     await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, pending.id, { receptionInstruction: null, technologistInstruction: "   ", actorUserId: testData.userId })), { statusCode: 400 });
 

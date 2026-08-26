@@ -7,6 +7,7 @@ interface NavigationMenuItemProps {
   collapsed?: boolean;
   showTooltip?: boolean;
   animationDelayMs?: number;
+  attentionPulse?: boolean;
   trailing?: ReactNode;
   onClick: () => void;
 }
@@ -18,23 +19,25 @@ export function NavigationMenuItem({
   collapsed = false,
   showTooltip = true,
   animationDelayMs,
+  attentionPulse = false,
   trailing,
   onClick,
 }: NavigationMenuItemProps) {
   const buttonStyle: CSSProperties = {
-    backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent",
+    backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : attentionPulse ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
     color: active ? "var(--accent)" : "var(--foreground)",
     border: active ? "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))" : "1px solid transparent",
-    boxShadow: active ? "var(--shadow-sm)" : "none",
+    boxShadow: active || attentionPulse ? "var(--shadow-sm)" : "none",
     animationDelay: animationDelayMs == null ? undefined : `${animationDelayMs}ms`,
   };
 
   return (
     <button
       type="button"
-      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors duration-150 ${collapsed ? "justify-center px-2" : ""}`}
+      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors duration-150 ${attentionPulse ? "animate-pulse" : ""} ${collapsed ? "justify-center px-2" : ""}`}
       style={buttonStyle}
       data-active={active ? "true" : "false"}
+      data-attention-pulse={attentionPulse ? "true" : "false"}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
       aria-label={label}

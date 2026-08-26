@@ -4,6 +4,8 @@ export type ComplementaryRecall = { id: number; originalAppointmentId: number; r
 
 export async function fetchComplementaryRecalls(): Promise<ComplementaryRecall[]> { return (await api<{ recalls: ComplementaryRecall[] }>("/v2/complementary-recall-requests")).recalls; }
 export async function fetchComplementaryRecallUnseenCount(): Promise<number> { return (await api<{ count: number }>("/v2/complementary-recall-requests/unseen-count")).count; }
+export type ComplementaryRecallReceptionSummary = { pendingCount: number; unseenPendingCount: number; };
+export async function fetchComplementaryRecallReceptionSummary(): Promise<ComplementaryRecallReceptionSummary> { return api<ComplementaryRecallReceptionSummary>("/v2/complementary-recall-requests/reception-summary"); }
 export async function markComplementaryRecallsSeen(ids: number[]): Promise<void> { await api<void>("/v2/complementary-recall-requests/mark-seen", { method: "POST", body: JSON.stringify({ ids }) }); }
 export async function fetchComplementaryRecall(id: number): Promise<ComplementaryRecall> { return (await api<{ recall: ComplementaryRecall }>(`/v2/complementary-recall-requests/${id}`)).recall; }
 export type ComplementaryRecallBookingContext = ComplementaryRecall & { patientId: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; };
