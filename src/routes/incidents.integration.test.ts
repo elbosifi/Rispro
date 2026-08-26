@@ -15,7 +15,7 @@ test("incident routes enforce the create and review role matrix and keep attachm
   const equipment = await pool.query<{ id: number }>("insert into equipment(name,equipment_type,modality,vendor,model,location,is_active) values($1,'WORKSTATION',null,'test','test','test',true) returning id", [`Incident route workstation ${suffix}`]);
   const cookies = new Map(await Promise.all(["receptionist", "modality_staff", "doctor", "administrative", "supervisor", "super_admin"].map(async (role) => [role, await createUser(role)] as const)));
   const server = http.createServer(createApp()); await new Promise<void>((resolve) => server.listen(0, resolve)); const port = (server.address() as { port: number }).port;
-  const request = async (path: string, cookie: string, method: "POST" | "PATCH", body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json", cookie }, body: JSON.stringify(body) });
+  const request = async (path: string, cookie: string, method: "GET" | "POST" | "PATCH", body?: unknown) => fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json", cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
   try {
     for (const role of cookies.keys()) {
       const response = await request("/api/incidents", cookies.get(role)!, "POST", { incidentType: "equipment", occurredAt: "2026-08-27T10:00:00.000Z", equipmentId: equipment.rows[0]!.id, equipmentCondition: "operational", description: `create ${role}` });
@@ -26,6 +26,11 @@ test("incident routes enforce the create and review role matrix and keep attachm
     for (const role of ["receptionist", "modality_staff", "doctor"]) assert.equal((await request(`/api/incidents/${reviewId}/review`, cookies.get(role)!, "PATCH", { status: "under_review", reviewNotes: "review" })).status, 403, role);
     const blocked = await request("/api/documents", cookies.get("receptionist")!, "POST", { incidentId: reviewId, documentType: "incident_attachment", originalFilename: "bypass.pdf", mimeType: "application/pdf", fileContentBase64: Buffer.from("pdf").toString("base64") });
     assert.equal(blocked.status, 400); assert.match(JSON.stringify(await blocked.json()), /incidentId.*incident attachment/i); assert.equal((await pool.query("select 1 from documents where incident_id=$1", [reviewId])).rowCount, 0);
+    for (const queryName of ["incidentId", "incident_id"]) {
+      const blockedList = await request(`/api/documents?${queryName}=${reviewId}`, cookies.get("receptionist")!, "GET");
+      assert.equal(blockedList.status, 400, queryName);
+      assert.match(JSON.stringify(await blockedList.json()), /incidentId.*incident attachment/i, queryName);
+    }
     const attachment = await request(`/api/incidents/${reviewId}/attachments`, cookies.get("receptionist")!, "POST", { originalFilename: "attachment.png", mimeType: "image/png", fileContentBase64: Buffer.from("png").toString("base64") });
     assert.equal(attachment.status, 201); const attachmentPayload = await attachment.json() as { document: { id: number; stored_path?: string; content_sha256?: string } }; documentIds.push(attachmentPayload.document.id); assert.equal(attachmentPayload.document.stored_path, undefined); assert.equal(attachmentPayload.document.content_sha256, undefined);
   } finally {

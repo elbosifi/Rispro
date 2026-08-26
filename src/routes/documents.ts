@@ -29,6 +29,11 @@ documentsRouter.get(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
     const query = asUnknownRecord(req.query);
+    const incidentId = query.incidentId ?? query.incident_id;
+    if (incidentId != null && String(incidentId).trim() !== "") {
+      res.status(400).json({ error: { message: "incidentId is only supported by the incident attachment endpoint." } });
+      return;
+    }
     const documents = await listDocuments({
       patientId: asOptionalUserId(query.patientId),
       appointmentId: asOptionalUserId(query.appointmentId),
