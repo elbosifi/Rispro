@@ -463,6 +463,12 @@ router.get(
           ${requireRequestDocumentForProtocolQueueParam}::boolean as require_request_document_for_protocol_queue,
           ${protocolingModalityAppliesSql(`(${PROTOCOLING_MODALITY_SQL})`)} as protocol_queue_applies_to_appointment,
           ${qualifyingRequestDocumentExistsSql("b.id")} as has_qualifying_request_document,
+          (complementary_return.id is not null) as is_additional_imaging,
+          complementary_return.original_appointment_id,
+          ('V2-' || lpad(complementary_return.original_appointment_id::text, 6, '0')) as original_accession,
+          original_exam.name_en as original_exam,
+          original_exam.name_ar as original_exam_ar,
+          original_exam.name_en as original_exam_en,
           ${PROTOCOL_ASSIGNMENT_SELECT},
           (
             select count(*)::int
@@ -481,6 +487,9 @@ router.get(
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
         left join users voided_by_user on voided_by_user.id = b.voided_by_user_id
+        left join appointments_v2.complementary_recall_requests complementary_return on complementary_return.recall_appointment_id = b.id
+        left join appointments_v2.bookings original_booking on original_booking.id = complementary_return.original_appointment_id
+        left join exam_types original_exam on original_exam.id = original_booking.exam_type_id
         ${PROTOCOL_ASSIGNMENT_JOIN}
         ${whereClause}
       )

@@ -35,6 +35,21 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(detailRoute, /original_exam\.name_en as original_exam_en/);
   });
 
+  it("includes complementary linkage fields in the Registration appointment list read", () => {
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
+    const listRoute = routes.match(/router\.get\(\s*"\/appointments"[\s\S]*?\n\);/)?.[0] ?? "";
+
+    assert.match(listRoute, /left join appointments_v2\.complementary_recall_requests complementary_return on complementary_return\.recall_appointment_id = b\.id/);
+    assert.match(listRoute, /left join appointments_v2\.bookings original_booking on original_booking\.id = complementary_return\.original_appointment_id/);
+    assert.match(listRoute, /left join exam_types original_exam on original_exam\.id = original_booking\.exam_type_id/);
+    assert.match(listRoute, /\(complementary_return\.id is not null\) as is_additional_imaging/);
+    assert.match(listRoute, /complementary_return\.original_appointment_id/);
+    assert.match(listRoute, /\('V2-' \|\| lpad\(complementary_return\.original_appointment_id::text, 6, '0'\)\) as original_accession/);
+    assert.match(listRoute, /original_exam\.name_en as original_exam/);
+    assert.match(listRoute, /original_exam\.name_ar as original_exam_ar/);
+    assert.match(listRoute, /original_exam\.name_en as original_exam_en/);
+  });
+
   it("only exposes the active non-cancelled CT/MRI assignment summary", () => {
     const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
 
