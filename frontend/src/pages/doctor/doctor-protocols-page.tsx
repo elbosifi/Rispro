@@ -1533,7 +1533,7 @@ function ProtocolAssignmentModal({
     freeTextProtocol: protocolMode === "free-text" ? nullableText(freeTextProtocol) : null,
     status: "ASSIGNED",
   });
-  const hasMoreProtocolActions = true;
+  const hasMoreProtocolActions = Boolean(printableSheet || existing);
   const displayedRequiresReport = reportOverride?.appointmentId === appointment.appointmentId ? reportOverride.value : appointment.requiresReport;
   const toggleActionMenu = () => {
     if (actionMenuOpen) {
@@ -1684,12 +1684,11 @@ function ProtocolAssignmentModal({
                  {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
                  </div>
                  <div className="sticky bottom-0 z-20 mt-auto flex shrink-0 items-center justify-end gap-1.5 border-t bg-background p-2" style={{ borderColor: "var(--border)" }}>
-                   <div className="me-auto flex items-center gap-2">{appointment.appointmentStatus === "completed" && appointment.activeComplementaryRecall == null ? <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => setRecallDialogOpen(true)}>Request additional imaging</Button> : null}{annotationDirty ? <span className="text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}</div>
+                   <div className="me-auto flex items-center gap-2">{appointment.appointmentStatus === "completed" && appointment.activeComplementaryRecall == null ? <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => setRecallDialogOpen(true)}>Request additional imaging</Button> : null}{appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <Button type="button" variant="destructive" size="sm" disabled={saving || withdrawRecallMutation.isPending} onClick={() => setWithdrawRecallDialogOpen(true)}>Withdraw request</Button> : null}{annotationDirty ? <span className="text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}</div>
                     {hasMoreProtocolActions ? <div ref={actionMenuAnchorRef} className="relative">
                       <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
                       {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
                         {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
-                        {appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <button type="button" role="menuitem" disabled={saving || withdrawRecallMutation.isPending} onClick={() => { setActionMenuOpen(false); setWithdrawRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Withdraw request</button> : null}
                         {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}
