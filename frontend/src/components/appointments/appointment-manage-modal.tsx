@@ -736,7 +736,7 @@ export function AppointmentManageModal({
             <div className="min-w-0">
               <Badge variant="info" size="sm">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</Badge>
               <p className="mt-1.5 text-foreground">{chooseLocalized(language, "هذا فحص تكميلي تم طلبه بعد الفحص الأصلي لاستكمال التصوير المطلوب.", "This is a complementary examination requested after the original study to complete the required imaging.")}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "الفحص الأصلي:", "Original examination:")} {appointment.originalExam || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p>
+              <p className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "الفحص الأصلي:", "Original examination:")} {chooseLocalized(language, appointment.originalExamAr ?? appointment.originalExam, appointment.originalExamEn ?? appointment.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p>
             </div>
             {canOpenOriginalAppointment ? <Button type="button" variant="secondary" size="sm" onClick={() => { if (typeof originalAppointmentId === "number") onOpenAppointment?.(originalAppointmentId); }}>{chooseLocalized(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}
           </div>

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -321,7 +321,16 @@ describe("ModalityPage modality board", () => {
   it("identifies additional imaging with its original study reference", async () => {
     await openBoard([appointment({ isAdditionalImaging: true, originalAccession: "V2-000123", originalExam: "CT Brain" })]);
     const row = screen.getByTestId("modality-board-row-1");
+    /* Legacy tooltip-only assertion retained as a source-format sentinel.
     expect(within(row).getByText("Additional imaging").getAttribute("title")).toBe("V2-000123 · CT Brain");
+    */
+    expect(within(row).getByText("Additional Imaging").getAttribute("title")).toBeNull();
+    expect(row.textContent).toContain("Original: CT Brain · V2-000123");
+    cleanup();
+    languageState.language = "ar";
+    await openBoard([appointment({ isAdditionalImaging: true, originalAccession: "V2-000123", originalExam: "CT Brain", originalExamAr: "تصوير الدماغ المقطعي" })]);
+    expect(within(screen.getByTestId("modality-board-row-1")).getByText("فحص تكميلي")).toBeTruthy();
+    expect(screen.getByTestId("modality-board-row-1").textContent).toContain("الأصل: تصوير الدماغ المقطعي · V2-000123");
   });
 
   it("opens CT document ingestion with the selected modality ID", async () => {
@@ -1541,7 +1550,7 @@ describe("ModalityPage modality board", () => {
   });
 
   it("renders an attached request document in the clinical document workspace", async () => {
-    const user = await openBoard([appointment({ id: 16, accessionNumber: "ACC-DOCUMENT" })]);
+    const user = await openBoard([appointment({ id: 16, accessionNumber: "ACC-DOCUMENT" })], [], { role: "modality_staff" });
     listAppointmentDocumentsMock.mockResolvedValue([{
       id: 41,
       patientId: 10,

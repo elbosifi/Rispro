@@ -1328,6 +1328,8 @@ router.get(
         ,complementary_return.original_appointment_id
         ,('V2-' || lpad(complementary_return.original_appointment_id::text, 6, '0')) as original_accession
         ,original_exam.name_en as original_exam
+        ,original_exam.name_ar as original_exam_ar
+        ,original_exam.name_en as original_exam_en
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id

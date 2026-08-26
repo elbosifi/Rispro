@@ -1104,7 +1104,7 @@ export default function ModalityPage() {
                                     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
                                       <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
                                     ) : null}
-                                    {appointment.isAdditionalImaging ? <span className="inline-flex items-center whitespace-nowrap text-[11px] font-medium text-violet-700" title={[appointment.originalAccession, appointment.originalExam].filter(Boolean).join(" · ")}>Additional imaging</span> : null}
+                                    {appointment.isAdditionalImaging ? <div className="min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, appointment.originalExamAr ?? appointment.originalExam, appointment.originalExamEn ?? appointment.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p></div> : null}
                                   </div>
                                 ) : null}
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}

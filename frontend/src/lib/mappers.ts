@@ -153,6 +153,8 @@ export interface AppointmentWithDetails extends Appointment {
   originalAppointmentId?: number | null;
   originalAccession?: string | null;
   originalExam?: string | null;
+  originalExamAr?: string | null;
+  originalExamEn?: string | null;
 }
 
 export interface NoShowCandidate {
@@ -438,6 +440,8 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     originalAppointmentId: numOrNull(raw, "original_appointment_id") ?? numOrNull(raw, "originalAppointmentId"),
     originalAccession: strOrNull(raw, "original_accession") ?? strOrNull(raw, "originalAccession"),
     originalExam: strOrNull(raw, "original_exam") ?? strOrNull(raw, "originalExam"),
+    originalExamAr: strOrNull(raw, "original_exam_ar") ?? strOrNull(raw, "originalExamAr"),
+    originalExamEn: strOrNull(raw, "original_exam_en") ?? strOrNull(raw, "originalExamEn"),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
