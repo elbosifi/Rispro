@@ -321,7 +321,7 @@ describe("ModalityPage modality board", () => {
   it("identifies additional imaging with its original study reference", async () => {
     await openBoard([appointment({ isAdditionalImaging: true, originalAccession: "V2-000123", originalExam: "CT Brain" })]);
     const row = screen.getByTestId("modality-board-row-1");
-    expect(within(row).getByText("Additional imaging")).toHaveAttribute("title", "V2-000123 · CT Brain");
+    expect(within(row).getByText("Additional imaging").getAttribute("title")).toBe("V2-000123 · CT Brain");
   });
 
   it("opens CT document ingestion with the selected modality ID", async () => {
