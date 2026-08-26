@@ -702,6 +702,8 @@ export function AppointmentManageModal({
   const canVoidAppointment = user?.role === "supervisor" || user?.role === "super_admin";
   const mobileDocumentsWorkspace = isMobileViewport && activeTab === "documents" && !documentReviewExpanded;
   const mobileDocumentFooterVisible = isMobileViewport && Boolean(appointment) && activeTab === "documents" && !documentReviewExpanded && canAttachDocuments;
+  const originalAppointmentId = appointment?.originalAppointmentId;
+  const canOpenOriginalAppointment = typeof originalAppointmentId === "number" && Number.isSafeInteger(originalAppointmentId) && originalAppointmentId > 0;
   const moreMenuItems = appointment ? <>
     {selectedCanReschedule ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("reschedule"); }}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button> : null}
     <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("status"); }}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button>
@@ -736,7 +738,7 @@ export function AppointmentManageModal({
               <p className="mt-1.5 text-foreground">{chooseLocalized(language, "هذا فحص تكميلي تم طلبه بعد الفحص الأصلي لاستكمال التصوير المطلوب.", "This is a complementary examination requested after the original study to complete the required imaging.")}</p>
               <p className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "الفحص الأصلي:", "Original examination:")} {appointment.originalExam || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p>
             </div>
-            {Number.isSafeInteger(appointment.originalAppointmentId) && appointment.originalAppointmentId > 0 ? <Button type="button" variant="secondary" size="sm" onClick={() => onOpenAppointment?.(appointment.originalAppointmentId!)}>{chooseLocalized(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}
+            {canOpenOriginalAppointment ? <Button type="button" variant="secondary" size="sm" onClick={() => { if (typeof originalAppointmentId === "number") onOpenAppointment?.(originalAppointmentId); }}>{chooseLocalized(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}
           </div>
         </section> : null}
         {/*
