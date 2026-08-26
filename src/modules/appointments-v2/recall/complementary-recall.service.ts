@@ -76,6 +76,7 @@ export async function getComplementaryRecallBookingContext(id: number, client: Q
   const result = await client.query<RecallRow & { patient_id: number; modality_id: number; exam_type_id: number | null; original_exam: string | null }>(`select r.${SELECT.replaceAll(", ", ", r.")}, b.patient_id, b.modality_id, b.exam_type_id, et.name_en as original_exam from appointments_v2.complementary_recall_requests r join appointments_v2.bookings b on b.id = r.original_appointment_id left join exam_types et on et.id = b.exam_type_id where r.id = $1`, [id]);
   const row = result.rows[0];
   if (!row || row.exam_type_id == null) return null;
+  if (row.status !== "pending_scheduling") throw new HttpError(409, "Complementary recall is not available for booking.");
   const recall = map(row);
   return { ...recall, patientId: Number(row.patient_id), modalityId: Number(row.modality_id), examTypeId: Number(row.exam_type_id), originalAccession: `V2-${String(recall.originalAppointmentId).padStart(6, "0")}`, originalExam: row.original_exam };
 }

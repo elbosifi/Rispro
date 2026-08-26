@@ -103,6 +103,20 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
         overrideReason: "",
       }));
     },
+    applyLockedPatientIdentityVerification(patient: SelectedPatient) {
+      setForm((prev) => {
+        if (!prev.patient || prev.patientId !== patient.id) return prev;
+        return {
+          ...prev,
+          patient: {
+            ...prev.patient,
+            patientIdentityVerificationProof: patient.patientIdentityVerificationProof ?? prev.patient.patientIdentityVerificationProof ?? null,
+            patientIdentityVerificationMethod: patient.patientIdentityVerificationMethod ?? prev.patient.patientIdentityVerificationMethod ?? null,
+            patientIdentitySelectionSource: prev.patient.patientIdentitySelectionSource ?? patient.patientIdentitySelectionSource ?? "url_preselect",
+          },
+        };
+      });
+    },
     setModalityId(modalityId: number | null) {
       setForm((prev) => ({
         ...prev,

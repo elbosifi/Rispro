@@ -59,7 +59,11 @@ export function AppointmentCreatePage() {
     : null;
 
   if (recallMode) {
-    if (!hasValidRecallRequestId || recallContextQuery.isLoading || (recallContextQuery.isSuccess && preloadPatientQuery.isLoading)) {
+    if (!hasValidRecallRequestId) {
+      return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Invalid complementary recall request ID.</div>;
+    }
+
+    if (recallContextQuery.isLoading || (recallContextQuery.isSuccess && preloadPatientQuery.isLoading)) {
       return <div style={{ padding: "24px 16px" }}>Loading complementary recall context…</div>;
     }
 

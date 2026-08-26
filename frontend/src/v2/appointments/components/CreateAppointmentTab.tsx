@@ -885,7 +885,10 @@ export function CreateAppointmentTab({
               value={form.patient}
               caseCategory={form.caseCategory}
               onSelectPatient={(patient: SelectedPatient) => {
-                if (complementaryRecallContext) return;
+                if (complementaryRecallContext) {
+                  actions.applyLockedPatientIdentityVerification(patient);
+                  return;
+                }
                 actions.setPatient(patient);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
