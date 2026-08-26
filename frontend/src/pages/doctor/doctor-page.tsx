@@ -38,6 +38,7 @@ import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists-page";
 import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { EnglishLanguageScope } from "@/providers/language-provider-component";
+import RecallRequestsPage from "@/pages/recall-requests/recall-requests-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -55,6 +56,7 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
+  { path: "/doctor/additional-imaging", label: "Additional Imaging", icon: ClipboardList },
   { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList },
 ];
 
@@ -297,6 +299,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
         path="protocols"
         element={canAccessProtocolsPage(me) ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
+      <Route path="additional-imaging" element={me.canAssignProtocols ? <RecallRequestsPage mode="doctor" /> : <Navigate to="/doctor/my-work" replace />} />
       <Route
         path="team-workload"
         element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
@@ -458,7 +461,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
 
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
-    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV.filter((item) => item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) : [];
+    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV.filter((item) => (item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) && (item.path !== "/doctor/additional-imaging" || me.canAssignProtocols)) : [];
     const byPath = new Map<string, DoctorPortalNavItem>();
     baseNav.forEach((item) => byPath.set(item.path, item));
     if (canManageClinicalRoster(me)) {

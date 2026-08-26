@@ -26,7 +26,7 @@ import {
 import { requirePatientIdentityReconciliationAccess } from "../../services/patient-identity-reconciliation-service.js";
 import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingAppointmentStatusFilter, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
-import { createComplementaryRecall, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
+import { createComplementaryRecall, listComplementaryRecalls, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 
 const router = Router();
 
@@ -177,6 +177,22 @@ router.post("/appointments/:appointmentId/complementary-recalls", asyncRoute(asy
 router.post("/complementary-recalls/:recallId/withdraw", asyncRoute(async (req: DoctorRequest, res: Response) => {
   const userId = await requireProtocolingAccess(req);
   const recall = await withTransaction((client) => withdrawComplementaryRecall(client, positiveInteger(req.params.recallId, "recallId"), userId!));
+  res.json({ recall });
+}));
+
+router.get("/complementary-recalls", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  await requireProtocolingAccess(req);
+  res.json({ recalls: await listComplementaryRecalls() });
+}));
+
+router.patch("/complementary-recalls/:recallId", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  const userId = await requireProtocolingAccess(req);
+  const body = asUnknownRecord(req.body);
+  const technologistInstruction = body.technologistInstruction;
+  if (typeof technologistInstruction !== "string") throw new HttpError(400, "Technologist instruction is required.");
+  const receptionInstruction = body.receptionInstruction ?? body.reception_instruction;
+  if (receptionInstruction != null && typeof receptionInstruction !== "string") throw new HttpError(400, "Reception instruction must be a string or null.");
+  const recall = await withTransaction((client) => updateComplementaryRecallInstructions(client, positiveInteger(req.params.recallId, "recallId"), { receptionInstruction: typeof receptionInstruction === "string" ? receptionInstruction : null, technologistInstruction, actorUserId: userId! }));
   res.json({ recall });
 }));
 

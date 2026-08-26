@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
-import { completeComplementaryRecallForBooking, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { completeComplementaryRecallForBooking, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
@@ -119,5 +119,40 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(cancelled.status, "cancelled");
     assert.equal(cancelled.recallAppointmentId, null);
     assert.equal((await pool.query("select id from appointments_v2.bookings where id = $1", [returnId])).rowCount, 1);
+  });
+
+  it("edits only pending instructions and makes the request unseen again", async () => {
+    if (!testData) return;
+    const unseenBefore = await complementaryRecallUnseenCount();
+    const pendingOriginalId = await originalBooking();
+    const pending = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: pendingOriginalId, receptionInstruction: "Old reception", technologistInstruction: "Old technologist", requestedByUserId: testData.userId }));
+    await transaction((client) => markComplementaryRecallsSeen(client, [pending.id], testData.userId));
+    assert.equal(await complementaryRecallUnseenCount(), unseenBefore);
+    const updated = await transaction((client) => updateComplementaryRecallInstructions(client, pending.id, { receptionInstruction: "  New reception  ", technologistInstruction: "  New technologist  ", actorUserId: testData.userId }));
+    assert.equal(updated.receptionInstruction, "New reception");
+    assert.equal(updated.technologistInstruction, "New technologist");
+    assert.equal(updated.status, "pending_scheduling");
+    assert.equal(updated.recallAppointmentId, null);
+    assert.equal((await getComplementaryRecall(pending.id))?.receptionSeenAt, null);
+    assert.equal(await complementaryRecallUnseenCount(), unseenBefore + 1);
+    await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, pending.id, { receptionInstruction: null, technologistInstruction: "   ", actorUserId: testData.userId })), { statusCode: 400 });
+
+    const scheduledOriginalId = await originalBooking();
+    const scheduled = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: scheduledOriginalId, receptionInstruction: null, technologistInstruction: "Scheduled", requestedByUserId: testData.userId }));
+    const scheduledReturnId = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, scheduled, scheduledReturnId, testData.userId));
+    await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, scheduled.id, { receptionInstruction: null, technologistInstruction: "Nope", actorUserId: testData.userId })), { statusCode: 409 });
+
+    const completedOriginalId = await originalBooking();
+    const completed = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: completedOriginalId, receptionInstruction: null, technologistInstruction: "Completed", requestedByUserId: testData.userId }));
+    const completedReturn = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, completed, completedReturn, testData.userId));
+    await transaction((client) => completeComplementaryRecallForBooking(client, completedReturn, testData.userId));
+    await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, completed.id, { receptionInstruction: null, technologistInstruction: "Nope", actorUserId: testData.userId })), { statusCode: 409 });
+
+    const withdrawnOriginalId = await originalBooking();
+    const withdrawn = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: withdrawnOriginalId, receptionInstruction: null, technologistInstruction: "Withdrawn", requestedByUserId: testData.userId }));
+    await transaction((client) => withdrawComplementaryRecall(client, withdrawn.id, testData.userId));
+    await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, withdrawn.id, { receptionInstruction: null, technologistInstruction: "Nope", actorUserId: testData.userId })), { statusCode: 409 });
   });
 });

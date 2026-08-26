@@ -2,6 +2,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, MoreVertical, Pencil, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   activateProtocolLibraryVersion,
   cancelDoctorProtocolAssignment,
@@ -1091,6 +1092,8 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
 function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
   const [modality, setModality] = useState<"" | "CT" | "MRI">("");
@@ -1100,6 +1103,12 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const [search, setSearch] = useState("");
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const value = new URLSearchParams(location.search).get("appointmentId");
+    const appointmentId = Number(value);
+    if (Number.isInteger(appointmentId) && appointmentId > 0) setSelectedAppointmentId(appointmentId);
+  }, [location.search]);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -1162,6 +1171,8 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
     if (assignmentBusy) return;
     setSelectedAppointmentId(null);
     setAssignmentError(null);
+    const params = new URLSearchParams(location.search);
+    if (params.has("appointmentId")) { params.delete("appointmentId"); navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: true }); }
   };
   const openAssignmentModal = (appointmentId: number) => {
     setAssignmentError(null);
@@ -1678,7 +1689,7 @@ function ProtocolAssignmentModal({
                       <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
                       {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
                         {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
-                        {appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <button type="button" role="menuitem" disabled={saving || withdrawRecallMutation.isPending} onClick={() => { setActionMenuOpen(false); setWithdrawRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Withdraw request</button> : appointment.appointmentStatus === "completed" ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); setRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Request additional imaging</button> : null}
+                        {appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <button type="button" role="menuitem" disabled={saving || withdrawRecallMutation.isPending} onClick={() => { setActionMenuOpen(false); setWithdrawRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Withdraw request</button> : appointment.appointmentStatus === "completed" && appointment.activeComplementaryRecall == null ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); setRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Request additional imaging</button> : null}
                         {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}

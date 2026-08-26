@@ -20,6 +20,7 @@ import type {
   AvailabilityStatus, LeaveType, RosterDutyType, RosterTeamRole, ModalityProtocolAssignment,
   ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType, ProtocolingPatientHistoryResponse, ProtocolingHistoricalPacsCandidatesResponse, HistoricalPacsCandidate,
 } from "@/types/api";
+import type { ComplementaryRecall } from "./complementary-recalls";
 
 const MRI_SEQUENCE_IMPORT_TIMEOUT_MS = 180_000;
 
@@ -1145,6 +1146,14 @@ export async function createComplementaryRecallRequest(appointmentId: number, pa
 
 export async function withdrawComplementaryRecallRequest(recallId: number) {
   return api<{ recall: { id: number; status: string; recallAppointmentId: number | null } }>(`/doctor/protocoling/complementary-recalls/${recallId}/withdraw`, { method: "POST" });
+}
+
+export async function fetchDoctorComplementaryRecalls(): Promise<ComplementaryRecall[]> {
+  return (await api<{ recalls: ComplementaryRecall[] }>("/doctor/protocoling/complementary-recalls")).recalls;
+}
+
+export async function updateDoctorComplementaryRecallInstructions(recallId: number, payload: { receptionInstruction: string | null; technologistInstruction: string }): Promise<ComplementaryRecall> {
+  return (await api<{ recall: ComplementaryRecall }>(`/doctor/protocoling/complementary-recalls/${recallId}`, { method: "PATCH", body: JSON.stringify(payload) })).recall;
 }
 
 export async function createDoctorProtocolAssignment(appointmentId: number, payload: ProtocolAssignmentPayload): Promise<DoctorProtocolingAppointmentDetail> {

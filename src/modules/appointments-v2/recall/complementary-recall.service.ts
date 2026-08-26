@@ -146,6 +146,20 @@ export async function withdrawComplementaryRecall(client: PoolClient, id: number
   return cancelled;
 }
 
+export async function updateComplementaryRecallInstructions(client: PoolClient, id: number, input: { receptionInstruction: string | null; technologistInstruction: string; actorUserId: number }): Promise<ComplementaryRecall> {
+  const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where id = $1 for update`, [id]);
+  if (!result.rows[0]) throw new HttpError(404, "Complementary recall request not found.");
+  const recall = map(result.rows[0]);
+  if (recall.status !== "pending_scheduling" || recall.recallAppointmentId != null) throw new HttpError(409, "Additional imaging instructions can only be edited before a return appointment is booked.");
+  const technologistInstruction = input.technologistInstruction.trim();
+  if (!technologistInstruction) throw new HttpError(400, "Technologist instruction is required.");
+  const receptionInstruction = input.receptionInstruction?.trim() || null;
+  const changed = await client.query<RecallRow>(`update appointments_v2.complementary_recall_requests set reception_instruction = $2, technologist_instruction = $3, reception_seen_at = null, reception_seen_by_user_id = null where id = $1 returning ${SELECT}`, [id, receptionInstruction, technologistInstruction]);
+  const updated = map(changed.rows[0]!);
+  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_instructions_updated", oldValues: { receptionInstruction: recall.receptionInstruction, technologistInstruction: recall.technologistInstruction }, newValues: { receptionInstruction: updated.receptionInstruction, technologistInstruction: updated.technologistInstruction }, changedByUserId: input.actorUserId }, client);
+  return updated;
+}
+
 /** @deprecated Use reopenComplementaryRecallForUncompletedBooking with an outcome reason. */
 export const reopenComplementaryRecallForCancelledBooking = (client: PoolClient, bookingId: number, actorUserId: number) => reopenComplementaryRecallForUncompletedBooking(client, bookingId, actorUserId, "cancelled");
 /** @deprecated Use withdrawComplementaryRecall. */
