@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { AppointmentManageModal } from "@/components/appointments/appointment-manage-modal";
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import { fetchComplementaryRecalls, withdrawComplementaryRecall, type ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import { fetchDoctorComplementaryRecalls, updateDoctorComplementaryRecallInstructions, withdrawComplementaryRecallRequest } from "@/lib/api/doctor-portal-reporting";
@@ -23,6 +24,7 @@ function variant(status: RecallStatus) { return ({ pending_scheduling: "warning"
 export default function RecallRequestsPage({ mode = "reception" }: RecallRequestsPageProps) {
   const navigate = useNavigate(); const queryClient = useQueryClient(); const { user } = useAuth(); const { language, isArabic } = useLanguage();
   const [filter, setFilter] = useState<FilterStatus>("pending_scheduling");
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<ComplementaryRecall | null>(null);
   const [editTarget, setEditTarget] = useState<ComplementaryRecall | null>(null);
   const [receptionInstruction, setReceptionInstruction] = useState(""); const [technologistInstruction, setTechnologistInstruction] = useState("");
@@ -50,9 +52,9 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
     <div className="rounded-2xl border border-border bg-card p-4 shadow-sm"><p className="text-sm font-medium">{local("تصفية حسب الحالة", "Filter by status")}</p><div className="mt-3 flex flex-wrap gap-2">{[...statuses, "all" as const].map((status) => <Button key={status} type="button" size="sm" variant={filter === status ? "secondary" : "ghost"} aria-pressed={filter === status} onClick={() => setFilter(status)}>{status === "all" ? local("الكل", "All") : label(language, status)} <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">({status === "all" ? rows.length : counts[status]})</span></Button>)}</div></div>
     <div className="overflow-hidden rounded-2xl border border-border bg-card">{recalls.isLoading ? <div className="p-5 text-sm text-muted-foreground">{local("جارٍ التحميل…", "Loading…")}</div> : recalls.isError ? <div className="p-5 text-sm text-muted-foreground">{local("تعذر تحميل طلبات التصوير الإضافي.", "Unable to load additional imaging requests.")}</div> : filtered.length === 0 ? <div className="p-8 text-center"><p className="font-medium">{local("لا توجد طلبات بهذه الحالة", "No requests with this status")}</p><p className="mt-1 text-sm text-muted-foreground">{local("اختر حالة أخرى لعرض الطلبات.", "Choose another status to view requests.")}</p></div> : filtered.map((recall) => {
       const status = recall.status as RecallStatus; const isSessionNew = mode === "reception" && sessionNewIds.has(recall.id);
-      const original = () => navigate(`${mode === "reception" ? "/registrations" : "/doctor/protocols"}?appointmentId=${recall.originalAppointmentId}${mode === "reception" ? "&tab=details" : ""}`);
-      const complementary = () => recall.recallAppointmentId && navigate(`${mode === "reception" ? "/registrations" : "/doctor/protocols"}?appointmentId=${recall.recallAppointmentId}${mode === "reception" ? "&tab=details" : ""}`);
-      const previousComplementary = () => recall.previousAttemptAppointmentId && navigate(`${mode === "reception" ? "/registrations" : "/doctor/protocols"}?appointmentId=${recall.previousAttemptAppointmentId}${mode === "reception" ? "&tab=details" : ""}`);
+      const original = () => mode === "reception" ? setSelectedAppointmentId(recall.originalAppointmentId) : navigate(`/doctor/protocols?appointmentId=${recall.originalAppointmentId}`);
+      const complementary = () => recall.recallAppointmentId && (mode === "reception" ? setSelectedAppointmentId(recall.recallAppointmentId) : navigate(`/doctor/protocols?appointmentId=${recall.recallAppointmentId}`));
+      const previousComplementary = () => recall.previousAttemptAppointmentId && (mode === "reception" ? setSelectedAppointmentId(recall.previousAttemptAppointmentId) : navigate(`/doctor/protocols?appointmentId=${recall.previousAttemptAppointmentId}`));
       const complementaryAccession = recall.recallAppointmentAccession || `V2-${String(recall.recallAppointmentId).padStart(6, "0")}`;
       const previousComplementaryAccession = `V2-${String(recall.previousAttemptAppointmentId).padStart(6, "0")}`;
       const metadata = [[local("تم الطلب", "Requested"), formatDateTimeLy(recall.requestedAt)], recall.scheduledAt ? [local("تم الحجز", "Booked"), formatDateTimeLy(recall.scheduledAt)] : null, recall.recallAppointmentDate ? [local("تاريخ الموعد التكميلي", "Complementary appointment date"), formatDateLy(recall.recallAppointmentDate)] : null, recall.completedAt ? [local("مكتمل", "Completed"), formatDateTimeLy(recall.completedAt)] : null, recall.cancelledAt ? [local("تم السحب", "Withdrawn"), formatDateTimeLy(recall.cancelledAt)] : null].filter((item): item is [string, string] => item != null);
@@ -60,5 +62,15 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
     })}</div>
     <Dialog open={withdrawTarget != null} onClose={() => { if (!withdraw.isPending) setWithdrawTarget(null); }}><DialogContent aria-labelledby="withdraw-title"><DialogHeader closeLabel={local("إغلاق", "Close")}><DialogTitle id="withdraw-title">{local("سحب طلب التصوير الإضافي", "Withdraw additional imaging request")}</DialogTitle></DialogHeader>{withdrawTarget ? <><DialogDescription>{local("سيتم سحب الطلب من قائمة الحجز النشطة، وسيبقى في السجل.", "The additional-imaging request will be withdrawn from the active scheduling queue but remain in history.")}</DialogDescription><div className="mt-4 rounded-lg bg-muted/40 p-3 text-sm"><p className="font-medium">{patient(withdrawTarget)}</p><p className="mt-1 text-muted-foreground">{local("رقم الوصول الأصلي", "Original accession")}: <span dir="ltr">{accession(withdrawTarget)}</span></p></div></> : null}<DialogFooter><Button type="button" variant="secondary" disabled={withdraw.isPending} onClick={() => setWithdrawTarget(null)}>{local("إلغاء", "Cancel")}</Button><Button type="button" variant="destructive" disabled={withdraw.isPending} onClick={() => { if (withdrawTarget && !withdrawalSubmitting.current) withdraw.mutate(withdrawTarget.id); }}>{local("سحب الطلب", "Withdraw request")}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={editTarget != null} onClose={() => { if (!edit.isPending) setEditTarget(null); }}><DialogContent aria-labelledby="edit-title"><DialogHeader closeLabel={local("إغلاق", "Close")}><DialogTitle id="edit-title">{local("تعديل طلب التصوير الإضافي", "Edit additional imaging request")}</DialogTitle></DialogHeader><div className="grid gap-3"><label className="grid gap-1 text-sm font-medium">{local("تعليمات الاستقبال", "Reception instruction")}<textarea value={receptionInstruction} onChange={(event) => setReceptionInstruction(event.target.value)} className="min-h-20 rounded-md border border-input bg-background p-2 font-normal" /></label><label className="grid gap-1 text-sm font-medium">{local("تعليمات فني الأشعة", "Technologist instruction")}<textarea required value={technologistInstruction} onChange={(event) => setTechnologistInstruction(event.target.value)} className="min-h-24 rounded-md border border-input bg-background p-2 font-normal" /></label>{edit.isError ? <p role="alert" className="text-sm text-red-700">{edit.error instanceof Error ? edit.error.message : local("تعذر حفظ التغييرات.", "Unable to save changes.")}</p> : null}</div><DialogFooter><Button type="button" variant="secondary" disabled={edit.isPending} onClick={() => setEditTarget(null)}>{local("إلغاء", "Cancel")}</Button><Button type="button" disabled={!technologistInstruction.trim() || edit.isPending} onClick={() => edit.mutate()}>{edit.isPending ? local("جارٍ الحفظ…", "Saving…") : local("حفظ التغييرات", "Save changes")}</Button></DialogFooter></DialogContent></Dialog>
+    {mode === "reception" && selectedAppointmentId ? (
+      <AppointmentManageModal
+        key={selectedAppointmentId}
+        appointmentId={selectedAppointmentId}
+        open
+        initialTab="details"
+        onClose={() => setSelectedAppointmentId(null)}
+        onOpenAppointment={(appointmentId) => setSelectedAppointmentId(appointmentId)}
+      />
+    ) : null}
   </div>;
 }
