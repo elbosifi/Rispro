@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { printIncidentReport } from "./incident-printing";
 
+const equipmentIncident = (overrides = {}) => ({ id: 1, incidentNumber: "INC-1", incident_type: "equipment" as const, status: "submitted" as const, occurred_at: "2026-08-26", created_at: "2026-08-26", description: "<script>", immediate_action: null, review_notes: "<review>", reporter_name: "Reporter", equipment_name: "MRI Scanner A", equipment_type: "MRI", location: "Room 1", equipment_condition: "operational", vendor_contacted: true, vendor_contact_person: "Vendor", vendor_reference: "TICKET-1", patient_arabic_name: null, patient_english_name: null, mrn: null, clinical_category: null, harm_level: null, ...overrides });
 describe("printIncidentReport", () => {
   const write = vi.fn();
   beforeEach(() => { write.mockReset(); vi.stubGlobal("window", { open: vi.fn(() => ({ document: { write, close: vi.fn() } })) }); });
-  it("renders localized LTR output and escapes user content", () => {
-    printIncidentReport({ incidentNumber: "INC-1", description: "<script>", equipment_name: "CT One" }, [{ original_filename: "<x>.pdf" }], "en");
-    const html = String(write.mock.calls[0][0]); expect(html).toContain('dir="ltr"'); expect(html).toContain("National Cancer Center Benghazi"); expect(html).toContain("&lt;script&gt;"); expect(html).toContain("&lt;x&gt;.pdf"); expect(html).toContain("direction:ltr");
-  });
-  it("renders RTL Arabic while retaining raw equipment name", () => { printIncidentReport({ incidentNumber: "INC-2", equipment_name: "MRI Scanner A" }, [], "ar"); const html = String(write.mock.calls[0][0]); expect(html).toContain('dir="rtl"'); expect(html).toContain("المركز الوطني للأورام بنغازي"); expect(html).toContain("MRI Scanner A"); });
+  it("renders localized LTR explicit labels, equipment, escaping, and print toolbar", () => { printIncidentReport(equipmentIncident(), [{ id: 1, original_filename: "<x>.pdf", mime_type: "text/plain", document_type: "incident_attachment", created_at: "2026-08-26" }], "en"); const html = String(write.mock.calls[0][0]); expect(html).toContain('dir="ltr"'); expect(html).toContain("Incident number"); expect(html).toContain("MRI Scanner A"); expect(html).toContain("&lt;script&gt;"); expect(html).toContain("&lt;review&gt;"); expect(html).toContain("&lt;x&gt;.pdf"); expect(html).not.toContain("incident_type"); expect(html).toContain("@media print{.toolbar{display:none}}"); expect(html).toContain("direction:ltr"); });
+  it("renders RTL Arabic and clinical patient details", () => { printIncidentReport(equipmentIncident({ incident_type: "clinical_workflow", equipment_name: null, patient_arabic_name: "مريض عربي", patient_english_name: "English Patient", mrn: "MRN-1", clinical_category: "wrong_exam", harm_level: "no_harm" }), [], "ar"); const html = String(write.mock.calls[0][0]); expect(html).toContain('dir="rtl"'); expect(html).toContain("مريض عربي"); expect(html).toContain("فحص غير صحيح"); });
 });

@@ -146,6 +146,14 @@ async function ensureRelatedRecords(patientId: number | null, appointmentId: num
   }
 }
 
+/** The metadata that may cross an HTTP boundary. Storage and digest fields stay internal. */
+export type PublicDocumentResponse = Omit<DocumentRow, "stored_path" | "content_sha256">;
+
+export function toPublicDocumentResponse(document: DocumentRow): PublicDocumentResponse {
+  const { stored_path: _storedPath, content_sha256: _contentSha256, ...safeDocument } = document;
+  return safeDocument;
+}
+
 async function ensureAppointmentBelongsToPatient(reference: AppointmentReference, patientId: number | null, executor: DocumentDatabaseExecutor = pool): Promise<void> {
   if (!patientId) return;
 

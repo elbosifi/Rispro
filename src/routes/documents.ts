@@ -8,10 +8,10 @@ import {
   getDocumentAbsolutePath,
   getDocumentById,
   listDocuments,
+  toPublicDocumentResponse,
   uploadDocument,
 } from "../services/document-service.js";
 import { getRequestDocumentProtocolPolicy } from "../services/request-document-protocol-policy.js";
-import type { DocumentRow } from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
 
@@ -25,14 +25,6 @@ documentsRouter.get(
   })
 );
 
-function toDocumentResponse(document: DocumentRow): Omit<DocumentRow, "stored_path" | "content_sha256"> & { stored_path: string } {
-  const { content_sha256: _contentSha256, ...safeDocument } = document;
-  return {
-    ...safeDocument,
-    stored_path: "",
-  };
-}
-
 documentsRouter.get(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
@@ -41,9 +33,8 @@ documentsRouter.get(
       patientId: asOptionalUserId(query.patientId),
       appointmentId: asOptionalUserId(query.appointmentId),
       appointmentRefType: asOptionalString(query.appointmentRefType),
-      incidentId: asOptionalUserId(query.incidentId),
     });
-    res.json({ documents: documents.map(toDocumentResponse) });
+    res.json({ documents: documents.map(toPublicDocumentResponse) });
   })
 );
 
@@ -71,12 +62,11 @@ documentsRouter.post(
         patientId: asOptionalUserId(body.patientId),
         appointmentId: asOptionalUserId(body.appointmentId),
         appointmentRefType: asOptionalString(body.appointmentRefType),
-        incidentId: asOptionalUserId(body.incidentId),
         source: asOptionalString(body.source),
       },
       req.user!.sub
     );
-    res.status(201).json({ document: toDocumentResponse(document) });
+    res.status(201).json({ document: toPublicDocumentResponse(document) });
   })
 );
 
