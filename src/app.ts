@@ -41,6 +41,7 @@ import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
+import { incidentsRouter } from "./routes/incidents.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -150,6 +151,7 @@ export function createApp(): Application {
   app.use("/api/patients", patientsRouter);
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
+  app.use("/api/incidents", incidentsRouter);
   app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/integrations", integrationsRouter);

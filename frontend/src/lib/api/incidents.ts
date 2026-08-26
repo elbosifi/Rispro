@@ -1,0 +1,10 @@
+import { api } from "@/lib/api-client";
+export type IncidentType="equipment"|"clinical_workflow"; export type IncidentStatus="submitted"|"under_review"|"action_required"|"resolved"|"closed";
+export type Incident=Record<string,unknown>&{id:number;incidentNumber:string;incident_type:IncidentType;status:IncidentStatus;description:string};
+export const fetchIncidents=(filters:{incidentType?:string;status?:string}={})=>api<{incidents:Incident[]}>(`/incidents?${new URLSearchParams(Object.entries(filters).filter(([,v])=>v) as [string,string][]).toString()}`);
+export const fetchIncident=(id:number)=>api<{incident:Incident}>(`/incidents/${id}`);
+export const createIncident=(payload:Record<string,unknown>)=>api<{incident:Incident}>("/incidents",{method:"POST",body:JSON.stringify(payload)});
+export const reviewIncident=(id:number,payload:Record<string,unknown>)=>api<{incident:Incident}>(`/incidents/${id}/review`,{method:"PATCH",body:JSON.stringify(payload)});
+export const fetchIncidentEquipment=()=>api<{equipment:Array<Record<string,unknown>>}>("/incidents/lookups/equipment");
+export const listIncidentAttachments=(id:number)=>api<{documents:Array<Record<string,unknown>>}>(`/incidents/${id}/attachments`);
+export const uploadIncidentAttachment=(id:number,payload:Record<string,unknown>)=>api<{document:Record<string,unknown>}>(`/incidents/${id}/attachments`,{method:"POST",body:JSON.stringify(payload)});

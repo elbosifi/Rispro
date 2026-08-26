@@ -45,6 +45,7 @@ import AuthoritativeOrthancOperationsPage from "@/pages/systems/authoritative-or
 import RequestScansPage from "@/pages/request-scans/request-scans-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
+import IncidentsPage from "@/pages/incidents/incidents-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
@@ -331,6 +332,7 @@ function AppContent() {
             <Route path="/systems/authoritative-orthanc" element={guardedPage("authoritative.orthanc", <AuthoritativeOrthancOperationsPage />)} />
             <Route path="/worklist-monitor" element={guardedPage("worklist.monitor", <WorklistMonitorPage />)} />
             <Route path="/settings" element={guardedPage("settings", <SettingsPage />)} />
+            <Route path="/incidents" element={guardedPage("incidents", <IncidentsPage />)} />
             <Route path="/workstation/printing" element={canAccessWorkstationPrinting(user.role) ? <WorkstationPrintingPage /> : <Navigate to="/" replace />} />
             <Route path="/legacy-access-viewer" element={guardedPage("legacy", <LegacyAccessViewerPage />)} />
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />

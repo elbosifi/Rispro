@@ -27,7 +27,8 @@ export type AppRouteKey =
   | "authoritative.orthanc"
   | "worklist.monitor"
   | "legacy"
-  | "settings";
+  | "settings"
+  | "incidents";
 
 export type PageAccessRouteKey = Exclude<AppRouteKey, "patients.new" | "search">;
 
@@ -55,7 +56,8 @@ export type AppNavIcon =
   | "authoritativeOrthanc"
   | "worklistMonitor"
   | "settings"
-  | "legacy";
+  | "legacy"
+  | "incidents";
 
 export interface AppRouteRegistryEntry {
   key: AppRouteKey;
@@ -302,6 +304,15 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     defaultRoles: ["supervisor", "super_admin"],
     navLabelKey: "nav.legacyReception",
     navIcon: "legacy",
+  },
+  {
+    key: "incidents",
+    path: "/incidents",
+    titleKey: "routeTitle.incidents",
+    accessKey: "incidents",
+    defaultRoles: ["receptionist", "modality_staff", "doctor", "administrative", "supervisor", "super_admin"],
+    navLabelKey: "nav.incidents",
+    navIcon: "incidents",
   },
   {
     key: "settings",

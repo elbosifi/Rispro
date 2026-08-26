@@ -45,6 +45,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   "authoritative.orthanc": "Authoritative Orthanc",
   "worklist.monitor": "MWL Monitor",
   legacy: "Legacy",
+  incidents: "Safety & Incidents",
   settings: "Settings",
 };
 

@@ -41,6 +41,7 @@ documentsRouter.get(
       patientId: asOptionalUserId(query.patientId),
       appointmentId: asOptionalUserId(query.appointmentId),
       appointmentRefType: asOptionalString(query.appointmentRefType),
+      incidentId: asOptionalUserId(query.incidentId),
     });
     res.json({ documents: documents.map(toDocumentResponse) });
   })
@@ -70,6 +71,7 @@ documentsRouter.post(
         patientId: asOptionalUserId(body.patientId),
         appointmentId: asOptionalUserId(body.appointmentId),
         appointmentRefType: asOptionalString(body.appointmentRefType),
+        incidentId: asOptionalUserId(body.incidentId),
         source: asOptionalString(body.source),
       },
       req.user!.sub

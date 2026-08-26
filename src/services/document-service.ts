@@ -23,6 +23,7 @@ import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
 export interface DocumentUploadPayload {
   patientId?: UserId;
   appointmentId?: UserId;
+  incidentId?: UserId;
   appointmentRefType?: string;
   documentType?: string;
   originalFilename?: string;
@@ -45,6 +46,7 @@ export interface DocumentRow {
   patient_id: number | null;
   appointment_id: number | null;
   v2_booking_id: number | null;
+  incident_id?: number | null;
   document_type: string;
   original_filename: string;
   stored_path: string;
@@ -68,6 +70,7 @@ interface DocumentFilters {
   patientId?: UserId;
   appointmentId?: UserId;
   appointmentRefType?: string;
+  incidentId?: UserId;
 }
 
 export interface DocumentsDeleteScope {
@@ -126,9 +129,9 @@ function resolveFileBuffer(payload: DocumentUploadPayload): Buffer {
   return decodeBase64File(payload.fileContentBase64);
 }
 
-async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null, executor: DocumentDatabaseExecutor = pool): Promise<void> {
-  if (!patientId && !appointmentId) {
-    throw new HttpError(400, "patientId or appointmentId is required.");
+async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null, incidentId: number | null, executor: DocumentDatabaseExecutor = pool): Promise<void> {
+  if (!patientId && !appointmentId && !incidentId) {
+    throw new HttpError(400, "patientId, appointmentId, or incidentId is required.");
   }
 
   if (patientId) {
@@ -136,6 +139,10 @@ async function ensureRelatedRecords(patientId: number | null, appointmentId: num
     if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Patient not found.");
     }
+  }
+  if (incidentId) {
+    const { rowCount } = await executor.query("select 1 from department_incidents where id=$1 limit 1", [incidentId]);
+    if (Number(rowCount || 0) === 0) throw new HttpError(404, "Incident not found.");
   }
 }
 
@@ -303,6 +310,10 @@ export async function listDocuments(
     }
   }
 
+  if (filters.incidentId) {
+    params.push(normalizePositiveInteger(filters.incidentId, "incidentId"));
+    conditions.push(`d.incident_id = $${params.length}`);
+  }
   const whereClause = conditions.length ? `where ${conditions.join(" and ")}` : "";
   const { rows } = await pool.query(
     `
@@ -311,6 +322,7 @@ export async function listDocuments(
         d.patient_id,
         d.appointment_id,
         d.v2_booking_id,
+        d.incident_id,
         d.document_type,
         d.original_filename,
         d.stored_path,
@@ -592,6 +604,7 @@ export async function uploadDocument(
 ): Promise<DocumentRow> {
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });
   const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
+  const incidentId = normalizePositiveInteger(payload.incidentId, "incidentId", { required: false });
   const appointmentRefType = normalizeAppointmentRefType(payload.appointmentRefType);
   const documentType = String(payload.documentType || "appointment_request").trim();
   const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
@@ -629,7 +642,7 @@ export async function uploadDocument(
     throw new HttpError(400, "Document file size changed while calculating its fingerprint.");
   }
 
-  await ensureRelatedRecords(patientId, appointmentId, executor);
+  await ensureRelatedRecords(patientId, appointmentId, incidentId, executor);
   const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType, executor);
   await ensureAppointmentBelongsToPatient(appointmentReference, patientId, executor);
 
@@ -670,6 +683,7 @@ export async function uploadDocument(
         patient_id,
         appointment_id,
         v2_booking_id,
+        incident_id,
         document_type,
         original_filename,
         stored_path,
@@ -688,12 +702,13 @@ export async function uploadDocument(
         idempotency_key,
         request_scan_job_id
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       returning
         id,
         patient_id,
         appointment_id,
         v2_booking_id,
+        incident_id,
         document_type,
         original_filename,
         stored_path,
@@ -715,6 +730,7 @@ export async function uploadDocument(
       patientId,
       appointmentReference.legacyAppointmentId,
       appointmentReference.v2BookingId,
+      incidentId,
       documentType,
       originalFilename,
       storedPath,
