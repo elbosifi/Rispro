@@ -56,9 +56,25 @@ documentsRouter.post(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
+    if (body.incidentId != null && String(body.incidentId).trim() !== "") {
+      res.status(400).json({ error: { message: "incidentId is only supported by the incident attachment endpoint." } });
+      return;
+    }
     const document = await uploadDocument(
       {
-        ...body,
+        documentType: asOptionalString(body.documentType),
+        originalFilename: asOptionalString(body.originalFilename),
+        mimeType: asOptionalString(body.mimeType),
+        fileContentBase64: asOptionalString(body.fileContentBase64),
+        fileContentBuffer: Buffer.isBuffer(body.fileContentBuffer) ? body.fileContentBuffer : undefined,
+        fileSourcePath: asOptionalString(body.fileSourcePath),
+        scanSessionId: asOptionalUserId(body.scanSessionId),
+        pageCount: typeof body.pageCount === "number" ? body.pageCount : undefined,
+        scannerName: asOptionalString(body.scannerName),
+        workstationName: asOptionalString(body.workstationName),
+        appVersion: asOptionalString(body.appVersion),
+        idempotencyKey: asOptionalString(body.idempotencyKey),
+        requestScanJobId: typeof body.requestScanJobId === "number" ? body.requestScanJobId : undefined,
         patientId: asOptionalUserId(body.patientId),
         appointmentId: asOptionalUserId(body.appointmentId),
         appointmentRefType: asOptionalString(body.appointmentRefType),

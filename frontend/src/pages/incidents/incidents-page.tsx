@@ -49,6 +49,14 @@ const now = () =>
   new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
+const formatLocalDateTime = (value: string, language: "en" | "ar") => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
 const fileBase64 = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -82,6 +90,12 @@ function patientName(incident: Incident, language: "en" | "ar") {
   return language === "ar"
     ? incident.patient_arabic_name || incident.patient_english_name
     : incident.patient_english_name || incident.patient_arabic_name;
+}
+function incidentContext(incident: Incident, language: "en" | "ar") {
+  if (incident.incident_type === "equipment") {
+    return { value: incident.equipment_name || "-", ltr: true };
+  }
+  return { value: patientName(incident, language) || "", ltr: false };
 }
 
 export default function IncidentsPage() {
@@ -203,9 +217,24 @@ export default function IncidentsPage() {
               setReviewStatus(item.status);
               setReviewNotes(item.review_notes || "");
             }}
-            className="flex w-full justify-between border-b py-2 text-start"
+            className="grid w-full gap-1 border-b py-3 text-start sm:grid-cols-[minmax(0,1fr)_auto]"
           >
-            <span>
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap gap-x-2 gap-y-1">
+                <strong>{item.incidentNumber}</strong>
+                <span>{formatLocalDateTime(item.occurred_at, language)}</span>
+                <span>{label(item.incident_type === "clinical_workflow" ? "clinical" : "equipment")}</span>
+              </div>
+              <div
+                dir={incidentContext(item, language).ltr ? "ltr" : undefined}
+                className={incidentContext(item, language).ltr ? "text-left" : undefined}
+              >
+                {incidentContext(item, language).value || label("clinical")}
+              </div>
+              <p className="line-clamp-2 text-sm text-muted-foreground">{item.description}</p>
+              <span className="text-xs text-muted-foreground">{label("reporter")}: {item.reporter_name || "-"}</span>
+            </div>
+            <span className="hidden">
               {item.incidentNumber} · {item.description}
             </span>
             <span>{label(item.status)}</span>
@@ -222,9 +251,10 @@ export default function IncidentsPage() {
             onSubmit={(event) => {
               event.preventDefault();
               const data = new FormData(event.currentTarget);
+              const localOccurredAt = String(data.get("occurredAt") ?? "");
               create.mutate({
                 incidentType: kind,
-                occurredAt: data.get("occurredAt"),
+                occurredAt: new Date(localOccurredAt).toISOString(),
                 description: data.get("description"),
                 immediateAction: data.get("immediateAction"),
                 equipmentId: data.get("equipmentId"),
@@ -391,7 +421,7 @@ export default function IncidentsPage() {
                 />
                 <DetailRow
                   label={label("occurredAt")}
-                  value={incident.occurred_at}
+                  value={formatLocalDateTime(incident.occurred_at, language)}
                 />
                 <DetailRow
                   label={label("reporter")}
@@ -399,7 +429,7 @@ export default function IncidentsPage() {
                 />
                 <DetailRow
                   label={label("createdAt")}
-                  value={incident.created_at}
+                  value={formatLocalDateTime(incident.created_at, language)}
                 />
                 <DetailRow
                   label={label("description")}

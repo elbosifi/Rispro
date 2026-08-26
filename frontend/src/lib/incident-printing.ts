@@ -17,6 +17,14 @@ const row = (
   equipment = false,
 ) =>
   `<div class="row${equipment ? " equipment" : ""}"><b>${label(language, key)}</b>: ${escape(value)}</div>`;
+const formatLocalDateTime = (value: string, language: Language) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
 
 export function printIncidentReport(
   incident: Incident,
@@ -31,9 +39,9 @@ export function printIncidentReport(
     row(language, "incidentNumber", incident.incidentNumber),
     row(language, "status", label(language, incident.status)),
     row(language, "type", label(language, incident.incident_type)),
-    row(language, "occurredAt", incident.occurred_at),
+    row(language, "occurredAt", formatLocalDateTime(incident.occurred_at, language)),
     row(language, "reporter", incident.reporter_name),
-    row(language, "createdAt", incident.created_at),
+    row(language, "createdAt", formatLocalDateTime(incident.created_at, language)),
     row(language, "description", incident.description),
     row(language, "immediateAction", incident.immediate_action),
     row(language, "reviewNotes", incident.review_notes),
