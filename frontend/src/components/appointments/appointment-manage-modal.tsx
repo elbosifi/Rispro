@@ -65,6 +65,7 @@ export type AppointmentManageModalProps = {
   initialTab?: AppointmentManageTab;
   checkReportOnOpen?: boolean;
   onTabChange?: (tab: AppointmentManageTab) => void;
+  onOpenAppointment?: (appointmentId: number) => void;
   onAppointmentUpdated?: (appointment: AppointmentWithDetails) => void;
   onAppointmentDeleted?: (appointmentId: number) => void;
 };
@@ -154,7 +155,8 @@ function AppointmentHeaderBadgeCluster({ appointment, language, compact = false 
     <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset size={compact ? "sm" : "default"} />
     <Badge size={compact ? "sm" : "default"} variant={appointmentStatusVariant(appointment.status)} className="whitespace-nowrap">{statusLabel(language, appointment.status)}</Badge>
     <Badge size={compact ? "sm" : "default"} variant={priorityVariant(priority)} className="whitespace-nowrap">{priority || chooseLocalized(language, "الأولوية غير محددة", "Priority not assigned")}</Badge>
-    <Badge size={compact ? "sm" : "default"} variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
+    <Badge size={compact ? "sm" : "default"} variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.isAdditionalImaging ? chooseLocalized(language, "يُدرج التقرير مع الفحص الأصلي", "Reported with original examination") : appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
+    {appointment.isAdditionalImaging ? <Badge size={compact ? "sm" : "default"} variant="info" className="whitespace-nowrap">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</Badge> : null}
     {isProtocolModality(appointment) ? <Badge size={compact ? "sm" : "default"} variant={protocolAssigned ? "success" : "neutral"} className="whitespace-nowrap">{protocolAssigned ? chooseLocalized(language, "البروتوكول معين", "Protocol assigned") : chooseLocalized(language, "البروتوكول غير معين", "Protocol not assigned")}</Badge> : null}
     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} /> : null}
   </div>;
@@ -168,6 +170,7 @@ export function AppointmentManageModal({
   initialTab = "documents",
   checkReportOnOpen = false,
   onTabChange,
+  onOpenAppointment,
   onAppointmentUpdated,
   onAppointmentDeleted,
 }: AppointmentManageModalProps) {
@@ -726,6 +729,16 @@ export function AppointmentManageModal({
             <div className="relative flex flex-wrap items-center justify-start gap-1.5 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => selectTab("details")}><Edit3 size={14} className="sm:me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => void printDocument()} disabled={printingKind != null}>{printingKind === "document" ? <Loader2 size={14} className="sm:me-1.5 animate-spin" aria-hidden="true" /> : <Printer size={14} className="sm:me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => void printLabel()} disabled={printingKind != null}>{printingKind === "label" ? <Loader2 size={14} className="sm:me-1.5 animate-spin" aria-hidden="true" /> : <Tags size={14} className="sm:me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">Print label</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="sm:me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={mobileDocumentFooterVisible ? <span aria-hidden="true" /> : <Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
           </div> : <DialogTitle>{t("registrations.manage")}</DialogTitle>}
         </DialogHeader>
+        {appointment?.isAdditionalImaging ? <section className="shrink-0 border-b border-accent/20 bg-accent/5 px-3 py-2.5 text-sm md:px-5" aria-label={chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <Badge variant="info" size="sm">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</Badge>
+              <p className="mt-1.5 text-foreground">{chooseLocalized(language, "هذا فحص تكميلي تم طلبه بعد الفحص الأصلي لاستكمال التصوير المطلوب.", "This is a complementary examination requested after the original study to complete the required imaging.")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "الفحص الأصلي:", "Original examination:")} {appointment.originalExam || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p>
+            </div>
+            {Number.isSafeInteger(appointment.originalAppointmentId) && appointment.originalAppointmentId > 0 ? <Button type="button" variant="secondary" size="sm" onClick={() => onOpenAppointment?.(appointment.originalAppointmentId!)}>{chooseLocalized(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}
+          </div>
+        </section> : null}
         {/*
             <div className="min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-3">

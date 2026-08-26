@@ -495,6 +495,16 @@ export default function RegistrationsPage() {
     setSearchParams(nextSearchParams, { replace: true });
   };
 
+  const openAppointmentById = (appointmentId: number) => {
+    if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) return;
+    setSelectedAppointment(null);
+    setReportCheckOnOpen(false);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("appointmentId", String(appointmentId));
+    nextSearchParams.set("tab", "details");
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
   const openReportPanel = (appointment: AppointmentWithDetails, checkNow = false) => {
     setSelectedAppointment(appointment);
     setReportCheckOnOpen(checkNow);
@@ -1333,6 +1343,7 @@ export default function RegistrationsPage() {
         checkReportOnOpen={reportCheckOnOpen}
         onClose={closeManageModal}
         onTabChange={setManageTabAndUrl}
+        onOpenAppointment={openAppointmentById}
         onAppointmentUpdated={setSelectedAppointment}
         onAppointmentDeleted={closeManageModal}
       />

@@ -298,6 +298,7 @@ describe("AppointmentManageModal", () => {
     expect(cluster.textContent).toContain("Priority not assigned");
     expect(cluster.textContent).toContain("Report not required");
     expect(cluster.textContent).toContain("Protocol not assigned");
+    expect(cluster.textContent).not.toContain("Additional Imaging");
     expect(cluster.textContent).not.toContain("scheduled");
   });
 
@@ -736,6 +737,27 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("button", { name: "Void appointment" })).toHaveProperty("disabled", false);
     fireEvent.click(screen.getByRole("button", { name: "Void appointment" }));
     await waitFor(() => expect(mocks.deleteAppointment).toHaveBeenCalledWith(42, "Duplicate booking"));
+  });
+
+  it("identifies complementary imaging and opens its original appointment", async () => {
+    const onOpenAppointment = vi.fn();
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      isAdditionalImaging: true,
+      originalAppointmentId: 17,
+      originalExam: "CT Chest",
+      originalAccession: "ACC-17",
+      requiresReport: false,
+    } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents", onOpenAppointment });
+
+    expect((await screen.findAllByText("Additional Imaging")).length).toBeGreaterThan(0);
+    expect(screen.getByText("CT Chest")).toBeTruthy();
+    expect(screen.getByText("ACC-17")).toBeTruthy();
+    expect(screen.getByText("Reported with original examination")).toBeTruthy();
+    expect(screen.queryByText("Report not required")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open original appointment" }));
+    expect(onOpenAppointment).toHaveBeenCalledWith(17);
   });
 
   it("uses the compact mobile document workspace, collapses an empty protocol panel, and keeps one More action in the footer", async () => {

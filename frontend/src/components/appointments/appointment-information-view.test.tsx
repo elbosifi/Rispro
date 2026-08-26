@@ -29,9 +29,9 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); localStorage.removeItem("rispro-language"); vi.restoreAllMocks(); });
 
-function renderInformation() {
+function renderInformation(appointmentOverride: AppointmentWithDetails = appointment) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<LanguageProvider><QueryClientProvider client={queryClient}><AppointmentInformationView appointment={appointment} lookups={{ modalities: [], examTypes: [], priorities: [{ id: 2, code: "routine", nameAr: "عادي", nameEn: "Routine", sortOrder: 1 }], specialReasons: [] }} onBack={vi.fn()} onOpenPatientProfile={vi.fn()} onOpenStatus={vi.fn()} onAppointmentUpdated={vi.fn()} /></QueryClientProvider></LanguageProvider>);
+  return render(<LanguageProvider><QueryClientProvider client={queryClient}><AppointmentInformationView appointment={appointmentOverride} lookups={{ modalities: [], examTypes: [], priorities: [{ id: 2, code: "routine", nameAr: "عادي", nameEn: "Routine", sortOrder: 1 }], specialReasons: [] }} onBack={vi.fn()} onOpenPatientProfile={vi.fn()} onOpenStatus={vi.fn()} onAppointmentUpdated={vi.fn()} /></QueryClientProvider></LanguageProvider>);
 }
 
 describe("AppointmentInformationView", () => {
@@ -58,5 +58,19 @@ describe("AppointmentInformationView", () => {
     localStorage.setItem("rispro-language", "ar");
     renderInformation();
     expect(screen.getByTestId("appointment-information-back-icon").getAttribute("data-direction")).toBe("right");
+  });
+
+  it("shows complementary reporting semantics and an assigned free-text protocol", async () => {
+    renderInformation({
+      ...appointment,
+      isAdditionalImaging: true,
+      requiresReport: false,
+      protocolAssignmentSummary: { assignmentId: 1, protocolName: null, versionNumber: null, freeTextProtocol: "Repeat delayed phase.", scannerName: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null },
+    } as AppointmentWithDetails);
+
+    expect(await screen.findByText("Reported with original examination")).toBeTruthy();
+    expect(screen.queryByText("Not required")).toBeNull();
+    expect(screen.getByText("Free-text protocol")).toBeTruthy();
+    expect(screen.getByText("Repeat delayed phase.")).toBeTruthy();
   });
 });
