@@ -13,6 +13,7 @@ import { lookupsV2Router } from "./api/routes/lookups-v2-routes.js";
 import { readV2Router } from "./api/routes/read-v2-routes.js";
 import { schedulingOverrideRequestRouter } from "./api/routes/scheduling-override-request-routes.js";
 import { patientSelectionRouter } from "./api/routes/patient-selection-routes.js";
+import { complementaryRecallRouter } from "./api/routes/complementary-recall-routes.js";
 
 /**
  * Create and return the complete V2 router tree.
@@ -44,6 +45,7 @@ export function createAppointmentsV2Router(): Router {
 
   // Deferred scheduling override approval workflow
   v2Router.use("/scheduling-override-requests", schedulingOverrideRequestRouter);
+  v2Router.use("/complementary-recall-requests", complementaryRecallRouter);
 
   return v2Router;
 }
@@ -55,6 +57,7 @@ export { adminSchedulingV2Router } from "./api/routes/admin-scheduling-v2-routes
 export { lookupsV2Router } from "./api/routes/lookups-v2-routes.js";
 export { readV2Router } from "./api/routes/read-v2-routes.js";
 export { schedulingOverrideRequestRouter } from "./api/routes/scheduling-override-request-routes.js";
+export { complementaryRecallRouter } from "./api/routes/complementary-recall-routes.js";
 
 // Re-export shared utilities
 export { SchedulingError } from "./shared/errors/scheduling-error.js";

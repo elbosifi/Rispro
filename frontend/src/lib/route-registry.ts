@@ -9,6 +9,7 @@ export type AppRouteKey =
   | "patients.new"
   | "appointments"
   | "scheduling.override.requests"
+  | "recall.requests"
   | "v2.appointments.admin"
   | "calendar"
   | "registrations"
@@ -37,6 +38,7 @@ export type AppNavIcon =
   | "nameDictionary"
   | "appointments"
   | "overrideRequests"
+  | "recallRequests"
   | "appointmentsV2Admin"
   | "calendar"
   | "registrations"
@@ -143,6 +145,15 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     defaultRoles: ["receptionist", "supervisor", "super_admin"],
     navLabelKey: "nav.schedulingOverrideRequests",
     navIcon: "overrideRequests",
+  },
+  {
+    key: "recall.requests",
+    path: "/recall-requests",
+    titleKey: "routeTitle.recallRequests",
+    accessKey: "recall.requests",
+    defaultRoles: ["receptionist", "supervisor", "super_admin"],
+    navLabelKey: "nav.recallRequests",
+    navIcon: "recallRequests",
   },
   {
     key: "v2.appointments.admin",

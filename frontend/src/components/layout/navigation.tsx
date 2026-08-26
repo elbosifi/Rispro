@@ -10,7 +10,7 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
-import { fetchNoShowSummary, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallUnseenCount } from "@/lib/api-hooks";
 import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
@@ -85,6 +85,7 @@ const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   nameDictionary: BookOpenText,
   appointments: CalendarDays,
   overrideRequests: ClipboardList,
+  recallRequests: ClipboardList,
   appointmentsV2Admin: Settings,
   calendar: ClipboardList,
   registrations: ListOrdered,
@@ -186,6 +187,7 @@ function NavButton({
   index: number;
   onClick: () => void;
 }) {
+  const { data: recallUnseen } = useQuery({ queryKey: ["complementary-recalls", "unseen-count"], queryFn: fetchComplementaryRecallUnseenCount, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
   return (
     <NavigationMenuItem
       icon={<NavIconGlyph icon={item.icon} size={16} />}
@@ -194,6 +196,7 @@ function NavButton({
       collapsed={collapsed}
       showTooltip={showTooltip}
       animationDelayMs={index * 40}
+      trailing={item.route === "recall.requests" && (recallUnseen ?? 0) > 0 ? <span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-foreground">{recallUnseen}</span> : null}
       onClick={onClick}
     />
   );
@@ -222,7 +225,7 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
   });
   return [
     group("quick", "navGroup.quickActions", [["patients.new"], ["appointments", "nav.newAppointment"]], true),
-    group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["request.scans"], ["queue"]], true),
+    group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["recall.requests"], ["request.scans"], ["queue"]], true),
     group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
     group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["settings"]], false),

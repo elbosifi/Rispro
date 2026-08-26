@@ -34,6 +34,7 @@ export interface Booking {
 }
 
 export interface CreateBookingPayload {
+  complementaryRecallRequestId?: number | null;
   patientId: number;
   modalityId: number;
   examTypeId?: number | null;

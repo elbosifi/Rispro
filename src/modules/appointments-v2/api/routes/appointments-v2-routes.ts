@@ -25,6 +25,8 @@ import {
   processPatientPushDeliveries,
   type PatientNotificationEventType,
 } from "../../../../services/patient-web-push-service.js";
+import { canRoleAccessPage, readPageVisibilityMatrix } from "../../../../services/page-visibility-settings-service.js";
+import { HttpError } from "../../../../utils/http-error.js";
 
 const router = Router();
 
@@ -144,6 +146,11 @@ router.post(
 
     const userId = Number(req.user?.sub ?? 0);
     const userRole = req.user?.role;
+    if (body.complementaryRecallRequestId != null) {
+      if (!userRole || !canRoleAccessPage("recall.requests", userRole, await readPageVisibilityMatrix())) {
+        throw new HttpError(403, "This role cannot access recall requests.");
+      }
+    }
     const capacityResolutionMode: CapacityResolutionMode =
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
@@ -161,6 +168,7 @@ router.post(
 
     const result = await createBooking(
       {
+        complementaryRecallRequestId: body.complementaryRecallRequestId ?? null,
         patientId: body.patientId,
         modalityId: body.modalityId,
         examTypeId: body.examTypeId ?? null,

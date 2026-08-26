@@ -19,6 +19,7 @@ import {
   findActiveSpecialQuotaConsumption,
   releaseActiveSpecialQuotaConsumption,
 } from "../repositories/special-quota-consumption.repo.js";
+import { reopenComplementaryRecallForCancelledBooking } from "../../recall/complementary-recall.service.js";
 
 export interface CancelBookingResult {
   booking: Booking;
@@ -88,6 +89,7 @@ async function cancelBookingInternal(
     reason: 'status", "cancelled"',
     actorUserId: userId,
   });
+  await reopenComplementaryRecallForCancelledBooking(client, bookingId, userId);
 
   // 3. Record a cancellation audit event (not an override, just a record)
   // Note: This is a lightweight record — no override needed for cancellation.

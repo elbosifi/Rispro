@@ -54,6 +54,7 @@ import { logAuditEntry } from "../../../../services/audit-service.js";
 import { resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
 import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
+import { linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -125,6 +126,13 @@ export async function createBookingInternal(
   approvedOverrideContext?: ApprovedOverrideContext,
   identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
+  const recall = payload.complementaryRecallRequestId == null
+    ? null
+    : await lockComplementaryRecallForBooking(client, Number(payload.complementaryRecallRequestId), {
+      patientId: payload.patientId,
+      modalityId: payload.modalityId,
+      examTypeId: payload.examTypeId ?? null,
+    });
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
@@ -492,6 +500,7 @@ export async function createBookingInternal(
     isWalkIn: payload.isWalkIn ?? false,
     userId,
   });
+  if (recall) await linkComplementaryRecallBooking(client, recall, booking.id, userId);
   if (consumedSpecialQuota) {
     const matchedQuota = decision.matchedSpecialQuota;
     if (!matchedQuota || payload.examTypeId == null) {

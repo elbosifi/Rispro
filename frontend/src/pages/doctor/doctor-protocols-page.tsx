@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import {
   activateProtocolLibraryVersion,
   cancelDoctorProtocolAssignment,
+  cancelComplementaryRecallRequest,
+  createComplementaryRecallRequest,
   createDoctorProtocolAssignment,
   createProtocolLibraryAnatomyRegion,
   createProtocolLibraryCtPhasePreset,
@@ -1392,6 +1394,9 @@ function ProtocolAssignmentModal({
   const [examTypeSearch, setExamTypeSearch] = useState("");
   const [examTypeOverride, setExamTypeOverride] = useState<{ appointmentId: number; id: number; name: string } | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [recallDialogOpen, setRecallDialogOpen] = useState(false);
+  const [receptionInstruction, setReceptionInstruction] = useState("");
+  const [technologistInstruction, setTechnologistInstruction] = useState("");
   const [reportEditorOpen, setReportEditorOpen] = useState(false);
   const [reportDraft, setReportDraft] = useState(appointment.requiresReport);
   const [reportOverride, setReportOverride] = useState<{ appointmentId: number; value: boolean } | null>(null);
@@ -1401,6 +1406,8 @@ function ProtocolAssignmentModal({
   const title = existing ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols are available. Enter a free-text protocol.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
+  const recallMutation = useMutation({ mutationFn: () => createComplementaryRecallRequest(appointment.appointmentId, { receptionInstruction: receptionInstruction.trim() || null, technologistInstruction: technologistInstruction.trim() }), onSuccess: async () => { setRecallDialogOpen(false); setReceptionInstruction(""); setTechnologistInstruction(""); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); pushToast({ type: "success", title: "Complementary recall requested" }); } });
+  const cancelRecallMutation = useMutation({ mutationFn: () => cancelComplementaryRecallRequest(appointment.activeComplementaryRecall!.id), onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); pushToast({ type: "success", title: result.linkedAppointmentStillExists ? "Recall cancelled; booked appointment remains" : "Recall cancelled" }); } });
   const protocolOptionLabel = (protocol: ProtocolLibraryProtocol) => `${protocol.name} · ${protocol.modality} · v${protocol.activeVersionNumber}`;
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
@@ -1538,7 +1545,7 @@ function ProtocolAssignmentModal({
     freeTextProtocol: protocolMode === "free-text" ? nullableText(freeTextProtocol) : null,
     status: "ASSIGNED",
   });
-  const hasMoreProtocolActions = Boolean(printableSheet || existing);
+  const hasMoreProtocolActions = true;
   const displayedRequiresReport = reportOverride?.appointmentId === appointment.appointmentId ? reportOverride.value : appointment.requiresReport;
   const toggleActionMenu = () => {
     if (actionMenuOpen) {
@@ -1693,6 +1700,7 @@ function ProtocolAssignmentModal({
                       <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
                       {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
                         {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
+                        {appointment.activeComplementaryRecall ? <button type="button" role="menuitem" disabled={saving || cancelRecallMutation.isPending} onClick={() => { setActionMenuOpen(false); cancelRecallMutation.mutate(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Cancel Recall Request</button> : <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); setRecallDialogOpen(true); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Request Complementary Recall</button>}
                         {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}
@@ -1705,6 +1713,7 @@ function ProtocolAssignmentModal({
           </>
         )}
         {detailsOpen ? <ProtocolingAppointmentDetailsDrawer key={appointment.appointmentId} appointment={appointment} onClose={() => setDetailsOpen(false)} /> : null}
+        <Dialog open={recallDialogOpen} onClose={() => !recallMutation.isPending && setRecallDialogOpen(false)}><DialogContent maxWidth="560px"><DialogHeader><DialogTitle>Request Complementary Recall</DialogTitle><DialogDescription>Original exam: {appointment.examTypeName ?? "Unspecified"} · {appointment.modalityCode}</DialogDescription></DialogHeader><div className="grid gap-3"><label className="grid gap-1 text-sm font-medium">Reception instruction <textarea value={receptionInstruction} onChange={(event) => setReceptionInstruction(event.target.value)} className="min-h-20 rounded-md border border-input bg-background p-2 font-normal" /></label><label className="grid gap-1 text-sm font-medium">Technologist instruction <textarea required value={technologistInstruction} onChange={(event) => setTechnologistInstruction(event.target.value)} className="min-h-24 rounded-md border border-input bg-background p-2 font-normal" /></label>{recallMutation.isError ? <p role="alert" className="text-sm text-red-700">{(recallMutation.error as Error).message}</p> : null}</div><DialogFooter><Button variant="secondary" onClick={() => setRecallDialogOpen(false)} disabled={recallMutation.isPending}>Cancel</Button><Button onClick={() => recallMutation.mutate()} disabled={!technologistInstruction.trim() || recallMutation.isPending}>{recallMutation.isPending ? "Requesting..." : "Request recall"}</Button></DialogFooter></DialogContent></Dialog>
         <Dialog open={Boolean(reconciliationStudy)} onClose={()=>{if(!reconciliationMutation.isPending){setReconciliationStudy(null);setReconciliationConfirmed(false);}}}><DialogContent maxWidth="680px"><DialogHeader><DialogTitle>Patient Identity Reconciliation</DialogTitle><DialogDescription>Only the DICOM Patient ID will change. Historical demographics and all imaging identifiers will remain unchanged.</DialogDescription></DialogHeader>{reconciliationStudy?<div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-lg border p-3"><h4 className="font-semibold">Historical DICOM identity</h4><p>Patient ID: {reconciliationStudy.historicalPatientId||"Unavailable"}</p><p>Patient name: {reconciliationStudy.historicalPatientName||"Unavailable"}</p><p>DOB: {reconciliationStudy.historicalPatientBirthDate||"Unavailable"}</p></div><div className="rounded-lg border p-3"><h4 className="font-semibold">Current RISpro identity</h4><p>Patient ID: {historyQuery.data?.currentPatient?.patientId||"Unavailable"}</p><p>Patient name: {historyQuery.data?.currentPatient?.name||"Unavailable"}</p><p>DOB: {historyQuery.data?.currentPatient?.birthDate||"Unavailable"}</p></div><div className="md:col-span-2 rounded-lg border p-3"><p>Study date: {reconciliationStudy.date||"Unknown"}</p><p>Study: {reconciliationStudy.description||"Study"}</p><p>Accession: {reconciliationStudy.accessionNumber||"Unavailable"}</p><p className="break-all text-xs text-muted-foreground">StudyInstanceUID: {reconciliationStudy.studyInstanceUid}</p></div><label className="md:col-span-2 flex items-start gap-2"><Checkbox checked={reconciliationConfirmed} onCheckedChange={(value)=>setReconciliationConfirmed(Boolean(value))}/><span>I confirm that this historical study belongs to the selected RISpro patient.</span></label>{reconciliationMutation.isError?<p role="alert" className="md:col-span-2 text-red-700">{(reconciliationMutation.error as Error).message}</p>:null}</div>:null}<DialogFooter><Button variant="secondary" onClick={()=>setReconciliationStudy(null)} disabled={reconciliationMutation.isPending}>Cancel</Button><Button onClick={()=>reconciliationMutation.mutate()} disabled={!reconciliationConfirmed||reconciliationMutation.isPending}>{reconciliationMutation.isPending?"Submitting...":"Reconcile patient identity"}</Button></DialogFooter></DialogContent></Dialog>
       </section>
     </div>

@@ -28,6 +28,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   "name.dictionary": "Name Dictionary",
   appointments: "Appointments",
   "scheduling.override.requests": "Override Requests",
+  "recall.requests": "Recall Requests",
   "v2.appointments.admin": "Scheduling Policy Admin",
   calendar: "Calendar",
   registrations: "Registrations",

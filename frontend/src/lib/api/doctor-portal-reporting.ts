@@ -1139,6 +1139,14 @@ export async function fetchDoctorProtocolingAppointmentDetail(appointmentId: num
   return raw.detail;
 }
 
+export async function createComplementaryRecallRequest(appointmentId: number, payload: { receptionInstruction: string | null; technologistInstruction: string }) {
+  return api<{ recall: { id: number; status: string } }>(`/doctor/protocoling/appointments/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function cancelComplementaryRecallRequest(recallId: number) {
+  return api<{ recall: { id: number; status: string; recallAppointmentId: number | null }; linkedAppointmentStillExists: boolean }>(`/doctor/protocoling/complementary-recalls/${recallId}/cancel`, { method: "POST" });
+}
+
 export async function createDoctorProtocolAssignment(appointmentId: number, payload: ProtocolAssignmentPayload): Promise<DoctorProtocolingAppointmentDetail> {
   const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
     method: "POST",

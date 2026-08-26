@@ -10,4 +10,5 @@ export * from "./api/catalog";
 export * from "./api/admin";
 export * from "./api/integrations";
 export * from "./api/patient-import";
+export * from "./api/complementary-recalls";
 export * from "./api/modality-previous-studies";

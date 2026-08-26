@@ -25,6 +25,8 @@ import {
 } from "./protocoling-repository.js";
 import { requirePatientIdentityReconciliationAccess } from "../../services/patient-identity-reconciliation-service.js";
 import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingAppointmentStatusFilter, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
+import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
+import { cancelComplementaryRecall, createComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 
 const router = Router();
 
@@ -162,6 +164,21 @@ router.get(
     res.json({ detail });
   })
 );
+
+router.post("/appointments/:appointmentId/complementary-recalls", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  const userId = await requireProtocolingAccess(req);
+  const body = asUnknownRecord(req.body);
+  const technologistInstruction = optionalText(body.technologistInstruction ?? body.technologist_instruction);
+  if (!technologistInstruction) throw new HttpError(400, "Technologist instruction is required.");
+  const recall = await withTransaction((client) => createComplementaryRecall(client, { originalAppointmentId: positiveInteger(req.params.appointmentId, "appointmentId"), receptionInstruction: optionalText(body.receptionInstruction ?? body.reception_instruction), technologistInstruction, requestedByUserId: userId! }));
+  res.status(201).json({ recall });
+}));
+
+router.post("/complementary-recalls/:recallId/cancel", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  const userId = await requireProtocolingAccess(req);
+  const recall = await withTransaction((client) => cancelComplementaryRecall(client, positiveInteger(req.params.recallId, "recallId"), userId!));
+  res.json({ recall, linkedAppointmentStillExists: recall.recallAppointmentId != null });
+}));
 
 router.post("/appointments/:appointmentId/history/patient-identity-reconciliation",asyncRoute(async(req:DoctorRequest,res:Response)=>{const userId=await requireProtocolingAccess(req);await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);const body=asUnknownRecord(req.body);const job=await requestProtocolingPatientIdentityReconciliation(positiveInteger(req.params.appointmentId,"appointmentId"),asString(body.studyInstanceUid),asOptionalString(body.accessionNumber)??null,userId!);res.status(202).json({job});}));
 

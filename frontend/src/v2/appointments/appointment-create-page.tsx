@@ -3,7 +3,7 @@ import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 import { useAuth } from "@/providers/auth-provider";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchDoctorMe, fetchPatientById } from "@/lib/api-hooks";
+import { fetchComplementaryRecallBookingContext, fetchDoctorMe, fetchPatientById } from "@/lib/api-hooks";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
@@ -11,6 +11,7 @@ import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
 export function AppointmentCreatePage() {
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
+  const recallRequestId = Number(searchParams.get("recallRequestId"));
   const { user } = useAuth();
   const { language } = useLanguage();
   const lookups = useV2Lookups();
@@ -22,7 +23,8 @@ export function AppointmentCreatePage() {
     enabled: Boolean(user),
     staleTime: 60_000,
   });
-  const parsedPatientId = urlPatientId ? Number(urlPatientId) : null;
+  const recallContextQuery = useQuery({ queryKey: ["complementary-recall", "booking-context", recallRequestId], queryFn: () => fetchComplementaryRecallBookingContext(recallRequestId), enabled: Number.isInteger(recallRequestId) && recallRequestId > 0, staleTime: 60_000 });
+  const parsedPatientId = recallContextQuery.data?.patientId ?? (urlPatientId ? Number(urlPatientId) : null);
   const hasValidPatientId = Number.isInteger(parsedPatientId) && (parsedPatientId as number) > 0;
 
   const preloadPatientQuery = useQuery({
@@ -86,6 +88,7 @@ export function AppointmentCreatePage() {
         currentUserRole={user?.role}
         doctorModuleCapabilities={doctorMeQuery.data?.moduleCapabilities ?? []}
         initialSelectedPatient={initialSelectedPatient}
+        complementaryRecallContext={recallContextQuery.data ? { id: recallContextQuery.data.id, modalityId: recallContextQuery.data.modalityId, examTypeId: recallContextQuery.data.examTypeId, originalAccession: recallContextQuery.data.originalAccession, originalExam: recallContextQuery.data.originalExam, receptionInstruction: recallContextQuery.data.receptionInstruction } : null}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />

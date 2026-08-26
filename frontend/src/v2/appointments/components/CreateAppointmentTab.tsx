@@ -50,6 +50,7 @@ interface CreateAppointmentTabProps {
   currentUserRole?: Role;
   doctorModuleCapabilities?: DoctorModuleCapability[];
   initialSelectedPatient?: SelectedPatient | null;
+  complementaryRecallContext?: { id: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; receptionInstruction: string | null } | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
     patientId: number;
@@ -160,6 +161,7 @@ export function CreateAppointmentTab({
   currentUserRole,
   doctorModuleCapabilities = [],
   initialSelectedPatient = null,
+  complementaryRecallContext = null,
   onCreateAppointment,
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
@@ -253,9 +255,10 @@ export function CreateAppointmentTab({
     if (initialPatientAppliedRef.current) return;
     if (!initialSelectedPatient) return;
     if (form.patientId != null) return;
-    actions.setPatient(initialSelectedPatient);
+    if (complementaryRecallContext) actions.initializeComplementaryRecall(initialSelectedPatient, complementaryRecallContext.modalityId, complementaryRecallContext.examTypeId);
+    else actions.setPatient(initialSelectedPatient);
     initialPatientAppliedRef.current = true;
-  }, [actions, form.patientId, initialSelectedPatient]);
+  }, [actions, complementaryRecallContext, form.patientId, initialSelectedPatient]);
 
   const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
   const safetyWarningEnabled = selectedModality?.safetyWarningEnabled === true;
@@ -563,6 +566,7 @@ export function CreateAppointmentTab({
 
   async function createWithDecision(decision: SchedulingDecisionDto, override?: CreateBookingRequest["override"]) {
     const request: CreateBookingRequest = {
+      complementaryRecallRequestId: complementaryRecallContext?.id ?? null,
       patientId: form.patientId as number,
       modalityId: form.modalityId as number,
       examTypeId: form.examTypeId,
@@ -776,6 +780,7 @@ export function CreateAppointmentTab({
         requesterReason,
         createdFromContext: "appointments_create",
         requestPayload: {
+          complementaryRecallRequestId: complementaryRecallContext?.id ?? null,
           patientId: form.patientId,
           modalityId: form.modalityId,
           examTypeId: form.examTypeId,
@@ -876,7 +881,7 @@ export function CreateAppointmentTab({
         {/* Patient & Form Panel */}
         <div data-testid="appointment-form-region" className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
-            <PatientSearchSection
+            {complementaryRecallContext ? <div><label className="block text-sm font-semibold mb-2 text-foreground">Patient</label><div className="rounded-md border border-border bg-muted/30 p-3 text-sm">{form.patient ? formatAppointmentPatientName(language, form.patient, "Patient") : "Loading patient…"}</div><div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">Complementary recall</span><p className="mt-1 text-muted-foreground">{complementaryRecallContext.originalAccession} · {complementaryRecallContext.originalExam ?? "Original exam"}</p>{complementaryRecallContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{complementaryRecallContext.receptionInstruction}</p> : null}</div></div> : <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
               onSelectPatient={(patient: SelectedPatient) => {
@@ -891,7 +896,7 @@ export function CreateAppointmentTab({
                 setPageError(null);
                 setSafetyAcknowledged(false);
               }}
-            />
+            />}
 
             {form.patientId != null && (patientNoShows.length > 0 || patientNoShowSummary?.bookingRestricted) && (
               <div className="mt-4 sm:mt-5 space-y-3">
@@ -954,7 +959,7 @@ export function CreateAppointmentTab({
                   setAvailabilitySelectedRow(null);
                   setSafetyAcknowledged(false);
                 }}
-                disabled={!schedulingEngineEnabled || !form.patientId}
+                disabled={Boolean(complementaryRecallContext) || !schedulingEngineEnabled || !form.patientId}
               />
 
               {safetyWarningEnabled && safetyComplete && (
@@ -1124,7 +1129,7 @@ export function CreateAppointmentTab({
                   actions.setExamTypeId(value);
                   setAvailabilitySelectedRow(null);
                 }}
-                disabled={!schedulingEngineEnabled || !form.modalityId || !safetyComplete}
+                disabled={Boolean(complementaryRecallContext) || !schedulingEngineEnabled || !form.modalityId || !safetyComplete}
               />
 
               <div>

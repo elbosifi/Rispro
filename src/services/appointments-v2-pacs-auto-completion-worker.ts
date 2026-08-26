@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
+import { completeComplementaryRecallForBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
 import { requireRow } from "../utils/records.js";
@@ -711,6 +712,7 @@ async function completeBookingIfStillEligible({
         result.timingConfidence,
       ]
     );
+    await completeComplementaryRecallForBooking(client, bookingId, null);
 
     await markHistoryCompleted(historyId, client);
 

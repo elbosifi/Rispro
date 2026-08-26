@@ -669,11 +669,11 @@ describe("Doctor protocoling request documents", () => {
     expect((protocol as HTMLTextAreaElement).value).toBe("Keep this protocol draft.");
   });
 
-  it("hides More protocol actions for a new blank assignment", async () => {
+  it("shows More protocol actions for a new blank assignment so a recall can be requested", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
-    expect(screen.queryByRole("button", { name: "More protocol actions" })).toBeNull();
+    expect(screen.getByRole("button", { name: "More protocol actions" })).toBeTruthy();
   });
 
   it("shows printable and clear actions in an overflow-safe menu and closes after printing", async () => {

@@ -16,6 +16,7 @@ import { safeEnqueuePatientNotificationEvent } from "../../../../services/patien
 import { resolvePatientIdentityRisk, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
+import { canRoleAccessPage, readPageVisibilityMatrix } from "../../../../services/page-visibility-settings-service.js";
 import {
   safeNotifySchedulingOverrideApprovalFailed,
   safeNotifySchedulingOverrideApproved,
@@ -514,6 +515,7 @@ function normalizeCreatePayload(payload: Record<string, unknown>): CreateAppoint
   const rawScreening = isObject(payload.mriPrimaryScreening) ? payload.mriPrimaryScreening : null;
   const screeningResult = rawScreening?.result;
   return {
+    complementaryRecallRequestId: getNumber(payload.complementaryRecallRequestId) || null,
     patientId,
     modalityId,
     examTypeId: getNumber(payload.examTypeId),
@@ -698,6 +700,9 @@ export async function createSchedulingOverrideRequest(
 
     if (requestType === "create_booking") {
       const createPayload = normalizeCreatePayload(payloadRecord);
+      if (createPayload.complementaryRecallRequestId != null && (!role || !canRoleAccessPage("recall.requests", role, await readPageVisibilityMatrix()))) {
+        throw new SchedulingError(403, "This role cannot access recall requests.", ["recall_requests_forbidden"]);
+      }
       const modality = await findModalityById(client, createPayload.modalityId);
       if (!modality) throw new SchedulingError(404, "Modality not found.", ["modality_not_found"]);
       validateModalitySafetyForCreate(modality, createPayload);

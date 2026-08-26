@@ -5,6 +5,7 @@
 import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
 
 export interface CreateAppointmentDto {
+  complementaryRecallRequestId?: number | null;
   patientId: number;
   modalityId: number;
   examTypeId?: number | null;

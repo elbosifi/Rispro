@@ -138,6 +138,7 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     appointmentStatus: String(row.appointment_status),
     protocolStatus: String(row.protocol_status) as DoctorProtocolingAppointmentRow["protocolStatus"],
     assignment,
+    activeComplementaryRecall: row.complementary_recall_id == null ? null : { id: Number(row.complementary_recall_id), status: String(row.complementary_recall_status) as "pending_scheduling" | "scheduled" },
   };
 }
 
@@ -215,7 +216,9 @@ const APPOINTMENT_SELECT = `
     apa.free_text_protocol,
     apa.status as assignment_status,
     apa.assigned_by,
-    apa.assigned_at
+    apa.assigned_at,
+    recall.id as complementary_recall_id,
+    recall.status as complementary_recall_status
   from appointments_v2.bookings b
   join patients p on p.id = b.patient_id
   join modalities m on m.id = b.modality_id
@@ -255,6 +258,14 @@ const APPOINTMENT_SELECT = `
     order by assignment.updated_at desc, assignment.id desc
     limit 1
   ) apa on true
+  left join lateral (
+    select recall.id, recall.status
+    from appointments_v2.complementary_recall_requests recall
+    where recall.original_appointment_id = b.id
+      and recall.status in ('pending_scheduling', 'scheduled')
+    order by recall.id desc
+    limit 1
+  ) recall on true
 `;
 
 export async function listProtocolingAppointments(filters: ProtocolingFilters): Promise<DoctorProtocolingAppointmentRow[]> {
