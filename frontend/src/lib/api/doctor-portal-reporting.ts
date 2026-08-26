@@ -1144,8 +1144,8 @@ export async function createComplementaryRecallRequest(appointmentId: number, pa
   return api<{ recall: { id: number; status: string } }>(`/doctor/protocoling/appointments/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) });
 }
 
-export async function withdrawComplementaryRecallRequest(recallId: number) {
-  return api<{ recall: { id: number; status: string; recallAppointmentId: number | null } }>(`/doctor/protocoling/complementary-recalls/${recallId}/withdraw`, { method: "POST" });
+export async function withdrawComplementaryRecallRequest(recallId: number): Promise<ComplementaryRecall> {
+  return (await api<{ recall: ComplementaryRecall }>(`/doctor/protocoling/complementary-recalls/${recallId}/withdraw`, { method: "POST" })).recall;
 }
 
 export async function fetchDoctorComplementaryRecalls(): Promise<ComplementaryRecall[]> {
