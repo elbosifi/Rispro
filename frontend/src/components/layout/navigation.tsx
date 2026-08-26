@@ -190,8 +190,8 @@ function NavButton({
   onClick: () => void;
 }) {
   const { data: recallSummary } = useQuery({ queryKey: ["complementary-recalls", "reception-summary"], queryFn: fetchComplementaryRecallReceptionSummary, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
-  const previousSummary = useRef<typeof recallSummary>();
-  const pulseTimer = useRef<number>();
+  const previousSummary = useRef<typeof recallSummary>(undefined);
+  const pulseTimer = useRef<number | undefined>(undefined);
   const [attentionPulse, setAttentionPulse] = useState(false);
   useEffect(() => {
     if (!recallSummary) return;
