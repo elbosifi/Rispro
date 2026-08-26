@@ -1035,6 +1035,7 @@ export default function RegistrationsPage() {
                           {patientName}
                         </button>
                         <p className="mt-1 font-mono text-xs text-muted-foreground">{apt.accessionNumber}</p>
+                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
                       </div>
                       <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
                         {statusLabel(language, apt.status)}
@@ -1178,6 +1179,7 @@ export default function RegistrationsPage() {
                             .filter(Boolean)
                             .join(" • ")}
                         </p>
+                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
                       </div>
 
                       <div className="min-w-0">
