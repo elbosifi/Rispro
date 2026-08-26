@@ -15,7 +15,6 @@ import {
   createProtocolLibraryMriSequencePreset,
   createProtocolLibraryMriSequenceRow,
   createProtocolLibraryProtocol,
-  createProtocolLibraryScanner,
   deleteProtocolLibraryCtPhaseRow,
   deleteProtocolLibraryMriSequenceRow,
   confirmMriSequenceImport,
@@ -44,12 +43,10 @@ import {
   updateProtocolLibraryMriSequenceRow,
   updateProtocolLibraryMriSequencePreset,
   updateProtocolLibraryProtocol,
-  updateProtocolLibraryScanner,
   updateProtocolLibraryVersion,
   updateDoctorProtocolAssignment,
   updateDoctorProtocolReportRequirement,
   type CtPhasePresetPayload,
-  type ImagingScannerPayload,
   type MriSequencePresetPayload,
   type MriSequenceImportInspect,
   type MriSequenceImportPreview,
@@ -220,7 +217,6 @@ function SectionButton({
 }
 
 const EMPTY_REGION: ProtocolAnatomyRegionPayload = { name: "", bodySystem: null, modalityScope: "BOTH", defaultCoverageNote: null, isActive: true };
-const EMPTY_SCANNER: ImagingScannerPayload = { name: "", modality: "MRI", vendor: null, model: null, fieldStrength: null, ctSliceDetectorSpecification: null, location: null, notes: null, isActive: true };
 const EMPTY_CT_PHASE: CtPhasePresetPayload = {
   name: "",
   contrastStatus: "NON_CONTRAST",
@@ -393,8 +389,6 @@ function ProtocolLibraryPanel() {
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [regionDraft, setRegionDraft] = useState<ProtocolAnatomyRegionPayload | null>(null);
   const [editingRegionId, setEditingRegionId] = useState<number | null>(null);
-  const [scannerDraft, setScannerDraft] = useState<ImagingScannerPayload | null>(null);
-  const [editingScannerId, setEditingScannerId] = useState<number | null>(null);
   const [ctPhaseDraft, setCtPhaseDraft] = useState<CtPhasePresetPayload | null>(null);
   const [editingCtPhaseId, setEditingCtPhaseId] = useState<number | null>(null);
   const [mriSequenceDraft, setMriSequenceDraft] = useState<MriSequencePresetPayload | null>(null);
@@ -445,8 +439,6 @@ function ProtocolLibraryPanel() {
 
   const createRegionMutation = useMutation({ mutationFn: createProtocolLibraryAnatomyRegion, onError: onMutationError, onSuccess: async () => { setRegionDraft(null); setEditingRegionId(null); await onMutationSuccess("anatomy-regions", "Region saved."); } });
   const updateRegionMutation = useMutation({ mutationFn: ({ id, payload }: { id: number; payload: Partial<ProtocolAnatomyRegionPayload> }) => updateProtocolLibraryAnatomyRegion(id, payload), onError: onMutationError, onSuccess: async () => { setRegionDraft(null); setEditingRegionId(null); await onMutationSuccess("anatomy-regions", "Region saved."); } });
-  const createScannerMutation = useMutation({ mutationFn: createProtocolLibraryScanner, onError: onMutationError, onSuccess: async () => { setScannerDraft(null); setEditingScannerId(null); await onMutationSuccess("scanners", "Scanner saved."); } });
-  const updateScannerMutation = useMutation({ mutationFn: ({ id, payload }: { id: number; payload: Partial<ImagingScannerPayload> }) => updateProtocolLibraryScanner(id, payload), onError: onMutationError, onSuccess: async () => { setScannerDraft(null); setEditingScannerId(null); await onMutationSuccess("scanners", "Scanner saved."); } });
   const createCtPhaseMutation = useMutation({ mutationFn: createProtocolLibraryCtPhasePreset, onError: onMutationError, onSuccess: async () => { setCtPhaseDraft(null); setEditingCtPhaseId(null); await onMutationSuccess("ct-phase-presets", "CT phase saved."); } });
   const updateCtPhaseMutation = useMutation({ mutationFn: ({ id, payload }: { id: number; payload: Partial<CtPhasePresetPayload> }) => updateProtocolLibraryCtPhasePreset(id, payload), onError: onMutationError, onSuccess: async () => { setCtPhaseDraft(null); setEditingCtPhaseId(null); await onMutationSuccess("ct-phase-presets", "CT phase saved."); } });
   const createMriSequenceMutation = useMutation({ mutationFn: createProtocolLibraryMriSequencePreset, onError: onMutationError, onSuccess: async () => { setMriSequenceDraft(null); setEditingMriSequenceId(null); await onMutationSuccess("mri-sequence-presets", "MRI sequence saved."); } });
@@ -507,7 +499,6 @@ function ProtocolLibraryPanel() {
   const reorderMriRowsMutation = useMutation({ mutationFn: ({ versionId, rowIds }: { versionId: number; rowIds: number[] }) => reorderProtocolLibraryMriSequenceRows(versionId, rowIds), onError: onMutationError, onSuccess: refreshBuilder });
 
   const startRegionEdit = (item: ProtocolAnatomyRegion) => { setEditingRegionId(item.id); setRegionDraft({ name: item.name, bodySystem: item.bodySystem, modalityScope: item.modalityScope, defaultCoverageNote: item.defaultCoverageNote, isActive: item.isActive }); };
-  const startScannerEdit = (item: ImagingScanner) => { setEditingScannerId(item.id); setScannerDraft({ name: item.name, modality: item.modality, vendor: item.vendor, model: item.model, fieldStrength: item.fieldStrength, ctSliceDetectorSpecification: item.ctSliceDetectorSpecification, location: item.location, notes: item.notes, isActive: item.isActive }); };
   const startCtPhaseEdit = (item: CtPhasePreset) => { setEditingCtPhaseId(item.id); setCtPhaseDraft({ name: item.name, contrastStatus: item.contrastStatus, timingType: item.timingType, delaySeconds: item.delaySeconds, bolusTrackingSite: item.bolusTrackingSite, triggerHu: item.triggerHu, defaultCoverage: item.defaultCoverage, reconstructionNotes: item.reconstructionNotes, instructions: item.instructions, isActive: item.isActive }); };
   const startMriSequenceEdit = (item: MriSequencePreset) => { setEditingMriSequenceId(item.id); setMriSequenceDraft({ scannerId: item.scannerId, vendor: item.vendor, name: item.name, vendorSequenceName: item.vendorSequenceName, genericFamily: item.genericFamily, weighting: item.weighting, defaultPlane: item.defaultPlane, fatSuppression: item.fatSuppression ?? null, acquisitionType: item.acquisitionType ?? null, contrastRelation: item.contrastRelation, defaultCoverage: item.defaultCoverage, defaultBValues: item.defaultBValues, defaultDynamicTiming: item.defaultDynamicTiming, estimatedScanTimeMinutes: item.estimatedScanTimeMinutes, notes: item.notes, scannerAliases: (item.scannerAliases ?? []).map((alias) => ({ scannerId: alias.scannerId, vendorSequenceName: alias.vendorSequenceName, notes: alias.notes })), isActive: item.isActive }); };
   const startCtRowEdit = (item: ProtocolLibraryCtPhaseRow) => { setEditingCtRowId(item.id); setCtRowDraft({ ctPhasePresetId: item.ctPhasePresetId, customPhaseName: item.customPhaseName, timingOverride: item.timingOverride, coverageOverride: item.coverageOverride, reconstructionOverride: item.reconstructionOverride, instructionsOverride: item.instructionsOverride, isRequired: item.isRequired }); };
@@ -1011,21 +1002,6 @@ function RegionForm({ draft, setDraft, saving, onSave, onCancel }: { draft: Prot
   );
 }
 
-function ScannerForm({ draft, setDraft, saving, onSave, onCancel }: { draft: ImagingScannerPayload; setDraft: (draft: ImagingScannerPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
-  return (
-    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Display name"><input aria-label="Display name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Modality"><select aria-label="Modality" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modality} onChange={(event) => setDraft({ ...draft, modality: event.target.value as ImagingScannerPayload["modality"], fieldStrength: event.target.value === "MRI" ? draft.fieldStrength : null, ctSliceDetectorSpecification: event.target.value === "CT" ? draft.ctSliceDetectorSpecification : null })}><option value="CT">CT</option><option value="MRI">MRI</option></select></Field>
-      {(["vendor", "model"] as const).map((key) => <Field key={key} label={key[0].toUpperCase() + key.slice(1)}><input aria-label={key[0].toUpperCase() + key.slice(1)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: editableText(event.target.value) })} /></Field>)}
-      {draft.modality === "MRI" ? <Field label="Field strength"><input aria-label="Field strength" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.fieldStrength)} onChange={(event) => setDraft({ ...draft, fieldStrength: editableText(event.target.value) })} placeholder="1.5T, 3T" /></Field> : null}
-      {draft.modality === "CT" ? <Field label="Slice / detector specification"><input aria-label="Slice / detector specification" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.ctSliceDetectorSpecification)} onChange={(event) => setDraft({ ...draft, ctSliceDetectorSpecification: editableText(event.target.value) })} /></Field> : null}
-      <Field label="Location"><input aria-label="Location" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.location)} onChange={(event) => setDraft({ ...draft, location: editableText(event.target.value) })} /></Field>
-      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
-      <FormActions saving={saving} saveLabel="Save scanner" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
-    </div></td></tr>
-  );
-}
-
 function CtPhaseForm({ draft, setDraft, saving, onSave, onCancel }: { draft: CtPhasePresetPayload; setDraft: (draft: CtPhasePresetPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
   return (
     <tr><td colSpan={7} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
@@ -1491,7 +1467,7 @@ function ProtocolAssignmentModal({
     mutationFn: (patientId: string) => searchProtocolingHistoricalPacsPatientId(appointment.appointmentId, patientId),
   });
   const reconciliationMutation=useMutation({mutationFn:()=>requestProtocolingPatientIdentityReconciliation(appointment.appointmentId,reconciliationStudy!.studyInstanceUid,reconciliationStudy!.accessionNumber),onSuccess:async()=>{const manualSearchPatientId=reconciliationStudy?.source==="manual_candidate"?reconciliationStudy.manualSearchPatientId:undefined;setReconciliationStudy(null);setReconciliationConfirmed(false);await Promise.all([queryClient.invalidateQueries({queryKey:["doctor","protocoling","history",appointment.patientId,appointment.appointmentId]}),queryClient.invalidateQueries({queryKey:["doctor","protocoling","historical-pacs-candidates",appointment.patientId]})]);if(manualSearchPatientId)oldPacsPatientIdMutation.mutate(manualSearchPatientId);},});
-  const historyItems = historyQuery.data?.items ?? [];
+  const historyItems = useMemo(() => historyQuery.data?.items ?? [], [historyQuery.data?.items]);
   const automaticHistoricalCandidates = historicalCandidatesQuery.data?.historicalCandidates ?? [];
   const hideAutomaticHistoricalCandidatesSection = automaticHistoricalCandidates.length > 0 && !automaticHistoricalCandidates.some((candidate) => candidate.studies.some((study) => !shouldHideHistoricalCandidateStudy(study)));
   const historicalPacsIndexStatus = historicalCandidatesQuery.data?.historicalPacsIndexStatus ?? historyQuery.data?.historicalPacsIndexStatus;

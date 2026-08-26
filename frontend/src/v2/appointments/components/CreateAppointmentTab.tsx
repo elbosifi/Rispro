@@ -442,7 +442,7 @@ export function CreateAppointmentTab({
     if (!overrideTypes.length || !row || row.status === "available") return false;
     if (isReceptionist) return allowReceptionOverrideRequestsFromAvailability;
     return shouldUseDeferredOverrideRequest(currentUserRole, overrideTypes, allowReceptionOverrideRequestsFromAvailability);
-  }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, currentUserRole]);
+  }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, currentUserRole, isReceptionist]);
 
   const inferRowOverrideTypes = useCallback((row: AvailabilityRowViewModel | null | undefined): SchedulingOverrideType[] => {
     return inferSupportedOverrideTypesFromExamRuleMetadata({
@@ -451,7 +451,7 @@ export function CreateAppointmentTab({
       effectModes: row?.matchedExamRuleSummary ? [row.matchedExamRuleSummary.effectMode] : [],
       capacityResolutionMode: "standard",
     });
-  }, [form.capacityResolutionMode]);
+  }, []);
 
   const visibleInAvailabilityPanel = useCallback((row: AvailabilityRowViewModel, selected = false): boolean => {
     return isAvailabilityRowVisible(row, {

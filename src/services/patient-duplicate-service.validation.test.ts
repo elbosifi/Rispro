@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  dismissPatientDuplicateCandidate,
+  getPatientDuplicateDetail,
   mergePatientDuplicateGroup,
   safeDeleteDuplicatePatient,
 } from "./patient-duplicate-service.js";
@@ -58,6 +60,39 @@ test("safeDeleteDuplicatePatient requires explicit DELETE confirmation", async (
     (error: unknown) => {
       assert.equal((error as { statusCode?: number }).statusCode, 400);
       assert.equal((error as Error).message, "confirmationText must be DELETE.");
+      return true;
+    }
+  );
+});
+
+test("getPatientDuplicateDetail rejects an invalid patient pair before querying the database", async () => {
+  await assert.rejects(
+    () => getPatientDuplicateDetail(0, sourcePatientId),
+    (error: unknown) => {
+      assert.equal((error as { statusCode?: number }).statusCode, 400);
+      assert.equal((error as Error).message, "Both patient ids are required.");
+      return true;
+    }
+  );
+});
+
+test("getPatientDuplicateDetail rejects the same patient record twice before querying the database", async () => {
+  await assert.rejects(
+    () => getPatientDuplicateDetail(targetPatientId, targetPatientId),
+    (error: unknown) => {
+      assert.equal((error as { statusCode?: number }).statusCode, 400);
+      assert.equal((error as Error).message, "Choose two different patient records.");
+      return true;
+    }
+  );
+});
+
+test("dismissPatientDuplicateCandidate rejects a non-positive second patient id before querying the database", async () => {
+  await assert.rejects(
+    () => dismissPatientDuplicateCandidate(targetPatientId, 0, null, null),
+    (error: unknown) => {
+      assert.equal((error as { statusCode?: number }).statusCode, 400);
+      assert.equal((error as Error).message, "Both patient ids are required.");
       return true;
     }
   );
