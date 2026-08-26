@@ -10,6 +10,7 @@ import {
   findActiveSpecialQuotaConsumption,
   releaseActiveSpecialQuotaConsumption,
 } from "../repositories/special-quota-consumption.repo.js";
+import { reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
 
 export interface VoidBookingResult {
   booking: Booking;
@@ -66,6 +67,7 @@ async function voidBookingInternal(
 
   if (userRole === "super_admin") {
     await voidAndRelease();
+    await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "voided");
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,
@@ -94,6 +96,7 @@ async function voidBookingInternal(
 
   if (booking.status === "scheduled") {
     await voidAndRelease();
+    await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "voided");
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,
@@ -118,6 +121,7 @@ async function voidBookingInternal(
     }
 
     await voidAndRelease();
+    await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "voided");
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,

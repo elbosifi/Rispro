@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
-import { cancelComplementaryRecall, completeComplementaryRecallForBooking, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen } from "../../recall/complementary-recall.service.js";
+import { completeComplementaryRecallForBooking, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
@@ -24,7 +25,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const result = await pool.query<{ id: number }>(
       `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, booking_time, status, case_category, policy_version_id, created_by_user_id, updated_by_user_id)
        values ($1, $2, $3, '2039-06-12', '09:00', $4, 'non_oncology', $5, $6, $6) returning id`,
-      [overrides.patientId ?? testData.patientId, overrides.modalityId ?? testData.modalityId, overrides.examTypeId === undefined ? testData.examTypeId : overrides.examTypeId, overrides.status ?? "scheduled", testData.policyVersionId, testData.userId]
+      [overrides.patientId ?? testData.patientId, overrides.modalityId ?? testData.modalityId, overrides.examTypeId === undefined ? testData.examTypeId : overrides.examTypeId, overrides.status ?? "completed", testData.policyVersionId, testData.userId]
     );
     return Number(result.rows[0]!.id);
   }
@@ -56,6 +57,10 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const nonProtocolingModality = await pool.query<{ id: number }>("insert into modalities(name_ar, name_en, code, daily_capacity, is_active) values ('X', 'Ultrasound', $1, 10, true) returning id", [`${TEST_PREFIX}US`]);
     const nonProtocolingOriginalId = await originalBooking({ modalityId: Number(nonProtocolingModality.rows[0]!.id) });
     await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: nonProtocolingOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId })), { statusCode: 409 });
+    for (const status of ["scheduled", "arrived", "waiting", "no-show", "cancelled", "discontinued", "voided"]) {
+      const ineligibleId = await originalBooking({ status });
+      await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: ineligibleId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId })), { statusCode: 409 });
+    }
   });
 
   it("joins the reception work queue and keeps unseen independent of scheduled state", async () => {
@@ -88,6 +93,9 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(scheduled?.recallAppointmentId, returnBookingId);
     const assignment = await pool.query<{ free_text_protocol: string; scanner_id: number | null }>("select free_text_protocol, scanner_id from appointment_protocol_assignments where appointment_id = $1", [returnBookingId]);
     assert.deepEqual(assignment.rows[0], { free_text_protocol: "Repeat contrast phase", scanner_id: null });
+    const eligibility = await resolveMwlEligibilityForBooking(returnBookingId);
+    assert.equal(eligibility.activeProtocolAssignmentExists, true);
+    assert.equal(eligibility.holdReason, null);
     await cancelBooking(returnBookingId, testData.userId);
     assert.equal((await getComplementaryRecall(recall.id))?.status, "pending_scheduling");
     const rebooked = await createBooking({ complementaryRecallRequestId: recall.id, patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-14", bookingTime: "10:00", caseCategory: "non_oncology" }, testData.userId, "supervisor", testData.policySetKey);
@@ -96,15 +104,20 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     await assert.rejects(() => getComplementaryRecallBookingContext(recall.id), { statusCode: 409 });
   });
 
-  it("clinically cancels without removing a linked appointment", async () => {
+  it("allows withdrawal only before a return appointment is booked", async () => {
     if (!testData) return;
     const originalId = await originalBooking();
     const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", requestedByUserId: testData.userId }));
     const returnId = await originalBooking();
     await transaction((client) => linkComplementaryRecallBooking(client, recall, returnId, testData.userId));
-    const cancelled = await transaction((client) => cancelComplementaryRecall(client, recall.id, testData.userId));
+    await assert.rejects(() => transaction((client) => withdrawComplementaryRecall(client, recall.id, testData.userId)), { statusCode: 409 });
+    await transaction((client) => reopenComplementaryRecallForUncompletedBooking(client, returnId, testData.userId, "no-show"));
+    const reopened = await getComplementaryRecall(recall.id);
+    assert.equal(reopened?.status, "pending_scheduling");
+    assert.equal(reopened?.recallAppointmentId, null);
+    const cancelled = await transaction((client) => withdrawComplementaryRecall(client, recall.id, testData.userId));
     assert.equal(cancelled.status, "cancelled");
-    assert.equal(cancelled.recallAppointmentId, returnId);
+    assert.equal(cancelled.recallAppointmentId, null);
     assert.equal((await pool.query("select id from appointments_v2.bookings where id = $1", [returnId])).rowCount, 1);
   });
 });

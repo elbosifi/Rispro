@@ -19,7 +19,7 @@ import {
   findActiveSpecialQuotaConsumption,
   releaseActiveSpecialQuotaConsumption,
 } from "../repositories/special-quota-consumption.repo.js";
-import { completeComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
+import { completeComplementaryRecallForBooking, reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -538,6 +538,7 @@ export async function updateBookingStatusManual(
       }
       if (targetStatus === "no-show") {
         await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
+        await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "no-show");
       }
       if (targetStatus === "completed") {
         await completeComplementaryRecallForBooking(client, bookingId, userId);
@@ -546,6 +547,7 @@ export async function updateBookingStatusManual(
           actionType: "manual_status_completion",
         });
       } else if (targetStatus === "discontinued") {
+        await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "discontinued");
         await cancelPendingReportingAssignmentIntent(client, bookingId, {
           reason: "status_discontinued",
           actorUserId: userId,

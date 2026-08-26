@@ -26,7 +26,7 @@ import {
 import { requirePatientIdentityReconciliationAccess } from "../../services/patient-identity-reconciliation-service.js";
 import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingAppointmentStatusFilter, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
-import { cancelComplementaryRecall, createComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
+import { createComplementaryRecall, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 
 const router = Router();
 
@@ -174,10 +174,10 @@ router.post("/appointments/:appointmentId/complementary-recalls", asyncRoute(asy
   res.status(201).json({ recall });
 }));
 
-router.post("/complementary-recalls/:recallId/cancel", asyncRoute(async (req: DoctorRequest, res: Response) => {
+router.post("/complementary-recalls/:recallId/withdraw", asyncRoute(async (req: DoctorRequest, res: Response) => {
   const userId = await requireProtocolingAccess(req);
-  const recall = await withTransaction((client) => cancelComplementaryRecall(client, positiveInteger(req.params.recallId, "recallId"), userId!));
-  res.json({ recall, linkedAppointmentStillExists: recall.recallAppointmentId != null });
+  const recall = await withTransaction((client) => withdrawComplementaryRecall(client, positiveInteger(req.params.recallId, "recallId"), userId!));
+  res.json({ recall });
 }));
 
 router.post("/appointments/:appointmentId/history/patient-identity-reconciliation",asyncRoute(async(req:DoctorRequest,res:Response)=>{const userId=await requireProtocolingAccess(req);await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);const body=asUnknownRecord(req.body);const job=await requestProtocolingPatientIdentityReconciliation(positiveInteger(req.params.appointmentId,"appointmentId"),asString(body.studyInstanceUid),asOptionalString(body.accessionNumber)??null,userId!);res.status(202).json({job});}));

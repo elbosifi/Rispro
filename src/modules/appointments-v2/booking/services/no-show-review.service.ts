@@ -4,6 +4,7 @@ import { logAuditEntry } from "../../../../services/audit-service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { activateNoShowRestrictionForBooking } from "../../../../services/patient-no-show-restriction-service.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
+import { reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
 
 const DEFAULT_REVIEW_TIME = "17:00";
 const DEFAULT_GRACE_MINUTES = 30;
@@ -176,6 +177,7 @@ async function transitionLockedBooking(client: PoolClient, booking: BookingRow, 
   await logAuditEntry({ entityType: "appointment_v2_booking", entityId: Number(booking.id), actionType,
     oldValues: { status: booking.status, booking_date: booking.booking_date }, newValues: { status: "no-show", reason }, changedByUserId: actorUserId }, client);
   await activateNoShowRestrictionForBooking(client, Number(booking.id), reason, actorUserId);
+  await reopenComplementaryRecallForUncompletedBooking(client, Number(booking.id), actorUserId, "no-show");
 }
 
 async function lockBooking(client: PoolClient, bookingId: number): Promise<BookingRow | null> {

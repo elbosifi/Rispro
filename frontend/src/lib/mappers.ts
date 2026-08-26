@@ -149,6 +149,10 @@ export interface AppointmentWithDetails extends Appointment {
     contrastNotes: string | null;
     status?: string | null;
   } | null;
+  isAdditionalImaging?: boolean;
+  originalAppointmentId?: number | null;
+  originalAccession?: string | null;
+  originalExam?: string | null;
 }
 
 export interface NoShowCandidate {
@@ -430,6 +434,10 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
           status: strOrNull(raw, "protocol_assignment_status") ?? strOrNull(raw, "protocolAssignmentStatus"),
         }
       : null,
+    isAdditionalImaging: bool(raw, "is_additional_imaging", bool(raw, "isAdditionalImaging", false)),
+    originalAppointmentId: numOrNull(raw, "original_appointment_id") ?? numOrNull(raw, "originalAppointmentId"),
+    originalAccession: strOrNull(raw, "original_accession") ?? strOrNull(raw, "originalAccession"),
+    originalExam: strOrNull(raw, "original_exam") ?? strOrNull(raw, "originalExam"),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

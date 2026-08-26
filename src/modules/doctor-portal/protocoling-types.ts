@@ -50,6 +50,7 @@ export interface DoctorProtocolingAppointmentRow {
   protocolStatus: "NOT_PROTOCOLLED" | ProtocolAssignmentStatus;
   assignment: ProtocolAssignmentSummary | null;
   activeComplementaryRecall: { id: number; status: "pending_scheduling" | "scheduled" } | null;
+  latestComplementaryRecall: { id: number; status: "pending_scheduling" | "scheduled" | "completed" | "cancelled" } | null;
 }
 
 export interface ProtocolingCtPhaseRow {

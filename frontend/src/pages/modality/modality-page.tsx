@@ -1084,7 +1084,7 @@ export default function ModalityPage() {
                               <td className="px-2 py-1.5">
                                 <p lang="ar" dir="rtl" className="truncate text-sm font-bold leading-5 text-foreground">{appointment.arabicFullName}</p>
                                 {showEnglishName ? <p lang="en" dir="ltr" className="truncate text-xs leading-4 text-slate-600">{englishName}</p> : null}
-                                {appointment.caseCategory || appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
+                                {appointment.caseCategory || appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" || appointment.isAdditionalImaging ? (
                                   <div className="mt-0.5 inline-flex max-w-full items-center gap-1.5">
                                     {appointment.caseCategory ? (
                                       <div
@@ -1104,6 +1104,7 @@ export default function ModalityPage() {
                                     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
                                       <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
                                     ) : null}
+                                    {appointment.isAdditionalImaging ? <span className="inline-flex items-center whitespace-nowrap text-[11px] font-medium text-violet-700" title={[appointment.originalAccession, appointment.originalExam].filter(Boolean).join(" · ")}>Additional imaging</span> : null}
                                   </div>
                                 ) : null}
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}

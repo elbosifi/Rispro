@@ -1003,6 +1003,7 @@ export interface DoctorProtocolingAppointment {
   protocolStatus: DoctorProtocolingStatus;
   assignment: ProtocolAssignment | null;
   activeComplementaryRecall?: { id: number; status: "pending_scheduling" | "scheduled" } | null;
+  latestComplementaryRecall?: { id: number; status: "pending_scheduling" | "scheduled" | "completed" | "cancelled" } | null;
 }
 
 export interface ProtocolingCtPhase {

@@ -8,3 +8,4 @@ export async function markComplementaryRecallsSeen(ids: number[]): Promise<void>
 export async function fetchComplementaryRecall(id: number): Promise<ComplementaryRecall> { return (await api<{ recall: ComplementaryRecall }>(`/v2/complementary-recall-requests/${id}`)).recall; }
 export type ComplementaryRecallBookingContext = ComplementaryRecall & { patientId: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; };
 export async function fetchComplementaryRecallBookingContext(id: number): Promise<ComplementaryRecallBookingContext> { return (await api<{ recall: ComplementaryRecallBookingContext }>(`/v2/complementary-recall-requests/${id}/booking-context`)).recall; }
+export async function withdrawComplementaryRecall(id: number): Promise<ComplementaryRecall> { return (await api<{ recall: ComplementaryRecall }>(`/v2/complementary-recall-requests/${id}/withdraw`, { method: "POST" })).recall; }

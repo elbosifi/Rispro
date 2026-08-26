@@ -139,6 +139,7 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     protocolStatus: String(row.protocol_status) as DoctorProtocolingAppointmentRow["protocolStatus"],
     assignment,
     activeComplementaryRecall: row.complementary_recall_id == null ? null : { id: Number(row.complementary_recall_id), status: String(row.complementary_recall_status) as "pending_scheduling" | "scheduled" },
+    latestComplementaryRecall: row.latest_complementary_recall_id == null ? null : { id: Number(row.latest_complementary_recall_id), status: String(row.latest_complementary_recall_status) as "pending_scheduling" | "scheduled" | "completed" | "cancelled" },
   };
 }
 
@@ -218,7 +219,9 @@ const APPOINTMENT_SELECT = `
     apa.assigned_by,
     apa.assigned_at,
     recall.id as complementary_recall_id,
-    recall.status as complementary_recall_status
+    recall.status as complementary_recall_status,
+    latest_recall.id as latest_complementary_recall_id,
+    latest_recall.status as latest_complementary_recall_status
   from appointments_v2.bookings b
   join patients p on p.id = b.patient_id
   join modalities m on m.id = b.modality_id
@@ -266,6 +269,13 @@ const APPOINTMENT_SELECT = `
     order by recall.id desc
     limit 1
   ) recall on true
+  left join lateral (
+    select latest_recall.id, latest_recall.status
+    from appointments_v2.complementary_recall_requests latest_recall
+    where latest_recall.original_appointment_id = b.id
+    order by latest_recall.id desc
+    limit 1
+  ) latest_recall on true
 `;
 
 export async function listProtocolingAppointments(filters: ProtocolingFilters): Promise<DoctorProtocolingAppointmentRow[]> {
@@ -277,7 +287,7 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
     protocolingModalityAppliesSql("protocoling_modality.modality_code"),
   ];
   if (await isRequestDocumentRequiredForProtocolQueue()) {
-    where.push(qualifyingRequestDocumentExistsSql("b.id"));
+    where.push(`(${qualifyingRequestDocumentExistsSql("b.id")} or (apa.assignment_id is not null and exists (select 1 from appointments_v2.complementary_recall_requests complementary_return where complementary_return.recall_appointment_id = b.id)))`);
   }
   if (filters.modality) {
     values.push(filters.modality);

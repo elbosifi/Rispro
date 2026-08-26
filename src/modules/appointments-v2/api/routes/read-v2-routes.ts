@@ -1324,6 +1324,10 @@ router.get(
         ,exists(select 1 from cd_robot_deliveries active_cd where active_cd.patient_id=b.patient_id and active_cd.status='sending') as cd_patient_active
         ,coalesce(document_summary.document_count, 0)::int as document_count
         ,document_summary.latest_document_at as latest_document_at
+        ,(complementary_return.id is not null) as is_additional_imaging
+        ,complementary_return.original_appointment_id
+        ,('V2-' || lpad(complementary_return.original_appointment_id::text, 6, '0')) as original_accession
+        ,original_exam.name_en as original_exam
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -1333,6 +1337,9 @@ router.get(
       left join appointments_v2.pacs_auto_completion_settings pacs_settings on pacs_settings.modality_id = b.modality_id
       left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
       left join document_summary on document_summary.booking_id = b.id
+      left join appointments_v2.complementary_recall_requests complementary_return on complementary_return.recall_appointment_id = b.id
+      left join appointments_v2.bookings original_booking on original_booking.id = complementary_return.original_appointment_id
+      left join exam_types original_exam on original_exam.id = original_booking.exam_type_id
       left join patient_identifier_types legacy_type on legacy_type.code = p.identifier_type
       left join lateral (
         select source.identifier_type, source.label_ar, source.label_en, source.value
