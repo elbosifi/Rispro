@@ -214,7 +214,7 @@ function NavButton({
       showTooltip={showTooltip}
       animationDelayMs={index * 40}
       attentionPulse={item.route === "recall.requests" && attentionPulse}
-      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-foreground" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : null}
+      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : null}
       onClick={onClick}
     />
   );
