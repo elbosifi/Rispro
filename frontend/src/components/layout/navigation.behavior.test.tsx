@@ -38,6 +38,7 @@ vi.mock("lucide-react", () => {
     Plus: Icon,
     ChevronDown: Icon,
     Globe2: Icon,
+    ShieldAlert: Icon,
   };
 });
 
