@@ -1,5 +1,6 @@
+import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render as renderTestingLibrary, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,10 @@ import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
+
+function render(ui: ReactElement) {
+  return renderTestingLibrary(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 const appointment: DoctorProtocolingAppointment = {
   appointmentId: 42,
@@ -128,7 +133,7 @@ describe("Doctor protocoling request documents", () => {
   });
 
   it("selects the appointment from the appointmentId URL", async () => {
-    render(<MemoryRouter initialEntries={["/doctor/protocols?appointmentId=42"]}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
+    renderTestingLibrary(<MemoryRouter initialEntries={["/doctor/protocols?appointmentId=42"]}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
 
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
   });
@@ -676,11 +681,11 @@ describe("Doctor protocoling request documents", () => {
     expect((protocol as HTMLTextAreaElement).value).toBe("Keep this protocol draft.");
   });
 
-  it("shows More protocol actions for a new blank assignment so a recall can be requested", async () => {
+  it("does not render overflow actions for a new blank assignment", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
-    expect(screen.getByRole("button", { name: "More protocol actions" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "More protocol actions" })).toBeNull();
   });
 
   it("shows printable and clear actions in an overflow-safe menu and closes after printing", async () => {
