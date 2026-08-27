@@ -353,7 +353,7 @@ function StatsTile({
   onClick?: () => void;
   title?: string;
   emphasis?: "neutral" | "danger" | "warning" | "success" | "muted";
-  size?: "primary" | "secondary";
+  size?: "primary" | "secondary" | "compact";
 }) {
   const emphasisClass = {
     neutral: "",
@@ -362,13 +362,20 @@ function StatsTile({
     success: "border-emerald-200 bg-emerald-50 text-emerald-700",
     muted: "bg-zinc-50 text-zinc-500",
   }[emphasis];
-  const content = (
+  const content = size === "compact" ? (
+    <>
+      <span className="text-xs font-semibold" style={{ color: emphasis === "neutral" ? "var(--text-muted)" : undefined }}>{label}</span>
+      <span className="text-sm font-semibold">{value}</span>
+    </>
+  ) : (
     <>
       <span className="text-xs font-semibold uppercase" style={{ color: emphasis === "neutral" ? "var(--text-muted)" : undefined }}>{label}</span>
       <span className={size === "primary" ? "mt-0.5 text-xl font-semibold" : "mt-0.5 text-base font-semibold"}>{value}</span>
     </>
   );
-  const className = `${size === "primary" ? "min-h-16" : "min-h-14"} rounded-lg border px-3 py-2 text-left ${emphasisClass}`;
+  const className = size === "compact"
+    ? `inline-flex h-8 items-center gap-1 rounded-md border px-2 text-left ${emphasisClass}`
+    : `${size === "primary" ? "min-h-16" : "min-h-14"} rounded-lg border px-3 py-2 text-left ${emphasisClass}`;
   const style = { backgroundColor: "var(--card)", borderColor: "var(--border)" };
   const mergedStyle = emphasis === "neutral" ? style : undefined;
   if (!onClick) return <div className={className} style={mergedStyle} title={title}>{content}</div>;
@@ -393,7 +400,7 @@ function DoctorWorkloadPanel({
   );
   return (
     <section className="rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between px-4 py-3 text-left font-semibold text-foreground">
+      <button type="button" onClick={onToggle} className="flex min-h-9 w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-sm font-semibold text-foreground">
         <span>
           Doctor workload: Unassigned {unassigned} | Highest assigned: {highestAssigned ? `${highestAssigned.doctorName} ${highestAssigned.total}` : "-"}
         </span>
@@ -431,11 +438,11 @@ function DoctorWorkloadPanel({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, compact = false }: { label: string; children: React.ReactNode; compact?: boolean }) {
   return (
-    <label className="text-sm font-medium">
-      <span className="text-foreground">{label}</span>
-      <div className="mt-1">{children}</div>
+    <label className={compact ? "block min-w-0 text-sm font-medium" : "text-sm font-medium"}>
+      <span className={compact ? "sr-only" : "text-foreground"}>{label}</span>
+      <div className={compact ? "" : "mt-1"}>{children}</div>
     </label>
   );
 }
@@ -445,18 +452,24 @@ function ActiveFilterStrip({
   userChips,
   loadedSavedViewName,
   onReset,
+  resultSummary,
+  refreshedLabel,
+  isRefreshing,
 }: {
   scopeChips: Array<{ key: string; label: string; value: string }>;
   userChips: Array<{ key: string; label: string; value: string; onRemove: () => void }>;
   loadedSavedViewName?: string | null;
   onReset: () => void;
+  resultSummary: string;
+  refreshedLabel: string;
+  isRefreshing: boolean;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border px-3 py-2 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+    <div className="space-y-1 rounded-lg border px-3 py-1.5 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Board scope</span>
         {scopeChips.map((chip) => (
-          <span key={chip.key} className="inline-flex min-h-7 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+          <span key={chip.key} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
             <span className="text-slate-500">{chip.label}:</span>
             <span>{chip.value}</span>
           </span>
@@ -474,7 +487,7 @@ function ActiveFilterStrip({
         <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active user filters</span>
         {userChips.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>No additional user filters</span>}
         {userChips.map((chip) => (
-          <span key={chip.key} className="inline-flex min-h-7 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+          <span key={chip.key} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
             <span className="text-slate-500">{chip.label}:</span>
             <span>{chip.value}</span>
             <button type="button" onClick={chip.onRemove} className="rounded-full p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label={`Clear filter: ${chip.label}`}>
@@ -482,6 +495,10 @@ function ActiveFilterStrip({
             </button>
           </span>
         ))}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+        <span>{resultSummary}</span>
+        <span>{isRefreshing ? "Refreshing... " : ""}Board refreshed: {refreshedLabel}</span>
       </div>
     </div>
   );
@@ -1619,14 +1636,16 @@ function ScheduledJobsPanelCompact({
     );
   };
 
+  const attentionCount = summary.partial + summary.failed + summary.scheduled + summary.running;
   return (
-    <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground"><CalendarClock size={16} /> Scheduled auto-assign jobs</h3>
-          <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-            Partial {summary.partial} - Failed {summary.failed} - Scheduled {summary.scheduled}{summary.running ? ` - Running ${summary.running}` : ""}
-          </p>
+    <section className="rounded-lg border px-3 py-1.5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-2 text-xs font-semibold text-foreground">
+          <CalendarClock size={15} />
+          <h3>Auto-assign jobs</h3>
+          <span className={attentionCount > 0 ? "rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-amber-800" : "rounded-full border px-1.5 py-0.5"} style={attentionCount > 0 ? undefined : { borderColor: "var(--border)", color: "var(--text-muted)" }}>
+            {summary.partial ? `Partial ${summary.partial} · ` : ""}{summary.failed ? `Failed ${summary.failed} · ` : ""}{summary.running ? `Running ${summary.running} · ` : ""}Scheduled {summary.scheduled}
+          </span>
         </div>
         <div className="flex gap-2">
           {loading && <span className="self-center text-xs" style={{ color: "var(--text-muted)" }}>Loading...</span>}
@@ -1640,6 +1659,7 @@ function ScheduledJobsPanelCompact({
       </div>
       {expanded && (
         <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+          <p className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>Partial {summary.partial} · Failed {summary.failed} · Scheduled {summary.scheduled} · Running {summary.running}</p>
           {attentionJobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No current scheduled jobs need attention.</p>}
           {attentionJobs.map((job) => renderGroup(job))}
           <button type="button" onClick={() => setShowHistory((value) => !value)} className="mt-3 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
@@ -2274,19 +2294,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     (filters.limit ?? 100) !== 100 ? { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100), onRemove: () => clearFilter("limit") } : null,
   ].filter((chip): chip is { key: string; label: string; value: string; onRemove: () => void } => Boolean(chip));
   const advancedFilterCount = [
-    Boolean(filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom),
     Boolean(filters.dateTo),
-    Boolean(filters.modalityId || filters.modalityCode),
-    Boolean(filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all")),
     Boolean(filters.finalizedByDoctorId),
     Boolean(filters.assignmentMatch && filters.assignmentMatch !== "all"),
-    (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus,
-    (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport,
     Boolean(filters.caseCategory),
     Boolean(filters.priorityCode),
-    Boolean(filters.q),
     (filters.caseSource ?? "all") !== "all",
-    (filters.sortBy ?? "priority_study_date") !== "priority_study_date",
     (filters.sortDirection ?? "asc") !== "asc",
     filters.pinUrgentToTop === false,
     (filters.limit ?? 100) !== 100,
@@ -2386,33 +2399,30 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal</p>
-          <h2 className="mt-1 text-2xl font-semibold text-foreground">Reporting Assignment Board</h2>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} - Reporting Board defaults are centrally managed. {selectedAssignedDoctor ? `Selected doctor: ${selectedAssignedDoctor.displayName}.` : ""}
-          </p>
-          {loadedSavedView && (
-            <p className="mt-1 text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</p>
-          )}
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2 lg:space-y-0 lg:overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h2 className="text-xl font-semibold text-foreground">Reporting Assignment Board</h2>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>Cutoff {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"}{selectedAssignedDoctor ? ` · ${selectedAssignedDoctor.displayName}` : ""}</span>
+            {loadedSavedView && <span className="text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</span>}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link to={printUrl} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+        <div className="flex flex-wrap gap-1.5">
+          <Link to={printUrl} target="_blank" className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
             <Printer size={16} /> {selectedAppointmentIds.length > 0 ? `Print handoff (${selectedAppointmentIds.length} selected)` : selectedCaseKeys.length > 0 ? "Print handoff (appointments only)" : "Print handoff"}
           </Link>
-          <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
+          <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
           </button>
-          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending || Boolean(fullResync && fullResync.remaining > 0)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
+          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending || Boolean(fullResync && fullResync.remaining > 0)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={fullResyncPending ? "animate-spin" : undefined} /> {fullResyncPending ? "Queueing..." : "Resync all reports"}
           </button>}
-          <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
             <Settings size={16} /> Board settings
           </button>
           {canManage && (
-            <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
+            <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-teal-600 px-2.5 text-xs font-semibold text-white">
               <Users size={16} /> Auto-assign next cases
             </button>
           )}
@@ -2458,9 +2468,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         />
       )}
 
-      <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-10">
-          <Field label="Search">
+      <section className="space-y-2 rounded-lg border p-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(14rem,1.5fr)_repeat(5,minmax(0,1fr))_auto]">
+          <Field label="Search" compact>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-3" style={{ color: "var(--text-muted)" }} />
               <input
@@ -2479,20 +2489,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               )}
             </div>
           </Field>
-          <Field label="Finalized Doctor">
-            <select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}>
-              <option value="">All</option>
-              {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
-            </select>
-          </Field>
-          <Field label="Assignment Match">
-            <select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>
-              {ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
-          <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
-          <Field label="Modality">
+          <Field label="Modality" compact>
             <select
               value={filters.modalityId ?? ""}
               onChange={(event) => setFilters((current) => ({ ...current, modalityId: event.target.value ? Number(event.target.value) : null, modalityCode: null, offset: 0 }))}
@@ -2502,7 +2499,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
             </select>
           </Field>
-          <Field label="Assigned doctor">
+          <Field label="Assigned doctor" compact>
             <select
               value={assignmentFilterValue}
               onChange={(event) => {
@@ -2520,27 +2517,40 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{doctor.displayName}</option>)}
             </select>
           </Field>
-          <Field label="Report status">
+          <Field label="Report status" compact>
             <select value={filters.reportStatus ?? "required_not_final"} onChange={(event) => setFilter("reportStatus", event.target.value as ReportingBoardReportStatus)} className={inputClass()}>
               {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
-          <Field label="Case type">
-            <select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>
-              {CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Sort by">
+          <Field label="Date from" compact><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
+          <Field label="Sort by" compact>
             <select value={filters.sortBy ?? "priority_study_date"} onChange={(event) => setFilter("sortBy", event.target.value as ReportingBoardSortBy)} className={inputClass()}>
               {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
         </div>
-        <button type="button" onClick={() => setAdvancedFiltersOpen((current) => !current)} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+        <button type="button" onClick={() => setAdvancedFiltersOpen((current) => !current)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
           <SlidersHorizontal size={16} /> Advanced filters {advancedFilterCount > 0 && <span className="rounded-full bg-teal-600 px-2 py-0.5 text-xs text-white">{advancedFilterCount}</span>}
         </button>
         {advancedFiltersOpen && (
-          <div className="grid gap-3 border-t pt-3 md:grid-cols-3 xl:grid-cols-5" style={{ borderColor: "var(--border)" }}>
+          <div className="grid gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" style={{ borderColor: "var(--border)" }}>
+            <Field label="Finalized Doctor">
+              <select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}>
+                <option value="">All</option>
+                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+              </select>
+            </Field>
+            <Field label="Assignment Match">
+              <select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>
+                {ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
+            <Field label="Case type">
+              <select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>
+                {CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </Field>
             <Field label="Category">
               <select value={filters.caseCategory ?? ""} onChange={(event) => setFilter("caseCategory", event.target.value || null)} className={inputClass()}>
                 <option value="">All</option>
@@ -2574,29 +2584,29 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         )}
       </section>
 
-      <section className="space-y-3">
-        {statsQuery.isLoading && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading board statistics...</p>}
+      <section className="space-y-1.5">
+        {statsQuery.isLoading && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Loading board statistics...</p>}
         {statsQuery.isError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
             {statsQuery.error instanceof Error ? statsQuery.error.message : "Could not load board statistics."}
           </p>
         )}
-        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-9">
-          <StatsTile label="Total" value={statsSummary?.total ?? "-"} />
-          <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} />
-          <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} />
-          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} />
-          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} />
-          <StatsTile label="Comparison requests" value={statsSummary?.comparisonRequests ?? "-"} />
-          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "warning" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." />
-          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} />
-          <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} />
-        </div>
-        <button type="button" onClick={() => setMetricDetailsOpen((current) => !current)} className="inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Reporting board metrics">
+          <StatsTile label="Total" value={statsSummary?.total ?? "-"} size="compact" />
+          <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} size="compact" />
+          <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} size="compact" />
+          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} size="compact" />
+          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} size="compact" />
+          <StatsTile label="Comparison requests" value={statsSummary?.comparisonRequests ?? "-"} size="compact" />
+          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "warning" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." size="compact" />
+          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} size="compact" />
+          <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} size="compact" />
+          <button type="button" onClick={() => setMetricDetailsOpen((current) => !current)} className="inline-flex h-8 items-center rounded-md border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
           {metricDetailsOpen ? "Hide metric details" : "Show metric details"}
         </button>
+        </div>
         {metricDetailsOpen && (
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <div className="grid gap-2 rounded-lg border p-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <div className="relative">
             <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} size="secondary" />
             {priorityShortcutOpen && (
@@ -2626,9 +2636,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         />
       </section>
 
-      <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
-        <section className="space-y-3">
-          {selectedCaseKeys.length === 0 && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
+      <div className={`${savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"} lg:min-h-0 lg:flex-1`}>
+        <section className="space-y-3 lg:flex lg:min-h-0 lg:flex-col lg:space-y-2">
+          {selectedCaseKeys.length === 0 && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
           {selectedCaseKeys.length > 0 && (
           <div className="sticky top-0 z-30 rounded-lg border p-3 shadow-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <div className="flex flex-wrap items-end gap-3">
@@ -2671,13 +2681,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
           </div>
           )}
-          <ActiveFilterStrip scopeChips={boardScopeChips} userChips={userFilterChips} loadedSavedViewName={loadedSavedView?.name ?? null} onReset={resetToDefaultBoard} />
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-            <p>{resultSummary}</p>
-            <p>{isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Board refreshed: {refreshedLabel}</p>
-          </div>
-          <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
-            <div className="max-h-[70vh] overflow-auto">
+          <ActiveFilterStrip
+            scopeChips={boardScopeChips}
+            userChips={userFilterChips}
+            loadedSavedViewName={loadedSavedView?.name ?? null}
+            onReset={resetToDefaultBoard}
+            resultSummary={resultSummary}
+            refreshedLabel={refreshedLabel}
+            isRefreshing={isBoardFetching && cases.length > 0}
+          />
+          <div className="rounded-lg border lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" style={{ borderColor: "var(--border)" }}>
+            <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
                 <thead className="sticky top-0 z-20 shadow-sm" style={{ backgroundColor: "var(--card)" }}>
                   <tr>
@@ -2710,7 +2724,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                     const selected = selectedCaseKeys.includes(row.caseKey);
                     return (
                       <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
-                        <td className="px-3 py-2"><input
+                        <td className="px-3 py-1.5"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
                           checked={selected}
@@ -2719,19 +2733,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                             setSelectedCaseKeys((current) => checked ? [...new Set([...current, row.caseKey])] : current.filter((key) => key !== row.caseKey));
                           }}
                         /></td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5">
                           <div className="flex min-w-44 flex-col gap-1">
                             <span className="font-semibold text-foreground">{patientName(row)}</span>
                             <PriorityBadge row={row} />
                           </div>
                         </td>
-                        <td className="px-3 py-2"><IdsCell row={row} /></td>
-                        <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
-                        <td className="px-3 py-2"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
-                        {showAssignedDoctorColumn && <td className="px-3 py-2"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
-                        <td className="px-3 py-2"><AgingTatCell row={row} /></td>
-                        <td className="px-3 py-2"><CompactStatusCell row={row} /></td>
-                        <td className="px-2 py-2 text-right">
+                        <td className="px-3 py-1.5"><IdsCell row={row} /></td>
+                        <td className="px-3 py-1.5">{row.bookingDate} {row.bookingTime ?? ""}</td>
+                        <td className="px-3 py-1.5"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
+                        {showAssignedDoctorColumn && <td className="px-3 py-1.5"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
+                        <td className="px-3 py-1.5"><AgingTatCell row={row} /></td>
+                        <td className="px-3 py-1.5"><CompactStatusCell row={row} /></td>
+                        <td className="px-2 py-1.5 text-right">
                           <RowActionMenu
                             row={row}
                             doctors={doctorsQuery.data ?? []}
@@ -2803,7 +2817,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           )}
         </section>
 
-        <aside className="space-y-4">
+        <aside className="space-y-4 lg:min-h-0 lg:overflow-auto">
           {!savedViewsOpen ? (
             <button
               type="button"

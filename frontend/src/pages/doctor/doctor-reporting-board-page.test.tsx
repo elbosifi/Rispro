@@ -623,6 +623,7 @@ describe("DoctorReportingBoardPage", () => {
   it("keeps Assigned Doctor separate from Finalized Doctor and serializes mismatch filtering", async () => {
     renderPage();
     expect(await screen.findByLabelText("Assigned doctor")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
     const finalized = screen.getByLabelText("Finalized Doctor");
     await waitFor(() => expect(within(finalized).getByRole("option", { name: "Dr Target" })).toBeTruthy());
     fireEvent.change(finalized, { target: { value: "5" } });
@@ -912,6 +913,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
     fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseSource: "comparisons" })));
 
@@ -947,6 +949,7 @@ describe("DoctorReportingBoardPage", () => {
     await screen.findByText("Reporting Assignment Board");
 
     await openSavedViews();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
     fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
     fireEvent.change(screen.getByPlaceholderText("Saved view name"), { target: { value: "Comparison pool" } });
     fireEvent.click(screen.getByRole("button", { name: "Save new view" }));
@@ -1058,6 +1061,17 @@ describe("DoctorReportingBoardPage", () => {
       filters: expect.objectContaining({ modalityId: 1 }),
     })));
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
+  });
+
+  it("keeps scheduled auto-assign controls reachable from the compact jobs trigger", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Auto-assign jobs")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByText("Partial 0 · Failed 0 · Scheduled 0 · Running 0")).toBeTruthy();
+    expect(screen.getByText("No current scheduled jobs need attention.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Schedule auto-assign" }));
+    expect(await screen.findByRole("heading", { name: "Schedule auto-assign" })).toBeTruthy();
   });
 
   it("applies search to reporting board filters on Enter and clears it", async () => {
@@ -1179,8 +1193,13 @@ describe("DoctorReportingBoardPage", () => {
 
     await screen.findByText("Reporting Assignment Board");
     expect(screen.queryByLabelText("Priority")).toBeNull();
+    expect(screen.queryByLabelText("Finalized Doctor")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
     expect(screen.getByLabelText("Priority")).toBeTruthy();
+    expect(screen.getByLabelText("Finalized Doctor")).toBeTruthy();
+    expect(screen.getByLabelText("Assignment Match")).toBeTruthy();
+    expect(screen.getByLabelText("Date to")).toBeTruthy();
+    expect(screen.getByLabelText("Case type")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
     expect(screen.getByRole("button", { name: /Advanced filters 1/i })).toBeTruthy();
   });
