@@ -224,26 +224,45 @@ export async function rescheduleBookingInternal(
   if (!booking) {
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
   }
-  await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
+  const isDoctorProtocolReportOnlyUpdate =
+    doctorProtocolReportUpdateAuthorized === true &&
+    requiresReport !== undefined &&
+    newDate === null &&
+    newTime === undefined &&
+    newExamTypeId === null &&
+    reportingPriorityId === null &&
+    notes === null &&
+    override === undefined &&
+    capacityResolutionMode === undefined &&
+    specialReasonCode === null &&
+    specialReasonNote === null &&
+    rescheduleReason === null &&
+    noShowAuthorizationReason === null &&
+    studyInstanceUid === undefined &&
+    approvedOverrideContext === undefined;
+
   let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
-  if (await isNoShowBookingBlocked(client, booking.patientId)) {
-    if (override) {
-      const supervisor = await authenticateSupervisor(
-        client,
-        override.supervisorUsername,
-        override.supervisorPassword
-      );
-      const reason = String(override.reason || "").trim();
-      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId: supervisor.id, reason, role: supervisor.role as Role };
-    } else if (userRole === "supervisor" || userRole === "super_admin") {
-      const reason = String(noShowAuthorizationReason || "").trim();
-      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId, reason, role: userRole };
-    } else {
-      const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
-      error.reasonCodes = ["patient_no_show_booking_blocked"];
-      throw error;
+  if (!isDoctorProtocolReportOnlyUpdate) {
+    await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
+    if (await isNoShowBookingBlocked(client, booking.patientId)) {
+      if (override) {
+        const supervisor = await authenticateSupervisor(
+          client,
+          override.supervisorUsername,
+          override.supervisorPassword
+        );
+        const reason = String(override.reason || "").trim();
+        if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+        noShowAuthorization = { userId: supervisor.id, reason, role: supervisor.role as Role };
+      } else if (userRole === "supervisor" || userRole === "super_admin") {
+        const reason = String(noShowAuthorizationReason || "").trim();
+        if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+        noShowAuthorization = { userId, reason, role: userRole };
+      } else {
+        const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
+        error.reasonCodes = ["patient_no_show_booking_blocked"];
+        throw error;
+      }
     }
   }
 

@@ -564,6 +564,51 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, true);
   });
 
+  it("allows Doctor Protocol to clear report required on a completed appointment without changing its schedule", async () => {
+    guard();
+    const completedAppointmentId = await createBooking(testData, today);
+    await pool.query(`update appointments_v2.bookings set status = 'completed' where id = $1`, [completedAppointmentId]);
+    const before = await pool.query<{ booking_date: string; booking_time: string | null; exam_type_id: string }>(
+      `select booking_date::text, booking_time::text, exam_type_id::text from appointments_v2.bookings where id = $1`,
+      [completedAppointmentId]
+    );
+
+    const response = await api(normal.cookie, `/api/doctor/protocoling/appointments/${completedAppointmentId}/report-requirement`, {
+      method: "PATCH",
+      body: { requiresReport: false, policySetKey: testData.policySetKey },
+    });
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, false);
+    const booking = await pool.query<{ requires_report: boolean; status: string; booking_date: string; booking_time: string | null; exam_type_id: string }>(
+      `select requires_report, status, booking_date::text, booking_time::text, exam_type_id::text from appointments_v2.bookings where id = $1`,
+      [completedAppointmentId]
+    );
+    assert.equal(booking.rows[0].requires_report, false);
+    assert.equal(booking.rows[0].status, "completed");
+    assert.equal(booking.rows[0].booking_date, before.rows[0].booking_date);
+    assert.equal(booking.rows[0].booking_time, before.rows[0].booking_time);
+    assert.equal(booking.rows[0].exam_type_id, before.rows[0].exam_type_id);
+  });
+
+  it("allows Doctor Protocol report-only updates for an existing patient missing booking requirements", async () => {
+    guard();
+    const patientId = await createPatient("Protocol Report Requirement Missing Registration");
+    await pool.query(
+      `update patients set phone_1 = null, national_id = null, identifier_type = null, identifier_value = null where id = $1`,
+      [patientId]
+    );
+    const reportAppointmentId = await createBooking(testData, today, patientId, { requiresReport: true });
+
+    const response = await api(normal.cookie, `/api/doctor/protocoling/appointments/${reportAppointmentId}/report-requirement`, {
+      method: "PATCH",
+      body: { requiresReport: false, policySetKey: testData.policySetKey },
+    });
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, false);
+  });
+
   it("runs availability, leave, conflict-blocked publish, templates, and draft generation", async () => {
     guard();
     const availabilityDate = addDays(today, 21);
