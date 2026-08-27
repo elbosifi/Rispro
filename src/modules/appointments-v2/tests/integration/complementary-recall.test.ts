@@ -126,12 +126,12 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(reopened?.scheduledAt, null);
     assert.equal(reopened?.completedAt, null);
     assert.equal(reopened?.receptionSeenAt, null);
-    const audit = await pool.query<{ old_values: { status: string; recallAppointmentId: number; scheduledAt: string; completedAt: string }; new_values: { previousRecallAppointmentId: number; reason: string } }>("select old_values, new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_reopened_after_uncompleted_booking' order by id desc limit 1", [recall.id]);
+    const audit = await pool.query<{ old_values: { status: string; recallAppointmentId: number; scheduledAt: string; completedAt: string }; new_values: { status: string; recallAppointmentId: null; previousRecallAppointmentId: number; reason: string } }>("select old_values, new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_reopened_after_uncompleted_booking' order by id desc limit 1", [recall.id]);
     assert.equal(audit.rows[0]?.old_values.status, "completed");
     assert.equal(audit.rows[0]?.old_values.recallAppointmentId, recallBookingId);
     assert.ok(audit.rows[0]?.old_values.scheduledAt);
     assert.ok(audit.rows[0]?.old_values.completedAt);
-    assert.deepEqual(audit.rows[0]?.new_values, { previousRecallAppointmentId: recallBookingId, reason: "voided" });
+    assert.deepEqual(audit.rows[0]?.new_values, { status: "pending_scheduling", recallAppointmentId: null, previousRecallAppointmentId: recallBookingId, reason: "voided" });
   });
 
   it("allows withdrawal only before a return appointment is booked", async () => {

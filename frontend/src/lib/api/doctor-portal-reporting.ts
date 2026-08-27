@@ -8,7 +8,7 @@ import type {
   RosterNotificationSummary, RosterTemplateCopyMode, RosterTemplateType, DoctorCase, DoctorCaseAssignmentSummary,
   DoctorCaseFilters, CreateReportingBoardBulkAssignmentJobPayload, ReportingBoardBulkAssignResult,
   ReportingBoardBulkAssignmentJob, ReportingBoardBulkReassignSelectedPayload, ReportingBoardBulkUnassignResult,
-  ReportingBoardBulkUnassignSelectedPayload, ReportingBoardCaseRow, OhifViewerAvailability, OhifViewerLaunchResponse,
+  ReportingBoardBulkUnassignSelectedPayload, OhifViewerAvailability, OhifViewerLaunchResponse,
   ReportingBoardCasesResponse, ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
   ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, ReportingBoardSettings,
   ReportingBoardStatsResponse, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,

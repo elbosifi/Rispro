@@ -192,19 +192,7 @@ function NavButton({
   onClick: () => void;
 }) {
   const { data: recallSummary } = useQuery({ queryKey: ["complementary-recalls", "reception-summary"], queryFn: fetchComplementaryRecallReceptionSummary, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
-  const previousSummary = useRef<typeof recallSummary>(undefined);
-  const pulseTimer = useRef<number | undefined>(undefined);
-  const [attentionPulse, setAttentionPulse] = useState(false);
-  useEffect(() => {
-    if (!recallSummary) return;
-    const previous = previousSummary.current;
-    previousSummary.current = recallSummary;
-    if (!previous || (recallSummary.pendingCount <= previous.pendingCount && !(previous.unseenPendingCount === 0 && recallSummary.unseenPendingCount > 0) && recallSummary.unseenPendingCount <= previous.unseenPendingCount)) return;
-    setAttentionPulse(true);
-    if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
-    pulseTimer.current = window.setTimeout(() => { setAttentionPulse(false); pulseTimer.current = undefined; }, 4_000);
-  }, [recallSummary]);
-  useEffect(() => () => { if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current); }, []);
+  const attentionPulse = (recallSummary?.unseenPendingCount ?? 0) > 0;
   const countLabel = language === "ar" ? `${recallSummary?.pendingCount ?? 0} طلبات تصوير إضافي بحاجة إلى حجز` : `${recallSummary?.pendingCount ?? 0} additional imaging requests need booking`;
   const newLabel = language === "ar" ? "طلب تصوير إضافي جديد" : "New additional imaging request";
   return (

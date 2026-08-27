@@ -1101,14 +1101,20 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const [appointmentStatus, setAppointmentStatus] = useState<"" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show">("");
   const [waitingFirst, setWaitingFirst] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const value = new URLSearchParams(location.search).get("appointmentId");
-    const appointmentId = Number(value);
-    if (Number.isInteger(appointmentId) && appointmentId > 0) setSelectedAppointmentId(appointmentId);
-  }, [location.search]);
+  const selectedAppointmentId = (() => {
+    const appointmentId = Number(new URLSearchParams(location.search).get("appointmentId"));
+    return Number.isInteger(appointmentId) && appointmentId > 0 ? appointmentId : null;
+  })();
+  const updateSelectedAppointment = useCallback((appointmentId: number | null) => {
+    const params = new URLSearchParams(location.search);
+    if (appointmentId === null) {
+      params.delete("appointmentId");
+    } else {
+      params.set("appointmentId", String(appointmentId));
+    }
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -1169,14 +1175,12 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const assignmentBusy = createAssignmentMutation.isPending || updateAssignmentMutation.isPending || clearAssignmentMutation.isPending;
   const closeAssignmentModal = () => {
     if (assignmentBusy) return;
-    setSelectedAppointmentId(null);
     setAssignmentError(null);
-    const params = new URLSearchParams(location.search);
-    if (params.has("appointmentId")) { params.delete("appointmentId"); navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: true }); }
+    updateSelectedAppointment(null);
   };
   const openAssignmentModal = (appointmentId: number) => {
     setAssignmentError(null);
-    setSelectedAppointmentId(appointmentId);
+    updateSelectedAppointment(appointmentId);
   };
   const navigateWorklist = (direction: -1 | 1) => {
     if (selectedAppointmentId === null) return;
@@ -1184,18 +1188,18 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
     const target = currentIndex >= 0 ? appointments[currentIndex + direction] : null;
     if (!target) return;
     setAssignmentError(null);
-    setSelectedAppointmentId(target.appointmentId);
+    updateSelectedAppointment(target.appointmentId);
   };
   const handleAssignmentSuccess = async (message: string, currentAppointmentId: number, assignNext: boolean) => {
     const currentIndex = appointments.findIndex((item) => item.appointmentId === currentAppointmentId);
     const next = assignNext && currentIndex >= 0 ? appointments[currentIndex + 1] : null;
     await invalidate();
     if (assignNext && next) {
-      setSelectedAppointmentId(next.appointmentId);
+      updateSelectedAppointment(next.appointmentId);
     } else if (assignNext) {
-      setSelectedAppointmentId(currentAppointmentId);
+      updateSelectedAppointment(currentAppointmentId);
     } else {
-      setSelectedAppointmentId(null);
+      updateSelectedAppointment(null);
     }
     setAssignmentError(null);
     pushToast({ type: "success", title: assignNext && !next ? `${message} No more matching appointments.` : message });
