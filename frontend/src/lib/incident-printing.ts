@@ -19,7 +19,7 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const summary = `<div class="summary"><div><span class="eyebrow">${label(language, "incidentNumber")}</span><strong class="incident-number isolate">${escape(incident.incidentNumber)}</strong></div><div class="chips"><span>${label(language, typeKey)}</span><span>${label(language, incident.status)}</span></div></div>`;
   const common = section(label(language, "incidentDetails"), [
     row(language, "occurredAt", formatDateTime(incident.occurred_at, language)),
-    row(language, "reporter", incident.reporter_name),
+    row(language, "reporterDisplay", incident.reporter_name),
     row(language, "createdAt", formatDateTime(incident.created_at, language)),
     row(language, "description", incident.description, false, true),
     row(language, "immediateAction", incident.immediate_action, false, true),

@@ -73,6 +73,7 @@ describe("IncidentsPage", () => {
   it("submits a valid browser-local datetime with labelled equipment and vendor fields", async () => {
     const user = userEvent.setup(); renderPage(); await openCreate();
     await user.selectOptions(screen.getByLabelText(/Equipment name/), "1");
+    await user.click(screen.getByRole("radio", { name: "Operational" }));
     expect(screen.getByTestId("selected-equipment-summary").textContent).toContain("Room A");
     await user.click(screen.getByRole("radio", { name: "Yes" }));
     await user.type(screen.getByLabelText("Contact person"), "Vendor");
@@ -87,7 +88,11 @@ describe("IncidentsPage", () => {
 
   it("switches type, searches after debounce, selects and clears a patient", async () => {
     const user = userEvent.setup(); renderPage(); await openCreate(); await chooseClinical();
-    expect(screen.getByRole("option", { name: "Wrong examination" })).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "Wrong examination" })).toBeTruthy();
+    expect(screen.getByLabelText(/Clinical\/workflow category/)).toHaveProperty("value", "");
+    expect(screen.getByLabelText(/Harm level/)).toHaveProperty("value", "");
+    expect(screen.getByRole("option", { name: "Select a clinical / workflow category" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("option", { name: "Select a harm level" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("option", { name: "Reporting issue" })).toBeTruthy();
     await user.type(screen.getByLabelText("Patient (optional)"), "En");
     const result = await screen.findByRole("option", { name: /English Patient.*MRN-22/ }, { timeout: 1500 });
@@ -96,6 +101,13 @@ describe("IncidentsPage", () => {
     expect(screen.getByTestId("selected-patient-summary").textContent).toContain("MRN-22");
     await user.click(screen.getByRole("button", { name: "Change / Clear patient" }));
     expect(screen.getByLabelText("Patient (optional)")).toBeTruthy();
+  });
+
+  it("requires a conscious Equipment condition selection", async () => {
+    renderPage(); await openCreate();
+    expect(screen.getByRole("radio", { name: "Operational" })).toHaveProperty("checked", false);
+    expect(screen.getByRole("radio", { name: "Degraded" })).toHaveProperty("checked", false);
+    expect(screen.getByRole("radio", { name: "Out of service" })).toHaveProperty("checked", false);
   });
 
   it("resets stale type-specific and form state on Cancel", async () => {
@@ -122,6 +134,7 @@ describe("IncidentsPage", () => {
   it("keeps a created incident and opens detail with a warning after partial upload failure", async () => {
     const user = userEvent.setup(); api.uploadIncidentAttachment.mockRejectedValueOnce(new Error("upload failed")); renderPage(); await openCreate();
     await user.selectOptions(screen.getByLabelText(/Equipment name/), "1");
+    await user.click(screen.getByRole("radio", { name: "Operational" }));
     await user.type(screen.getByLabelText(/Description of incident/), "Issue");
     fireEvent.change(document.querySelector("input[type='file']")!, { target: { files: [new File(["x"], "failed.pdf", { type: "application/pdf" })] } });
     await user.click(screen.getByRole("button", { name: "Submit incident" }));
@@ -132,6 +145,7 @@ describe("IncidentsPage", () => {
   it("shows a localized create error with the safe API message", async () => {
     const user = userEvent.setup(); api.createIncident.mockRejectedValueOnce(new Error("Request rejected")); renderPage(); await openCreate();
     await user.selectOptions(screen.getByLabelText(/Equipment name/), "1");
+    await user.click(screen.getByRole("radio", { name: "Operational" }));
     await user.type(screen.getByLabelText(/Description of incident/), "Issue");
     await user.click(screen.getByRole("button", { name: "Submit incident" }));
     expect(await screen.findByText("Unable to submit the incident.")).toBeTruthy();
@@ -170,10 +184,57 @@ describe("IncidentsPage", () => {
     expect(screen.getByText("No attachments")).toBeTruthy();
   });
 
+  it("shows attachment failure with Retry and blocks printing until metadata succeeds", async () => {
+    const user = userEvent.setup(); api.listIncidentAttachments.mockRejectedValueOnce(new Error("attachments down")); renderPage();
+    await user.click(await screen.findByRole("button", { name: /INC-000007/ }));
+    expect(await screen.findByText("Unable to load attachments.")).toBeTruthy();
+    expect(screen.queryByText("No attachments")).toBeNull();
+    expect(screen.getByRole("button", { name: "Print incident report" })).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("link", { name: /Open/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Print incident report" })).toHaveProperty("disabled", false);
+  });
+
+  it("shows Equipment loading, error/retry, and empty states while submission stays unavailable", async () => {
+    api.fetchIncidentEquipment.mockImplementationOnce(() => new Promise(() => {}));
+    const loading = renderPage(); await openCreate();
+    expect(await screen.findByText("Loading equipment…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit incident" })).toHaveProperty("disabled", true);
+    loading.unmount();
+
+    api.fetchIncidentEquipment.mockRejectedValueOnce(new Error("equipment down"));
+    const failed = renderPage(); await openCreate();
+    expect(await screen.findByText("Unable to load equipment.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit incident" })).toHaveProperty("disabled", true);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByLabelText(/Equipment name/)).toBeTruthy();
+    failed.unmount();
+
+    api.fetchIncidentEquipment.mockResolvedValueOnce({ equipment: [] });
+    renderPage(); await openCreate();
+    expect(await screen.findByText("No active equipment is available.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit incident" })).toHaveProperty("disabled", true);
+  });
+
   it.each(["administrative", "super_admin"])("shows reviewer controls for %s", async (role) => {
     const user = userEvent.setup(); renderPage(role);
     await user.click(await screen.findByRole("button", { name: /INC-000007/ }));
     expect(await screen.findByRole("button", { name: "Save review" })).toBeTruthy();
+  });
+
+  it("keeps review state aligned with a successful review response", async () => {
+    const user = userEvent.setup();
+    api.reviewIncident.mockResolvedValueOnce({ incident: { ...equipmentIncident, status: "resolved", review_notes: "Server-confirmed review" } });
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: /INC-000007/ }));
+    const reviewStatus = await screen.findByLabelText("Status", { selector: "#review-status" });
+    await user.selectOptions(reviewStatus, "action_required");
+    const reviewNotes = screen.getByLabelText("Review / corrective action");
+    await user.type(reviewNotes, "Client review");
+    await user.click(screen.getByRole("button", { name: "Save review" }));
+    await waitFor(() => expect(api.reviewIncident).toHaveBeenCalledWith(7, { status: "action_required", reviewNotes: "Client review" }));
+    await waitFor(() => expect(reviewStatus).toHaveProperty("value", "resolved"));
+    expect(reviewNotes).toHaveProperty("value", "Server-confirmed review");
   });
 
   it.each(["receptionist", "modality_staff", "doctor"])("hides reviewer controls for %s", async (role) => {
