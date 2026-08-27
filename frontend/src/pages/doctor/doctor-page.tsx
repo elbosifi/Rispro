@@ -494,6 +494,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   const canAccessSettings = canRoleAccessRoute(normalizedMatrix, "settings", user.role);
   const canSearchPatients = canRoleAccessRoute(normalizedMatrix, "patients", user.role);
   const canSearchRegistrations = canRoleAccessRoute(normalizedMatrix, "registrations", user.role);
+  const isReportingBoardRoute = location.pathname === "/doctor/reporting-board" || /^\/doctor\/reporting-board\/saved\/[^/]+$/.test(location.pathname);
 
   return (
     <EnglishLanguageScope>
@@ -539,8 +540,8 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         onWorkspaceNavigate={navigate}
       />
 
-      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:grid-cols-[240px_1fr]">
-        <aside className="hidden border-b p-3 lg:block lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
+      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:grid-cols-[240px_1fr] lg:overflow-hidden">
+        <aside className="hidden border-b p-3 lg:block lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
           <nav className="flex flex-col gap-2">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -565,7 +566,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
             })}
           </nav>
         </aside>
-        <main className="p-4 lg:p-6">
+        <main className={`p-4 lg:h-full lg:min-h-0 lg:min-w-0 lg:p-6 ${isReportingBoardRoute ? "lg:overflow-hidden" : "lg:overflow-y-auto lg:overscroll-contain"}`}>
           <DoctorPortalRoutes me={me} />
         </main>
       </div>
