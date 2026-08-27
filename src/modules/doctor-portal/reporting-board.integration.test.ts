@@ -257,6 +257,81 @@ async function createBooking(input: BookingInput): Promise<number> {
   return bookingId;
 }
 
+async function createCandidateWindowFixture(input: {
+  earlyDate: string;
+  laterDate: string;
+  finalCount: number;
+  draftCount: number;
+}): Promise<{ finalIds: number[]; draftIds: number[] }> {
+  const fixtureKey = randomUUID().replace(/-/g, "").slice(0, 8);
+  const totalCount = input.finalCount + input.draftCount;
+  const result = await pool.query<{ appointment_id: string; report_status: "final" | "draft" }>(`
+    with inserted_patients as (
+      insert into patients (
+        arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years,
+        identifier_type, identifier_value
+      )
+      select
+        $1 || ' window Arabic ' || fixture_index,
+        $1 || ' window ' || fixture_index,
+        $2 || lpad(fixture_index::text, 3, '0'),
+        $1 || ' window ' || fixture_index,
+        'F', 40, 'national_id', $2 || lpad(fixture_index::text, 3, '0')
+      from generate_series(1, $3::integer) fixture_index
+      returning id
+    ), numbered_patients as (
+      select id, row_number() over (order by id) as fixture_index
+      from inserted_patients
+    ), inserted_bookings as (
+      insert into appointments_v2.bookings (
+        patient_id, modality_id, exam_type_id, reporting_priority_id,
+        booking_date, booking_time, case_category, requires_report, study_instance_uid, status, notes,
+        completed_at, policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code,
+        special_reason_note, is_walk_in, created_by_user_id, updated_by_user_id
+      )
+      select
+        patient.id, $4, $5, null,
+        case when patient.fixture_index <= $6 then $7::date else $8::date end,
+        '09:00'::time, 'oncology', true, null, 'completed', null,
+        '2026-05-01T08:00:00.000Z'::timestamptz, $9, 'standard', false, null,
+        null, false, $10, $10
+      from numbered_patients patient
+      returning id, booking_date
+    ), seeded_cache as (
+      insert into doctor_portal.reporting_board_sonicdicom_cache (
+        appointment_id, report_status, report_final_at, source, last_success_at, last_attempt_at,
+        next_check_at, status_changed_at, failure_count, accession_number_snapshot
+      )
+      select
+        booking.id,
+        case when booking.booking_date = $7::date then 'final' else 'draft' end,
+        case when booking.booking_date = $7::date then now() else null end,
+        'sonicdicom', now(), now(), now() + interval '1 hour', now(), 0,
+        'V2-' || lpad(booking.id::text, 6, '0')
+      from inserted_bookings booking
+      returning appointment_id, report_status
+    )
+    select appointment_id::text, report_status
+    from seeded_cache
+    order by appointment_id
+  `, [
+    `${TEST_PREFIX}candidate_${fixtureKey}`,
+    `8${fixtureKey}`,
+    totalCount,
+    ctModalityId,
+    ctExamTypeId,
+    input.finalCount,
+    input.earlyDate,
+    input.laterDate,
+    policyVersionId,
+    admin.id,
+  ]);
+  return {
+    finalIds: result.rows.filter((row) => row.report_status === "final").map((row) => Number(row.appointment_id)),
+    draftIds: result.rows.filter((row) => row.report_status === "draft").map((row) => Number(row.appointment_id)),
+  };
+}
+
 async function seedSonicDicomCache(appointmentId: number, state: ReportState | "throw", finalAt: string | null = null): Promise<void> {
   if (!pool) return;
   const unavailable = state === "throw";
@@ -1839,6 +1914,43 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       assert.equal(cases.status, 200, JSON.stringify(cases.data));
       assert.equal(stats.data.summary.total, cases.data.cases.length, reportStatus);
     }
+  });
+
+  it("filters the complete local candidate scope before paginating cases and stats", async () => {
+    guard();
+    const earlyDate = addDays(36);
+    const laterDate = addDays(37);
+    const fixture = await createCandidateWindowFixture({ earlyDate, laterDate, finalCount: 105, draftCount: 15 });
+    const query = `dateFrom=${earlyDate}&dateTo=${laterDate}&modalityCode=CT&caseSource=appointments&reportStatus=required_not_final&sortBy=study_date&sortDirection=asc&pinUrgentToTop=false`;
+
+    const all = await api<{
+      cases: Array<{ appointmentId: number; reportStatus: string }>;
+      totalCount: number;
+      pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
+    }>(supervisor.cookie, `/api/doctor/reporting-board/cases?${query}&limit=20&offset=0`);
+    assert.equal(all.status, 200, JSON.stringify(all.data));
+    assert.equal(all.data.cases.length, 15);
+    assert.equal(all.data.totalCount, 15);
+    assert.deepEqual(new Set(all.data.cases.map((row) => row.appointmentId)), new Set(fixture.draftIds));
+    assert.equal(all.data.cases.every((row) => row.reportStatus === "draft"), true);
+    assert.equal(all.data.cases.some((row) => fixture.finalIds.includes(row.appointmentId)), false);
+    assert.deepEqual(all.data.pagination, { limit: 20, offset: 0, hasMore: false, nextOffset: null });
+
+    const firstPage = await api<typeof all.data>(supervisor.cookie, `/api/doctor/reporting-board/cases?${query}&limit=10&offset=0`);
+    assert.equal(firstPage.status, 200, JSON.stringify(firstPage.data));
+    assert.equal(firstPage.data.cases.length, 10);
+    assert.equal(firstPage.data.totalCount, 15);
+    assert.deepEqual(firstPage.data.pagination, { limit: 10, offset: 0, hasMore: true, nextOffset: 10 });
+
+    const secondPage = await api<typeof all.data>(supervisor.cookie, `/api/doctor/reporting-board/cases?${query}&limit=10&offset=10`);
+    assert.equal(secondPage.status, 200, JSON.stringify(secondPage.data));
+    assert.deepEqual(secondPage.data.cases.map((row) => row.appointmentId), all.data.cases.slice(10).map((row) => row.appointmentId));
+    assert.equal(secondPage.data.totalCount, 15);
+    assert.deepEqual(secondPage.data.pagination, { limit: 10, offset: 10, hasMore: false, nextOffset: null });
+
+    const stats = await api<{ summary: { total: number } }>(supervisor.cookie, `/api/doctor/reporting-board/stats?${query}`);
+    assert.equal(stats.status, 200, JSON.stringify(stats.data));
+    assert.equal(stats.data.summary.total, 15);
   });
 
   it("bulk assigns next eligible appointment cases in protected priority/age order and enforces assignment rules", async () => {

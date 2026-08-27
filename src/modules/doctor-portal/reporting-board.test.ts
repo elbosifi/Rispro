@@ -117,7 +117,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
     assert.match(repository, /reporting_board_sonicdicom_cache/);
-    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function fetchLimitForUnifiedCandidates")), /checkSonicDicomReportStatus\(/);
+    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function needsResolvedPostFiltering")), /checkSonicDicomReportStatus\(/);
     assert.match(service, /reportStatus === "required_not_final"/);
     assert.match(service, /row\.reportStatus !== "final"/);
   });
@@ -563,11 +563,23 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
   it("keeps board reads cache-only for status and study notes", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
-    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function fetchLimitForUnifiedCandidates")), /reportStatusChecker\(|studyNoteFetcher\(/);
+    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function needsResolvedPostFiltering")), /reportStatusChecker\(|studyNoteFetcher\(/);
     assert.match(repository, /reporting_board_sonicdicom_cache/);
     assert.match(repository, /sonicdicom_study_note as "sonicDicomStudyNote"/);
     const mobileView = service.slice(service.indexOf("export async function getPublicReportingBoardMobileView"), service.indexOf("export async function getPublicReportingBoardMobileCase"));
     assert.doesNotMatch(mobileView, /checkSonicDicomReportStatusesBatch|fetchSonicDicomStudyNotes|studyNoteFetcher/);
     assert.match(mobileView, /mobileCase\(row, Boolean\(identity\)\)/);
+  });
+
+  it("uses exact full-scope resolution before filtered desktop pagination", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+
+    assert.match(service, /function needsResolvedPostFiltering/);
+    assert.match(service, /filters\.overdue/);
+    assert.match(service, /filters\.urgentOrStat/);
+    assert.match(service, /listUnifiedReportingBoardCases\(scopedFilters, \{ includeSonicDicomStudyNotes: true, fullScope: true \}\)/);
+    assert.match(service, /totalCount = allCases\.length/);
+    assert.match(service, /cases = allCases\.slice\(filters\.offset, filters\.offset \+ filters\.limit\)/);
+    assert.doesNotMatch(service, /MAX_UNIFIED_CANDIDATE_FETCH|fetchLimitForUnifiedCandidates/);
   });
 });

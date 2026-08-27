@@ -101,7 +101,6 @@ export interface Actor {
 
 const MAX_CASE_LIST_LIMIT = 300;
 const MAX_SONICDICOM_BATCH_SIZE = 200;
-const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
 const MOBILE_FULL_SCOPE_WARNING_MS = 2_000;
@@ -293,15 +292,14 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
 
-function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
-  const requestedWindow = filters.limit + filters.offset;
-  const needsPostFilter = Boolean(
+function needsResolvedPostFiltering(filters: ReportingBoardFilters): boolean {
+  return Boolean(
     (filters.reportStatus && filters.reportStatus !== "all") ||
     filters.finalizedByDoctorId ||
-    (filters.assignmentMatch && filters.assignmentMatch !== "all")
+    (filters.assignmentMatch && filters.assignmentMatch !== "all") ||
+    filters.overdue ||
+    filters.urgentOrStat
   );
-  const multiplier = needsPostFilter ? 5 : 2;
-  return Math.min(MAX_UNIFIED_CANDIDATE_FETCH, Math.max(100, requestedWindow * multiplier));
 }
 
 function sourceAllowsAppointments(caseSource: ReportingBoardFilters["caseSource"]): boolean {
@@ -445,7 +443,9 @@ async function listUnifiedReportingBoardCases(
       .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()))
       .sort(compareReportingBoardRows(filters));
   }
-  const fetchLimit = fetchLimitForUnifiedCandidates(filters);
+  // Each source is already sorted. The first offset + limit rows from each
+  // source are sufficient to construct the exact merged page.
+  const fetchLimit = filters.offset + filters.limit;
   const sourceFilters = { ...filters, limit: fetchLimit, offset: 0 };
   const [appointmentRows, comparisonRows] = await Promise.all([
     sourceAllowsAppointments(filters.caseSource) ? listReportingBoardCaseCandidates(sourceFilters) : Promise.resolve([]),
@@ -625,8 +625,35 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  const cases = await listUnifiedReportingBoardCases(scopedFilters, { includeSonicDicomStudyNotes: true });
-  return { cases, filters };
+  let cases: ReportingBoardCaseRow[];
+  let totalCount: number;
+  if (needsResolvedPostFiltering(scopedFilters)) {
+    const allCases = await listUnifiedReportingBoardCases(scopedFilters, { includeSonicDicomStudyNotes: true, fullScope: true });
+    totalCount = allCases.length;
+    cases = allCases.slice(filters.offset, filters.offset + filters.limit);
+    void enqueueReportingBoardSonicDicomCacheRows(cases.filter((row) => row.caseType === "appointment").map((row) => row.appointmentId)).catch(() => null);
+  } else {
+    cases = await listUnifiedReportingBoardCases(scopedFilters, { includeSonicDicomStudyNotes: true });
+    const [appointmentRows, comparisonRows] = await Promise.all([
+      sourceAllowsAppointments(scopedFilters.caseSource) ? listReportingBoardStatsRows(scopedFilters) : Promise.resolve([]),
+      sourceAllowsComparisons(scopedFilters.caseSource)
+        ? listUnifiedReportingBoardCases({ ...scopedFilters, caseSource: "comparisons" }, { fullScope: true })
+        : Promise.resolve([]),
+    ]);
+    totalCount = appointmentRows.length + comparisonRows.filter((row) => row.caseType === "comparison").length;
+  }
+  const hasMore = filters.offset + cases.length < totalCount;
+  return {
+    cases,
+    filters,
+    totalCount,
+    pagination: {
+      limit: filters.limit,
+      offset: filters.offset,
+      hasMore,
+      nextOffset: hasMore ? filters.offset + filters.limit : null,
+    },
+  };
 }
 
 export async function getReportingBoardStats(actor: Actor, input: ReportingBoardFilters): Promise<ReportingBoardStatsResponse> {
@@ -638,8 +665,8 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  if ((filters.reportStatus && filters.reportStatus !== "all") || filters.finalizedByDoctorId || (filters.assignmentMatch && filters.assignmentMatch !== "all")) {
-    const cases = await listUnifiedReportingBoardCases({ ...scopedFilters, limit: MAX_UNIFIED_CANDIDATE_FETCH, offset: 0 });
+  if (needsResolvedPostFiltering(scopedFilters)) {
+    const cases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
     return { filters, ...aggregateReportingBoardStats(cases) };
   }
   const rows = [

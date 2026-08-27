@@ -9,7 +9,7 @@ import type {
   DoctorCaseFilters, CreateReportingBoardBulkAssignmentJobPayload, ReportingBoardBulkAssignResult,
   ReportingBoardBulkAssignmentJob, ReportingBoardBulkReassignSelectedPayload, ReportingBoardBulkUnassignResult,
   ReportingBoardBulkUnassignSelectedPayload, ReportingBoardCaseRow, OhifViewerAvailability, OhifViewerLaunchResponse,
-  ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
+  ReportingBoardCasesResponse, ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
   ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, ReportingBoardSettings,
   ReportingBoardStatsResponse, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
   RosterXmlImportPreview, RosterXmlImportResult, AppointmentProtocol, ProtocolAuditTimelineEvent, ProtocolAnatomyRegion,
@@ -581,8 +581,8 @@ export async function updateReportingBoardSettings(payload: ReportingBoardSettin
   return raw.settings;
 }
 
-export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }> {
-  return api<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
+export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<ReportingBoardCasesResponse> {
+  return api<ReportingBoardCasesResponse>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
 }
 
 export async function fetchOhifViewerAvailability(): Promise<OhifViewerAvailability> {

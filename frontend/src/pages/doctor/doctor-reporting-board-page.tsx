@@ -2293,14 +2293,21 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   ].filter(Boolean).length;
   const isBoardFetching = casesQuery.isFetching || statsQuery.isFetching || boardRefreshing;
   const refreshedLabel = lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
-  const resultCount = statsSummary?.total ?? cases.length;
-  const comparisonCount = statsSummary?.comparisonRequests ?? cases.filter((row) => row.caseType === "comparison").length;
+  const visibleResultCount = cases.length;
+  const resultTotalCount = casesQuery.data?.totalCount ?? visibleResultCount;
+  const resultOffset = casesQuery.data?.pagination?.offset ?? filters.offset ?? 0;
+  const resultCountPhrase = resultOffset > 0 && visibleResultCount > 0
+    ? `${resultOffset + 1}-${resultOffset + visibleResultCount} of ${resultTotalCount}`
+    : visibleResultCount < resultTotalCount
+      ? `${visibleResultCount} of ${resultTotalCount}`
+      : String(visibleResultCount);
+  const comparisonCount = cases.filter((row) => row.caseType === "comparison").length;
   const resultReportPhrase = reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus).toLowerCase().replaceAll(" ", "-");
   const resultScopePhrase = modalityChipValue.replace(/^Configured /, "");
   const resultDate = filters.dateFrom ?? effectiveFilters.dateFrom;
   const resultDatePhrase = resultDate ? ` from ${resultDate} onward` : "";
   const resultComparisonPhrase = comparisonCount > 0 ? `, including ${comparisonCount} comparison ${comparisonCount === 1 ? "request" : "requests"}` : "";
-  const resultSummary = `Showing ${resultCount} ${resultReportPhrase} ${resultScopePhrase} reporting ${resultCount === 1 ? "case" : "cases"}${resultDatePhrase}${resultComparisonPhrase}.`;
+  const resultSummary = `Showing ${resultCountPhrase} ${resultReportPhrase} ${resultScopePhrase} reporting ${visibleResultCount === 1 ? "case" : "cases"}${resultDatePhrase}${resultComparisonPhrase}.`;
 
   const refreshBoard = async () => {
     setBoardRefreshing(true);

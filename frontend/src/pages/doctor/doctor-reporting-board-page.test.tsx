@@ -250,6 +250,8 @@ describe("DoctorReportingBoardPage", () => {
     fetchFullReportingBoardSonicDicomResyncStatusMock.mockResolvedValue({ ok: true, remaining: 0, failed: 0 });
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [caseRow],
+      totalCount: 1,
+      pagination: { limit: 100, offset: 0, hasMore: false, nextOffset: null },
       filters: {
         dateFrom: "2026-05-15",
         dateTo: null,
@@ -848,6 +850,35 @@ describe("DoctorReportingBoardPage", () => {
 
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
+  });
+
+  it("describes the returned table page from the cases response independently of stats", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: Array.from({ length: 8 }, (_, index) => ({
+        ...caseRow,
+        caseKey: `appointment:${index + 1}`,
+        appointmentId: index + 1,
+        accessionNumber: `V2-${String(index + 1).padStart(6, "0")}`,
+        patientEnglishName: `Visible Patient ${index + 1}`,
+      })),
+      filters: { reportStatus: "required_not_final", limit: 8, offset: 0 },
+      totalCount: 55,
+      pagination: { limit: 8, offset: 0, hasMore: true, nextOffset: 8 },
+    });
+    fetchReportingBoardStatsMock.mockResolvedValue({
+      filters: { reportStatus: "required_not_final" },
+      summary: { total: 999, comparisonRequests: 0 },
+      byDoctor: [],
+      byModality: [],
+      byPriority: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText(/^Showing 8 of 55 required-not-final /)).toBeTruthy();
+    expect(screen.queryByText(/^Showing 55 /)).toBeNull();
+    expect(screen.queryByText(/^Showing 999 /)).toBeNull();
+    expect(within(screen.getByText("Total").parentElement!).getByText("999")).toBeTruthy();
   });
 
   it("renders board scope and omits noisy default active filters", async () => {

@@ -688,6 +688,13 @@ export interface ReportingBoardStatsResponse {
   byPriority: ReportingBoardPriorityStatsRow[];
 }
 
+export interface ReportingBoardCasesResponse {
+  cases: ReportingBoardCaseRow[];
+  filters: ReportingBoardFilters;
+  totalCount: number;
+  pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
+}
+
 export interface ReportingBoardBulkAssignResult {
   requestedCount: number;
   assignedCount: number;
