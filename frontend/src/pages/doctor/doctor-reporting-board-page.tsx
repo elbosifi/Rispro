@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
 import {
   assignReportingBoardCase,
   assignComparisonRequest,
@@ -70,6 +71,7 @@ import type {
 
 const FULL_RESCAN_STORAGE_KEY = "rispro.reporting-board.sonicdicom-resync";
 type FullResyncState = { queued: number; requestedAt: string; remaining: number; failed: number };
+type ReportingBoardUtilitySection = "filters" | "metrics" | "workload" | null;
 
 function storedFullResync(): FullResyncState | null {
   try {
@@ -448,58 +450,30 @@ function Field({ label, children, compact = false }: { label: string; children: 
 }
 
 function ActiveFilterStrip({
-  scopeChips,
   userChips,
   loadedSavedViewName,
-  onReset,
-  resultSummary,
-  refreshedLabel,
-  isRefreshing,
 }: {
-  scopeChips: Array<{ key: string; label: string; value: string }>;
   userChips: Array<{ key: string; label: string; value: string; onRemove: () => void }>;
   loadedSavedViewName?: string | null;
-  onReset: () => void;
-  resultSummary: string;
-  refreshedLabel: string;
-  isRefreshing: boolean;
 }) {
   return (
-    <div className="space-y-1 rounded-lg border px-3 py-1.5 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Board scope</span>
-        {scopeChips.map((chip) => (
-          <span key={chip.key} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
-            <span className="text-slate-500">{chip.label}:</span>
-            <span>{chip.value}</span>
-          </span>
-        ))}
-        {loadedSavedViewName && (
-          <span className="inline-flex min-h-7 items-center rounded-full border border-teal-200 bg-teal-50 px-2 text-xs font-semibold text-teal-700">
-            Saved view: {loadedSavedViewName}
-          </span>
-        )}
-        <button type="button" onClick={onReset} className="ml-auto inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-          Reset to default board
-        </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active user filters</span>
-        {userChips.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>No additional user filters</span>}
-        {userChips.map((chip) => (
-          <span key={chip.key} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
-            <span className="text-slate-500">{chip.label}:</span>
-            <span>{chip.value}</span>
-            <button type="button" onClick={chip.onRemove} className="rounded-full p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label={`Clear filter: ${chip.label}`}>
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-        <span>{resultSummary}</span>
-        <span>{isRefreshing ? "Refreshing... " : ""}Board refreshed: {refreshedLabel}</span>
-      </div>
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active filters</span>
+      {userChips.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>No additional user filters</span>}
+      {userChips.map((chip) => (
+        <span key={chip.key} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+          <span className="text-slate-500">{chip.label}:</span>
+          <span>{chip.value}</span>
+          <button type="button" onClick={chip.onRemove} className="rounded-full p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label={`Clear filter: ${chip.label}`}>
+            <X size={12} />
+          </button>
+        </span>
+      ))}
+      {loadedSavedViewName && (
+        <span className="inline-flex min-h-7 items-center rounded-full border border-teal-200 bg-teal-50 px-2 text-xs font-semibold text-teal-700">
+          Saved view: {loadedSavedViewName}
+        </span>
+      )}
     </div>
   );
 }
@@ -1758,13 +1732,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [selectedUnassignReason, setSelectedUnassignReason] = useState("");
   const [selectedUnassignConfirmOpen, setSelectedUnassignConfirmOpen] = useState(false);
   const [priorityShortcutOpen, setPriorityShortcutOpen] = useState(false);
-  const [doctorStatsOpen, setDoctorStatsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [utilitySection, setUtilitySection] = useState<ReportingBoardUtilitySection>(null);
+  const [autoAssignMenuOpen, setAutoAssignMenuOpen] = useState(false);
+  const [autoAssignJobsOpen, setAutoAssignJobsOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [savedViewsOpen, setSavedViewsOpen] = useState(false);
-  const [metricDetailsOpen, setMetricDetailsOpen] = useState(false);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [boardActionMessage, setBoardActionMessage] = useState<{ tone: "success" | "error"; text: string; detail?: string | null } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
@@ -2269,13 +2244,6 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         : "All";
   const requiresReportValue = (filters.requiresReport ?? effectiveFilters.requiresReport) === false ? "No" : (filters.requiresReport ?? effectiveFilters.requiresReport) === true ? "Yes" : "All";
   const sortValue = `${sortLabel(filters.sortBy ?? effectiveFilters.sortBy)} ${(filters.sortDirection ?? effectiveFilters.sortDirection ?? "asc").toUpperCase()}`;
-  const boardScopeChips = [
-    { key: "modality", label: "Scope", value: modalityChipValue },
-    { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus) },
-    { key: "requiresReport", label: "Requires report", value: requiresReportValue },
-    { key: "dateFrom", label: "From", value: filters.dateFrom ?? effectiveFilters.dateFrom ?? "-" },
-    { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100) },
-  ];
   const userFilterChips = [
     filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom ? { key: "dateFrom", label: "Date from", value: filters.dateFrom, onRemove: () => clearFilter("dateFrom") } : null,
     filters.dateTo ? { key: "dateTo", label: "Date to", value: filters.dateTo, onRemove: () => clearFilter("dateTo") } : null,
@@ -2314,13 +2282,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     : visibleResultCount < resultTotalCount
       ? `${visibleResultCount} of ${resultTotalCount}`
       : String(visibleResultCount);
-  const comparisonCount = cases.filter((row) => row.caseType === "comparison").length;
-  const resultReportPhrase = reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus).toLowerCase().replaceAll(" ", "-");
-  const resultScopePhrase = modalityChipValue.replace(/^Configured /, "");
-  const resultDate = filters.dateFrom ?? effectiveFilters.dateFrom;
-  const resultDatePhrase = resultDate ? ` from ${resultDate} onward` : "";
-  const resultComparisonPhrase = comparisonCount > 0 ? `, including ${comparisonCount} comparison ${comparisonCount === 1 ? "request" : "requests"}` : "";
-  const resultSummary = `Showing ${resultCountPhrase} ${resultReportPhrase} ${resultScopePhrase} reporting ${visibleResultCount === 1 ? "case" : "cases"}${resultDatePhrase}${resultComparisonPhrase}.`;
+  const workloadDoctorCount = doctorStats.filter((row) => row.doctorId !== null).length;
+  const scheduledJobCount = scheduledJobsQuery.data?.length ?? 0;
+  const toggleUtilitySection = (section: Exclude<ReportingBoardUtilitySection, null>) => {
+    setUtilitySection((current) => current === section ? null : section);
+    if (section !== "metrics") setPriorityShortcutOpen(false);
+  };
 
   const refreshBoard = async () => {
     setBoardRefreshing(true);
@@ -2406,26 +2373,25 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             <h2 className="text-xl font-semibold text-foreground">Reporting Assignment Board</h2>
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>Cutoff {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"}{selectedAssignedDoctor ? ` · ${selectedAssignedDoctor.displayName}` : ""}</span>
             {loadedSavedView && <span className="text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</span>}
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>Showing {resultCountPhrase}</span>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>{isBoardFetching ? "Refreshing..." : `Board refreshed: ${refreshedLabel}`}</span>
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Link to={printUrl} target="_blank" className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-            <Printer size={16} /> {selectedAppointmentIds.length > 0 ? `Print handoff (${selectedAppointmentIds.length} selected)` : selectedCaseKeys.length > 0 ? "Print handoff (appointments only)" : "Print handoff"}
-          </Link>
           <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
           </button>
-          {canManage && <button type="button" onClick={queueFullResync} disabled={fullResyncPending || Boolean(fullResync && fullResync.remaining > 0)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
-            <RefreshCw size={16} className={fullResyncPending ? "animate-spin" : undefined} /> {fullResyncPending ? "Queueing..." : "Resync all reports"}
-          </button>}
-          <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-            <Settings size={16} /> Board settings
-          </button>
-          {canManage && (
-            <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-teal-600 px-2.5 text-xs font-semibold text-white">
-              <Users size={16} /> Auto-assign next cases
-            </button>
-          )}
+          <AnchoredMenu open={moreMenuOpen} onOpenChange={setMoreMenuOpen} width={260} trigger={<button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}><MoreVertical size={16} /> More <ChevronDown size={14} /></button>}>
+            <Link to={printUrl} target="_blank" role="menuitem" className="flex min-h-9 items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-foreground hover:bg-muted"><Printer size={16} /> {selectedAppointmentIds.length > 0 ? `Print handoff (${selectedAppointmentIds.length} selected)` : selectedCaseKeys.length > 0 ? "Print handoff (appointments only)" : "Print handoff"}</Link>
+            {canManage && <button type="button" role="menuitem" onClick={queueFullResync} disabled={fullResyncPending || Boolean(fullResync && fullResync.remaining > 0)} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"><RefreshCw size={16} className={fullResyncPending ? "animate-spin" : undefined} /> {fullResyncPending ? "Queueing..." : "Resync all reports"}</button>}
+            <button type="button" role="menuitem" onClick={() => setSettingsOpen(true)} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground hover:bg-muted"><Settings size={16} /> Board settings</button>
+          </AnchoredMenu>
+          {canManage && <AnchoredMenu open={autoAssignMenuOpen} onOpenChange={setAutoAssignMenuOpen} width={250} trigger={<button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-teal-600 px-2.5 text-xs font-semibold text-white"><Users size={16} /> Auto-assign <ChevronDown size={14} /></button>}>
+            <button type="button" role="menuitem" onClick={() => setBulkOpen(true)} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground hover:bg-muted"><Users size={16} /> Auto-assign next cases</button>
+            <button type="button" role="menuitem" onClick={() => setAutoAssignJobsOpen((current) => !current)} className="flex min-h-9 w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground hover:bg-muted"><span className="inline-flex items-center gap-2"><CalendarClock size={16} /> Scheduled jobs</span><span className="rounded-full border px-1.5 py-0.5 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>{scheduledJobCount}</span></button>
+            <button type="button" role="menuitem" onClick={() => setScheduleBulkOpen(true)} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground hover:bg-muted"><CalendarClock size={16} /> Schedule auto-assign</button>
+          </AnchoredMenu>}
+          <button type="button" onClick={resetToDefaultBoard} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}><RefreshCw size={15} /> Reset to default board</button>
         </div>
       </div>
       {boardActionMessage && (
@@ -2452,7 +2418,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         </section>
       )}
 
-      {canManage && (
+      {canManage && autoAssignJobsOpen && (
         <ScheduledJobsPanelCompact
           jobs={scheduledJobsQuery.data ?? []}
           loading={scheduledJobsQuery.isLoading}
@@ -2529,59 +2495,33 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             </select>
           </Field>
         </div>
-        <button type="button" onClick={() => setAdvancedFiltersOpen((current) => !current)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-          <SlidersHorizontal size={16} /> Advanced filters {advancedFilterCount > 0 && <span className="rounded-full bg-teal-600 px-2 py-0.5 text-xs text-white">{advancedFilterCount}</span>}
-        </button>
-        {advancedFiltersOpen && (
-          <div className="grid gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" style={{ borderColor: "var(--border)" }}>
-            <Field label="Finalized Doctor">
-              <select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}>
-                <option value="">All</option>
-                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
-              </select>
-            </Field>
-            <Field label="Assignment Match">
-              <select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>
-                {ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </Field>
+      </section>
+
+      <section className="space-y-2" aria-label="Reporting board utilities">
+        <div className="flex flex-wrap items-center gap-2">
+          {([
+            ["filters", "Filters", SlidersHorizontal, advancedFilterCount],
+            ["metrics", "Metrics", Clock3, null],
+            ["workload", "Workload", Users, workloadDoctorCount],
+          ] as const).map(([section, label, Icon, count]) => {
+            const open = utilitySection === section;
+            return <button key={section} type="button" onClick={() => toggleUtilitySection(section)} aria-expanded={open} className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${open ? "border-teal-500 bg-teal-50 text-teal-800" : "text-foreground hover:border-teal-400"}`} style={open ? undefined : { borderColor: "var(--border)" }}><Icon size={16} /> {label}{count !== null && <span className={open ? "rounded-full bg-teal-600 px-1.5 py-0.5 text-white" : "rounded-full border px-1.5 py-0.5"} style={open ? undefined : { borderColor: "var(--border)", color: "var(--text-muted)" }}>{count}</span>}<ChevronDown size={14} className={open ? "rotate-180 transition-transform" : "transition-transform"} /></button>;
+          })}
+        </div>
+        {utilitySection === "filters" && <div className="space-y-2 rounded-lg border p-3" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <ActiveFilterStrip userChips={userFilterChips} loadedSavedViewName={loadedSavedView?.name ?? null} />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <Field label="Finalized Doctor"><select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}><option value="">All</option>{(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></Field>
+            <Field label="Assignment Match"><select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>{ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
             <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
-            <Field label="Case type">
-              <select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>
-                {CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Category">
-              <select value={filters.caseCategory ?? ""} onChange={(event) => setFilter("caseCategory", event.target.value || null)} className={inputClass()}>
-                <option value="">All</option>
-                <option value="oncology">Oncology</option>
-                <option value="non_oncology">Non-oncology</option>
-              </select>
-            </Field>
-            <Field label="Priority">
-              <select value={filters.priorityCode ?? ""} onChange={(event) => setFilter("priorityCode", event.target.value || null)} className={inputClass()}>
-                <option value="">All</option>
-                {(lookupsQuery.data?.priorities ?? []).map((priority) => <option key={priority.id} value={priority.code}>{priority.nameEn}</option>)}
-              </select>
-            </Field>
-            <Field label="Direction">
-              <select value={filters.sortDirection ?? "asc"} onChange={(event) => setFilter("sortDirection", event.target.value as ReportingBoardSortDirection)} className={inputClass()}>
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-            </Field>
-            <label className="flex h-full items-end text-sm font-medium">
-              <span className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3" style={{ borderColor: "var(--border)" }}>
-                <input type="checkbox" checked={filters.pinUrgentToTop !== false} onChange={(event) => setFilter("pinUrgentToTop", event.target.checked)} />
-                Keep STAT/urgent on top
-              </span>
-            </label>
-            <Field label="Limit">
-              <input type="number" min={1} max={300} value={filters.limit ?? 100} onChange={(event) => setFilter("limit", Number(event.target.value) || 100)} className={inputClass()} />
-              <span className="text-xs" style={{ color: "var(--text-muted)" }}>Shows up to 300 cases. Use filters for larger lists.</span>
-            </Field>
+            <Field label="Case type"><select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>{CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+            <Field label="Category"><select value={filters.caseCategory ?? ""} onChange={(event) => setFilter("caseCategory", event.target.value || null)} className={inputClass()}><option value="">All</option><option value="oncology">Oncology</option><option value="non_oncology">Non-oncology</option></select></Field>
+            <Field label="Priority"><select value={filters.priorityCode ?? ""} onChange={(event) => setFilter("priorityCode", event.target.value || null)} className={inputClass()}><option value="">All</option>{(lookupsQuery.data?.priorities ?? []).map((priority) => <option key={priority.id} value={priority.code}>{priority.nameEn}</option>)}</select></Field>
+            <Field label="Direction"><select value={filters.sortDirection ?? "asc"} onChange={(event) => setFilter("sortDirection", event.target.value as ReportingBoardSortDirection)} className={inputClass()}><option value="asc">Asc</option><option value="desc">Desc</option></select></Field>
+            <label className="flex h-full items-end text-sm font-medium"><span className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3" style={{ borderColor: "var(--border)" }}><input type="checkbox" checked={filters.pinUrgentToTop !== false} onChange={(event) => setFilter("pinUrgentToTop", event.target.checked)} />Keep STAT/urgent on top</span></label>
+            <Field label="Limit"><input type="number" min={1} max={300} value={filters.limit ?? 100} onChange={(event) => setFilter("limit", Number(event.target.value) || 100)} className={inputClass()} /><span className="text-xs" style={{ color: "var(--text-muted)" }}>Shows up to 300 cases. Use filters for larger lists.</span></Field>
           </div>
-        )}
+        </div>}
       </section>
 
       <section className="space-y-1.5">
@@ -2601,11 +2541,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "warning" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." size="compact" />
           <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} size="compact" />
           <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} size="compact" />
-          <button type="button" onClick={() => setMetricDetailsOpen((current) => !current)} className="inline-flex h-8 items-center rounded-md border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-          {metricDetailsOpen ? "Hide metric details" : "Show metric details"}
-        </button>
         </div>
-        {metricDetailsOpen && (
+        {utilitySection === "metrics" && (
         <div className="grid gap-2 rounded-lg border p-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <div className="relative">
             <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} size="secondary" />
@@ -2628,12 +2565,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           )}
         </div>
         )}
-        <DoctorWorkloadPanel
-          open={doctorStatsOpen}
+        {utilitySection === "workload" && <DoctorWorkloadPanel
+          open
           rows={doctorStats}
           loading={statsQuery.isLoading}
-          onToggle={() => setDoctorStatsOpen((current) => !current)}
-        />
+          onToggle={() => toggleUtilitySection("workload")}
+        />}
       </section>
 
       <div className={`${savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"} lg:min-h-0 lg:flex-1`}>
@@ -2681,15 +2618,6 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
           </div>
           )}
-          <ActiveFilterStrip
-            scopeChips={boardScopeChips}
-            userChips={userFilterChips}
-            loadedSavedViewName={loadedSavedView?.name ?? null}
-            onReset={resetToDefaultBoard}
-            resultSummary={resultSummary}
-            refreshedLabel={refreshedLabel}
-            isRefreshing={isBoardFetching && cases.length > 0}
-          />
           <div className="rounded-lg border lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" style={{ borderColor: "var(--border)" }}>
             <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>

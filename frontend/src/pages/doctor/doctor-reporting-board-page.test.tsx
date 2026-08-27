@@ -222,6 +222,30 @@ async function openSavedViews() {
   fireEvent.click(await screen.findByRole("button", { name: "Open saved views" }));
 }
 
+async function openFilters() {
+  fireEvent.click(await screen.findByRole("button", { name: /^Filters/ }));
+}
+
+async function openMoreMenu() {
+  fireEvent.click(await screen.findByRole("button", { name: "More" }));
+  await screen.findByRole("menu");
+}
+
+async function openAutoAssignMenu() {
+  fireEvent.click(await screen.findByRole("button", { name: "Auto-assign" }));
+  await screen.findByRole("menu");
+}
+
+async function requestFullResync() {
+  await openMoreMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Resync all reports" }));
+}
+
+async function openBoardSettings() {
+  await openMoreMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Board settings" }));
+}
+
 function expectNoPriorityTint(row: Element) {
   expect(row.className).not.toContain("bg-red");
   expect(row.className).not.toContain("bg-orange");
@@ -590,7 +614,7 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByRole("columnheader", { name: "Assigned doctor" })).toBeNull();
   });
 
-  it("keeps the Assigned tile, filter chip, and Assigned doctor selector synchronized", async () => {
+  it("keeps the Assigned tile, active filter chip, and Assigned doctor selector synchronized", async () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
@@ -600,6 +624,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: null })));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ assignmentStatus: "assigned", assignedDoctorId: null })));
     expect((screen.getByLabelText("Assigned doctor") as HTMLSelectElement).value).toBe("assigned");
+    await openFilters();
     expect(screen.getByText("Assigned:").parentElement?.textContent).toContain("Assigned:Assigned");
   });
 
@@ -623,7 +648,7 @@ describe("DoctorReportingBoardPage", () => {
   it("keeps Assigned Doctor separate from Finalized Doctor and serializes mismatch filtering", async () => {
     renderPage();
     expect(await screen.findByLabelText("Assigned doctor")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     const finalized = screen.getByLabelText("Finalized Doctor");
     await waitFor(() => expect(within(finalized).getByRole("option", { name: "Dr Target" })).toBeTruthy());
     fireEvent.change(finalized, { target: { value: "5" } });
@@ -876,19 +901,18 @@ describe("DoctorReportingBoardPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText(/^Showing 8 of 55 required-not-final /)).toBeTruthy();
+    expect(await screen.findByText("Showing 8 of 55")).toBeTruthy();
     expect(screen.queryByText(/^Showing 55 /)).toBeNull();
     expect(screen.queryByText(/^Showing 999 /)).toBeNull();
     expect(within(screen.getByText("Total").parentElement!).getByText("999")).toBeTruthy();
   });
 
-  it("renders board scope and omits noisy default active filters", async () => {
+  it("keeps default scope in compact controls and exposes active filters on demand", async () => {
     renderPage();
 
-    await screen.findByText("Board scope");
+    await openFilters();
     expect(screen.getAllByText("Configured CT/MR").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Required not final").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Yes").length).toBeGreaterThan(0);
     expect(screen.getByText("No additional user filters")).toBeTruthy();
     expect(screen.queryByText("Category:")).toBeNull();
     expect(screen.queryByText("Priority:")).toBeNull();
@@ -904,6 +928,7 @@ describe("DoctorReportingBoardPage", () => {
     await openSavedViews();
     fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent", offset: 50 })));
+    await openFilters();
     fireEvent.click(await screen.findByRole("button", { name: "Clear filter: Priority" }));
 
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: null, offset: 0 })));
@@ -913,7 +938,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseSource: "comparisons" })));
 
@@ -949,7 +974,7 @@ describe("DoctorReportingBoardPage", () => {
     await screen.findByText("Reporting Assignment Board");
 
     await openSavedViews();
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
     fireEvent.change(screen.getByPlaceholderText("Saved view name"), { target: { value: "Comparison pool" } });
     fireEvent.click(screen.getByRole("button", { name: "Save new view" }));
@@ -976,7 +1001,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     await screen.findByLabelText("Priority");
     const limitLabel = screen.getByText("Limit").closest("label");
     expect(limitLabel).toBeTruthy();
@@ -1039,7 +1064,8 @@ describe("DoctorReportingBoardPage", () => {
   it("validates and submits the bulk assignment modal", async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Auto-assign next cases/i }));
+    await openAutoAssignMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Auto-assign next cases/i }));
     expect(await screen.findByText("Assignment order: STAT/urgent first, then priority + oldest study.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Auto-assign next cases" })).toBeTruthy();
     expect(screen.getByText(/The system will choose the next eligible cases using the current filters and assignment order/i)).toBeTruthy();
@@ -1063,14 +1089,18 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
   });
 
-  it("keeps scheduled auto-assign controls reachable from the compact jobs trigger", async () => {
+  it("keeps scheduled auto-assign controls reachable from the Auto-assign menu", async () => {
     renderPage();
 
+    await openAutoAssignMenu();
+    expect(screen.getByRole("menuitem", { name: /Scheduled jobs/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Scheduled jobs/ }));
     expect(await screen.findByText("Auto-assign jobs")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
     expect(screen.getByText("Partial 0 · Failed 0 · Scheduled 0 · Running 0")).toBeTruthy();
     expect(screen.getByText("No current scheduled jobs need attention.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Schedule auto-assign" }));
+    await openAutoAssignMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Schedule auto-assign" }));
     expect(await screen.findByRole("heading", { name: "Schedule auto-assign" })).toBeTruthy();
   });
 
@@ -1115,12 +1145,12 @@ describe("DoctorReportingBoardPage", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderPage();
     expect(await screen.findByRole("button", { name: "Refresh" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Resync all reports" }));
+    await requestFullResync();
     expect(confirm).toHaveBeenCalledWith("Recheck all completed cases requiring reports against SonicDICOM. This runs in the background and may take time.");
     expect(queueFullReportingBoardSonicDicomResyncMock).not.toHaveBeenCalled();
 
     confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "Resync all reports" }));
+    await requestFullResync();
     await waitFor(() => expect(queueFullReportingBoardSonicDicomResyncMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Full SonicDICOM resync queued for 1/)).toBeTruthy();
   });
@@ -1134,11 +1164,12 @@ describe("DoctorReportingBoardPage", () => {
       .mockResolvedValueOnce({ ok: true, remaining: 0, failed: 2 });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Resync all reports" }));
+    await requestFullResync();
     await waitFor(() => expect(fetchFullReportingBoardSonicDicomResyncStatusMock).toHaveBeenCalledWith("2026-08-23T10:00:00.000Z"));
     expect(await screen.findByText("3 / 10")).toBeTruthy();
     expect(screen.getByText("7 remaining · 1 failed")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Resync all reports" }) as HTMLButtonElement).disabled).toBe(true);
+    await openMoreMenu();
+    expect((screen.getByRole("menuitem", { name: "Resync all reports" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(false);
 
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2_100)); });
@@ -1165,7 +1196,8 @@ describe("DoctorReportingBoardPage", () => {
   it("does not show full report resync to non-managers", async () => {
     renderPage("/doctor/reporting-board", ordinaryDoctorMe);
     await screen.findByRole("button", { name: "Refresh" });
-    expect(screen.queryByRole("button", { name: "Resync all reports" })).toBeNull();
+    await openMoreMenu();
+    expect(screen.queryByRole("menuitem", { name: "Resync all reports" })).toBeNull();
   });
 
   it("clears an incomplete SonicDICOM refresh warning after a successful retry", async () => {
@@ -1194,14 +1226,48 @@ describe("DoctorReportingBoardPage", () => {
     await screen.findByText("Reporting Assignment Board");
     expect(screen.queryByLabelText("Priority")).toBeNull();
     expect(screen.queryByLabelText("Finalized Doctor")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     expect(screen.getByLabelText("Priority")).toBeTruthy();
     expect(screen.getByLabelText("Finalized Doctor")).toBeTruthy();
     expect(screen.getByLabelText("Assignment Match")).toBeTruthy();
     expect(screen.getByLabelText("Date to")).toBeTruthy();
     expect(screen.getByLabelText("Case type")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
-    expect(screen.getByRole("button", { name: /Advanced filters 1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Filters1/i })).toBeTruthy();
+  });
+
+  it("keeps Filters, Metrics, and Workload mutually exclusive and closes the active section", async () => {
+    renderPage();
+
+    await openFilters();
+    expect(screen.getByLabelText("Finalized Doctor")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    expect(screen.queryByLabelText("Finalized Doctor")).toBeNull();
+    expect(await screen.findByText("STAT/Urgent")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Workload/ }));
+    expect(screen.queryByText(/Median C/)).toBeNull();
+    expect(await screen.findByText(/Doctor workload: Unassigned 5/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Workload/ }));
+    expect(screen.queryByText(/Doctor workload: Unassigned 5/)).toBeNull();
+  });
+
+  it("exposes the compact Auto-assign and More menu actions", async () => {
+    renderPage();
+
+    await openAutoAssignMenu();
+    expect(screen.getByRole("menuitem", { name: "Auto-assign next cases" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Scheduled jobs/ })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Schedule auto-assign" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Auto-assign" }));
+
+    await openMoreMenu();
+    expect(screen.getByRole("menuitem", { name: "Print handoff" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Resync all reports" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Board settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset to default board" })).toBeTruthy();
   });
 
   it("sends sort controls to the reporting board API", async () => {
@@ -1209,7 +1275,7 @@ describe("DoctorReportingBoardPage", () => {
 
     await screen.findByText("Reporting Assignment Board");
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "accession" } });
-    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await openFilters();
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
     fireEvent.click(screen.getByLabelText("Keep STAT/urgent on top"));
 
@@ -1226,7 +1292,7 @@ describe("DoctorReportingBoardPage", () => {
 
     expect((await screen.findAllByText("Total")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Show metric details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
     expect((await screen.findAllByText("STAT/Urgent")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /STAT\/Urgent/i }));
@@ -1235,12 +1301,13 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "stat", offset: 0 })));
   });
 
-  it("collapses doctor workload by default and expands it", async () => {
+  it("keeps doctor workload closed until its selector is opened", async () => {
     renderPage();
 
-    expect(await screen.findByText(/Doctor workload: Unassigned 5 \| Highest assigned: Dr Target 7/)).toBeTruthy();
+    expect(screen.queryByText(/Doctor workload: Unassigned 5 \| Highest assigned: Dr Target 7/)).toBeNull();
     expect(screen.queryByRole("columnheader", { name: "Oldest study" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Doctor workload/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Workload/i }));
+    expect(await screen.findByText(/Doctor workload: Unassigned 5 \| Highest assigned: Dr Target 7/)).toBeTruthy();
     expect(await screen.findByRole("columnheader", { name: "Oldest study" })).toBeTruthy();
   });
 
@@ -1253,15 +1320,20 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.getByText("Select cases to reassign.")).toBeTruthy();
     expect(screen.queryByText("0 selected")).toBeNull();
     expect(screen.queryByLabelText("Reassign to")).toBeNull();
-    expect(screen.getByRole("link", { name: "Print handoff" })).toBeTruthy();
+    await openMoreMenu();
+    expect(screen.getByRole("menuitem", { name: "Print handoff" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
 
     fireEvent.click(selectAll);
     expect(await screen.findByText("1 selected")).toBeTruthy();
     expect(screen.getByLabelText("Reassign to")).toBeTruthy();
     expect(screen.getByLabelText("Reason/note")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Reassign selected" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: /Auto-assign next cases/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Print handoff (1 selected)" })).toBeTruthy();
+    await openAutoAssignMenu();
+    expect(screen.getByRole("menuitem", { name: /Auto-assign next cases/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Auto-assign" }));
+    await openMoreMenu();
+    expect(screen.getByRole("menuitem", { name: "Print handoff (1 selected)" })).toBeTruthy();
   });
 
   it("shows return-to-pool only for assigned row editors and requires confirmation reason", async () => {
@@ -1381,7 +1453,7 @@ describe("DoctorReportingBoardPage", () => {
   it("allows doctor supervisors to edit centrally managed Reporting Board defaults", async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Board settings" }));
+    await openBoardSettings();
     expect(await screen.findByRole("button", { name: "Save settings" })).toBeTruthy();
     expect(screen.getByLabelText("Pin STAT/urgent first")).toBeTruthy();
   });
@@ -1389,7 +1461,7 @@ describe("DoctorReportingBoardPage", () => {
   it("opens board settings modal with existing controls", async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Board settings" }));
+    await openBoardSettings();
     expect(await screen.findByRole("heading", { name: /Board settings/i })).toBeTruthy();
     expect(screen.getByLabelText("Cutoff mode")).toBeTruthy();
     expect(screen.getByLabelText("Default report status")).toBeTruthy();
