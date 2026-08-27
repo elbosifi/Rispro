@@ -752,8 +752,9 @@ describe("AppointmentManageModal", () => {
     renderModal({ initialTab: "documents", onOpenAppointment });
 
     expect((await screen.findAllByText("Additional Imaging")).length).toBeGreaterThan(0);
-    expect(screen.getByText("CT Chest")).toBeTruthy();
-    expect(screen.getByText("ACC-17")).toBeTruthy();
+    const originalExaminationRow = screen.getByText(/Original examination:/);
+    expect(originalExaminationRow.textContent).toContain("CT Chest");
+    expect(originalExaminationRow.textContent).toContain("ACC-17");
     expect(screen.getByText("Reported with original examination")).toBeTruthy();
     expect(screen.queryByText("Report not required")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open original appointment" }));

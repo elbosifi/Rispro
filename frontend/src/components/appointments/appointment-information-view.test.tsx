@@ -70,6 +70,7 @@ describe("AppointmentInformationView", () => {
 
     expect(await screen.findByText("Reported with original examination")).toBeTruthy();
     expect(screen.queryByText("Not required")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Technical PACS details" }));
     expect(screen.getByText("Free-text protocol")).toBeTruthy();
     expect(screen.getByText("Repeat delayed phase.")).toBeTruthy();
   });

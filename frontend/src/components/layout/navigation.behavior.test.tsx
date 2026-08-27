@@ -954,6 +954,7 @@ describe("Navigation governance", () => {
       "v2.appointments.admin": [],
       "patients.merge": [],
       "name.dictionary": [],
+      incidents: [],
       pacs: [],
       "pacs.remap": [],
       "worklist.monitor": [],
