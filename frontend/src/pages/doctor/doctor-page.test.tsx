@@ -1986,36 +1986,15 @@ describe("Doctor Portal shell", () => {
     await waitFor(() => expect(fetchProtocolLibraryAnatomyRegionsMock).toHaveBeenCalledTimes(2));
   });
 
-  it("keeps scanner text spaces and swaps MRI field strength for CT detector details", async () => {
+  it("directs protocol library admins to Equipment for scanner management", async () => {
     fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Scanners" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Add scanner" }));
 
-    expect(screen.getByLabelText("Field strength")).toBeTruthy();
-    expect(screen.queryByLabelText("Slice / detector specification")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Main MRI " } });
-    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Main MRI ");
-    fireEvent.change(screen.getByLabelText("Field strength"), { target: { value: "1.5T" } });
-    fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Room A 1" } });
-    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Shared morning scanner" } });
-    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "CT" } });
-
-    expect(screen.queryByLabelText("Field strength")).toBeNull();
-    expect(screen.getByLabelText("Slice / detector specification")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Slice / detector specification"), { target: { value: "128 slice / 256 detector" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save scanner" }));
-
-    await waitFor(() => expect(createProtocolLibraryScannerMock.mock.calls[0]?.[0]).toMatchObject({
-      name: "Main MRI ",
-      modality: "CT",
-      fieldStrength: null,
-      ctSliceDetectorSpecification: "128 slice / 256 detector",
-      location: "Room A 1",
-      notes: "Shared morning scanner",
-    }));
+    expect(await screen.findByText("Scanner equipment is managed in Settings → Equipment.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add scanner" })).toBeNull();
   });
 
   it("creates a generic MRI sequence preset with dropdown fields and scanner-specific alias", async () => {
