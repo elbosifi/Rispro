@@ -693,11 +693,11 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByLabelText("Assignment reconciled to SonicDICOM finalizer")).toBeTruthy();
   });
 
-  it("allows manager assignment controls for final cases but hides return to waiting pool", async () => {
+  it("keeps manager reassignment available for final cases through the selected-case workflow", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [
         { ...caseRow, reportStatus: "final", assignedDoctorId: null, assignedDoctorName: null, assignmentStatus: "unassigned", canAssign: true, manualFinalOverrideId: null },
-        { ...caseRow, appointmentId: 43, accessionNumber: "V2-000043", reportStatus: "final", assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned", canAssign: true, manualFinalOverrideId: null },
+        { ...caseRow, caseKey: "appointment:43", appointmentId: 43, accessionNumber: "V2-000043", reportStatus: "final", assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned", canAssign: true, manualFinalOverrideId: null },
       ],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "all" },
     });
@@ -706,39 +706,39 @@ describe("DoctorReportingBoardPage", () => {
 
     const unassignedRow = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(unassignedRow).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
-    let menu = await screen.findByRole("menu");
-    expect(within(menu).getByRole("combobox")).toBeTruthy();
-    expect(within(menu).getByRole("option", { name: "Dr Target" })).toBeTruthy();
-    expect(within(menu).queryByText(/report final/i)).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Assign" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(await screen.findByText("1 selected")).toBeTruthy();
+    expect(screen.getByLabelText("Reassign to")).toBeTruthy();
 
     const assignedRow = screen.getByText("V2-000043").closest("tr")!;
     fireEvent.click(within(assignedRow).getByRole("button", { name: "Open actions for V2-000043" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
-    menu = screen.getAllByRole("menu").at(-1)!;
-    expect(within(menu).getByRole("combobox")).toBeTruthy();
-    expect(within(menu).getByRole("option", { name: "Dr Target" })).toBeTruthy();
-    expect(within(menu).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reassign" }));
+    expect(await screen.findByText("2 selected")).toBeTruthy();
+    expect(screen.queryByText("Return to waiting pool")).toBeNull();
   });
 
-  it("keeps row reassignment available from the compact action menu", async () => {
+  it("hands row-menu reassignment to the selected-case editor and preserves other selections", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" }],
+      cases: [
+        { ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" },
+        { ...caseRow, caseKey: "appointment:43", appointmentId: 43, accessionNumber: "V2-000043" },
+      ],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
     });
     renderPage();
     await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
 
+    fireEvent.click(screen.getByLabelText("Select case V2-000043"));
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
-    const menu = await screen.findByRole("menu");
-    await waitFor(() => expect(within(menu).getByRole("combobox")).toBeTruthy());
-    fireEvent.change(within(menu).getByRole("combobox"), { target: { value: "5" } });
-    fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reassign" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(await screen.findByText("2 selected")).toBeTruthy();
+    expect((screen.getByLabelText("Select case V2-000042") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Select case V2-000043") as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByLabelText("Reassign to")).toBeTruthy();
   });
 
   it("shows SonicDICOM study and patient list actions as backend redirect links and copies accession", async () => {
@@ -1264,9 +1264,10 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Auto-assign" }));
 
     await openMoreMenu();
-    expect(screen.getByRole("menuitem", { name: "Print handoff" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Resync all reports" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Board settings" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Print handoff/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Print handoff" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset to default board" })).toBeTruthy();
   });
 
@@ -1320,60 +1321,20 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.getByText("Select cases to reassign.")).toBeTruthy();
     expect(screen.queryByText("0 selected")).toBeNull();
     expect(screen.queryByLabelText("Reassign to")).toBeNull();
-    await openMoreMenu();
-    expect(screen.getByRole("menuitem", { name: "Print handoff" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("link", { name: "Print handoff" })).toBeTruthy();
 
     fireEvent.click(selectAll);
     expect(await screen.findByText("1 selected")).toBeTruthy();
     expect(screen.getByLabelText("Reassign to")).toBeTruthy();
     expect(screen.getByLabelText("Reason/note")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Reassign selected" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Reassign" }) as HTMLButtonElement).disabled).toBe(true);
     await openAutoAssignMenu();
     expect(screen.getByRole("menuitem", { name: /Auto-assign next cases/i })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Auto-assign" }));
-    await openMoreMenu();
-    expect(screen.getByRole("menuitem", { name: "Print handoff (1 selected)" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Print handoff (1 selected)" })).toBeTruthy();
   });
 
-  it("shows return-to-pool only for assigned row editors and requires confirmation reason", async () => {
-    fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [
-        { ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" },
-        { ...caseRow, appointmentId: 43, accessionNumber: "V2-000043", assignedDoctorId: null, assignedDoctorName: null, assignmentStatus: "unassigned" },
-      ],
-      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
-    });
-    renderPage();
-    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
-
-    const assignedRow = screen.getByText("V2-000042").closest("tr")!;
-    fireEvent.click(within(assignedRow).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
-    let menu = await screen.findByRole("menu");
-    await waitFor(() => expect(within(menu).getByRole("option", { name: "Return to waiting pool" })).toBeTruthy());
-
-    const unassignedRow = screen.getByText("V2-000043").closest("tr")!;
-    fireEvent.click(within(unassignedRow).getByRole("button", { name: "Open actions for V2-000043" }));
-    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
-    await waitFor(() => expect(screen.getAllByRole("menu").length).toBeGreaterThan(1));
-    menu = screen.getAllByRole("menu").at(-1)!;
-    expect(within(menu).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
-
-    menu = screen.getAllByRole("menu")[0];
-    fireEvent.change(within(menu).getByRole("combobox"), { target: { value: "__UNASSIGN__" } });
-    expect(await screen.findByText(/removes the assigned doctor and returns the case to the unassigned pool/i)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Confirm return to waiting pool" }) as HTMLButtonElement).disabled).toBe(true);
-
-    fireEvent.change(screen.getByPlaceholderText("Reason for returning to waiting pool"), { target: { value: "radiologist unavailable" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm return to waiting pool" }));
-
-    await waitFor(() => expect(unassignReportingBoardCaseMock).toHaveBeenCalledWith(42, { reason: "radiologist unavailable" }));
-    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
-    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
-  });
-
-  it("keeps normal row reassignment behavior when selecting a doctor", async () => {
+  it("reassigns one selected case directly through the bulk endpoint and clears the editor on success", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" }],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
@@ -1381,18 +1342,18 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
     await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
 
-    const row = screen.getByText("V2-000042").closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.change(screen.getByLabelText("Reassign to"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Reason/note"), { target: { value: "normal reassignment" } });
     fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
-    const menu = await screen.findByRole("menu");
-    await waitFor(() => expect(within(menu).getByRole("combobox")).toBeTruthy());
-    const combobox = within(menu).getByRole("combobox");
-    fireEvent.change(combobox, { target: { value: "5" } });
-    fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
-    expect(unassignReportingBoardCaseMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(bulkReassignSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42], comparisonRequestIds: [], doctorId: 5, reason: "normal reassignment" }));
+    expect(screen.queryByRole("button", { name: "Confirm reassignment" })).toBeNull();
+    expect(await screen.findByText("1 case reassigned to Dr Target.")).toBeTruthy();
+    expect(screen.queryByText("1 selected")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    expect((screen.getByLabelText("Reassign to") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Reason/note") as HTMLInputElement).value).toBe("");
   });
 
   it("bulk returns selected cases to waiting pool only after reason confirmation", async () => {
@@ -1415,7 +1376,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
   });
 
-  it("selects comparison rows and sends comparison IDs to selected bulk actions", async () => {
+  it("reassigns mixed appointment and comparison selections through the same bulk endpoint", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [caseRow, comparisonRow],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
@@ -1439,8 +1400,7 @@ describe("DoctorReportingBoardPage", () => {
 
     fireEvent.change(screen.getByLabelText("Reassign to"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Reason/note"), { target: { value: "mixed reporting queue" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reassign selected" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm reassignment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
 
     await waitFor(() => expect(bulkReassignSelectedReportingCasesMock).toHaveBeenCalledWith({
       appointmentIds: [42],
@@ -1448,6 +1408,24 @@ describe("DoctorReportingBoardPage", () => {
       doctorId: 5,
       reason: "mixed reporting queue",
     }));
+    expect(screen.queryByRole("button", { name: "Confirm reassignment" })).toBeNull();
+  });
+
+  it("keeps selection and reassignment inputs visible after a bulk reassignment error", async () => {
+    bulkReassignSelectedReportingCasesMock.mockRejectedValue(new Error("Doctor is not eligible for reporting."));
+    renderPage();
+
+    await screen.findByText("V2-000042");
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.change(screen.getByLabelText("Reassign to"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Reason/note"), { target: { value: "coverage handoff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+
+    expect(await screen.findByText("Doctor is not eligible for reporting.")).toBeTruthy();
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect((screen.getByLabelText("Reassign to") as HTMLSelectElement).value).toBe("5");
+    expect((screen.getByLabelText("Reason/note") as HTMLInputElement).value).toBe("coverage handoff");
+    expect((screen.getByRole("button", { name: "Reassign" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("allows doctor supervisors to edit centrally managed Reporting Board defaults", async () => {
