@@ -14,7 +14,9 @@ import { useLanguage } from "@/providers/language-provider";
 const statuses = ["pending_scheduling", "scheduled", "completed", "cancelled"] as const;
 type RecallStatus = (typeof statuses)[number];
 type FilterStatus = RecallStatus | "all";
+type SeenRecallBatch = { ids: number[]; pendingIds: number[] };
 export type RecallRequestsPageProps = { mode?: "reception" | "doctor" };
+const EMPTY_RECALLS: ComplementaryRecall[] = [];
 
 function label(language: "ar" | "en", status: RecallStatus) {
   return chooseLocalized(language, ...({ pending_scheduling: ["بحاجة إلى حجز", "Needs booking"], scheduled: ["تم الحجز", "Scheduled"], completed: ["مكتمل", "Completed"], cancelled: ["تم سحب الطلب", "Withdrawn"] } satisfies Record<RecallStatus, [string, string]>)[status]);
@@ -32,10 +34,10 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   const withdrawalSubmitting = useRef(false);
   const key = mode === "doctor" ? ["doctor", "protocoling", "complementary-recalls"] : ["complementary-recalls"];
   const recalls = useQuery({ queryKey: key, queryFn: mode === "doctor" ? fetchDoctorComplementaryRecalls : fetchComplementaryRecalls, refetchInterval: 30_000 });
-  const seen = useMutation({ mutationFn: markComplementaryRecallsSeen, onSuccess: () => { void Promise.all([queryClient.invalidateQueries({ queryKey: ["complementary-recalls"] }), queryClient.invalidateQueries({ queryKey: ["complementary-recalls", "reception-summary"] })]); } });
+  const seen = useMutation({ mutationFn: ({ ids }: SeenRecallBatch) => markComplementaryRecallsSeen(ids), onMutate: ({ pendingIds }: SeenRecallBatch) => { if (pendingIds.length) setSessionNewIds((current) => new Set([...current, ...pendingIds])); }, onSuccess: () => { void Promise.all([queryClient.invalidateQueries({ queryKey: ["complementary-recalls"] }), queryClient.invalidateQueries({ queryKey: ["complementary-recalls", "reception-summary"] })]); } });
   const withdraw = useMutation({ mutationFn: (id: number) => mode === "doctor" ? withdrawComplementaryRecallRequest(id) : withdrawComplementaryRecall(id), onMutate: () => { withdrawalSubmitting.current = true; }, onSuccess: () => { setWithdrawTarget(null); void queryClient.invalidateQueries({ queryKey: key }); if (mode === "reception") void queryClient.invalidateQueries({ queryKey: ["complementary-recalls", "reception-summary"] }); }, onSettled: () => { withdrawalSubmitting.current = false; } });
   const edit = useMutation({ mutationFn: () => updateDoctorComplementaryRecallInstructions(editTarget!.id, { receptionInstruction: receptionInstruction.trim() || null, technologistInstruction: technologistInstruction.trim() }), onSuccess: () => { setEditTarget(null); void queryClient.invalidateQueries({ queryKey: key }); } });
-  const rows = recalls.data ?? []; const canWithdraw = user?.role === "supervisor" || user?.role === "super_admin";
+  const rows = recalls.data ?? EMPTY_RECALLS; const canWithdraw = user?.role === "supervisor" || user?.role === "super_admin";
   const counts = useMemo(() => Object.fromEntries(statuses.map((status) => [status, rows.filter((row) => row.status === status).length])) as Record<RecallStatus, number>, [rows]);
   const filtered = filter === "all" ? rows : rows.filter((row) => row.status === filter);
   const local = (ar: string, en: string) => chooseLocalized(language, ar, en);
@@ -44,7 +46,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   const examination = (recall: ComplementaryRecall) => chooseLocalized(language, recall.originalExamAr ?? recall.originalExam, recall.originalExamEn ?? recall.originalExam) || local("غير متاح", "Unavailable");
   const modality = (recall: ComplementaryRecall) => [recall.modalityCode, chooseLocalized(language, recall.modalityNameAr ?? recall.modalityName, recall.modalityNameEn ?? recall.modalityName)].filter(Boolean).join(" · ") || local("غير متاح", "Unavailable");
   const previousReason = (reason: string | null | undefined) => chooseLocalized(language, ...(reason === "no-show" ? ["لم يحضر", "No-show"] : reason === "cancelled" ? ["ملغي", "Cancelled"] : reason === "discontinued" ? ["موقوف", "Discontinued"] : reason === "voided" ? ["مُبطل", "Voided"] : [reason || "—", reason || "—"]));
-  useEffect(() => { if (mode !== "reception") return; const unseen = rows.filter((row) => row.receptionSeenAt == null && (row.status === "pending_scheduling" || row.status === "scheduled")); const pendingIds = unseen.filter((row) => row.status === "pending_scheduling").map((row) => row.id); if (pendingIds.length) setSessionNewIds((current) => new Set([...current, ...pendingIds])); if (unseen.length && !seen.isPending) seen.mutate(unseen.map((row) => row.id)); }, [mode, rows, seen]);
+  useEffect(() => { if (mode !== "reception") return; const unseen = rows.filter((row) => row.receptionSeenAt == null && (row.status === "pending_scheduling" || row.status === "scheduled")); if (unseen.length && !seen.isPending) seen.mutate({ ids: unseen.map((row) => row.id), pendingIds: unseen.filter((row) => row.status === "pending_scheduling").map((row) => row.id) }); }, [mode, rows, seen]);
   const openEdit = (recall: ComplementaryRecall) => { setReceptionInstruction(recall.receptionInstruction ?? ""); setTechnologistInstruction(recall.technologistInstruction); setEditTarget(recall); };
 
   return <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4" dir={isArabic ? "rtl" : "ltr"}>
