@@ -1967,8 +1967,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const selectedReassignMutation = useMutation({
     mutationFn: (input: { appointmentIds: number[]; comparisonRequestIds: number[]; doctorId: number; doctorName: string; reason: string | null }) => {
-      const { appointmentIds, comparisonRequestIds, doctorId, reason } = input;
-      return bulkReassignSelectedReportingCases({ appointmentIds, comparisonRequestIds, doctorId, reason });
+      const request = {
+        appointmentIds: input.appointmentIds,
+        comparisonRequestIds: input.comparisonRequestIds,
+        doctorId: input.doctorId,
+        reason: input.reason,
+      };
+      return bulkReassignSelectedReportingCases(request);
     },
     onSuccess: async (result, payload) => {
       setBulkResult(result);
