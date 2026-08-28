@@ -161,6 +161,19 @@ describe("Doctor protocoling request documents", () => {
     await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ appointmentStatus: null, waitingFirst: true })));
   });
 
+  it("uses the standard DD/MM/YYYY date input while sending ISO date filters", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    const dateFrom = await screen.findByLabelText("From");
+    expect(dateFrom.getAttribute("type")).toBe("text");
+    await userEvent.clear(dateFrom);
+    await userEvent.type(dateFrom, "01092026");
+    await userEvent.tab();
+
+    await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ dateFrom: "2026-09-01" })));
+    expect((dateFrom as HTMLInputElement).value).toBe("01/09/2026");
+  });
+
   it("refreshes the protocoling appointment worklist after ten seconds", async () => {
     vi.useFakeTimers();
     const view = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
