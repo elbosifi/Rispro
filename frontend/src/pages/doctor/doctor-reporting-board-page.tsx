@@ -1966,7 +1966,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     },
   });
   const selectedReassignMutation = useMutation({
-    mutationFn: ({ doctorName: _doctorName, ...payload }: { appointmentIds: number[]; comparisonRequestIds: number[]; doctorId: number; doctorName: string; reason: string | null }) => bulkReassignSelectedReportingCases(payload),
+    mutationFn: (input: { appointmentIds: number[]; comparisonRequestIds: number[]; doctorId: number; doctorName: string; reason: string | null }) => {
+      const { appointmentIds, comparisonRequestIds, doctorId, reason } = input;
+      return bulkReassignSelectedReportingCases({ appointmentIds, comparisonRequestIds, doctorId, reason });
+    },
     onSuccess: async (result, payload) => {
       setBulkResult(result);
       setSelectedCaseKeys([]);
