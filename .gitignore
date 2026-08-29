@@ -5,6 +5,7 @@ node_modules/
 secrets/
 var/qz-bootstrap/
 docker/orthanc/generated/
+docker/postgres/generated/
 
 # Persistent runtime data; protected from update-script git cleanup.
 storage/sante-hl7-outbox/

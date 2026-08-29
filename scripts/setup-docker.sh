@@ -35,6 +35,10 @@ main() {
     warn ".env already exists at ${ENV_FILE}"
     if [ "$(prompt_yes_no 'Reuse the current configuration and start the stack?' yes)" = "true" ]; then
       RISPRO_DB_MODE="${CURRENT_DB_MODE:-internal}"
+      RISPRO_DB_BACKUP_ACCESS_ENABLED="${CURRENT_DB_BACKUP_ACCESS_ENABLED:-false}"
+      RISPRO_DB_BACKUP_BIND_IP="${CURRENT_DB_BACKUP_BIND_IP:-}"
+      RISPRO_DB_BACKUP_PORT="${CURRENT_DB_BACKUP_PORT:-5432}"
+      RISPRO_DB_BACKUP_ALLOWED_IPS="${CURRENT_DB_BACKUP_ALLOWED_IPS:-}"
       RISPRO_DICOM_MODE="${CURRENT_DICOM_MODE:-embedded}"
       RISPRO_MPPS_MODE="${CURRENT_MPPS_MODE:-disabled}"
       ORTHANC_TIMEOUT_SECONDS="${CURRENT_ORTHANC_TIMEOUT_SECONDS:-10}"

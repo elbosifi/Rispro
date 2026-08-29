@@ -25,13 +25,17 @@ import { executeBackupV3Retention, previewLocalBackupV3Retention } from "../serv
 import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery, deliberatelyResetBackupV3MasterKey, recoverBackupV3MasterKey } from "../services/backup-v3-master-key-setup-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
+import { getDatabaseBackupAccessConfig } from "../services/database-backup-access-config.js";
 import { HttpError } from "../utils/http-error.js";
 
 /** Routine backup operations are deliberately separate from destructive restore controls. */
 export const backupControlRouter = express.Router();
 backupControlRouter.use(requireAuth, requireAnyRole(["supervisor", "super_admin"]));
 
-backupControlRouter.get("/summary", asyncRoute(async (_req: Request, res: Response) => res.json(await getBackupControlCenterSummary())));
+backupControlRouter.get("/summary", asyncRoute(async (_req: Request, res: Response) => res.json({
+  ...await getBackupControlCenterSummary(),
+  database_backup_access: getDatabaseBackupAccessConfig(),
+})));
 backupControlRouter.get("/destinations", asyncRoute(async (_req: Request, res: Response) => res.json({ destinations: await listBackupDestinationProfiles() })));
 backupControlRouter.get("/jobs", asyncRoute(async (req: Request, res: Response) => res.json({ jobs: await listBackupJobs(Number(req.query.limit || 50)) })));
 backupControlRouter.get("/schedules", asyncRoute(async (_req: Request, res: Response) => res.json({ schedules: await listBackupSchedules() })));

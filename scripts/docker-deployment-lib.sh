@@ -6,6 +6,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 ORTHANC_CONFIG_DIR="${PROJECT_ROOT}/docker/orthanc/generated"
 ORTHANC_CONFIG_FILE="${ORTHANC_CONFIG_DIR}/orthanc.json"
+DB_BACKUP_ACCESS_CONFIG_DIR="${PROJECT_ROOT}/docker/postgres/generated"
+DB_BACKUP_ACCESS_HBA_FILE="${DB_BACKUP_ACCESS_CONFIG_DIR}/pg_hba.conf"
+DB_BACKUP_ACCESS_COMPOSE_FILE="${DB_BACKUP_ACCESS_CONFIG_DIR}/docker-compose.database-backup-access.yml"
 SANTE_HL7_HOST_OUTBOX_DIR="${PROJECT_ROOT}/storage/sante-hl7-outbox"
 SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 # Keep deployment configuration backups outside the checkout: update-docker's
@@ -212,6 +215,10 @@ load_existing_config() {
   CURRENT_DB_USER="$(read_env_value DB_USER)"
   CURRENT_DB_PASSWORD="$(read_env_value DB_PASSWORD)"
   CURRENT_DB_NAME="$(read_env_value DB_NAME)"
+  CURRENT_DB_BACKUP_ACCESS_ENABLED="$(read_env_value RISPRO_DB_BACKUP_ACCESS_ENABLED)"
+  CURRENT_DB_BACKUP_BIND_IP="$(read_env_value RISPRO_DB_BACKUP_BIND_IP)"
+  CURRENT_DB_BACKUP_PORT="$(read_env_value RISPRO_DB_BACKUP_PORT)"
+  CURRENT_DB_BACKUP_ALLOWED_IPS="$(read_env_value RISPRO_DB_BACKUP_ALLOWED_IPS)"
   CURRENT_ORTHANC_BASE_URL="$(read_env_value ORTHANC_BASE_URL)"
   CURRENT_ORTHANC_VERIFY_TLS="$(read_env_value ORTHANC_VERIFY_TLS)"
   CURRENT_ORTHANC_TIMEOUT_SECONDS="$(read_env_value ORTHANC_TIMEOUT_SECONDS)"
@@ -266,6 +273,10 @@ hydrate_deployment_config_from_current_env() {
   DB_USER="${CURRENT_DB_USER:-}"
   DB_PASSWORD="${CURRENT_DB_PASSWORD:-}"
   DB_NAME="${CURRENT_DB_NAME:-}"
+  RISPRO_DB_BACKUP_ACCESS_ENABLED="${CURRENT_DB_BACKUP_ACCESS_ENABLED:-false}"
+  RISPRO_DB_BACKUP_BIND_IP="${CURRENT_DB_BACKUP_BIND_IP:-}"
+  RISPRO_DB_BACKUP_PORT="${CURRENT_DB_BACKUP_PORT:-5432}"
+  RISPRO_DB_BACKUP_ALLOWED_IPS="${CURRENT_DB_BACKUP_ALLOWED_IPS:-}"
   DATABASE_SSL="${CURRENT_DATABASE_SSL:-false}"
   DATABASE_SSL_REJECT_UNAUTHORIZED="${CURRENT_DATABASE_SSL_REJECT_UNAUTHORIZED:-false}"
 
@@ -495,6 +506,10 @@ collect_deployment_config() {
   SANTE_HL7_ALLOWED_BASE_PATHS="${CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_HOST_OUTBOX_HINT="${CURRENT_SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
   SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
+  RISPRO_DB_BACKUP_ACCESS_ENABLED="${CURRENT_DB_BACKUP_ACCESS_ENABLED:-false}"
+  RISPRO_DB_BACKUP_BIND_IP="${CURRENT_DB_BACKUP_BIND_IP:-}"
+  RISPRO_DB_BACKUP_PORT="${CURRENT_DB_BACKUP_PORT:-5432}"
+  RISPRO_DB_BACKUP_ALLOWED_IPS="${CURRENT_DB_BACKUP_ALLOWED_IPS:-}"
 
   if [ "$RISPRO_DB_MODE" = "internal" ]; then
     DB_USER="${CURRENT_DB_USER:-rispro}"
@@ -503,7 +518,14 @@ collect_deployment_config() {
     DATABASE_URL="postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD")@postgres:5432/${DB_NAME}"
     DATABASE_SSL="false"
     DATABASE_SSL_REJECT_UNAUTHORIZED="false"
+    RISPRO_DB_BACKUP_ACCESS_ENABLED="$(prompt_yes_no 'Enable external database backup access?' "$([ "${CURRENT_DB_BACKUP_ACCESS_ENABLED:-false}" = "true" ] && printf yes || printf no)")"
+    if [ "$RISPRO_DB_BACKUP_ACCESS_ENABLED" = "true" ]; then
+      RISPRO_DB_BACKUP_BIND_IP="$(prompt 'Database backup bind IP' "${CURRENT_DB_BACKUP_BIND_IP:-}")"
+      RISPRO_DB_BACKUP_PORT="$(prompt 'Database backup host port' "${CURRENT_DB_BACKUP_PORT:-5432}")"
+      RISPRO_DB_BACKUP_ALLOWED_IPS="$(prompt 'Allowed backup hosts (comma-separated IPv4/CIDR whitelist)' "${CURRENT_DB_BACKUP_ALLOWED_IPS:-}")"
+    fi
   else
+    RISPRO_DB_BACKUP_ACCESS_ENABLED="false"
     local ext_host="localhost"
     local ext_port="5432"
     local ext_name="rispro"
@@ -580,6 +602,80 @@ collect_deployment_config() {
   fi
 }
 
+is_valid_ipv4() {
+  local address="$1"
+  awk -v value="$address" 'BEGIN {
+    count = split(value, octets, ".")
+    if (count != 4) exit 1
+    for (i = 1; i <= 4; i++) {
+      if (octets[i] !~ /^[0-9]+$/ || octets[i] + 0 > 255) exit 1
+    }
+  }'
+}
+
+is_valid_ipv4_or_cidr() {
+  local entry="$1"
+  local address prefix
+  case "$entry" in
+    */*)
+      address="${entry%/*}"
+      prefix="${entry##*/}"
+      is_valid_ipv4 "$address" || return 1
+      case "$prefix" in ''|*[!0-9]*) return 1 ;; esac
+      [ "$prefix" -le 32 ]
+      ;;
+    *) is_valid_ipv4 "$entry" ;;
+  esac
+}
+
+validate_db_backup_allowed_ips() {
+  local raw="$1"
+  local entry
+  local -a entries=()
+  [ -n "$raw" ] || { err 'RISPRO_DB_BACKUP_ALLOWED_IPS requires at least one IPv4 address or CIDR.'; return 1; }
+  case "$raw" in
+    ,*|*,|*,,*) err 'RISPRO_DB_BACKUP_ALLOWED_IPS contains an empty whitelist entry.'; return 1 ;;
+  esac
+  IFS=',' read -r -a entries <<< "$raw"
+  for entry in "${entries[@]}"; do
+    entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
+    [ -n "$entry" ] || { err 'RISPRO_DB_BACKUP_ALLOWED_IPS contains an empty whitelist entry.'; return 1; }
+    is_valid_ipv4_or_cidr "$entry" || { err "Invalid database backup whitelist entry: ${entry}"; return 1; }
+    case "$entry" in
+      0.0.0.0|0.0.0.0/0) err "Unsafe database backup whitelist entry is not allowed: ${entry}"; return 1 ;;
+    esac
+  done
+}
+
+is_local_ipv4() {
+  local address="$1"
+  if command -v ip >/dev/null 2>&1; then
+    ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$address"
+    return
+  fi
+  if command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n' | grep -Fxq "$address"
+    return
+  fi
+  err 'Cannot validate RISPRO_DB_BACKUP_BIND_IP because neither ip nor hostname -I is available.'
+  return 1
+}
+
+validate_db_backup_access() {
+  [ "$RISPRO_DB_MODE" = "external" ] && return 0
+  case "$RISPRO_DB_BACKUP_ACCESS_ENABLED" in
+    true|false) ;;
+    *) err 'RISPRO_DB_BACKUP_ACCESS_ENABLED must be true or false.'; return 1 ;;
+  esac
+  [ "$RISPRO_DB_BACKUP_ACCESS_ENABLED" = "true" ] || return 0
+  is_valid_ipv4 "$RISPRO_DB_BACKUP_BIND_IP" || { err 'RISPRO_DB_BACKUP_BIND_IP must be a valid IPv4 address.'; return 1; }
+  [ "$RISPRO_DB_BACKUP_BIND_IP" != "0.0.0.0" ] || { err 'RISPRO_DB_BACKUP_BIND_IP must not be 0.0.0.0.'; return 1; }
+  is_local_ipv4 "$RISPRO_DB_BACKUP_BIND_IP" || { err "RISPRO_DB_BACKUP_BIND_IP is not assigned to this host: ${RISPRO_DB_BACKUP_BIND_IP}"; return 1; }
+  validate_positive_integer "$RISPRO_DB_BACKUP_PORT" 'RISPRO_DB_BACKUP_PORT' || return 1
+  [ "$RISPRO_DB_BACKUP_PORT" -le 65535 ] || { err 'RISPRO_DB_BACKUP_PORT must be between 1 and 65535.'; return 1; }
+  validate_db_backup_allowed_ips "$RISPRO_DB_BACKUP_ALLOWED_IPS"
+}
+
 validate_positive_integer() {
   local value="$1"
   local name="$2"
@@ -603,6 +699,7 @@ preflight_validate_env() {
   fi
 
   validate_positive_integer "$ORTHANC_TIMEOUT_SECONDS" 'ORTHANC_TIMEOUT_SECONDS' || return 1
+  validate_db_backup_access || return 1
   SANTE_HL7_OUTPUT_FOLDER_PATH="${SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_ALLOWED_BASE_PATHS="${SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_HOST_OUTBOX_HINT="${SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
@@ -662,6 +759,10 @@ DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=${DB_NAME}
 DATABASE_SSL=${DATABASE_SSL}
 DATABASE_SSL_REJECT_UNAUTHORIZED=${DATABASE_SSL_REJECT_UNAUTHORIZED}
+RISPRO_DB_BACKUP_ACCESS_ENABLED=${RISPRO_DB_BACKUP_ACCESS_ENABLED}
+RISPRO_DB_BACKUP_BIND_IP=${RISPRO_DB_BACKUP_BIND_IP}
+RISPRO_DB_BACKUP_PORT=${RISPRO_DB_BACKUP_PORT}
+RISPRO_DB_BACKUP_ALLOWED_IPS=${RISPRO_DB_BACKUP_ALLOWED_IPS}
 
 # -- Authentication --
 JWT_SECRET=${JWT_SECRET}
@@ -957,11 +1058,57 @@ recreate_internal_orthanc_if_changed() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-deps --force-recreate orthanc
 }
 
+render_db_backup_access_config() {
+  local entry cidr config_hash
+  local -a entries=()
+  [ "$RISPRO_DB_MODE" = "internal" ] && [ "$RISPRO_DB_BACKUP_ACCESS_ENABLED" = "true" ] || return 0
+
+  mkdir -p "$DB_BACKUP_ACCESS_CONFIG_DIR"
+  chmod 700 "$DB_BACKUP_ACCESS_CONFIG_DIR"
+  umask 077
+  cat > "$DB_BACKUP_ACCESS_HBA_FILE" <<'EOF_HBA'
+# Generated by RISpro. Internal Compose peers authenticate on the directly
+# connected Docker network; external clients require an explicit rule below.
+local all all trust
+host all all samenet scram-sha-256
+EOF_HBA
+  IFS=',' read -r -a entries <<< "$RISPRO_DB_BACKUP_ALLOWED_IPS"
+  for entry in "${entries[@]}"; do
+    entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
+    cidr="$entry"
+    case "$cidr" in */*) ;; *) cidr="${cidr}/32" ;; esac
+    printf 'host all all %s scram-sha-256\n' "$cidr" >> "$DB_BACKUP_ACCESS_HBA_FILE"
+  done
+  cat >> "$DB_BACKUP_ACCESS_HBA_FILE" <<'EOF_HBA'
+host all all 0.0.0.0/0 reject
+host all all ::0/0 reject
+EOF_HBA
+  config_hash="$(sha256sum "$DB_BACKUP_ACCESS_HBA_FILE" | awk '{print $1}')"
+  cat > "$DB_BACKUP_ACCESS_COMPOSE_FILE" <<EOF_COMPOSE
+services:
+  postgres:
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    ports:
+      - "${RISPRO_DB_BACKUP_BIND_IP}:${RISPRO_DB_BACKUP_PORT}:5432"
+    volumes:
+      - "./docker/postgres/generated/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro"
+    labels:
+      rispro.database-backup-access-config-sha: "${config_hash}"
+EOF_COMPOSE
+  # PostgreSQL drops privileges before reading hba_file. The file contains only
+  # network rules (no credentials), so it must remain container-readable.
+  chmod 644 "$DB_BACKUP_ACCESS_HBA_FILE"
+  chmod 600 "$DB_BACKUP_ACCESS_COMPOSE_FILE"
+}
+
 build_compose_args() {
   COMPOSE_FILES=(-f docker-compose.yml)
 
   if [ "$RISPRO_DB_MODE" = "internal" ]; then
     COMPOSE_FILES+=(-f docker-compose.internal-db.yml)
+    if [ "$RISPRO_DB_BACKUP_ACCESS_ENABLED" = "true" ]; then
+      COMPOSE_FILES+=(-f docker/postgres/generated/docker-compose.database-backup-access.yml)
+    fi
   fi
 
   if [ "$RISPRO_DICOM_MODE" = "orthanc_internal" ]; then
@@ -1002,6 +1149,7 @@ run_compose_preflight() {
   preflight_validate_env
   prepare_qz_printing
   write_env_file
+  render_db_backup_access_config
   render_orthanc_config
   build_compose_args
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" config >/dev/null

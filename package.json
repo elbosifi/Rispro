@@ -39,7 +39,7 @@
     "ci:inspect": "node scripts/dev/ci-inspect.mjs",
     "test:tooling": "node --test scripts/dev/required-db-test.test.mjs scripts/dev/ci-inspect.test.mjs",
     "agent:contract": "node scripts/harness/check-agent-contract.mjs",
-    "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh",
+    "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh && bash scripts/test-database-backup-access.sh",
     "test:qz:deployment": "node --test scripts/qz/qz-deployment.test.mjs scripts/qz/qz-powershell.test.mjs",
     "test:request-scan-worker-compose": "node --test scripts/request-scan-worker-compose.test.mjs",
     "test": "npm run test:backend:unit",

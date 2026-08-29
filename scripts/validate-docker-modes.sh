@@ -4,6 +4,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=./docker-deployment-lib.sh
+source "${SCRIPT_DIR}/docker-deployment-lib.sh"
 TMP_DIR="$(mktemp -d /tmp/rispro-docker-modes.XXXXXX)"
 
 cleanup() {
@@ -156,16 +158,32 @@ main() {
   local orthanc_internal_env="${TMP_DIR}/orthanc-internal.env"
   local orthanc_external_env="${TMP_DIR}/orthanc-external.env"
   local orthanc_internal_mpps_env="${TMP_DIR}/orthanc-internal-mpps.env"
+  local db_backup_access_env="${TMP_DIR}/db-backup-access.env"
 
   write_env_file "${embedded_env}" "internal" "embedded" "disabled"
   write_env_file "${orthanc_internal_env}" "internal" "orthanc_internal" "disabled"
   write_env_file "${orthanc_external_env}" "external" "orthanc_external" "disabled"
   write_env_file "${orthanc_internal_mpps_env}" "internal" "orthanc_internal" "internal_bridge"
+  write_env_file "${db_backup_access_env}" "internal" "embedded" "disabled"
 
   render_compose_config \
     "embedded + internal db" \
     "${embedded_env}" \
     -f docker-compose.yml -f docker-compose.internal-db.yml
+
+  RISPRO_DB_MODE="internal"
+  RISPRO_DB_BACKUP_ACCESS_ENABLED="true"
+  RISPRO_DB_BACKUP_BIND_IP="192.9.101.252"
+  RISPRO_DB_BACKUP_PORT="5432"
+  RISPRO_DB_BACKUP_ALLOWED_IPS="192.9.101.162"
+  DB_BACKUP_ACCESS_CONFIG_DIR="${TMP_DIR}/postgres"
+  DB_BACKUP_ACCESS_HBA_FILE="${DB_BACKUP_ACCESS_CONFIG_DIR}/pg_hba.conf"
+  DB_BACKUP_ACCESS_COMPOSE_FILE="${DB_BACKUP_ACCESS_CONFIG_DIR}/docker-compose.database-backup-access.yml"
+  render_db_backup_access_config
+  render_compose_config \
+    "embedded + internal db + database backup access" \
+    "${db_backup_access_env}" \
+    -f docker-compose.yml -f docker-compose.internal-db.yml -f "${DB_BACKUP_ACCESS_COMPOSE_FILE}"
 
   cp "${TMP_DIR}/orthanc/orthanc.json" "${PROJECT_ROOT}/docker/orthanc/generated/orthanc.json"
   render_compose_config \

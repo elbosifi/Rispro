@@ -109,6 +109,33 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(screen.queryByText(/Legacy v2 JSON restore/i)).toBeNull();
   });
 
+  it("shows database backup access as read-only deployment configuration", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/backup-control/summary") return jsonResponse({
+        database_backup_access: {
+          enabled: true,
+          bindIp: "192.9.101.252",
+          port: "5432",
+          allowedHosts: ["192.9.101.162"],
+          readOnly: true,
+          applyCommand: "./scripts/update-docker.sh",
+        },
+      });
+      if (url === "/api/backup-control/destinations") return jsonResponse({ destinations: [] });
+      if (url === "/api/backup-control/jobs") return jsonResponse({ jobs: [] });
+      if (url === "/api/backup-control/schedules") return jsonResponse({ schedules: [] });
+      if (url === "/api/backup-control/restore-verifications") return jsonResponse({ verifications: [] });
+      return jsonResponse({}, 404);
+    }));
+
+    renderSection();
+    expect(await screen.findByText("192.9.101.252")).toBeTruthy();
+    expect(screen.getByText("192.9.101.162")).toBeTruthy();
+    expect(screen.getByText("./scripts/update-docker.sh")).toBeTruthy();
+    expect(screen.queryByText(/DB_PASSWORD/i)).toBeNull();
+  });
+
   it("requires preview before restore execution and blocks preview errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);

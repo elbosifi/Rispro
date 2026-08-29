@@ -336,6 +336,27 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `DB_WAIT_RETRIES` | `30` | Max attempts to wait for PostgreSQL |
 | `DB_WAIT_INTERVAL` | `2` | Seconds between retry attempts |
 
+### Database Backup Access
+
+Internal-DB deployments can publish PostgreSQL to one trusted LAN interface for a database backup system such as Databasus. The feature is disabled by default; without these settings PostgreSQL has no host port mapping.
+
+Configure the RISpro host `.env` and run the supported update command:
+
+```env
+RISPRO_DB_BACKUP_ACCESS_ENABLED=true
+RISPRO_DB_BACKUP_BIND_IP=192.9.101.252
+RISPRO_DB_BACKUP_PORT=5432
+RISPRO_DB_BACKUP_ALLOWED_IPS=192.9.101.162
+```
+
+```bash
+./scripts/update-docker.sh
+```
+
+The deployment scripts validate that the bind address is a local IPv4 address, generate the exact `192.9.101.252:5432:5432` Compose mapping, and generate a PostgreSQL `pg_hba.conf`. External connections must match one of the comma-separated individual IPv4 or IPv4 CIDR whitelist entries and authenticate with the normal PostgreSQL credentials. Internal RISpro containers continue to authenticate over their directly connected Docker network. The generated files under `docker/postgres/generated/` are recreated and reapplied by every supported setup/update run and are protected from the update workflow's untracked-file cleanup.
+
+Bind only to a trusted LAN interface. Use explicit source entries such as `192.9.101.162` or `192.9.101.162/32`; never use `0.0.0.0`, `0.0.0.0/0`, or a broad convenience CIDR. PostgreSQL credentials remain separate from this network-access setting and are never shown in its Settings card. Settings → Backup & Restore → Database Backup Access is read-only because the web application does not have authority to modify host deployment configuration.
+
 ### Orthanc / MPPS Variables
 
 | Variable | Default | Description |

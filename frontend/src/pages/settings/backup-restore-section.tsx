@@ -110,6 +110,14 @@ type BackupControlSummary = {
   last_successful_restore_verification?: { completed_at?: string | null } | null;
   next_schedule?: { name?: string; next_run_at?: string | null } | null;
   worker?: { heartbeat_at?: string | null; last_failure_message?: string | null } | null;
+  database_backup_access?: {
+    enabled: boolean;
+    bindIp: string;
+    port: string;
+    allowedHosts: string[];
+    readOnly: true;
+    applyCommand: string;
+  };
   encryption?: {
     state?: "fresh_setup_required" | "ready" | "restart_required" | "runtime_key_persistence_required" | "recovery_required" | "invalid_key" | "validation_unavailable" | "deliberate_reset_required";
     encryptionReady: boolean;
@@ -1040,6 +1048,21 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   return (
     <div className="space-y-4">
       <p className="description-center">{t("settings.backupInfo")}</p>
+
+      <section dir="ltr" className="rounded-lg border border-stone-200 bg-white p-4 text-left text-sm dark:border-stone-700 dark:bg-stone-900">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="font-semibold text-stone-900 dark:text-white">Database Backup Access</h4>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${backupControlSummary?.database_backup_access?.enabled ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" : "bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300"}`}>
+            {backupControlSummary ? (backupControlSummary.database_backup_access?.enabled ? "Enabled" : "Disabled") : "Loading..."}
+          </span>
+        </div>
+        <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div><dt className="text-xs text-stone-500">Bind IP</dt><dd className="font-mono">{backupControlSummary ? (backupControlSummary.database_backup_access?.bindIp || "Not configured") : "Loading..."}</dd></div>
+          <div><dt className="text-xs text-stone-500">Port</dt><dd className="font-mono">{backupControlSummary ? (backupControlSummary.database_backup_access?.port || "5432") : "Loading..."}</dd></div>
+          <div><dt className="text-xs text-stone-500">Allowed backup hosts</dt><dd className="break-all font-mono">{backupControlSummary ? (backupControlSummary.database_backup_access?.allowedHosts?.join(", ") || "None") : "Loading..."}</dd></div>
+        </dl>
+        <p className="mt-3 text-xs text-stone-600 dark:text-stone-300">Read-only deployment configuration. Examples: 192.9.101.162 or 192.9.101.162/32. Edit the RISpro host .env and apply with <code className="font-mono">{backupControlSummary?.database_backup_access?.applyCommand || "./scripts/update-docker.sh"}</code>.</p>
+      </section>
 
       <section className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-900 dark:bg-sky-950/20">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
