@@ -13,6 +13,7 @@ import { documentsRouter } from "./routes/documents.js";
 import { scanSessionsRouter } from "./routes/scan-sessions.js";
 import { integrationsRouter } from "./routes/integrations.js";
 import { authoritativeOrthancRouter } from "./routes/authoritative-orthanc.js";
+import { authoritativeOrthancInternalRouter } from "./routes/authoritative-orthanc-internal.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
@@ -145,6 +146,7 @@ export function createApp(): Application {
   // Token-scoped data for the in-container appointment-slip renderer. It must remain
   // outside the user-session middleware because Chromium never receives that session.
   app.use("/api/internal/appointment-slip-render", appointmentSlipRenderRouter);
+  app.use("/api/internal/authoritative-orthanc", authoritativeOrthancInternalRouter);
   app.use("/api", blockForcedPasswordChange);
   app.use("/api/action-pin", actionPinRouter);
   app.use("/api/users", usersRouter);
