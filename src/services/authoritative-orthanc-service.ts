@@ -295,11 +295,16 @@ export class AuthoritativeOrthancClient {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID.");
     const [detail, instances] = await Promise.all([
       this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`, {}, { acceptableStatuses: [404] }),
-      this.request(`/studies/${encodeURIComponent(orthancStudyId)}/instances`, {}, { acceptableStatuses: [404] }),
+      this.request(`/studies/${encodeURIComponent(orthancStudyId)}/instances?expand=false`, {}, { acceptableStatuses: [404] }),
     ]);
     if (!detail || !instances) return null;
     if (!Array.isArray(instances)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study instance list.", { code: "orthanc_invalid_response" });
-    const instanceIds = [...new Set(instances.map(text).filter(Boolean))];
+    const instanceIds = [...new Set(instances.map((instance) => {
+      if (typeof instance === "string") return text(instance);
+      const child = record(instance);
+      return first(child.ID, child.Id, child.id);
+    }).filter((instanceId): instanceId is string => Boolean(instanceId)))];
+    if (instances.length && !instanceIds.length) throw new HttpError(502, "Authoritative Orthanc returned an invalid study instance list.", { code: "orthanc_invalid_response" });
     return { study: studyDetails(detail, orthancStudyId), instanceIds };
   }
   async getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata | null> {

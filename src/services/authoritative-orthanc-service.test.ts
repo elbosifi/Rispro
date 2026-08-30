@@ -401,7 +401,7 @@ test("loads child instance IDs and expanded origin metadata for inbound audit", 
     const parsed = new URL(String(url));
     calls.push(`${parsed.pathname}${parsed.search}`);
     if (parsed.pathname === "/studies/study-a") return json(study());
-    if (parsed.pathname === "/studies/study-a/instances") return json(["instance-a", "instance-b", "instance-b", "instance-c"]);
+    if (parsed.pathname === "/studies/study-a/instances") { assert.equal(parsed.search, "?expand=false"); return json(["instance-a", "instance-b", "instance-b", "instance-c"]); }
     if (parsed.pathname === "/instances/instance-a/metadata") return json({ Origin: "DicomProtocol", RemoteAET: "CT_AE", RemoteIP: "10.0.0.10", CalledAET: "ORTHANCPG", ReceptionDate: "20260830T100000" });
     throw new Error(`Unexpected ${parsed.pathname}`);
   });
@@ -412,8 +412,22 @@ test("loads child instance IDs and expanded origin metadata for inbound audit", 
   assert.equal(inbound.study.studyInstanceUid, "1.2.3");
   assert.deepEqual(await client.getInstanceReceptionMetadata("instance-a"), { orthancInstanceId: "instance-a", origin: "DicomProtocol", remoteAet: "CT_AE", remoteIp: "10.0.0.10", calledAet: "ORTHANCPG", receptionDate: "20260830T100000" });
   assert.ok(calls.includes("/instances/instance-a/metadata?expand"));
-  assert.ok(calls.includes("/studies/study-a/instances"));
+  assert.ok(calls.includes("/studies/study-a/instances?expand=false"));
   assert.equal(calls.some((call) => call.startsWith("/series/")), false);
+});
+
+test("defensively accepts expanded child entries but rejects a non-empty malformed instance list", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === "/studies/study-a") return json(study());
+    if (parsed.pathname === "/studies/study-a/instances") { assert.equal(parsed.search, "?expand=false"); return json([{ ID: "instance-a" }, { Id: "instance-b" }, { id: "instance-a" }]); }
+    if (parsed.pathname === "/studies/malformed") return json(study());
+    if (parsed.pathname === "/studies/malformed/instances") return json([{ ParentStudy: "study-a" }, 42, null]);
+    throw new Error(`Unexpected ${parsed.pathname}`);
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  assert.deepEqual((await client.getStudyForInboundAudit("study-a"))?.instanceIds, ["instance-a", "instance-b"]);
+  await assert.rejects(() => client.getStudyForInboundAudit("malformed"), /invalid study instance list/i);
 });
 
 test("uses Orthanc metrics for the current change tail and safely tolerates unavailable audit resources", async () => {
