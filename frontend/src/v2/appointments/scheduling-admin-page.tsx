@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
+import { useLanguage } from "@/providers/language-provider";
 import {
   useV2PolicyStatus,
   useV2CreatePolicyDraft,
@@ -46,6 +47,7 @@ function snapshotsDiffer(published: PolicySnapshotDto | undefined, draft: Policy
 
 export function SchedulingAdminPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [showPublish, setShowPublish] = useState(false);
   const status = useV2PolicyStatus("default");
@@ -74,33 +76,33 @@ export function SchedulingAdminPage() {
   const hasValidationWarnings = validation.warnings.length > 0;
   const hasUnpublishedChanges = snapshotsDiffer(status.data?.publishedSnapshot, status.data?.draftSnapshot);
   const publishDisabledReason = !draftVersionId
-    ? "Create a draft before publishing."
+    ? t("schedulingAdmin.createDraftBeforePublishing")
     : hasBlockingValidationErrors
-    ? "Resolve blocking validation errors before publishing."
+    ? t("schedulingAdmin.resolveBlockingErrors")
     : publishDraft.isPending
-    ? "Publish is already in progress."
+    ? t("schedulingAdmin.publishInProgress")
     : null;
 
   if (user?.role !== "supervisor" && user?.role !== "super_admin") {
     return (
       <div style={{ padding: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Scheduling Policies</h1>
-        <p style={{ color: "var(--color-error, #ef4444)" }}>Supervisor access required.</p>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>{t("schedulingAdmin.accessDeniedTitle")}</h1>
+        <p style={{ color: "var(--color-error, #ef4444)" }}>{t("schedulingAdmin.supervisorRequired")}</p>
       </div>
     );
   }
 
   return (
     <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto", display: "grid", gap: 16 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Scheduling Policy Admin</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700 }}>{t("schedulingAdmin.title")}</h1>
 
       {status.isError && (
         <div style={{ color: "var(--color-error, #ef4444)" }}>
-          Failed to load status: {(status.error as Error)?.message ?? "Unknown error"}
+          {t("schedulingAdmin.statusLoadFailed")}: {(status.error as Error)?.message ?? t("schedulingAdmin.unknownError")}
         </div>
       )}
 
-      <SectionCard title="Status">
+      <SectionCard title={t("schedulingAdmin.status")}>
         <div
           style={{
             padding: 16,
@@ -112,9 +114,9 @@ export function SchedulingAdminPage() {
           }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, fontSize: 13 }}>
-            <div>{`Live version: ${status.data?.published ? `v${status.data.published.versionNo}` : "none"}`}</div>
-            <div>{`Draft version: ${status.data?.draft ? `v${status.data.draft.versionNo}` : "none"}`}</div>
-            <div>{`Draft state: ${hasUnpublishedChanges ? "Draft has unpublished changes" : "No unpublished changes"}`}</div>
+            <div>{t("schedulingAdmin.liveVersion", { version: status.data?.published ? `v${status.data.published.versionNo}` : t("schedulingAdmin.none") })}</div>
+            <div>{t("schedulingAdmin.draftVersion", { version: status.data?.draft ? `v${status.data.draft.versionNo}` : t("schedulingAdmin.none") })}</div>
+            <div>{t("schedulingAdmin.draftState", { state: t(hasUnpublishedChanges ? "schedulingAdmin.unpublishedChanges" : "schedulingAdmin.noUnpublishedChanges") })}</div>
             <div>
               <strong>Validation:</strong>{" "}
               {hasBlockingValidationErrors
@@ -131,19 +133,19 @@ export function SchedulingAdminPage() {
               onClick={async () => {
                 try {
                   await createDraft.mutateAsync({ policySetKey: "default" });
-                  pushToast({ type: "success", title: "Draft Created", message: "New working draft created from published policy." });
+                  pushToast({ type: "success", title: t("schedulingAdmin.draftCreated"), message: t("schedulingAdmin.draftCreatedMessage") });
                 } catch (error) {
                   pushToast({
                     type: "error",
-                    title: "Draft Creation Failed",
-                    message: error instanceof Error ? error.message : "Unknown error",
+                    title: t("schedulingAdmin.draftCreationFailed"),
+                    message: error instanceof Error ? error.message : t("schedulingAdmin.unknownError"),
                   });
                 }
               }}
               disabled={createDraft.isPending || Boolean(status.data?.draft)}
               style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #e2e8f0" }}
             >
-              Create Draft
+              {t("schedulingAdmin.createDraft")}
             </button>
 
             <button
@@ -151,11 +153,11 @@ export function SchedulingAdminPage() {
               onClick={() => setShowPublish(true)}
               disabled={Boolean(publishDisabledReason)}
               style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #e2e8f0" }}
-              title={publishDisabledReason ?? "Publish the working draft to make it live"}
+              title={publishDisabledReason ?? t("schedulingAdmin.publishDraftTitle")}
             >
-              Publish Draft
+              {t("schedulingAdmin.publishDraft")}
             </button>
-            <span style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>Save draft in Working Draft section.</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>{t("schedulingAdmin.saveDraftHint")}</span>
           </div>
           {publishDisabledReason && (
             <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>{publishDisabledReason}</div>
@@ -165,7 +167,7 @@ export function SchedulingAdminPage() {
         <PolicyStatusPanel status={status.data} />
       </SectionCard>
 
-      <section aria-label="Live Policy" style={{ display: "grid", gap: 12 }}>
+      <section aria-label={t("schedulingAdmin.livePolicy")} style={{ display: "grid", gap: 12 }}>
         {status.data?.publishedSnapshot ? (
           <LivePolicyPanel
             snapshot={status.data.publishedSnapshot}
@@ -185,13 +187,13 @@ export function SchedulingAdminPage() {
               color: "var(--text-muted, #64748b)",
             }}
           >
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>Live Policy</h2>
-            No live policy published yet.
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>{t("schedulingAdmin.livePolicy")}</h2>
+            {t("schedulingAdmin.noLivePolicy")}
           </div>
         )}
       </section>
 
-      <SectionCard title="Working Draft">
+      <SectionCard title={t("schedulingAdmin.workingDraft")}>
         <PolicyValidationSummary result={validation} />
         <PolicyDraftEditor
           snapshot={draftSnapshot}
@@ -200,7 +202,7 @@ export function SchedulingAdminPage() {
           isSaving={saveDraft.isPending}
           onSave={async (nextSnapshot, changeNote) => {
             if (!draftVersionId) {
-              pushToast({ type: "error", title: "No Draft", message: "Create a draft first." });
+              pushToast({ type: "error", title: t("schedulingAdmin.noDraft"), message: t("schedulingAdmin.createDraftFirst") });
               return;
             }
             await saveDraft.mutateAsync({ versionId: draftVersionId, policySnapshot: nextSnapshot, changeNote });
@@ -210,14 +212,14 @@ export function SchedulingAdminPage() {
             ]);
             pushToast({
               type: "success",
-              title: "Draft Saved",
-              message: "Working draft snapshot saved successfully. This is your working copy — use 'Publish Draft' to make it live.",
+              title: t("schedulingAdmin.draftSaved"),
+              message: t("schedulingAdmin.draftSavedMessage"),
             });
           }}
         />
       </SectionCard>
 
-      <SectionCard title="Preview / Diff">
+      <SectionCard title={t("schedulingAdmin.previewDiff")}>
         <div style={{ display: "grid", gap: 12 }}>
           <div
             style={{
@@ -230,22 +232,22 @@ export function SchedulingAdminPage() {
               gap: 6,
             }}
           >
-            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Before publishing</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{t("schedulingAdmin.beforePublishing")}</h2>
             <div>
-              <strong>Validation:</strong>{" "}
+              <strong>{t("schedulingAdmin.validation")}:</strong>{" "}
               {hasBlockingValidationErrors
-                ? `${validation.errors.length} blocking error${validation.errors.length === 1 ? "" : "s"}`
+                ? t(validation.errors.length === 1 ? "schedulingAdmin.blockingErrorOne" : "schedulingAdmin.blockingErrorsMany", { count: validation.errors.length })
                 : hasValidationWarnings
-                ? `${validation.warnings.length} warning${validation.warnings.length === 1 ? "" : "s"}`
-                : "valid"}
+                ? t(validation.warnings.length === 1 ? "schedulingAdmin.warningOne" : "schedulingAdmin.warningsMany", { count: validation.warnings.length })
+                : t("schedulingAdmin.valid")}
             </div>
             <div>
-              <strong>Preview:</strong>{" "}
+              <strong>{t("schedulingAdmin.preview")}:</strong>{" "}
               {preview.data
-                ? `${preview.data.addedRulesCount} added, ${preview.data.removedRulesCount} removed, ${preview.data.modifiedRulesCount} modified`
-                : "not loaded"}
+                ? t("schedulingAdmin.previewSummary", { added: preview.data.addedRulesCount, removed: preview.data.removedRulesCount, modified: preview.data.modifiedRulesCount })
+                : t("schedulingAdmin.notLoaded")}
             </div>
-            <div><strong>High-risk warnings:</strong> {riskSummary.highRiskWarnings.length}</div>
+            <div><strong>{t("schedulingAdmin.highRiskWarnings")}:</strong> {riskSummary.highRiskWarnings.length}</div>
             {riskSummary.highRiskWarnings.length > 0 && (
               <ul style={{ margin: 0, paddingInlineStart: 18, color: "var(--color-warning, #92400e)" }}>
                 {riskSummary.highRiskWarnings.slice(0, 3).map((warning, index) => (
@@ -253,13 +255,13 @@ export function SchedulingAdminPage() {
                 ))}
               </ul>
             )}
-            <div style={{ color: "var(--text-muted, #64748b)" }}>Publishing makes this draft the live policy.</div>
+            <div style={{ color: "var(--text-muted, #64748b)" }}>{t("schedulingAdmin.publishMakesLive")}</div>
           </div>
           <PolicyPreviewPanel preview={preview.data} isLoading={preview.isLoading} riskSummary={riskSummary} />
         </div>
       </SectionCard>
 
-      <SectionCard title="Advanced">
+      <SectionCard title={t("schedulingAdmin.advanced")}>
         <div
           style={{
             padding: 12,
@@ -270,7 +272,7 @@ export function SchedulingAdminPage() {
             color: "var(--text-muted, #64748b)",
           }}
         >
-          Raw JSON remains collapsed in the Working Draft editor and is intended for debug use only.
+          {t("schedulingAdmin.rawJsonDebug")}
         </div>
       </SectionCard>
 
@@ -280,11 +282,11 @@ export function SchedulingAdminPage() {
         isPublishing={publishDraft.isPending}
         onPublish={async (changeNote) => {
           if (!draftVersionId) {
-            pushToast({ type: "error", title: "No Draft", message: "Create a draft first." });
+            pushToast({ type: "error", title: t("schedulingAdmin.noDraft"), message: t("schedulingAdmin.createDraftFirst") });
             return;
           }
           await publishDraft.mutateAsync({ versionId: draftVersionId, changeNote });
-          pushToast({ type: "success", title: "Draft Published", message: "Policy published successfully." });
+          pushToast({ type: "success", title: t("schedulingAdmin.draftPublished"), message: t("schedulingAdmin.policyPublished") });
           setShowPublish(false);
         }}
       />
