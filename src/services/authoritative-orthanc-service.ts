@@ -176,7 +176,7 @@ export class AuthoritativeOrthancClient {
       request.end();
     });
   }
-  private async request(path: string, init: RequestInit = {}, options: { allowDisabled?: boolean; acceptableStatuses?: number[] } = {}): Promise<unknown> {
+  private async request(path: string, init: RequestInit = {}, options: { allowDisabled?: boolean; acceptableStatuses?: number[]; responseType?: "json" | "text" } = {}): Promise<unknown> {
     if (!this.settings.enabled && !options.allowDisabled) throw new HttpError(503, "Authoritative Orthanc is disabled.", { code: "orthanc_disabled" });
     if (!this.settings.baseUrl) throw new HttpError(503, "Authoritative Orthanc base URL is not configured.");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), this.settings.timeoutSeconds * 1000);
@@ -191,6 +191,7 @@ export class AuthoritativeOrthancClient {
       if (!response.ok) throw new HttpError(502, `Authoritative Orthanc request failed (status=${response.status}).`);
       const body = await response.text();
       if (!body) return null;
+      if (options.responseType === "text") return body;
       try { return JSON.parse(body) as unknown; } catch { throw new HttpError(502, "Authoritative Orthanc returned an invalid JSON response.", { code: "orthanc_invalid_response" }); }
     } catch (error) { if ((error as Error).name === "AbortError") throw new HttpError(502, "Authoritative Orthanc request timed out.", { code: "orthanc_timeout" }); if (error instanceof HttpError) throw error; if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|ENOTFOUND/i.test(String(error))) throw new HttpError(502, "Authoritative Orthanc is unavailable.", { code: "orthanc_unavailable" }); throw error; } finally { clearTimeout(timeout); }
   }
@@ -237,6 +238,18 @@ export class AuthoritativeOrthancClient {
     if (!Number.isSafeInteger(lastSequence) || lastSequence < 0) throw new HttpError(502, "Authoritative Orthanc returned an invalid changes cursor.", { code: "orthanc_invalid_response" });
     return { changes, lastSequence, done: payload.Done === true };
   }
+  async getLastChangeSequenceFromMetrics(): Promise<number | null> {
+    try {
+      const metrics = await this.request("/tools/metrics-prometheus", {}, { acceptableStatuses: [404], responseType: "text" });
+      if (typeof metrics !== "string") return null;
+      const match = metrics.match(/^orthanc_last_change(?:\{[^}]*\})?\s+(\d+(?:\.\d+)?)(?:\s|$)/m);
+      if (!match) return null;
+      const sequence = Number(match[1]);
+      return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : null;
+    } catch {
+      return null;
+    }
+  }
   async listRemoteModalityKeys(): Promise<string[]> { const payload = await this.request("/modalities", {}, { allowDisabled: true }); return Array.isArray(payload) ? payload.map(text).filter(Boolean) : Object.keys(record(payload)); }
   async upsertRemoteModality(key: string, modality: { aet: string; host: string; port: number }): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ AET: modality.aet, Host: modality.host, Port: modality.port }) }); }
   async deleteRemoteModality(key: string): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "DELETE" }, { allowDisabled: true, acceptableStatuses: [404] }); }
@@ -278,17 +291,22 @@ export class AuthoritativeOrthancClient {
     return studyDetails(detail, orthancStudyId);
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); return studyDetails(detail, orthancStudyId, statistics); }
-  async getStudyForInboundAudit(orthancStudyId: string): Promise<OrthancInboundAuditStudy> {
+  async getStudyForInboundAudit(orthancStudyId: string): Promise<OrthancInboundAuditStudy | null> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID.");
-    const detail = record(await this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`));
-    const seriesIds = (Array.isArray(detail.Series) ? detail.Series : []).map(text).filter(Boolean);
-    const series = await mapBounded(seriesIds, 4, async (seriesId) => record(await this.request(`/series/${encodeURIComponent(seriesId)}`)));
-    const instanceIds = [...new Set(series.flatMap((row) => (Array.isArray(row.Instances) ? row.Instances : []).map(text).filter(Boolean)))];
+    const [detail, instances] = await Promise.all([
+      this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`, {}, { acceptableStatuses: [404] }),
+      this.request(`/studies/${encodeURIComponent(orthancStudyId)}/instances`, {}, { acceptableStatuses: [404] }),
+    ]);
+    if (!detail || !instances) return null;
+    if (!Array.isArray(instances)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study instance list.", { code: "orthanc_invalid_response" });
+    const instanceIds = [...new Set(instances.map(text).filter(Boolean))];
     return { study: studyDetails(detail, orthancStudyId), instanceIds };
   }
-  async getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata> {
+  async getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata | null> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
-    const metadata = record(await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}/metadata?expand`));
+    const response = await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}/metadata?expand`, {}, { acceptableStatuses: [404] });
+    if (!response) return null;
+    const metadata = record(response);
     return {
       orthancInstanceId,
       origin: first(metadata.Origin, metadata.origin),

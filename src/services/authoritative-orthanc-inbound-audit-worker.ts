@@ -13,13 +13,16 @@ const INBOUND_AUDIT_LOCK_KEY = 712364093;
 const DEFAULT_INBOUND_AUDIT_INTERVAL_MS = 60_000;
 const CHANGE_BATCH_SIZE = 200;
 const METADATA_CONCURRENCY = 4;
+const PENDING_INSTANCE_RETENTION_DAYS = 7;
 
 type Queryable = Pick<PoolClient, "query"> | typeof pool;
+type PendingInstance = { change_sequence: string; orthanc_instance_id: string };
 
 export interface AuthoritativeOrthancInboundAuditClient {
   getChanges(since: number, limit?: number): Promise<OrthancChangesPage>;
-  getStudyForInboundAudit(orthancStudyId: string): Promise<OrthancInboundAuditStudy>;
-  getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata>;
+  getLastChangeSequenceFromMetrics?(): Promise<number | null>;
+  getStudyForInboundAudit(orthancStudyId: string): Promise<OrthancInboundAuditStudy | null>;
+  getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata | null>;
 }
 
 export interface AuthoritativeOrthancInboundAuditWorker { stop(): Promise<void>; }
@@ -38,6 +41,19 @@ function orthancTimestamp(value: string | null, fallback: string): string {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
 }
 
+function optionalOrthancTimestamp(value: string | null): string | null {
+  if (!value) return null;
+  const compact = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+  const parsed = compact
+    ? Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3]), Number(compact[4]), Number(compact[5]), Number(compact[6]))
+    : Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function warning(type: string, values: Record<string, unknown>): void {
+  console.warn(JSON.stringify({ type, worker: `${os.hostname()}:${process.pid}`, ...values }));
+}
+
 async function mapBounded<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(values.length);
   let next = 0;
@@ -52,6 +68,8 @@ async function mapBounded<T, R>(values: T[], concurrency: number, operation: (va
 }
 
 async function readChangesTail(client: AuthoritativeOrthancInboundAuditClient): Promise<number> {
+  const metricTail = await client.getLastChangeSequenceFromMetrics?.();
+  if (metricTail != null) return metricTail;
   let cursor = 0;
   for (;;) {
     const page = await client.getChanges(cursor, 1000);
@@ -79,21 +97,69 @@ function receptionGroups(instances: OrthancInstanceReceptionMetadata[], complete
   return [...groups.values()];
 }
 
-async function recordStableStudy(change: OrthancChangesPage["changes"][number], client: AuthoritativeOrthancInboundAuditClient): Promise<number> {
+async function persistPendingInstance(change: OrthancChangesPage["changes"][number], db: Queryable): Promise<void> {
+  if (!change.resourceId) return;
+  await db.query(
+    `insert into authoritative_orthanc_inbound_pending_instances(change_sequence,orthanc_instance_id,change_date)
+     values($1,$2,$3)
+     on conflict(change_sequence) do nothing`,
+    [change.sequence, change.resourceId, optionalOrthancTimestamp(change.date ?? null)],
+  );
+}
+
+async function pendingStudyInstances(studyInstanceIds: string[], stableSequence: number, db: Queryable): Promise<PendingInstance[]> {
+  if (!studyInstanceIds.length) return [];
+  const result = await db.query<PendingInstance>(
+    `select change_sequence::text,orthanc_instance_id
+       from authoritative_orthanc_inbound_pending_instances
+      where orthanc_instance_id = any($1::text[])
+        and change_sequence <= $2
+      order by change_sequence`,
+    [studyInstanceIds, stableSequence],
+  );
+  return result.rows;
+}
+
+async function consumePendingInstances(instances: PendingInstance[], db: Queryable): Promise<void> {
+  if (!instances.length) return;
+  await db.query(
+    "delete from authoritative_orthanc_inbound_pending_instances where change_sequence = any($1::bigint[])",
+    [instances.map((instance) => Number(instance.change_sequence))],
+  );
+}
+
+async function cleanupStalePendingInstances(db: Queryable): Promise<void> {
+  await db.query(
+    "delete from authoritative_orthanc_inbound_pending_instances where created_at < now() - ($1::text || ' days')::interval",
+    [String(PENDING_INSTANCE_RETENTION_DAYS)],
+  );
+}
+
+async function recordStableStudy(change: OrthancChangesPage["changes"][number], client: AuthoritativeOrthancInboundAuditClient, db: Queryable): Promise<number> {
   if (!change.resourceId) return 0;
   const observedAt = new Date().toISOString();
   const completedAt = orthancTimestamp(change.date ?? null, observedAt);
-  const { study, instanceIds } = await client.getStudyForInboundAudit(change.resourceId);
-  const instances = await mapBounded(instanceIds, METADATA_CONCURRENCY, (instanceId) => client.getInstanceReceptionMetadata(instanceId));
+  const inboundStudy = await client.getStudyForInboundAudit(change.resourceId);
+  if (!inboundStudy) {
+    warning("authoritative_orthanc_inbound_audit_study_missing", { changeSequence: change.sequence, orthancStudyId: change.resourceId });
+    return 0;
+  }
+  const pending = await pendingStudyInstances(inboundStudy.instanceIds, change.sequence, db);
+  if (!pending.length) return 0;
+  const metadata = await mapBounded(pending, METADATA_CONCURRENCY, async (instance) => {
+    const received = await client.getInstanceReceptionMetadata(instance.orthanc_instance_id);
+    if (!received) warning("authoritative_orthanc_inbound_audit_instance_missing", { changeSequence: change.sequence, orthancStudyId: change.resourceId, orthancInstanceId: instance.orthanc_instance_id });
+    return received;
+  });
   let recorded = 0;
-  for (const group of receptionGroups(instances, completedAt)) {
+  for (const group of receptionGroups(metadata.filter((instance): instance is OrthancInstanceReceptionMetadata => instance !== null), completedAt)) {
     const receptionDates = group.receptionDates.sort();
-    await recordInboundDicomReception({
-      patientId: study.patientId,
-      patientName: study.patientName,
-      accessionNumber: study.accessionNumber,
-      studyInstanceUid: study.studyInstanceUid,
-      studyDescription: study.studyDescription,
+    const result = await recordInboundDicomReception({
+      patientId: inboundStudy.study.patientId,
+      patientName: inboundStudy.study.patientName,
+      accessionNumber: inboundStudy.study.accessionNumber,
+      studyInstanceUid: inboundStudy.study.studyInstanceUid,
+      studyDescription: inboundStudy.study.studyDescription,
       sourceAet: group.remoteAet,
       sourceIp: group.remoteIp,
       destinationAet: group.calledAet,
@@ -104,8 +170,9 @@ async function recordStableStudy(change: OrthancChangesPage["changes"][number], 
       orthancChangeSequence: change.sequence,
       orthancResourceId: change.resourceId,
     });
-    recorded += 1;
+    if (!result.deduplicated) recorded += 1;
   }
+  await consumePendingInstances(pending, db);
   return recorded;
 }
 
@@ -132,6 +199,7 @@ export async function runAuthoritativeOrthancInboundAuditCycle(
     const lock = await db.query<{ acquired: boolean }>("select pg_try_advisory_lock($1) acquired", [INBOUND_AUDIT_LOCK_KEY]);
     if (!lock.rows[0]?.acquired) return { lockAcquired: false, mode: "processed", recorded: 0, lastSequence: null };
     try {
+      await cleanupStalePendingInstances(db);
       const client = await clientFactory();
       let cursor = await ensureState(db);
       if (cursor == null) {
@@ -145,14 +213,17 @@ export async function runAuthoritativeOrthancInboundAuditCycle(
         const page = await client.getChanges(processedCursor, CHANGE_BATCH_SIZE);
         if (page.lastSequence < processedCursor) {
           const baseline = await readChangesTail(client);
-          const warning = `Authoritative Orthanc changes sequence moved backwards from ${processedCursor} to ${page.lastSequence}; inbound audit cursor rebaselined at ${baseline}.`;
-          console.warn(JSON.stringify({ type: "authoritative_orthanc_inbound_audit_rebaselined", worker: `${os.hostname()}:${process.pid}`, previousSequence: processedCursor, observedSequence: page.lastSequence, baseline }));
-          await updateState(db, baseline, warning);
+          const message = `Authoritative Orthanc changes sequence moved backwards from ${processedCursor} to ${page.lastSequence}; inbound audit cursor rebaselined at ${baseline}.`;
+          warning("authoritative_orthanc_inbound_audit_rebaselined", { previousSequence: processedCursor, observedSequence: page.lastSequence, baseline });
+          await updateState(db, baseline, message);
           return { lockAcquired: true, mode: "rebaselined", recorded: 0, lastSequence: baseline };
         }
         if (!page.done && page.lastSequence <= processedCursor) throw new Error("Authoritative Orthanc changes cursor did not advance.");
         const changes = page.changes.filter((change) => change.sequence > processedCursor).sort((a, b) => a.sequence - b.sequence);
-        for (const change of changes) if (change.changeType === "StableStudy") recorded += await recordStableStudy(change, client);
+        for (const change of changes) {
+          if (change.changeType === "NewInstance") await persistPendingInstance(change, db);
+          if (change.changeType === "StableStudy") recorded += await recordStableStudy(change, client, db);
+        }
         processedCursor = page.lastSequence;
         await updateState(db, processedCursor, null);
         if (page.done) return { lockAcquired: true, mode: "processed", recorded, lastSequence: processedCursor };
@@ -184,8 +255,8 @@ export async function startAuthoritativeOrthancInboundAuditWorker(options: { int
       console.info(JSON.stringify({ type: "authoritative_orthanc_inbound_audit_tick", worker: `${os.hostname()}:${process.pid}`, ...result }));
     } finally { workerRunning = false; }
   };
-  void tick().catch((error) => console.warn(JSON.stringify({ type: "authoritative_orthanc_inbound_audit_tick_failed", error: error instanceof Error ? error.message : String(error) })));
-  workerInterval = setInterval(() => { void tick().catch((error) => console.warn(JSON.stringify({ type: "authoritative_orthanc_inbound_audit_tick_failed", error: error instanceof Error ? error.message : String(error) }))); }, intervalMs);
+  void tick().catch((error) => warning("authoritative_orthanc_inbound_audit_tick_failed", { error: error instanceof Error ? error.message : String(error) }));
+  workerInterval = setInterval(() => { void tick().catch((error) => warning("authoritative_orthanc_inbound_audit_tick_failed", { error: error instanceof Error ? error.message : String(error) })); }, intervalMs);
   workerInterval.unref();
   return { async stop() { workerStopped = true; if (workerInterval) { clearInterval(workerInterval); workerInterval = null; } while (workerRunning) await new Promise((resolve) => setTimeout(resolve, 50)); } };
 }

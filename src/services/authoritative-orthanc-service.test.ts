@@ -400,18 +400,35 @@ test("loads child instance IDs and expanded origin metadata for inbound audit", 
   service.__setAuthoritativeOrthancFetchForTests(async (url) => {
     const parsed = new URL(String(url));
     calls.push(`${parsed.pathname}${parsed.search}`);
-    if (parsed.pathname === "/studies/study-a") return json({ ...study(), Series: ["series-a", "series-b"] });
-    if (parsed.pathname === "/series/series-a") return json({ Instances: ["instance-a", "instance-b"] });
-    if (parsed.pathname === "/series/series-b") return json({ Instances: ["instance-b", "instance-c"] });
+    if (parsed.pathname === "/studies/study-a") return json(study());
+    if (parsed.pathname === "/studies/study-a/instances") return json(["instance-a", "instance-b", "instance-b", "instance-c"]);
     if (parsed.pathname === "/instances/instance-a/metadata") return json({ Origin: "DicomProtocol", RemoteAET: "CT_AE", RemoteIP: "10.0.0.10", CalledAET: "ORTHANCPG", ReceptionDate: "20260830T100000" });
     throw new Error(`Unexpected ${parsed.pathname}`);
   });
   const client = new service.AuthoritativeOrthancClient(enabled);
   const inbound = await client.getStudyForInboundAudit("study-a");
+  assert.ok(inbound);
   assert.deepEqual(inbound.instanceIds, ["instance-a", "instance-b", "instance-c"]);
   assert.equal(inbound.study.studyInstanceUid, "1.2.3");
   assert.deepEqual(await client.getInstanceReceptionMetadata("instance-a"), { orthancInstanceId: "instance-a", origin: "DicomProtocol", remoteAet: "CT_AE", remoteIp: "10.0.0.10", calledAet: "ORTHANCPG", receptionDate: "20260830T100000" });
   assert.ok(calls.includes("/instances/instance-a/metadata?expand"));
+  assert.ok(calls.includes("/studies/study-a/instances"));
+  assert.equal(calls.some((call) => call.startsWith("/series/")), false);
+});
+
+test("uses Orthanc metrics for the current change tail and safely tolerates unavailable audit resources", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/tools/metrics-prometheus") return new Response("# HELP orthanc_last_change Last change\northanc_last_change 1234\n");
+    if (path === "/studies/missing") return json({}, 404);
+    if (path === "/studies/missing/instances") return json({}, 404);
+    if (path === "/instances/missing/metadata") return json({}, 404);
+    throw new Error(`Unexpected ${path}`);
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  assert.equal(await client.getLastChangeSequenceFromMetrics(), 1234);
+  assert.equal(await client.getStudyForInboundAudit("missing"), null);
+  assert.equal(await client.getInstanceReceptionMetadata("missing"), null);
 });
 
 test("paginates expanded study inventory without per-study detail requests for normal studies", async () => {
