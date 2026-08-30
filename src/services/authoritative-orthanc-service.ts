@@ -18,8 +18,10 @@ export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinica
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyTime?: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
-export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null };
+export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null; date?: string | null };
 export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: number; done: boolean };
+export type OrthancInstanceReceptionMetadata = { orthancInstanceId: string; origin: string | null; remoteAet: string | null; remoteIp: string | null; calledAet: string | null; receptionDate: string | null };
+export type OrthancInboundAuditStudy = { study: OrthancStudyDetails; instanceIds: string[] };
 export type OrthancStudiesIndexPage = { studies: OrthancStudyDetails[]; resourceCount: number };
 export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
@@ -52,6 +54,19 @@ function first(...values: unknown[]): string | null { for (const value of values
 function tags(payload: unknown) { const row = record(payload); return { ...row, ...record(row.MainDicomTags), ...record(row.PatientMainDicomTags), ...record(row.Tags), ...record(row.NormalizedTags) }; }
 function count(value: unknown) { const parsed = Number(first(value) ?? 0); return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0; }
 function optionalNonNegativeNumber(value: unknown): number | null { const raw = first(value); if (raw == null) return null; const parsed = Number(raw); return Number.isFinite(parsed) && parsed >= 0 ? parsed : null; }
+async function mapBounded<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(values.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= values.length) return;
+      results[index] = await operation(values[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 function studyDetails(payload: unknown, orthancStudyId: string, statistics: unknown = {}): OrthancStudyDetails {
   const detailRow = record(payload);
   const row = { ...detailRow, ...record(statistics) };
@@ -216,6 +231,7 @@ export class AuthoritativeOrthancClient {
       changeType: text(change.ChangeType),
       resourceType: first(change.ResourceType),
       resourceId: first(change.ID),
+      date: first(change.Date),
     })).filter((change) => Number.isSafeInteger(change.sequence) && change.sequence >= 0);
     const lastSequence = Number(payload.Last);
     if (!Number.isSafeInteger(lastSequence) || lastSequence < 0) throw new HttpError(502, "Authoritative Orthanc returned an invalid changes cursor.", { code: "orthanc_invalid_response" });
@@ -262,6 +278,26 @@ export class AuthoritativeOrthancClient {
     return studyDetails(detail, orthancStudyId);
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); return studyDetails(detail, orthancStudyId, statistics); }
+  async getStudyForInboundAudit(orthancStudyId: string): Promise<OrthancInboundAuditStudy> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID.");
+    const detail = record(await this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`));
+    const seriesIds = (Array.isArray(detail.Series) ? detail.Series : []).map(text).filter(Boolean);
+    const series = await mapBounded(seriesIds, 4, async (seriesId) => record(await this.request(`/series/${encodeURIComponent(seriesId)}`)));
+    const instanceIds = [...new Set(series.flatMap((row) => (Array.isArray(row.Instances) ? row.Instances : []).map(text).filter(Boolean)))];
+    return { study: studyDetails(detail, orthancStudyId), instanceIds };
+  }
+  async getInstanceReceptionMetadata(orthancInstanceId: string): Promise<OrthancInstanceReceptionMetadata> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
+    const metadata = record(await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}/metadata?expand`));
+    return {
+      orthancInstanceId,
+      origin: first(metadata.Origin, metadata.origin),
+      remoteAet: first(metadata.RemoteAET, metadata.RemoteAet, metadata.remoteAet),
+      remoteIp: first(metadata.RemoteIP, metadata.RemoteIp, metadata.remoteIp),
+      calledAet: first(metadata.CalledAET, metadata.CalledAet, metadata.calledAet),
+      receptionDate: first(metadata.ReceptionDate, metadata.receptionDate),
+    };
+  }
   async getStudyForPatientIdentityReconciliation(query: OrthancStudyQuery): Promise<OrthancPatientIdentitySnapshot> {
     const found = await this.findStudy(query);
     if (found.status !== "matched" || !found.study) throw new HttpError(found.status === "ambiguous" ? 409 : 404, found.status === "ambiguous" ? "Authoritative Orthanc study match is ambiguous." : "Authoritative Orthanc study was not found.", { code: found.status === "ambiguous" ? "PATIENT_IDENTITY_RECONCILIATION_AMBIGUOUS_STUDY" : "PATIENT_IDENTITY_RECONCILIATION_STUDY_NOT_FOUND" });

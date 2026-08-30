@@ -24,6 +24,8 @@ export type DicomTransferEvent = {
   error_code: string | null;
   error_message: string | null;
   orthanc_job_id: string | null;
+  orthanc_change_sequence: number | null;
+  orthanc_resource_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,10 +38,13 @@ export type RecordInboundDicomReceptionInput = {
   studyDescription?: unknown;
   sourceAet?: unknown;
   sourceIp?: unknown;
+  destinationAet?: unknown;
   instanceCount?: unknown;
   firstSeenAt?: unknown;
   lastSeenAt?: unknown;
   completedAt?: unknown;
+  orthancChangeSequence?: unknown;
+  orthancResourceId?: unknown;
 };
 
 export type RecordInboundDicomReceptionResult = {
@@ -82,13 +87,28 @@ function inboundIdempotencyKey(input: {
   studyDescription: string | null;
   sourceAet: string | null;
   sourceIp: string | null;
+  destinationAet: string | null;
   instanceCount: number | null;
   completedAt: string | null;
+  orthancChangeSequence: number | null;
+  orthancResourceId: string | null;
 }): string | null {
+  if (input.orthancChangeSequence != null) {
+    return createHash("sha256")
+      .update(["RECEIVED", "orthanc-change", input.orthancChangeSequence, input.sourceAet, input.sourceIp, input.destinationAet].map((value) => value ?? "").join("\u0000"))
+      .digest("hex");
+  }
   if (!input.completedAt) return null;
   return createHash("sha256")
     .update(["RECEIVED", input.patientId, input.patientName, input.accessionNumber, input.studyInstanceUid, input.studyDescription, input.sourceAet, input.sourceIp, input.instanceCount, input.completedAt].map((value) => value ?? "").join("\u0000"))
     .digest("hex");
+}
+
+function optionalChangeSequence(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new HttpError(400, "orthancChangeSequence must be a non-negative whole number.");
+  return parsed;
 }
 
 export async function recordInboundDicomReception(input: RecordInboundDicomReceptionInput): Promise<RecordInboundDicomReceptionResult> {
@@ -103,18 +123,22 @@ export async function recordInboundDicomReception(input: RecordInboundDicomRecep
   const firstSeenAt = optionalTimestamp(input.firstSeenAt, "firstSeenAt") ?? new Date().toISOString();
   const lastSeenAt = optionalTimestamp(input.lastSeenAt, "lastSeenAt") ?? firstSeenAt;
   const completedAt = optionalTimestamp(input.completedAt, "completedAt") ?? lastSeenAt;
-  const idempotencyKey = inboundIdempotencyKey({ patientId, patientName, accessionNumber, studyInstanceUid, studyDescription, sourceAet, sourceIp, instanceCount, completedAt: input.completedAt == null || input.completedAt === "" ? null : completedAt });
-  const values = [patientId, patientName, accessionNumber, studyInstanceUid, studyDescription, sourceAet, sourceIp, instanceCount, firstSeenAt, lastSeenAt, completedAt, idempotencyKey];
+  const orthancChangeSequence = optionalChangeSequence(input.orthancChangeSequence);
+  const orthancResourceId = optionalText(input.orthancResourceId, "orthancResourceId", 256);
+  const destinationAet = optionalText(input.destinationAet, "destinationAet")?.toUpperCase() ?? AUTHORITATIVE_ORTHANC_AET;
+  const idempotencyKey = inboundIdempotencyKey({ patientId, patientName, accessionNumber, studyInstanceUid, studyDescription, sourceAet, sourceIp, destinationAet, instanceCount, completedAt: input.completedAt == null || input.completedAt === "" ? null : completedAt, orthancChangeSequence, orthancResourceId });
+  const values = [patientId, patientName, accessionNumber, studyInstanceUid, studyDescription, sourceAet, sourceIp, destinationAet, instanceCount, firstSeenAt, lastSeenAt, completedAt, orthancChangeSequence, orthancResourceId, idempotencyKey];
   const inserted = await pool.query<DicomTransferEvent>(`
     insert into dicom_transfer_events (
       direction,status,patient_id,patient_name,accession_number,study_instance_uid,study_description,
-      source_aet,source_ip,destination_aet,instance_count,first_seen_at,last_seen_at,completed_at,idempotency_key
+      source_aet,source_ip,destination_aet,instance_count,first_seen_at,last_seen_at,completed_at,
+      orthanc_change_sequence,orthanc_resource_id,idempotency_key
     ) values (
-      'RECEIVED','SUCCESS',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      'RECEIVED','SUCCESS',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
     )
     on conflict (idempotency_key) where idempotency_key is not null do nothing
     returning *
-  `, [...values.slice(0, 7), AUTHORITATIVE_ORTHANC_AET, ...values.slice(7)]);
+  `, values);
   if (inserted.rows[0]) return { event: inserted.rows[0], deduplicated: false };
 
   const existing = await pool.query<DicomTransferEvent>("select * from dicom_transfer_events where idempotency_key=$1", [idempotencyKey]);

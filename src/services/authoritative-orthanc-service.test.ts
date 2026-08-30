@@ -373,7 +373,7 @@ test("reads study inventory, index metadata, and change pages without Orthanc wr
     calls.push({ path: parsed.pathname, search: parsed.search, method: init?.method || "GET" });
     if (parsed.pathname === "/studies") return json(parsed.searchParams.has("expand") ? [{ ID: "study-1", ...study(), Series: ["series-1", "series-2"], PatientMainDicomTags: { PatientID: "OLD-1", PatientName: "ALSIFI^SERAJ^ALI", PatientBirthDate: "19800102", PatientSex: "M" }, RequestedTags: { ModalitiesInStudy: "CT\\SR", NumberOfStudyRelatedInstances: "9" } }] : ["study-1"]);
     if (parsed.pathname === "/studies/study-1") return json({ ...study(), Series: ["series-1", "series-2"], PatientMainDicomTags: { PatientID: "OLD-1", PatientName: "ALSIFI^SERAJ^ALI", PatientBirthDate: "19800102", PatientSex: "M" }, RequestedTags: { ModalitiesInStudy: "CT\\SR" } });
-    if (parsed.pathname === "/changes") return json({ Changes: [{ Seq: 12, ChangeType: "StableStudy", ResourceType: "Study", ID: "study-1" }], Last: 12, Done: true });
+    if (parsed.pathname === "/changes") return json({ Changes: [{ Seq: 12, ChangeType: "StableStudy", ResourceType: "Study", ID: "study-1", Date: "20260830T100200" }], Last: 12, Done: true });
     throw new Error(`Unexpected ${parsed.pathname}`);
   });
   const client = new service.AuthoritativeOrthancClient(enabled);
@@ -386,13 +386,32 @@ test("reads study inventory, index metadata, and change pages without Orthanc wr
   assert.equal(indexed?.patientName, "ALSIFI^SERAJ^ALI");
   assert.deepEqual(indexed?.modalitiesInStudy, ["CT", "SR"]);
   assert.equal(indexed?.seriesCount, 2);
-  assert.deepEqual(await client.getChanges(10, 100), { changes: [{ sequence: 12, changeType: "StableStudy", resourceType: "Study", resourceId: "study-1" }], lastSequence: 12, done: true });
+  assert.deepEqual(await client.getChanges(10, 100), { changes: [{ sequence: 12, changeType: "StableStudy", resourceType: "Study", resourceId: "study-1", date: "20260830T100200" }], lastSequence: 12, done: true });
   assert.ok(calls.every((call) => call.method === "GET"));
   assert.equal(calls.find((call) => call.path === "/changes")?.search, "?since=10&limit=100");
   const expanded = calls.find((call) => call.path === "/studies" && call.search.includes("expand"));
   assert.ok(expanded?.search.includes("since=0"));
   assert.ok(expanded?.search.includes("limit=1000"));
   assert.ok(expanded?.search.includes("requestedTags="));
+});
+
+test("loads child instance IDs and expanded origin metadata for inbound audit", async () => {
+  const calls: string[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const parsed = new URL(String(url));
+    calls.push(`${parsed.pathname}${parsed.search}`);
+    if (parsed.pathname === "/studies/study-a") return json({ ...study(), Series: ["series-a", "series-b"] });
+    if (parsed.pathname === "/series/series-a") return json({ Instances: ["instance-a", "instance-b"] });
+    if (parsed.pathname === "/series/series-b") return json({ Instances: ["instance-b", "instance-c"] });
+    if (parsed.pathname === "/instances/instance-a/metadata") return json({ Origin: "DicomProtocol", RemoteAET: "CT_AE", RemoteIP: "10.0.0.10", CalledAET: "ORTHANCPG", ReceptionDate: "20260830T100000" });
+    throw new Error(`Unexpected ${parsed.pathname}`);
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  const inbound = await client.getStudyForInboundAudit("study-a");
+  assert.deepEqual(inbound.instanceIds, ["instance-a", "instance-b", "instance-c"]);
+  assert.equal(inbound.study.studyInstanceUid, "1.2.3");
+  assert.deepEqual(await client.getInstanceReceptionMetadata("instance-a"), { orthancInstanceId: "instance-a", origin: "DicomProtocol", remoteAet: "CT_AE", remoteIp: "10.0.0.10", calledAet: "ORTHANCPG", receptionDate: "20260830T100000" });
+  assert.ok(calls.includes("/instances/instance-a/metadata?expand"));
 });
 
 test("paginates expanded study inventory without per-study detail requests for normal studies", async () => {

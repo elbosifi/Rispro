@@ -18,6 +18,7 @@ import type { RequestScanWorker } from "./services/request-scan-worker.js";
 import type { ClinicalDocumentExportWorker } from "./services/clinical-document-export-service.js";
 import type { HistoricalPacsSyncWorker } from "./services/historical-pacs-index-service.js";
 import type { PatientIdentityReconciliationWorker } from "./services/patient-identity-reconciliation-worker.js";
+import type { AuthoritativeOrthancInboundAuditWorker } from "./services/authoritative-orthanc-inbound-audit-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -38,6 +39,7 @@ let requestScanWorker: RequestScanWorker | null = null;
 let clinicalDocumentExportWorker: ClinicalDocumentExportWorker | null = null;
 let historicalPacsSyncWorker: HistoricalPacsSyncWorker | null = null;
 let patientIdentityReconciliationWorker: PatientIdentityReconciliationWorker | null = null;
+let authoritativeOrthancInboundAuditWorker: AuthoritativeOrthancInboundAuditWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -142,6 +144,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   if (clinicalDocumentExportWorker) { try { await clinicalDocumentExportWorker.stop(); } catch (error) { console.error("Failed to stop Clinical Document Export worker.", error); } }
   if (historicalPacsSyncWorker) { try { await historicalPacsSyncWorker.stop(); } catch (error) { console.error("Failed to stop historical PACS index worker.", error); } }
   if (patientIdentityReconciliationWorker) { try { await patientIdentityReconciliationWorker.stop(); } catch (error) { console.error("Failed to stop Patient Identity Reconciliation worker.", error); } }
+  if (authoritativeOrthancInboundAuditWorker) { try { await authoritativeOrthancInboundAuditWorker.stop(); } catch (error) { console.error("Failed to stop Authoritative Orthanc inbound audit worker.", error); } }
 
   server.close(async (serverError?: Error) => {
     try {
@@ -390,6 +393,18 @@ async function start(): Promise<void> {
     console.error("Historical PACS index worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.historical_pacs_index = "initialization_failed";
+  }
+
+  try {
+    await measureStartupStage("authoritative_orthanc_inbound_audit_worker", async () => {
+      const { startAuthoritativeOrthancInboundAuditWorker } = await import("./services/authoritative-orthanc-inbound-audit-worker.js");
+      authoritativeOrthancInboundAuditWorker = await startAuthoritativeOrthancInboundAuditWorker();
+    });
+    startupSummary.authoritative_orthanc_inbound_audit = "started";
+  } catch (error) {
+    console.error("Authoritative Orthanc inbound audit worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.authoritative_orthanc_inbound_audit = "initialization_failed";
   }
 
   if (process.env.RISPRO_E2E === "1") {
