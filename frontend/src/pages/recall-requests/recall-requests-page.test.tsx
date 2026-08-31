@@ -6,10 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import RecallRequestsPage from "./recall-requests-page";
 
-const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn() }));
+const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockMarkSeen } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockMarkSeen: vi.fn() }));
 
 vi.mock("@/lib/api/complementary-recalls", () => ({
   fetchComplementaryRecalls: mockFetchRecalls,
+  acknowledgeComplementaryRecall: mockAcknowledge,
   withdrawComplementaryRecall: vi.fn(),
 }));
 vi.mock("@/lib/api/doctor-portal-reporting", () => ({
@@ -17,7 +18,7 @@ vi.mock("@/lib/api/doctor-portal-reporting", () => ({
   updateDoctorComplementaryRecallInstructions: mockUpdateRecall,
   withdrawComplementaryRecallRequest: vi.fn(),
 }));
-vi.mock("@/lib/api-hooks", () => ({ markComplementaryRecallsSeen: vi.fn() }));
+vi.mock("@/lib/api-hooks", () => ({ markComplementaryRecallsSeen: mockMarkSeen }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { role: "doctor" } }) }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false }) }));
 vi.mock("@/components/appointments/appointment-manage-modal", () => ({ AppointmentManageModal: () => null }));
@@ -37,6 +38,8 @@ const recall: ComplementaryRecall = {
   requestedByUserId: 2,
   requestedAt: "2039-06-15T08:00:00.000Z",
   receptionSeenAt: null,
+  receptionAcknowledgedAt: null,
+  receptionAcknowledgedByUserId: null,
   scheduledAt: null,
   completedAt: null,
   cancelledAt: null,
@@ -51,6 +54,7 @@ const recall: ComplementaryRecall = {
   modalityNameEn: "Computed tomography",
   requesterDisplayName: "Doctor One",
 };
+const acknowledgedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One" };
 
 function renderPage(mode: "reception" | "doctor") {
   return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><RecallRequestsPage mode={mode} /></QueryClientProvider></MemoryRouter>);
@@ -61,9 +65,12 @@ describe("Recall Requests metadata", () => {
     mockFetchRecalls.mockReset();
     mockFetchDoctorRecalls.mockReset();
     mockUpdateRecall.mockReset();
+    mockAcknowledge.mockReset();
+    mockMarkSeen.mockReset();
     mockFetchRecalls.mockResolvedValue([recall]);
     mockFetchDoctorRecalls.mockResolvedValue([recall]);
     mockUpdateRecall.mockResolvedValue(recall);
+    mockAcknowledge.mockResolvedValue(acknowledgedRecall);
   });
 
   it("renders structured metadata for reception", async () => {
@@ -74,6 +81,32 @@ describe("Recall Requests metadata", () => {
     expect(screen.getByText("Within 24 hours")).toBeTruthy();
     expect(screen.getByText("Separate report")).toBeTruthy();
     expect(screen.getByText("Due date/time:")).toBeTruthy();
+    await waitFor(() => expect(mockMarkSeen).toHaveBeenCalledWith([42]));
+  });
+
+  it("acknowledges pending reception requests and renders the acknowledgement", async () => {
+    mockMarkSeen.mockImplementation(() => new Promise<void>(() => undefined));
+    mockFetchRecalls.mockReset();
+    mockFetchRecalls.mockResolvedValueOnce([recall]).mockResolvedValue([acknowledgedRecall]);
+    renderPage("reception");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Acknowledge request" }));
+    await waitFor(() => expect(mockAcknowledge).toHaveBeenCalledWith(42));
+    expect(await screen.findByText(/Acknowledged.*Reception One/)).toBeTruthy();
+    expect(screen.getByText(/10:30/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Acknowledge request" })).toBeNull();
+  });
+
+  it("shows acknowledgement read-only in reception and doctor views", async () => {
+    mockFetchRecalls.mockResolvedValue([acknowledgedRecall]);
+    mockFetchDoctorRecalls.mockResolvedValue([acknowledgedRecall]);
+    renderPage("reception");
+    expect(await screen.findByText(/Acknowledged.*Reception One/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Acknowledge request" })).toBeNull();
+
+    renderPage("doctor");
+    expect(await screen.findByText(/Acknowledged.*Reception One/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Acknowledge request" })).toBeNull();
   });
 
   it("edits structured metadata only through the doctor request dialog", async () => {
