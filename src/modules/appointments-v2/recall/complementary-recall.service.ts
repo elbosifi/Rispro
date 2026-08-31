@@ -5,6 +5,15 @@ import { logAuditEntry } from "../../../services/audit-service.js";
 import { PROTOCOLING_MODALITY_SQL } from "../../../services/protocoling-modality.js";
 
 export type ComplementaryRecallStatus = "pending_scheduling" | "scheduled" | "completed" | "cancelled";
+export type ComplementaryRecallReasonCode = "missing_sequence_phase" | "incomplete_anatomical_coverage" | "motion_nondiagnostic_quality" | "incorrect_protocol" | "incorrect_contrast_phase_timing" | "additional_diagnostic_characterization" | "technical_equipment_problem" | "patient_related_limitation" | "other";
+export type ComplementaryRecallQaClassification = "diagnostic_addition" | "technical_repeat" | "protocol_error" | "acquisition_error" | "equipment_failure" | "patient_related_unavoidable" | "other";
+export type ComplementaryRecallUrgency = "same_day" | "within_24_hours" | "within_72_hours" | "routine";
+export type ComplementaryRecallReportingDisposition = "supplement_original_report" | "separate_report" | "no_separate_report";
+
+const REASON_CODES: readonly ComplementaryRecallReasonCode[] = ["missing_sequence_phase", "incomplete_anatomical_coverage", "motion_nondiagnostic_quality", "incorrect_protocol", "incorrect_contrast_phase_timing", "additional_diagnostic_characterization", "technical_equipment_problem", "patient_related_limitation", "other"];
+const QA_CLASSIFICATIONS: readonly ComplementaryRecallQaClassification[] = ["diagnostic_addition", "technical_repeat", "protocol_error", "acquisition_error", "equipment_failure", "patient_related_unavoidable", "other"];
+const URGENCIES: readonly ComplementaryRecallUrgency[] = ["same_day", "within_24_hours", "within_72_hours", "routine"];
+const REPORTING_DISPOSITIONS: readonly ComplementaryRecallReportingDisposition[] = ["supplement_original_report", "separate_report", "no_separate_report"];
 
 export interface ComplementaryRecall {
   id: number;
@@ -12,6 +21,11 @@ export interface ComplementaryRecall {
   recallAppointmentId: number | null;
   receptionInstruction: string | null;
   technologistInstruction: string;
+  reasonCode: ComplementaryRecallReasonCode | null;
+  qaClassification: ComplementaryRecallQaClassification | null;
+  urgency: ComplementaryRecallUrgency | null;
+  dueAt: string | null;
+  reportingDisposition: ComplementaryRecallReportingDisposition | null;
   status: ComplementaryRecallStatus;
   requestedByUserId: number;
   requestedAt: string;
@@ -44,6 +58,8 @@ export interface ComplementaryRecallBookingContext extends ComplementaryRecall {
 type RecallRow = {
   id: number; original_appointment_id: number; recall_appointment_id: number | null;
   reception_instruction: string | null; technologist_instruction: string; status: ComplementaryRecallStatus;
+  reason_code: ComplementaryRecallReasonCode | null; qa_classification: ComplementaryRecallQaClassification | null;
+  urgency: ComplementaryRecallUrgency | null; due_at: string | Date | null; reporting_disposition: ComplementaryRecallReportingDisposition | null;
   requested_by_user_id: number; requested_at: string; reception_seen_at: string | null;
   scheduled_at: string | null; completed_at: string | null; cancelled_at: string | null;
 };
@@ -51,12 +67,24 @@ type Queryable = Pick<PoolClient, "query">;
 
 function map(row: RecallRow): ComplementaryRecall {
   const extra = row as RecallRow & Record<string, unknown>;
-  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at, patientDisplayName: extra.patient_display_name == null ? null : String(extra.patient_display_name), patientMrn: extra.patient_mrn == null ? null : String(extra.patient_mrn), patientIdentifier: extra.patient_identifier == null ? null : String(extra.patient_identifier), patientArabicName: extra.patient_arabic_name == null ? null : String(extra.patient_arabic_name), patientEnglishName: extra.patient_english_name == null ? null : String(extra.patient_english_name), originalAccession: extra.original_accession == null ? undefined : String(extra.original_accession), originalExam: extra.original_exam == null ? null : String(extra.original_exam), originalExamAr: extra.original_exam_ar == null ? null : String(extra.original_exam_ar), originalExamEn: extra.original_exam_en == null ? null : String(extra.original_exam_en), modalityName: extra.modality_name == null ? null : String(extra.modality_name), modalityNameAr: extra.modality_name_ar == null ? null : String(extra.modality_name_ar), modalityNameEn: extra.modality_name_en == null ? null : String(extra.modality_name_en), modalityCode: extra.modality_code == null ? null : String(extra.modality_code), requesterDisplayName: extra.requester_display_name == null ? null : String(extra.requester_display_name), recallAppointmentAccession: extra.recall_appointment_accession == null ? null : String(extra.recall_appointment_accession), recallAppointmentDate: extra.recall_appointment_date == null ? null : String(extra.recall_appointment_date), previousAttemptAppointmentId: extra.previous_attempt_appointment_id == null ? null : Number(extra.previous_attempt_appointment_id), previousAttemptReason: extra.previous_attempt_reason == null ? null : String(extra.previous_attempt_reason), previousAttemptAt: extra.previous_attempt_at == null ? null : String(extra.previous_attempt_at) };
+  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, reasonCode: row.reason_code, qaClassification: row.qa_classification, urgency: row.urgency, dueAt: row.due_at == null ? null : new Date(row.due_at).toISOString(), reportingDisposition: row.reporting_disposition, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at, patientDisplayName: extra.patient_display_name == null ? null : String(extra.patient_display_name), patientMrn: extra.patient_mrn == null ? null : String(extra.patient_mrn), patientIdentifier: extra.patient_identifier == null ? null : String(extra.patient_identifier), patientArabicName: extra.patient_arabic_name == null ? null : String(extra.patient_arabic_name), patientEnglishName: extra.patient_english_name == null ? null : String(extra.patient_english_name), originalAccession: extra.original_accession == null ? undefined : String(extra.original_accession), originalExam: extra.original_exam == null ? null : String(extra.original_exam), originalExamAr: extra.original_exam_ar == null ? null : String(extra.original_exam_ar), originalExamEn: extra.original_exam_en == null ? null : String(extra.original_exam_en), modalityName: extra.modality_name == null ? null : String(extra.modality_name), modalityNameAr: extra.modality_name_ar == null ? null : String(extra.modality_name_ar), modalityNameEn: extra.modality_name_en == null ? null : String(extra.modality_name_en), modalityCode: extra.modality_code == null ? null : String(extra.modality_code), requesterDisplayName: extra.requester_display_name == null ? null : String(extra.requester_display_name), recallAppointmentAccession: extra.recall_appointment_accession == null ? null : String(extra.recall_appointment_accession), recallAppointmentDate: extra.recall_appointment_date == null ? null : String(extra.recall_appointment_date), previousAttemptAppointmentId: extra.previous_attempt_appointment_id == null ? null : Number(extra.previous_attempt_appointment_id), previousAttemptReason: extra.previous_attempt_reason == null ? null : String(extra.previous_attempt_reason), previousAttemptAt: extra.previous_attempt_at == null ? null : String(extra.previous_attempt_at) };
 }
 
-const SELECT = `id, original_appointment_id, recall_appointment_id, reception_instruction, technologist_instruction, status, requested_by_user_id, requested_at, reception_seen_at, scheduled_at, completed_at, cancelled_at`;
+const SELECT = `id, original_appointment_id, recall_appointment_id, reception_instruction, technologist_instruction, reason_code, qa_classification, urgency, due_at, reporting_disposition, status, requested_by_user_id, requested_at, reception_seen_at, scheduled_at, completed_at, cancelled_at`;
 
-export async function createComplementaryRecall(client: PoolClient, input: { originalAppointmentId: number; receptionInstruction: string | null; technologistInstruction: string; requestedByUserId: number }): Promise<ComplementaryRecall> {
+function normalizeEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!allowed.includes(normalized as T)) throw new HttpError(400, `Invalid ${label}.`);
+  return normalized as T;
+}
+
+function normalizeDueAt(value: unknown): string | null {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Due date/time must be a valid timestamp.");
+  return new Date(value).toISOString();
+}
+
+export async function createComplementaryRecall(client: PoolClient, input: { originalAppointmentId: number; receptionInstruction: string | null; technologistInstruction: string; reasonCode: unknown; qaClassification: unknown; urgency: unknown; dueAt: unknown; reportingDisposition: unknown; requestedByUserId: number }): Promise<ComplementaryRecall> {
   const original = await client.query<{ id: number; status: string; exam_type_id: number | null; protocoling_modality: string | null }>(`select b.id, b.status, b.exam_type_id, ${PROTOCOLING_MODALITY_SQL} as protocoling_modality from appointments_v2.bookings b join modalities m on m.id = b.modality_id where b.id = $1 for update`, [input.originalAppointmentId]);
   if (!original.rows[0]) throw new HttpError(404, "Original appointment not found.");
   if (original.rows[0].protocoling_modality == null) throw new HttpError(409, "Only CT or MRI protocoling appointments can receive an additional imaging request.");
@@ -64,15 +92,20 @@ export async function createComplementaryRecall(client: PoolClient, input: { ori
   if (original.rows[0].exam_type_id == null) throw new HttpError(409, "The original appointment requires an exam type before additional imaging can be requested.");
   const text = input.technologistInstruction.trim();
   if (!text) throw new HttpError(400, "Technologist instruction is required.");
+  const reasonCode = normalizeEnum(input.reasonCode, REASON_CODES, "recall reason");
+  const qaClassification = normalizeEnum(input.qaClassification, QA_CLASSIFICATIONS, "QA classification");
+  const urgency = normalizeEnum(input.urgency, URGENCIES, "urgency");
+  const dueAt = normalizeDueAt(input.dueAt);
+  const reportingDisposition = normalizeEnum(input.reportingDisposition, REPORTING_DISPOSITIONS, "reporting disposition");
   let result;
   try {
-    result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, status, requested_by_user_id) values ($1,$2,$3,'pending_scheduling',$4) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, input.requestedByUserId]);
+    result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, reason_code, qa_classification, urgency, due_at, reporting_disposition, status, requested_by_user_id) values ($1,$2,$3,$4,$5,$6,$7,$8,'pending_scheduling',$9) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, reasonCode, qaClassification, urgency, dueAt, reportingDisposition, input.requestedByUserId]);
   } catch (error) {
     if ((error as { code?: string }).code === "23505") throw new HttpError(409, "An active additional imaging request already exists for this appointment.");
     throw error;
   }
   const recall = map(result.rows[0]!);
-  await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_requested", newValues: { originalAppointmentId: recall.originalAppointmentId, status: recall.status }, changedByUserId: input.requestedByUserId }, client);
+  await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_requested", newValues: { originalAppointmentId: recall.originalAppointmentId, status: recall.status, reasonCode: recall.reasonCode, qaClassification: recall.qaClassification, urgency: recall.urgency, dueAt: recall.dueAt, reportingDisposition: recall.reportingDisposition }, changedByUserId: input.requestedByUserId }, client);
   return recall;
 }
 
@@ -160,7 +193,7 @@ export async function withdrawComplementaryRecall(client: PoolClient, id: number
   return cancelled;
 }
 
-export async function updateComplementaryRecallInstructions(client: PoolClient, id: number, input: { receptionInstruction: string | null; technologistInstruction: string; actorUserId: number }): Promise<ComplementaryRecall> {
+export async function updateComplementaryRecallInstructions(client: PoolClient, id: number, input: { receptionInstruction: string | null; technologistInstruction: string; reasonCode: unknown; qaClassification: unknown; urgency: unknown; dueAt: unknown; reportingDisposition: unknown; actorUserId: number }): Promise<ComplementaryRecall> {
   const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where id = $1 for update`, [id]);
   if (!result.rows[0]) throw new HttpError(404, "Additional imaging request not found.");
   const recall = map(result.rows[0]);
@@ -168,9 +201,14 @@ export async function updateComplementaryRecallInstructions(client: PoolClient, 
   const technologistInstruction = input.technologistInstruction.trim();
   if (!technologistInstruction) throw new HttpError(400, "Technologist instruction is required.");
   const receptionInstruction = input.receptionInstruction?.trim() || null;
-  const changed = await client.query<RecallRow>(`update appointments_v2.complementary_recall_requests set reception_instruction = $2, technologist_instruction = $3, reception_seen_at = null, reception_seen_by_user_id = null where id = $1 returning ${SELECT}`, [id, receptionInstruction, technologistInstruction]);
+  const reasonCode = normalizeEnum(input.reasonCode, REASON_CODES, "recall reason");
+  const qaClassification = normalizeEnum(input.qaClassification, QA_CLASSIFICATIONS, "QA classification");
+  const urgency = normalizeEnum(input.urgency, URGENCIES, "urgency");
+  const dueAt = normalizeDueAt(input.dueAt);
+  const reportingDisposition = normalizeEnum(input.reportingDisposition, REPORTING_DISPOSITIONS, "reporting disposition");
+  const changed = await client.query<RecallRow>(`update appointments_v2.complementary_recall_requests set reception_instruction = $2, technologist_instruction = $3, reason_code = $4, qa_classification = $5, urgency = $6, due_at = $7, reporting_disposition = $8, reception_seen_at = null, reception_seen_by_user_id = null where id = $1 returning ${SELECT}`, [id, receptionInstruction, technologistInstruction, reasonCode, qaClassification, urgency, dueAt, reportingDisposition]);
   const updated = map(changed.rows[0]!);
-  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_instructions_updated", oldValues: { receptionInstruction: recall.receptionInstruction, technologistInstruction: recall.technologistInstruction }, newValues: { receptionInstruction: updated.receptionInstruction, technologistInstruction: updated.technologistInstruction }, changedByUserId: input.actorUserId }, client);
+  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_instructions_updated", oldValues: { receptionInstruction: recall.receptionInstruction, technologistInstruction: recall.technologistInstruction, reasonCode: recall.reasonCode, qaClassification: recall.qaClassification, urgency: recall.urgency, dueAt: recall.dueAt, reportingDisposition: recall.reportingDisposition }, newValues: { receptionInstruction: updated.receptionInstruction, technologistInstruction: updated.technologistInstruction, reasonCode: updated.reasonCode, qaClassification: updated.qaClassification, urgency: updated.urgency, dueAt: updated.dueAt, reportingDisposition: updated.reportingDisposition }, changedByUserId: input.actorUserId }, client);
   return updated;
 }
 

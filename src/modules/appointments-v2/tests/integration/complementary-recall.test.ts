@@ -4,12 +4,23 @@ import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
 import { voidBookingByStaff } from "../../booking/services/void-booking.service.js";
-import { completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall as createComplementaryRecallRecord, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions as updateComplementaryRecallRecord, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "RECALL_";
+const recallMetadata = { reasonCode: "technical_equipment_problem", qaClassification: "technical_repeat", urgency: "routine", dueAt: null, reportingDisposition: "supplement_original_report" } as const;
+type RecallCreateInput = Omit<Parameters<typeof createComplementaryRecallRecord>[1], keyof typeof recallMetadata> & Partial<Pick<Parameters<typeof createComplementaryRecallRecord>[1], keyof typeof recallMetadata>>;
+type RecallUpdateInput = Omit<Parameters<typeof updateComplementaryRecallRecord>[2], keyof typeof recallMetadata> & Partial<Pick<Parameters<typeof updateComplementaryRecallRecord>[2], keyof typeof recallMetadata>>;
+
+function createComplementaryRecall(client: import("pg").PoolClient, input: RecallCreateInput) {
+  return createComplementaryRecallRecord(client, { ...recallMetadata, ...input });
+}
+
+function updateComplementaryRecallInstructions(client: import("pg").PoolClient, id: number, input: RecallUpdateInput) {
+  return updateComplementaryRecallRecord(client, id, { ...recallMetadata, ...input });
+}
 
 describe("Complementary recall — integration", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
@@ -50,6 +61,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const originalId = await originalBooking();
     const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Reception note", technologistInstruction: "Repeat axial acquisition", requestedByUserId: testData.userId }));
     assert.equal(recall.status, "pending_scheduling");
+    assert.equal(recall.dueAt, null);
     await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId })), { statusCode: 409 });
     const missingExamOriginalId = await originalBooking({ examTypeId: null });
     await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: missingExamOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId })), { statusCode: 409 });
@@ -62,6 +74,14 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
       const ineligibleId = await originalBooking({ status });
       await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: ineligibleId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId })), { statusCode: 409 });
     }
+    const invalidMetadataOriginalId = await originalBooking();
+    await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidMetadataOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, reasonCode: "invalid" })), { statusCode: 400 });
+    const invalidQaOriginalId = await originalBooking();
+    await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidQaOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, qaClassification: "invalid" })), { statusCode: 400 });
+    const invalidUrgencyOriginalId = await originalBooking();
+    await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidUrgencyOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, urgency: "invalid" })), { statusCode: 400 });
+    const invalidReportingOriginalId = await originalBooking();
+    await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidReportingOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, reportingDisposition: "invalid" })), { statusCode: 400 });
   });
 
   it("joins the reception work queue and keeps unseen independent of scheduled state", async () => {
@@ -69,7 +89,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const summaryBefore = await complementaryRecallReceptionSummary();
     const unseenBefore = await complementaryRecallUnseenCount();
     const originalId = await originalBooking();
-    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Call before booking", technologistInstruction: "Repeat delayed phase", requestedByUserId: testData.userId }));
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Call before booking", technologistInstruction: "Repeat delayed phase", requestedByUserId: testData.userId, reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report" }));
     const rows = await listComplementaryRecalls();
     const row = rows.find((item) => item.id === recall.id);
     assert.equal(row?.originalAppointmentId, originalId);
@@ -77,6 +97,19 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.ok(row?.patientIdentifier || row?.patientMrn);
     assert.equal(row?.receptionInstruction, "Call before booking");
     assert.equal(row?.technologistInstruction, "Repeat delayed phase");
+    assert.equal(recall.reasonCode, "missing_sequence_phase");
+    assert.equal(recall.qaClassification, "acquisition_error");
+    assert.equal(recall.urgency, "within_24_hours");
+    assert.equal(recall.dueAt, "2039-06-13T10:30:00.000Z");
+    assert.equal(recall.reportingDisposition, "separate_report");
+    const fetched = await getComplementaryRecall(recall.id);
+    assert.equal(fetched?.reasonCode, "missing_sequence_phase");
+    assert.equal(fetched?.dueAt, "2039-06-13T10:30:00.000Z");
+    assert.equal(row?.qaClassification, "acquisition_error");
+    assert.equal(row?.urgency, "within_24_hours");
+    assert.equal(row?.reportingDisposition, "separate_report");
+    const createAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_requested' order by id desc limit 1", [recall.id]);
+    assert.deepEqual(createAudit.rows[0]?.new_values, { originalAppointmentId: originalId, status: "pending_scheduling", reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report" });
     assert.ok(row?.originalAccession);
     assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBefore.pendingCount + 1, unseenPendingCount: summaryBefore.unseenPendingCount + 1 });
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore + 1);
@@ -167,9 +200,20 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const pending = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: pendingOriginalId, receptionInstruction: "Old reception", technologistInstruction: "Old technologist", requestedByUserId: testData.userId }));
     await transaction((client) => markComplementaryRecallsSeen(client, [pending.id], testData.userId));
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore);
-    const updated = await transaction((client) => updateComplementaryRecallInstructions(client, pending.id, { receptionInstruction: "  New reception  ", technologistInstruction: "  New technologist  ", actorUserId: testData.userId }));
+    const updated = await transaction((client) => updateComplementaryRecallInstructions(client, pending.id, { receptionInstruction: "  New reception  ", technologistInstruction: "  New technologist  ", reasonCode: "incorrect_protocol", qaClassification: "protocol_error", urgency: "same_day", dueAt: "2039-06-16T08:00:00.000Z", reportingDisposition: "no_separate_report", actorUserId: testData.userId }));
     assert.equal(updated.receptionInstruction, "New reception");
     assert.equal(updated.technologistInstruction, "New technologist");
+    assert.equal(updated.reasonCode, "incorrect_protocol");
+    assert.equal(updated.qaClassification, "protocol_error");
+    assert.equal(updated.urgency, "same_day");
+    assert.equal(updated.dueAt, "2039-06-16T08:00:00.000Z");
+    assert.equal(updated.reportingDisposition, "no_separate_report");
+    const updateAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_instructions_updated' order by id desc limit 1", [pending.id]);
+    assert.equal(updateAudit.rows[0]?.new_values.reasonCode, "incorrect_protocol");
+    assert.equal(updateAudit.rows[0]?.new_values.qaClassification, "protocol_error");
+    assert.equal(updateAudit.rows[0]?.new_values.urgency, "same_day");
+    assert.equal(updateAudit.rows[0]?.new_values.dueAt, "2039-06-16T08:00:00.000Z");
+    assert.equal(updateAudit.rows[0]?.new_values.reportingDisposition, "no_separate_report");
     assert.equal(updated.status, "pending_scheduling");
     assert.equal(updated.recallAppointmentId, null);
     assert.equal((await getComplementaryRecall(pending.id))?.receptionSeenAt, null);

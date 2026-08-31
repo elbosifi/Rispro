@@ -51,10 +51,11 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockCreateComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
+  createComplementaryRecallRequest: mockCreateComplementaryRecall,
   createProtocolLibraryAnatomyRegion: vi.fn(), createProtocolLibraryCtPhasePreset: vi.fn(), createProtocolLibraryCtPhaseRow: vi.fn(),
   createProtocolLibraryDraftFromActive: vi.fn(), createProtocolLibraryMriSequencePreset: vi.fn(), createProtocolLibraryMriSequenceRow: vi.fn(),
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
@@ -125,6 +126,8 @@ describe("Doctor protocoling request documents", () => {
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
+    mockCreateComplementaryRecall.mockReset();
+    mockCreateComplementaryRecall.mockResolvedValue({ recall: { id: 1, status: "pending_scheduling" } });
     mockRescheduleBooking.mockReset();
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
@@ -136,6 +139,34 @@ describe("Doctor protocoling request documents", () => {
     renderTestingLibrary(<MemoryRouter initialEntries={["/doctor/protocols?appointmentId=42"]}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
 
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
+  });
+
+  it("requires structured recall selections and sends their default metadata", async () => {
+    const completedAppointment = { ...appointment, appointmentStatus: "completed" as const };
+    mockFetchAppointments.mockResolvedValue([completedAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: completedAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request additional imaging" }));
+    expect((screen.getByLabelText("Urgency") as HTMLSelectElement).value).toBe("routine");
+    expect((screen.getByLabelText("Reporting disposition") as HTMLSelectElement).value).toBe("supplement_original_report");
+    expect(screen.getAllByRole("button", { name: "Request additional imaging" })[1]?.hasAttribute("disabled")).toBe(true);
+
+    await userEvent.selectOptions(screen.getByLabelText("Recall reason"), "missing_sequence_phase");
+    await userEvent.selectOptions(screen.getByLabelText("QA classification"), "acquisition_error");
+    await userEvent.type(screen.getByRole("textbox", { name: "Technologist instruction" }), "Repeat the delayed phase");
+    await userEvent.click(screen.getAllByRole("button", { name: "Request additional imaging" })[1]!);
+
+    await waitFor(() => expect(mockCreateComplementaryRecall).toHaveBeenCalledWith(42, {
+      receptionInstruction: null,
+      technologistInstruction: "Repeat the delayed phase",
+      reasonCode: "missing_sequence_phase",
+      qaClassification: "acquisition_error",
+      urgency: "routine",
+      dueAt: null,
+      reportingDisposition: "supplement_original_report",
+    }));
   });
 
   it("filters the worklist by appointment status and preserves waiting-first preference", async () => {

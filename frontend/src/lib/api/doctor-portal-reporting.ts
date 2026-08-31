@@ -20,7 +20,7 @@ import type {
   AvailabilityStatus, LeaveType, RosterDutyType, RosterTeamRole, ModalityProtocolAssignment,
   ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType, ProtocolingPatientHistoryResponse, ProtocolingHistoricalPacsCandidatesResponse, HistoricalPacsCandidate,
 } from "@/types/api";
-import type { ComplementaryRecall } from "./complementary-recalls";
+import type { ComplementaryRecall, ComplementaryRecallMetadataPayload } from "./complementary-recalls";
 
 const MRI_SEQUENCE_IMPORT_TIMEOUT_MS = 180_000;
 
@@ -1166,7 +1166,9 @@ export async function fetchComparisonReportingDoctors(modalityId: number): Promi
   return raw.doctors ?? [];
 }
 
-export async function createComplementaryRecallRequest(appointmentId: number, payload: { receptionInstruction: string | null; technologistInstruction: string }) {
+export type ComplementaryRecallRequestPayload = { receptionInstruction: string | null; technologistInstruction: string } & ComplementaryRecallMetadataPayload;
+
+export async function createComplementaryRecallRequest(appointmentId: number, payload: ComplementaryRecallRequestPayload) {
   return api<{ recall: { id: number; status: string } }>(`/doctor/protocoling/appointments/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) });
 }
 
@@ -1178,7 +1180,7 @@ export async function fetchDoctorComplementaryRecalls(): Promise<ComplementaryRe
   return (await api<{ recalls: ComplementaryRecall[] }>("/doctor/protocoling/complementary-recalls")).recalls;
 }
 
-export async function updateDoctorComplementaryRecallInstructions(recallId: number, payload: { receptionInstruction: string | null; technologistInstruction: string }): Promise<ComplementaryRecall> {
+export async function updateDoctorComplementaryRecallInstructions(recallId: number, payload: ComplementaryRecallRequestPayload): Promise<ComplementaryRecall> {
   return (await api<{ recall: ComplementaryRecall }>(`/doctor/protocoling/complementary-recalls/${recallId}`, { method: "PATCH", body: JSON.stringify(payload) })).recall;
 }
 
