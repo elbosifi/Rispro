@@ -77,14 +77,14 @@ function ConfirmationPanel({ row }: { row: ComparisonRequest }) {
       void queryClient.invalidateQueries({ queryKey: ["comparison-request", row.id] });
       void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
       void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] });
-      if (updated.status === "assigned") pushToast({ type: "success", title: "Comparison released", message: `Comparison assigned to ${updated.assignedDoctorName ?? "the selected doctor"}.` });
-      else if (row.plannedReportingDoctorId && updated.assignedDoctorId == null) pushToast({ type: "warning", title: "Comparison released", message: "Comparison released to the reporting pool because the selected doctor is no longer eligible." });
-      else pushToast({ type: "success", title: "Comparison released", message: "Comparison released to the reporting pool." });
+      if (updated.status === "assigned") pushToast({ type: "success", title: t(language, "comparisons.released"), message: t(language, "comparisons.assignedRelease", { name: updated.assignedDoctorName ?? t(language, "comparisons.assignReportingDoctor") }) });
+      else if (row.plannedReportingDoctorId && updated.assignedDoctorId == null) pushToast({ type: "warning", title: t(language, "comparisons.released"), message: t(language, "comparisons.ineligiblePlanRelease") });
+      else pushToast({ type: "success", title: t(language, "comparisons.released"), message: t(language, "comparisons.poolRelease") });
     },
     onError: (error) => pushToast({
       type: "error",
-      title: "Confirmation failed",
-      message: error instanceof Error ? error.message : "Unable to confirm comparison materials.",
+      title: t(language, "comparisons.confirmationFailed"),
+      message: error instanceof Error ? error.message : t(language, "comparisons.confirmationFailedMessage"),
     }),
   });
   const canSubmit = imageAvailabilityConfirmed && Boolean(documentsDisposition) && selectedPriorConfirmed && !mutation.isPending;
@@ -232,8 +232,8 @@ function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: 
       <ComparisonDocumentsPanel comparisonRequestId={row.id} canAttach={canConfirm && canPrepare} canDelete={canCancel && canPrepare} />
 
       {row.assignedDoctorName ? <p className="text-xs text-muted-foreground">{t(language, "comparisons.assignedDoctor", { name: row.assignedDoctorName })}</p> : null}
-      {row.status === "pending_upload_confirmation" ? <p className="text-xs text-muted-foreground">{row.plannedReportingDoctorName ? `Target doctor: ${row.plannedReportingDoctorName} - assignment activates after preparation` : "Reporting destination: Unassigned reporting pool"}</p> : null}
-      {row.preparationReturnReason ? <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900"><strong>Returned to preparation</strong>{row.preparationReturnedByName ? ` by ${row.preparationReturnedByName}` : ""}{row.preparationReturnedAt ? ` · ${formatDateTimeLy(row.preparationReturnedAt)}` : ""}: {row.preparationReturnReason}</p> : null}
+      {row.status === "pending_upload_confirmation" ? <p className="text-xs text-muted-foreground">{row.plannedReportingDoctorName ? t(language, "comparisons.plannedTarget", { name: row.plannedReportingDoctorName }) : t(language, "comparisons.poolDestination")}</p> : null}
+      {row.preparationReturnReason ? <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900"><strong>{t(language, "comparisons.returnedPreparation")}</strong>{row.preparationReturnedByName ? ` ${t(language, "comparisons.by", { name: row.preparationReturnedByName })}` : ""}{row.preparationReturnedAt ? ` · ${formatDateTimeLy(row.preparationReturnedAt)}` : ""}: {row.preparationReturnReason}</p> : null}
       {row.finalizedAt ? <p className="text-xs text-emerald-700">{t(language, "comparisons.finalizedBy", { date: formatDateTimeLy(row.finalizedAt), name: row.finalizedByName || t(language, "comparisons.staff") })}</p> : null}
       {row.status !== "pending_upload_confirmation" && row.materialsConfirmationNote ? <p className="text-xs text-muted-foreground"><strong>{t(language, "comparisons.preparationNote")}:</strong> {row.materialsConfirmationNote}</p> : null}
       {row.status === "cancelled" ? <p className="rounded-md bg-red-50 p-2 text-xs text-red-800"><strong>{t(language, "comparisons.cancelled")}:</strong> {row.cancellationReason || t(language, "comparisons.noReason")}{row.cancelledAt ? ` · ${formatDateTimeLy(row.cancelledAt)}` : ""}</p> : null}
