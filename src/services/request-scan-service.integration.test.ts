@@ -655,7 +655,7 @@ test("allows a different automated request document for an appointment that alre
   assert.match(job.source_relative_path, /^Requests[\\/]Processed[\\/]/);
 });
 
-test("requires matching document evidence for an accession filename", async (t) => {
+test("automatically assigns a verified accession filename without document recognition", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const jobId = await createJob("pending", `${booking.accession}.pdf`);
@@ -664,26 +664,31 @@ test("requires matching document evidence for an accession filename", async (t) 
   const job = await processRequestScanJob(
     jobId,
     settings,
-    dependencies({ ok: true, accession: booking.accession }, { recognitionCalls, uploads })
+    dependencies({ ok: false, reason: "no_barcode" }, { recognitionCalls, uploads })
   );
   assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
   assert.equal(job.barcode_value, booking.accession);
-  assert.equal(recognitionCalls.length, 1);
+  assert.equal(job.identifier_strategy, "filename_accession");
+  assert.equal(recognitionCalls.length, 0);
   assert.equal(uploads.length, 1);
+  const checkpoint = await pool.query<{ identifier_source: string }>("select identifier_source from request_scan_job_appointments where request_scan_job_id=$1 and appointment_id=$2", [jobId, booking.id]);
+  assert.deepEqual(checkpoint.rows, [{ identifier_source: "filename" }]);
 
-  const duplicateJobId = await createJob("pending", `Scan_${booking.accession}_Page1.jpg`);
-  const duplicateRecognitionCalls: string[] = [];
-  const duplicate = await processRequestScanJob(
-    duplicateJobId,
+  const embeddedJobId = await createJob("pending", `1136_2026-08-25_${booking.accession}.pdf`);
+  const embeddedRecognitionCalls: string[] = [];
+  const embedded = await processRequestScanJob(
+    embeddedJobId,
     settings,
-    dependencies({ ok: true, accession: booking.accession }, { recognitionCalls: duplicateRecognitionCalls })
+    dependencies({ ok: false, reason: "no_barcode" }, { recognitionCalls: embeddedRecognitionCalls })
   );
-  assert.equal(duplicate.status, "processed");
-  assert.equal(duplicateRecognitionCalls.length, 1);
+  assert.equal(embedded.status, "processed");
+  assert.equal(Number(embedded.appointment_id), booking.id);
+  assert.equal(embedded.identifier_strategy, "filename_accession");
+  assert.equal(embeddedRecognitionCalls.length, 0);
 });
 
-test("requires matching document QR evidence for a QR filename", async (t) => {
+test("automatically assigns a verified QR filename without document recognition", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const token = await issuePublicCancelToken(booking.id);
@@ -693,7 +698,7 @@ test("requires matching document QR evidence for a QR filename", async (t) => {
   const recognitionCalls: string[] = [];
   const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
   let verifiedToken: string | null = null;
-  const scannerDependencies = dependencies({ ok: true, qrTokens: [token] }, { recognitionCalls, diagnostics, verifyToken: async (value) => { verifiedToken = value; return verifyPublicCancelToken(value); } });
+  const scannerDependencies = dependencies({ ok: false, reason: "no_barcode" }, { recognitionCalls, diagnostics, verifyToken: async (value) => { verifiedToken = value; return verifyPublicCancelToken(value); } });
   const job = await processRequestScanJob(
     jobId,
     settings,
@@ -701,20 +706,22 @@ test("requires matching document QR evidence for a QR filename", async (t) => {
   );
   assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
-  assert.equal(recognitionCalls.length, 1);
+  assert.equal(job.identifier_strategy, "filename_qr");
+  assert.equal(recognitionCalls.length, 0);
   assert.equal(verifiedToken, token);
-  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_DOCUMENT_CONFIRMATION"));
+  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_FILENAME_QR" && metadata.documentFallbackRan === false && metadata.sourcesAgreed === true));
   assert.equal(JSON.stringify(diagnostics).includes(token), false);
   assert.equal(job.error_message, null);
 
   const normalUrlJobId = await createJob("pending", `https://rispro.nccb.com.ly/public/appointment?t=${token}.pdf`);
   const normalUrlRecognitionCalls: string[] = [];
-  const normalUrlDependencies = dependencies({ ok: true, qrTokens: [token] }, { recognitionCalls: normalUrlRecognitionCalls });
+  const normalUrlDependencies = dependencies({ ok: false, reason: "no_barcode" }, { recognitionCalls: normalUrlRecognitionCalls });
   normalUrlDependencies.downloadRequestScanFile = async () => {};
   const normalUrlJob = await processRequestScanJob(normalUrlJobId, settings, normalUrlDependencies);
   assert.equal(normalUrlJob.status, "processed");
   assert.equal(Number(normalUrlJob.appointment_id), booking.id);
-  assert.equal(normalUrlRecognitionCalls.length, 1);
+  assert.equal(normalUrlJob.identifier_strategy, "filename_qr");
+  assert.equal(normalUrlRecognitionCalls.length, 0);
 });
 
 test("treats matching accession and QR evidence as consensus and conflicting evidence as manual review", async (t) => {
@@ -735,7 +742,8 @@ test("treats matching accession and QR evidence as consensus and conflicting evi
   );
   assert.equal(consensus.status, "processed");
   assert.equal(Number(consensus.appointment_id), first.id);
-  assert.equal(consensusRecognitionCalls.length, 1);
+  assert.equal(consensus.identifier_strategy, "filename_consensus");
+  assert.equal(consensusRecognitionCalls.length, 0);
 
   const conflictId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${secondToken}.pdf`);
   const conflictRecognitionCalls: string[] = [];

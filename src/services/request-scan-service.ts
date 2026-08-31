@@ -580,6 +580,20 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         throw new HttpError(422, "The filename contains conflicting appointment information. Assign the document manually.");
       }
 
+      if (filenameEvidence.decision.kind === "success") {
+        const appointment = filenameEvidence.appointments.get(filenameEvidence.decision.appointmentId);
+        if (!appointment) throw new RequestScanProcessingError("The verified filename appointment could not be loaded. Manual review is required.", "internal_processing");
+        const successCode = filenameEvidence.decision.strategy === "filename_consensus"
+          ? "IDENTIFIER_SUCCESS_FILENAME_CONSENSUS"
+          : filenameEvidence.decision.strategy === "filename_qr"
+            ? "IDENTIFIER_SUCCESS_FILENAME_QR"
+            : "IDENTIFIER_SUCCESS_FILENAME_ACCESSION";
+        logIdentifier(dependencies, successCode, identifierMetadata(job.filename, filenameEvidence, identifierStarted, false, true));
+        appointments = [appointment];
+        appointmentSources.set(Number(appointment.id), new Set(["filename"]));
+        identifierStrategy = filenameEvidence.decision.strategy;
+        await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
+      } else {
       {
       const initialCode = filenameEvidence.accessionCandidateCount + filenameEvidence.qrCandidateCount === 0
         ? "IDENTIFIER_FILENAME_NOT_FOUND"
@@ -711,6 +725,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFIRMATION", {
           ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, true),
         });
+      }
       }
       }
     }
