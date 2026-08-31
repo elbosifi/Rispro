@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { CheckCircle2, ExternalLink, ImageUp, Search, XCircle } from "lucide-react";
@@ -154,6 +154,12 @@ function EditComparisonDialog({ row, manager, open, onClose }: { row: Comparison
   const [reason, setReason] = useState(row.reason);
   const [bookingId, setBookingId] = useState(row.linkedPreviousBookingId);
   const [doctorId, setDoctorId] = useState<number | null>(row.plannedReportingDoctorId ?? null);
+  useEffect(() => {
+    if (!open) return;
+    setReason(row.reason);
+    setBookingId(row.linkedPreviousBookingId);
+    setDoctorId(row.plannedReportingDoctorId ?? null);
+  }, [open, row.id, row.reason, row.linkedPreviousBookingId, row.plannedReportingDoctorId]);
   const studies = useQuery({ queryKey: ["comparison-previous-studies", row.patientId], queryFn: () => fetchPreviousCompletedStudies(row.patientId), enabled: open && manager });
   const selectedStudy = (studies.data ?? []).find((study) => study.bookingId === bookingId);
   const doctors = useQuery({ queryKey: ["comparison-reporting-doctors", selectedStudy?.modalityId], queryFn: () => fetchComparisonReportingDoctors(selectedStudy!.modalityId), enabled: open && manager && Boolean(selectedStudy) });
@@ -162,7 +168,8 @@ function EditComparisonDialog({ row, manager, open, onClose }: { row: Comparison
     mutationFn: () => updateComparisonRequest(row.id, { reason: reason.trim(), ...(manager ? { linkedPreviousBookingId: bookingId, plannedReportingDoctorId: doctorId } : {}) }),
     onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }), queryClient.invalidateQueries({ queryKey: ["comparison-request", row.id] }), queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] })]); onClose(); },
   });
-  return <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}><DialogContent><DialogHeader><DialogTitle>Edit request</DialogTitle><DialogDescription>Only pending comparison requests can be edited.</DialogDescription></DialogHeader><label className="grid gap-1 text-sm">Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-20 rounded border p-2" /></label>{manager && <><label className="grid gap-1 text-sm">Previous completed study<select disabled={priorLocked} value={bookingId} onChange={(event) => { setBookingId(Number(event.target.value)); setDoctorId(null); }} className="h-10 rounded border px-2">{(studies.data ?? []).map((study) => <option key={study.bookingId} value={study.bookingId}>{study.date} · {study.modalityCode} · {study.accessionNumber}</option>)}</select>{priorLocked && <span className="text-xs text-muted-foreground">Previous study cannot change after preparation evidence exists.</span>}</label><label className="grid gap-1 text-sm">Assign reporting doctor<select disabled={doctors.isLoading} value={doctorId ?? ""} onChange={(event) => setDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded border px-2"><option value="">Unassigned - send to reporting pool</option>{(doctors.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></label></>}</DialogContent><DialogFooter><Button type="button" variant="secondary" onClick={onClose}>Cancel</Button><Button type="button" disabled={!reason.trim() || mutation.isPending} onClick={() => mutation.mutate()}>Save changes</Button></DialogFooter></Dialog>;
+  const { language } = useLanguage();
+  return <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}><DialogContent><DialogHeader><DialogTitle>{t(language, "comparisons.editRequest")}</DialogTitle><DialogDescription>{t(language, "comparisons.editHelp")}</DialogDescription></DialogHeader><label className="grid gap-1 text-sm">{t(language, "comparisons.reason")}<textarea value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-20 rounded border p-2" /></label>{manager && <><label className="grid gap-1 text-sm">{t(language, "comparisons.previousCompletedStudy")}<select disabled={priorLocked} value={bookingId} onChange={(event) => { setBookingId(Number(event.target.value)); setDoctorId(null); }} className="h-10 rounded border px-2">{(studies.data ?? []).map((study) => <option key={study.bookingId} value={study.bookingId}>{study.date} · {study.modalityCode} · {study.accessionNumber}</option>)}</select>{priorLocked && <span className="text-xs text-muted-foreground">{t(language, "comparisons.previousStudyLocked")}</span>}</label><label className="grid gap-1 text-sm">{t(language, "comparisons.assignReportingDoctor")}<select disabled={doctors.isLoading} value={doctorId ?? ""} onChange={(event) => setDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded border px-2"><option value="">{t(language, "comparisons.unassignedReportingPool")}</option>{(doctors.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></label></>}</DialogContent><DialogFooter><Button type="button" variant="secondary" onClick={onClose}>Cancel</Button><Button type="button" disabled={!reason.trim() || mutation.isPending} onClick={() => mutation.mutate()}>{t(language, "comparisons.saveChanges")}</Button></DialogFooter></Dialog>;
 }
 
 function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: ComparisonRequest; canConfirm: boolean; canCancel: boolean; canEdit: boolean; manager: boolean }) {
