@@ -206,6 +206,7 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
       {row.status === "pending_upload_confirmation" ? <p className="text-xs text-muted-foreground">{row.plannedReportingDoctorName ? `Target doctor: ${row.plannedReportingDoctorName} - assignment activates after preparation` : "Reporting destination: Unassigned reporting pool"}</p> : null}
       {row.preparationReturnReason ? <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900"><strong>Returned to preparation</strong>{row.preparationReturnedByName ? ` by ${row.preparationReturnedByName}` : ""}{row.preparationReturnedAt ? ` · ${formatDateTimeLy(row.preparationReturnedAt)}` : ""}: {row.preparationReturnReason}</p> : null}
       {row.finalizedAt ? <p className="text-xs text-emerald-700">{t(language, "comparisons.finalizedBy", { date: formatDateTimeLy(row.finalizedAt), name: row.finalizedByName || t(language, "comparisons.staff") })}</p> : null}
+      {row.status !== "pending_upload_confirmation" && row.materialsConfirmationNote ? <p className="text-xs text-muted-foreground"><strong>Preparation note:</strong> {row.materialsConfirmationNote}</p> : null}
       {row.status === "cancelled" ? <p className="rounded-md bg-red-50 p-2 text-xs text-red-800"><strong>{t(language, "comparisons.cancelled")}:</strong> {row.cancellationReason || t(language, "comparisons.noReason")}{row.cancelledAt ? ` · ${formatDateTimeLy(row.cancelledAt)}` : ""}</p> : null}
       {canConfirm ? <ConfirmationPanel row={row} /> : null}
       </div>

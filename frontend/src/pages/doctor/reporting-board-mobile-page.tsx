@@ -9,6 +9,7 @@ import {
   fetchReportingBoardMobileView,
   fetchRosterDoctors,
   reassignReportingBoardMobileCase,
+  returnComparisonToPreparation,
   reconcileReportingBoardAssignmentToSonicFinalizer,
   sendReportingBoardMobileTestPush,
   subscribeReportingBoardMobilePush,
@@ -201,6 +202,8 @@ export function ReportingBoardMobilePage() {
   const [reason, setReason] = useState("");
   const [unassignOpen, setUnassignOpen] = useState(false);
   const [unassignReason, setUnassignReason] = useState("");
+  const [returnPreparationOpen, setReturnPreparationOpen] = useState(false);
+  const [returnPreparationReason, setReturnPreparationReason] = useState("");
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
@@ -333,6 +336,18 @@ export function ReportingBoardMobilePage() {
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Return to waiting pool failed."),
   });
+  const returnPreparationMutation = useMutation({
+    mutationFn: () => returnComparisonToPreparation(selectedCase!.comparisonRequestId!, { reason: returnPreparationReason.trim() }),
+    onSuccess: async () => {
+      setMessage("Comparison returned to preparation.");
+      setSelectedCase(null);
+      setReturnPreparationOpen(false);
+      setReturnPreparationReason("");
+      await queryClient.invalidateQueries({ queryKey: ["comparison-requests"] });
+      await refreshLoadedPages();
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Could not return comparison to preparation."),
+  });
   const reconcileMutation = useMutation({
     mutationFn: () => reconcileReportingBoardAssignmentToSonicFinalizer(selectedCase!.appointmentId, {
       expectedAssignedDoctorId: selectedCase!.assignedDoctorId!,
@@ -448,6 +463,12 @@ export function ReportingBoardMobilePage() {
     : "Cases awaiting reports";
   const notificationsSupported = pushSupported() && window.Notification.permission !== "denied" && Boolean(pushConfigQuery.data?.enabled);
   const selectedFinalizer = selectedCase ? finalizerDisplay(selectedCase) : null;
+  const canReturnSelectedComparison = Boolean(
+    selectedCase?.caseType === "comparison" &&
+    ["ready_for_reporting", "assigned"].includes(selectedCase.appointmentStatus) &&
+    !data.allowedActions.readOnly &&
+    (data.allowedActions.accessLevel === "supervisor" || data.allowedActions.accessLevel === "admin" || selectedCase.assignedDoctorId === data.currentDoctorId)
+  );
 
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-3 text-slate-950">
@@ -594,6 +615,11 @@ export function ReportingBoardMobilePage() {
                           </button>
                         </>
                       )}
+                    </div>
+                  )}
+                  {canReturnSelectedComparison && (
+                    <div className="grid gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                      {!returnPreparationOpen ? <button type="button" onClick={() => setReturnPreparationOpen(true)} className="h-10 rounded-xl border border-amber-300 bg-white text-sm font-bold text-amber-800">Return to preparation</button> : <><textarea aria-label="Return reason" value={returnPreparationReason} onChange={(event) => setReturnPreparationReason(event.target.value)} className="min-h-20 rounded-xl border border-amber-200 bg-white p-2 text-sm" placeholder="Return reason" /><div className="flex gap-2"><button type="button" onClick={() => setReturnPreparationOpen(false)} className="h-10 flex-1 rounded-xl border border-amber-300 bg-white text-sm font-bold">Cancel</button><button type="button" disabled={!returnPreparationReason.trim() || returnPreparationMutation.isPending} onClick={() => returnPreparationMutation.mutate()} className="h-10 flex-1 rounded-xl bg-amber-700 text-sm font-bold text-white disabled:opacity-50">Return</button></div></>}
                     </div>
                   )}
                   {selectedCase.canReassign && (
