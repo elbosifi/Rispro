@@ -782,7 +782,14 @@ export async function confirmComparisonMaterials(
     else await audit(client, actor, "comparison_released_to_reporting_pool", updated, { linkedModalityId: updated.linkedModalityId }, null, actorProfile);
     if (skippedPlannedDoctorId) await audit(client, actor, "comparison_planned_assignment_skipped", updated, { doctorId: skippedPlannedDoctorId, reason: "doctor_no_longer_eligible" }, null, actorProfile);
     await client.query("commit");
-    if (activatedDoctorId) await createAssignedToMeNotifications({ doctorId: activatedDoctorId, comparisonRequestIds: [id] }).catch(() => undefined);
+    if (activatedDoctorId) await createAssignedToMeNotifications({ doctorId: activatedDoctorId, comparisonRequestIds: [id] }).catch((error) => {
+      console.warn(JSON.stringify({
+        type: "comparison_assigned_notification_failed",
+        comparisonRequestId: id,
+        doctorId: activatedDoctorId,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    });
     return updated;
   } catch (error) {
     await client.query("rollback");
