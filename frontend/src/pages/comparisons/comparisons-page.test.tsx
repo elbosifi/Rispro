@@ -216,7 +216,7 @@ describe("comparison preparation worklist behavior", () => {
     expect(release.disabled).toBe(true);
     for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
     expect(release.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("radio", { name: "Attached papers verified" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Papers attached and verified" }));
     expect(release.disabled).toBe(false);
     fireEvent.click(release);
     await waitFor(() => expect(apiMocks.confirm).toHaveBeenCalledWith(77, {
