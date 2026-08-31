@@ -15,8 +15,11 @@ import {
 import {
   cancelComparisonRequest,
   confirmComparisonMaterials,
+  fetchComparisonReportingDoctors,
+  fetchPreviousCompletedStudies,
   fetchComparisonRequest,
   fetchComparisonRequests,
+  updateComparisonRequest,
 } from "@/lib/api-hooks";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
@@ -146,9 +149,26 @@ function CancelComparisonDialog({ row, open, onClose }: { row: ComparisonRequest
   );
 }
 
-function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest; canConfirm: boolean; canCancel: boolean }) {
+function EditComparisonDialog({ row, manager, open, onClose }: { row: ComparisonRequest; manager: boolean; open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState(row.reason);
+  const [bookingId, setBookingId] = useState(row.linkedPreviousBookingId);
+  const [doctorId, setDoctorId] = useState<number | null>(row.plannedReportingDoctorId ?? null);
+  const studies = useQuery({ queryKey: ["comparison-previous-studies", row.patientId], queryFn: () => fetchPreviousCompletedStudies(row.patientId), enabled: open && manager });
+  const selectedStudy = (studies.data ?? []).find((study) => study.bookingId === bookingId);
+  const doctors = useQuery({ queryKey: ["comparison-reporting-doctors", selectedStudy?.modalityId], queryFn: () => fetchComparisonReportingDoctors(selectedStudy!.modalityId), enabled: open && manager && Boolean(selectedStudy) });
+  const priorLocked = row.documentCount > 0 || Boolean(row.remapJobId) || row.materialsConfirmed;
+  const mutation = useMutation({
+    mutationFn: () => updateComparisonRequest(row.id, { reason: reason.trim(), ...(manager ? { linkedPreviousBookingId: bookingId, plannedReportingDoctorId: doctorId } : {}) }),
+    onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }), queryClient.invalidateQueries({ queryKey: ["comparison-request", row.id] }), queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] })]); onClose(); },
+  });
+  return <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}><DialogContent><DialogHeader><DialogTitle>Edit request</DialogTitle><DialogDescription>Only pending comparison requests can be edited.</DialogDescription></DialogHeader><label className="grid gap-1 text-sm">Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-20 rounded border p-2" /></label>{manager && <><label className="grid gap-1 text-sm">Previous completed study<select disabled={priorLocked} value={bookingId} onChange={(event) => { setBookingId(Number(event.target.value)); setDoctorId(null); }} className="h-10 rounded border px-2">{(studies.data ?? []).map((study) => <option key={study.bookingId} value={study.bookingId}>{study.date} · {study.modalityCode} · {study.accessionNumber}</option>)}</select>{priorLocked && <span className="text-xs text-muted-foreground">Previous study cannot change after preparation evidence exists.</span>}</label><label className="grid gap-1 text-sm">Assign reporting doctor<select disabled={doctors.isLoading} value={doctorId ?? ""} onChange={(event) => setDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded border px-2"><option value="">Unassigned - send to reporting pool</option>{(doctors.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></label></>}</DialogContent><DialogFooter><Button type="button" variant="secondary" onClick={onClose}>Cancel</Button><Button type="button" disabled={!reason.trim() || mutation.isPending} onClick={() => mutation.mutate()}>Save changes</Button></DialogFooter></Dialog>;
+}
+
+function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: ComparisonRequest; canConfirm: boolean; canCancel: boolean; canEdit: boolean; manager: boolean }) {
   const { language } = useLanguage();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const image = imageReadiness(row, language);
   const canPrepare = row.status === "pending_upload_confirmation";
   const canCancelRequest = row.status !== "cancelled" && row.status !== "finalized";
@@ -175,6 +195,7 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
           <div>{t(language, "comparisons.created", { date: formatDateTimeLy(row.createdAt) })}</div>
           <div>{t(language, "comparisons.by", { name: row.createdByName || (row.createdBy ? `#${row.createdBy}` : "-") })}</div>
           <Link to={`/comparisons/${row.id}`} className="mt-2 inline-flex items-center gap-1 font-semibold text-accent"><ExternalLink size={13} />{t(language, "comparisons.openDetails")}</Link>
+          {canEdit && canPrepare ? <Button type="button" variant="ghost" size="sm" onClick={() => setEditOpen(true)}>Edit request</Button> : null}
         </div>
         </div>
       </header>
@@ -219,6 +240,7 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
         {canCancel && canCancelRequest ? <Button type="button" variant="ghost" className="text-red-700" onClick={() => setCancelOpen(true)}>{t(language, "comparisons.cancelRequest")}</Button> : null}
       </footer>
       <CancelComparisonDialog row={row} open={cancelOpen} onClose={() => setCancelOpen(false)} />
+      <EditComparisonDialog row={row} manager={manager} open={editOpen} onClose={() => setEditOpen(false)} />
     </article>
   );
 }
@@ -232,6 +254,7 @@ export default function ComparisonsPage() {
   const [search, setSearch] = useState("");
   const canConfirm = Boolean(user && CONFIRM_ROLES.has(user.role));
   const canCancel = Boolean(user && CANCEL_ROLES.has(user.role));
+  const manager = Boolean(user && ["supervisor", "super_admin"].includes(user.role));
   const selectedId = id ? Number(id) : null;
   const listQuery = useQuery({ queryKey: ["comparison-requests", status, search], queryFn: () => fetchComparisonRequests({ status, q: search || null }), enabled: !selectedId });
   const detailQuery = useQuery({ queryKey: ["comparison-request", selectedId], queryFn: () => fetchComparisonRequest(selectedId!), enabled: Boolean(selectedId), refetchInterval: (query) => {
@@ -257,7 +280,7 @@ export default function ComparisonsPage() {
           </form>
         </div>
       ) : null}
-      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} />)}</div></div>}
+      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} manager={manager} canEdit={Boolean(user && (manager || row.createdBy === user.id))} />)}</div></div>}
     </main>
   );
 }
