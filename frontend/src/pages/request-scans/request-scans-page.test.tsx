@@ -97,8 +97,13 @@ describe("RequestScansPage", () => {
     mock([unassignedFailure]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    const search = await screen.findByLabelText("Selected RIS appointment");
+    const search = await screen.findByLabelText("Find RIS appointment");
     expect((search as HTMLInputElement).value).toBe("V2-003838");
+    const preview = screen.getByTitle("Scanned request preview");
+    expect(preview.getAttribute("src")).toBe("/api/request-scans/22/file");
+    expect(screen.getByRole("link", { name: "Open full size" }).getAttribute("href")).toBe("/api/request-scans/22/file");
+    expect(screen.getByRole("heading", { name: "Search results" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Selected appointment" }).textContent).toContain("No appointment selected");
     expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -115,6 +120,9 @@ describe("RequestScansPage", () => {
     expect(screen.queryByText("Outside the selected modality; cannot be assigned here.")).toBeTruthy();
     expect((screen.getByText("V2-000013").closest("button") as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(valid);
+    const selectedAppointment = screen.getByRole("region", { name: "Selected appointment" });
+    expect(selectedAppointment.textContent).toContain("V2-000012");
+    expect(selectedAppointment.textContent).toContain("Selected Patient");
     const attach = screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement;
     expect(attach.disabled).toBe(true);
     fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
@@ -128,7 +136,7 @@ describe("RequestScansPage", () => {
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss scan" }));
-    expect(screen.queryByLabelText("Selected RIS appointment")).toBeNull();
+    expect(screen.queryByLabelText("Find RIS appointment")).toBeNull();
     expect(await screen.findByText("Dismiss failed Request Scan")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/22/dismiss?workflowSource=modality&modalityId=7"))).toBe(true));
@@ -604,8 +612,8 @@ describe("RequestScansPage", () => {
     const fetchMock = mock([{ ...archiveFailure, document_id: null, attachment_completed_at: null, appointment_id: null }]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    expect(await screen.findByText("Detected/scanned information")).toBeTruthy();
-    expect(screen.getByText("Selected RIS appointment")).toBeTruthy();
+    expect(await screen.findByText("Scanned request")).toBeTruthy();
+    expect(screen.getByLabelText("Find RIS appointment")).toBeTruthy();
     const comboboxes = screen.getAllByRole("combobox");
     expect(await screen.findByRole("option", { name: /V2-000012/ })).toBeTruthy();
     fireEvent.change(comboboxes[1], { target: { value: "12" } });
