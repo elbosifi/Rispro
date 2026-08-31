@@ -16,7 +16,7 @@
     "migrate": "tsx src/db/migrate.ts",
     "seed:supervisor": "tsx src/db/seed-supervisor.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "typecheck:frontend": "cd frontend && npx tsc --noEmit",
+    "typecheck:frontend": "cd frontend && npx tsc --noEmit -p tsconfig.app.json && npx tsc --noEmit -p tsconfig.node.json",
     "build:frontend": "cd frontend && npm run build",
     "db:test:up": "node scripts/db-test-container.js up",
     "db:test:down": "node scripts/db-test-container.js down",
