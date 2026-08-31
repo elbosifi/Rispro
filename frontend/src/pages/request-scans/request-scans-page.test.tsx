@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const authState = vi.hoisted(() => ({ role: "super_admin" as string }));
@@ -66,6 +66,7 @@ async function openMenu(filename = "request.pdf") {
   return screen.findByRole("menu", { name: `Actions for ${filename}` });
 }
 
+beforeEach(() => vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:request-scan-default"), revokeObjectURL: vi.fn() }));
 afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
@@ -94,18 +95,40 @@ describe("RequestScansPage", () => {
   });
 
   it("prefills one filename accession without selecting an appointment", async () => {
-    mock([unassignedFailure]);
+    const createObjectURL = vi.fn(() => "blob:request-scan-22");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const fetchMock = mock([unassignedFailure]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
     const search = await screen.findByLabelText("Find RIS appointment");
     expect((search as HTMLInputElement).value).toBe("V2-003838");
-    const preview = screen.getByTitle("Scanned request preview");
-    expect(preview.getAttribute("src")).toBe("/api/request-scans/22/file");
+    const preview = await screen.findByTitle("Scanned request preview");
+    const fileCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/request-scans/22/file"));
+    expect(fileCall?.[0]).toBe("/api/request-scans/22/file");
+    expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(preview.getAttribute("src")).toBe("blob:request-scan-22");
     expect(screen.getByRole("link", { name: "Open full size" }).getAttribute("href")).toBe("/api/request-scans/22/file");
     expect(screen.getByRole("heading", { name: "Search results" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Selected appointment" }).textContent).toContain("No appointment selected");
     expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:request-scan-22");
+  });
+
+  it("renders an image assignment with the same authenticated Blob preview pipeline", async () => {
+    const createObjectURL = vi.fn(() => "blob:request-scan-23");
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
+    const fetchMock = mock([{ ...unassignedFailure, id: 23, filename: "request.jpg" }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    const image = await screen.findByAltText("request.jpg");
+    const fileCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/request-scans/23/file"));
+    expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(image.getAttribute("src")).toBe("blob:request-scan-23");
   });
 
   it("matches the selected numeric modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
@@ -124,6 +147,8 @@ describe("RequestScansPage", () => {
     expect(selectedAppointment.textContent).toContain("V2-000012");
     expect(selectedAppointment.textContent).toContain("Selected Patient");
     const attach = screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement;
+    expect(screen.getByText("This document will become part of the selected patient’s medical record.")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /I verified the patient identity/ })).toBeTruthy();
     expect(attach.disabled).toBe(true);
     fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
     expect(attach.disabled).toBe(false);
