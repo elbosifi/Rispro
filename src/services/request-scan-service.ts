@@ -594,7 +594,6 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         identifierStrategy = filenameEvidence.decision.strategy;
         await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
       } else {
-      {
       const initialCode = filenameEvidence.accessionCandidateCount + filenameEvidence.qrCandidateCount === 0
         ? "IDENTIFIER_FILENAME_NOT_FOUND"
         : filenameEvidence.invalidCandidateCount > 0
@@ -625,9 +624,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
           throw new HttpError(422, "Multiple different appointment barcodes were detected. Assign the document manually.");
         }
         if (barcode.reason === "no_barcode" || barcode.reason === "no_valid_accession") {
-          throw new HttpError(422, filenameEvidence.decision.kind === "success"
-            ? "The filename identifies an appointment, but no matching identifier could be confirmed inside the document. Review and assign the document manually."
-            : "No valid appointment identifier could be confirmed. Assign the document manually.");
+          throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
         }
         throw new HttpError(422, requestScanBarcodeErrorMessage(barcode.reason));
       }
@@ -682,9 +679,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
 
       const documentAppointmentIds = [...documentAppointments.keys()];
       if (documentAppointmentIds.length === 0) {
-        throw new HttpError(422, filenameEvidence.decision.kind === "success"
-          ? "The filename identifies an appointment, but no matching identifier could be confirmed inside the document. Review and assign the document manually."
-          : "No valid appointment identifier could be confirmed. Assign the document manually.");
+        throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
       }
       if (unresolvedInternalCount) throw new HttpError(422, "The document contains an appointment identifier that could not be resolved. Review and assign the document manually.");
       const documentPatients = new Set([...documentAppointments.values()].map((value) => Number(value.patient_id)));
@@ -701,7 +696,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         documentQrCandidateCount: barcode.qrTokens?.length ?? 0,
       });
 
-      const verifiedFilenameAppointmentId = filenameEvidence.decision.kind === "success" || filenameEvidence.decision.kind === "partial"
+      const verifiedFilenameAppointmentId = filenameEvidence.decision.kind === "partial"
         ? filenameEvidence.decision.appointmentId
         : null;
       if (verifiedFilenameAppointmentId != null && !documentAppointments.has(verifiedFilenameAppointmentId)) {
@@ -725,7 +720,6 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFIRMATION", {
           ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, true),
         });
-      }
       }
       }
     }
