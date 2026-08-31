@@ -69,11 +69,14 @@ function ConfirmationPanel({ row }: { row: ComparisonRequest }) {
       selectedPriorConfirmed,
       materialsConfirmationNote: materialsConfirmationNote.trim() || null,
     }),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: ["comparison-requests"] });
       void queryClient.invalidateQueries({ queryKey: ["comparison-request", row.id] });
-      void queryClient.invalidateQueries({ queryKey: ["reporting-board-cases"] });
-      pushToast({ type: "success", title: "Comparison released", message: "Request is ready for reporting." });
+      void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
+      void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] });
+      if (updated.status === "assigned") pushToast({ type: "success", title: "Comparison released", message: `Comparison assigned to ${updated.assignedDoctorName ?? "the selected doctor"}.` });
+      else if (row.plannedReportingDoctorId && updated.assignedDoctorId == null) pushToast({ type: "warning", title: "Comparison released", message: "Comparison released to the reporting pool because the selected doctor is no longer eligible." });
+      else pushToast({ type: "success", title: "Comparison released", message: "Comparison released to the reporting pool." });
     },
     onError: (error) => pushToast({
       type: "error",

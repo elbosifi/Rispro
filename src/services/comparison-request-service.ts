@@ -767,13 +767,13 @@ export async function confirmComparisonMaterials(
           selected_prior_confirmed = true,
           documents_disposition = $5,
           assigned_doctor_id = $4,
-          planned_reporting_doctor_id = case when $6::boolean then null else planned_reporting_doctor_id end,
-          planned_reporting_doctor_set_by = case when $6::boolean then null else planned_reporting_doctor_set_by end,
-          planned_reporting_doctor_set_at = case when $6::boolean then null else planned_reporting_doctor_set_at end,
+          planned_reporting_doctor_id = null,
+          planned_reporting_doctor_set_by = null,
+          planned_reporting_doctor_set_at = null,
           updated_at = now()
         where id = $1
       `,
-      [id, actor.userId, note, activatedDoctorId, documentsDisposition, Boolean(skippedPlannedDoctorId)]
+      [id, actor.userId, note, activatedDoctorId, documentsDisposition]
     );
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
@@ -782,7 +782,7 @@ export async function confirmComparisonMaterials(
     else await audit(client, actor, "comparison_released_to_reporting_pool", updated, { linkedModalityId: updated.linkedModalityId }, null, actorProfile);
     if (skippedPlannedDoctorId) await audit(client, actor, "comparison_planned_assignment_skipped", updated, { doctorId: skippedPlannedDoctorId, reason: "doctor_no_longer_eligible" }, null, actorProfile);
     await client.query("commit");
-    if (activatedDoctorId) await createAssignedToMeNotifications({ doctorId: activatedDoctorId, comparisonRequestIds: [id] });
+    if (activatedDoctorId) await createAssignedToMeNotifications({ doctorId: activatedDoctorId, comparisonRequestIds: [id] }).catch(() => undefined);
     return updated;
   } catch (error) {
     await client.query("rollback");
@@ -860,7 +860,7 @@ export async function returnComparisonToPreparation(actor: ComparisonActor, idIn
     const assignedDoctor = actor.appRole === "doctor" && profile?.canFinalizeReports === true && activeAssignment?.doctorId === profile.id;
     if (!supervisor && !assignedDoctor) throw new HttpError(403, "You are not allowed to return this comparison to preparation.");
     if (activeAssignment) await client.query(`update doctor_portal.comparison_case_assignments set status='cancelled', updated_at=now() where id=$1`, [activeAssignment.id]);
-    await client.query(`update comparison_requests set status='pending_upload_confirmation', assigned_doctor_id=null, planned_reporting_doctor_id=coalesce($2, planned_reporting_doctor_id), planned_reporting_doctor_set_by=case when $2 is null then planned_reporting_doctor_set_by else planned_reporting_doctor_set_by end, materials_confirmed=false, materials_confirmed_by=null, materials_confirmed_at=null, materials_confirmation_note=null, image_availability_confirmed=false, documents_availability_confirmed=false, selected_prior_confirmed=false, documents_disposition=null, preparation_returned_by=$3, preparation_returned_at=now(), preparation_return_reason=$4, updated_at=now() where id=$1`, [id, activeAssignment?.doctorId ?? null, actor.userId, reason]);
+    await client.query(`update comparison_requests set status='pending_upload_confirmation', assigned_doctor_id=null, planned_reporting_doctor_id=$2, planned_reporting_doctor_set_by=case when $2 is null then null else $3 end, planned_reporting_doctor_set_at=case when $2 is null then null else now() end, materials_confirmed=false, materials_confirmed_by=null, materials_confirmed_at=null, materials_confirmation_note=null, image_availability_confirmed=false, documents_availability_confirmed=false, selected_prior_confirmed=false, documents_disposition=null, preparation_returned_by=$3, preparation_returned_at=now(), preparation_return_reason=$4, updated_at=now() where id=$1`, [id, activeAssignment?.doctorId ?? null, actor.userId, reason]);
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
     await audit(client, actor, "comparison_returned_to_preparation", updated, { previousStatus: request.status, previousAssignedDoctorId: activeAssignment?.doctorId ?? null, previousMaterialsConfirmationNote: request.materialsConfirmationNote, returnReason: reason }, reason, profile);
@@ -979,7 +979,7 @@ export async function unassignComparisonRequest(
       [assignmentId]
     );
     await client.query(
-      `update comparison_requests set status = 'ready_for_reporting', assigned_doctor_id = null, updated_at = now() where id = $1`,
+      `update comparison_requests set status = 'ready_for_reporting', assigned_doctor_id = null, planned_reporting_doctor_id = null, planned_reporting_doctor_set_by = null, planned_reporting_doctor_set_at = null, updated_at = now() where id = $1`,
       [id]
     );
     const updated = await findComparisonRequestById(id, client);

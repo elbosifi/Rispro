@@ -98,7 +98,7 @@ export function RequestComparisonModal({
                             type="radio"
                             name="comparison-study"
                             checked={selectedBookingId === study.bookingId}
-                            onChange={() => setSelectedBookingId(study.bookingId)}
+                            onChange={() => { setSelectedBookingId(study.bookingId); setPlannedReportingDoctorId(null); }}
                             className="mt-1"
                           />
                           <span>
@@ -127,7 +127,7 @@ export function RequestComparisonModal({
           {canPlanDoctor && selectedStudy ? (
             <label className="grid gap-1 text-sm">
               <span className="font-medium">Assign reporting doctor</span>
-              <select aria-label="Assign reporting doctor" value={plannedReportingDoctorId ?? ""} onChange={(event) => setPlannedReportingDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded-lg border border-border bg-background px-3">
+              <select aria-label="Assign reporting doctor" disabled={doctorsQuery.isLoading} value={plannedReportingDoctorId ?? ""} onChange={(event) => setPlannedReportingDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded-lg border border-border bg-background px-3">
                 <option value="">Unassigned - send to reporting pool</option>
                 {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
               </select>
