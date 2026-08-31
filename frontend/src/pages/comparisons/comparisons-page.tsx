@@ -120,7 +120,8 @@ function CancelComparisonDialog({ row, open, onClose }: { row: ComparisonRequest
       onClose();
       void queryClient.invalidateQueries({ queryKey: ["comparison-requests"] });
       void queryClient.invalidateQueries({ queryKey: ["comparison-request", row.id] });
-      void queryClient.invalidateQueries({ queryKey: ["reporting-board-cases"] });
+      void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
+      void queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] });
       pushToast({ type: "success", title: "Comparison request cancelled", message: "The cancellation was recorded for audit." });
     },
     onError: (error) => pushToast({ type: "error", title: "Cancellation failed", message: error instanceof Error ? error.message : "Unable to cancel the comparison request." }),
