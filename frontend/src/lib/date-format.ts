@@ -18,6 +18,24 @@ const displayDateTimeFormatter = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
   hour12: false
 });
 
+function tripoliDateTimeParts(date: Date): Record<string, string> {
+  return Object.fromEntries(new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: TRIPOLI_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+
+function tripoliOffsetMs(utcMs: number): number {
+  const parts = tripoliDateTimeParts(new Date(utcMs));
+  return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second)) - utcMs;
+}
+
 export const DATE_INPUT_LANG = "en-GB";
 
 function extractIsoDate(value: unknown): string {
@@ -87,6 +105,27 @@ export function formatDateTimeLy(value: unknown): string {
   const date = toDateOrNull(value);
   if (!date) return "—";
   return displayDateTimeFormatter.format(date);
+}
+
+export function tripoliDateTimeLocalToIso(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(raw);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  const localAsUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  const localDate = new Date(localAsUtc);
+  if (localDate.getUTCFullYear() !== Number(year) || localDate.getUTCMonth() !== Number(month) - 1 || localDate.getUTCDate() !== Number(day) || localDate.getUTCHours() !== Number(hour) || localDate.getUTCMinutes() !== Number(minute)) return null;
+  const firstPass = localAsUtc - tripoliOffsetMs(localAsUtc);
+  return new Date(localAsUtc - tripoliOffsetMs(firstPass)).toISOString();
+}
+
+export function isoToTripoliDateTimeLocal(value: string | null | undefined): string {
+  if (!value?.trim()) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = tripoliDateTimeParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 export function todayIsoDateLy(): string {

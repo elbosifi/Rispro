@@ -31,7 +31,7 @@ const recall: ComplementaryRecall = {
   reasonCode: "missing_sequence_phase",
   qaClassification: "acquisition_error",
   urgency: "within_24_hours",
-  dueAt: "2039-06-16T08:00:00.000Z",
+  dueAt: "2026-09-01T08:00:00.000Z",
   reportingDisposition: "separate_report",
   status: "pending_scheduling",
   requestedByUserId: 2,
@@ -84,6 +84,7 @@ describe("Recall Requests metadata", () => {
     expect((screen.getByLabelText("QA classification") as HTMLSelectElement).value).toBe("acquisition_error");
     expect((screen.getByLabelText("Urgency") as HTMLSelectElement).value).toBe("within_24_hours");
     expect((screen.getByLabelText("Reporting disposition") as HTMLSelectElement).value).toBe("separate_report");
+    expect((screen.getByLabelText("Due date/time") as HTMLInputElement).value).toBe("2026-09-01T10:00");
 
     await userEvent.selectOptions(screen.getByLabelText("Recall reason"), "incorrect_protocol");
     await userEvent.selectOptions(screen.getByLabelText("QA classification"), "protocol_error");
@@ -97,7 +98,7 @@ describe("Recall Requests metadata", () => {
       reasonCode: "incorrect_protocol",
       qaClassification: "protocol_error",
       urgency: "same_day",
-      dueAt: "2039-06-16T08:00",
+      dueAt: "2026-09-01T08:00:00.000Z",
       reportingDisposition: "no_separate_report",
     })));
   });

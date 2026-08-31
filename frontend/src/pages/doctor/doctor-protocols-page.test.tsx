@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render as renderTestingLibrary, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as renderTestingLibrary, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -155,6 +155,7 @@ describe("Doctor protocoling request documents", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Recall reason"), "missing_sequence_phase");
     await userEvent.selectOptions(screen.getByLabelText("QA classification"), "acquisition_error");
+    fireEvent.change(screen.getByLabelText("Due date/time"), { target: { value: "2026-09-01T10:00" } });
     await userEvent.type(screen.getByRole("textbox", { name: "Technologist instruction" }), "Repeat the delayed phase");
     await userEvent.click(screen.getAllByRole("button", { name: "Request additional imaging" })[1]!);
 
@@ -164,7 +165,7 @@ describe("Doctor protocoling request documents", () => {
       reasonCode: "missing_sequence_phase",
       qaClassification: "acquisition_error",
       urgency: "routine",
-      dueAt: null,
+      dueAt: "2026-09-01T08:00:00.000Z",
       reportingDisposition: "supplement_original_report",
     }));
   });
