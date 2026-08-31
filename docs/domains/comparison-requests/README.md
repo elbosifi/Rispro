@@ -20,7 +20,10 @@ Comparison requests track doctor-requested comparison-study work that is separat
 - Browser scanning reuses the configured NAPS2 WebScan path and uploads the resulting PDF through the same canonical document service.
 - DICOM preparation launches the existing PACS Remap page in a comparison-scoped context. The backend locks replacement identity to the comparison request's patient and stores the nullable `dicom_remap_jobs.comparison_request_id` relationship.
 - The latest linked remap job is authoritative for image readiness. Only `sent` is displayed as PACS-ready; queued, staging, processing, sending, awaiting-confirmation, and failed states remain distinct.
-- Remap success does not release a request. The existing explicit three-part material confirmation remains the transition to `ready_for_reporting`.
+- Receptionists, modality staff, and reporting staff participate in preparation. Paper confirmation is explicit: `attached_verified` requires a paper, while `not_required` requires none.
+- A supervisor may plan a reporting doctor during creation or pending editing. The plan activates only after material release and then clears; explicit manager unassignment also clears any plan.
+- An assigned comparison can return to preparation, preserving its assigned doctor as the new plan for re-release. A ready/unassigned return has no planned doctor.
+- Remap success does not release a request. The explicit material confirmation remains the transition to reporting.
 - Cancellation is an audited status transition for supervisors and super-admins. Finalized and already-cancelled requests cannot be cancelled.
 
 ## Current Known Risks

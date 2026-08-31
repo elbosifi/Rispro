@@ -2615,7 +2615,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                           <RowActionMenu
                             row={row}
                             canManage={canManage}
-                            canReturnToPreparation={canManage || (row.caseType === "comparison" && row.assignedDoctorId === me.profile?.id)}
+                            canReturnToPreparation={row.caseType === "comparison" && ["ready_for_reporting", "assigned"].includes(row.appointmentStatus) && (canManage || row.assignedDoctorId === me.profile?.id)}
                             ohifAvailability={ohifAvailabilityQuery.data ?? null}
                             onSelectForReassignment={(targetRow) => setSelectedCaseKeys((current) => current.includes(targetRow.caseKey) ? current : [...current, targetRow.caseKey])}
                             onFinalize={async (targetRow, finalText) => {
