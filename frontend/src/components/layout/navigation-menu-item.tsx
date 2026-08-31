@@ -8,6 +8,7 @@ interface NavigationMenuItemProps {
   showTooltip?: boolean;
   animationDelayMs?: number;
   attentionPulse?: boolean;
+  eventFlash?: "success" | "attention" | null;
   trailing?: ReactNode;
   onClick: () => void;
 }
@@ -20,24 +21,26 @@ export function NavigationMenuItem({
   showTooltip = true,
   animationDelayMs,
   attentionPulse = false,
+  eventFlash = null,
   trailing,
   onClick,
 }: NavigationMenuItemProps) {
   const buttonStyle: CSSProperties = {
-    backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : attentionPulse ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
+    backgroundColor: eventFlash === "success" ? "color-mix(in srgb, #059669 18%, transparent)" : eventFlash === "attention" ? "color-mix(in srgb, #dc2626 18%, transparent)" : active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : attentionPulse ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
     color: active ? "var(--accent)" : "var(--foreground)",
-    border: active ? "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))" : "1px solid transparent",
-    boxShadow: active || attentionPulse ? "var(--shadow-sm)" : "none",
+    border: eventFlash === "success" ? "1px solid color-mix(in srgb, #059669 50%, var(--border))" : eventFlash === "attention" ? "1px solid color-mix(in srgb, #dc2626 50%, var(--border))" : active ? "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))" : "1px solid transparent",
+    boxShadow: active || attentionPulse || eventFlash ? "var(--shadow-sm)" : "none",
     animationDelay: animationDelayMs == null ? undefined : `${animationDelayMs}ms`,
   };
 
   return (
     <button
       type="button"
-      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors duration-150 ${attentionPulse ? "animate-pulse" : ""} ${collapsed ? "justify-center px-2" : ""}`}
+      className={`nav-item-reveal group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors duration-150 ${attentionPulse ? "animate-pulse" : ""} ${eventFlash ? "motion-safe:animate-pulse" : ""} ${collapsed ? "justify-center px-2" : ""}`}
       style={buttonStyle}
       data-active={active ? "true" : "false"}
       data-attention-pulse={attentionPulse ? "true" : "false"}
+      data-event-flash={eventFlash ?? undefined}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
       aria-label={label}

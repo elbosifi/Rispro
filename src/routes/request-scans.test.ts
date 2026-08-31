@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { assertRequestScanJobScope, buildInlineContentDisposition, buildModalityEligibleAppointmentsQuery, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, requestScanScope, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
+import { assertRequestScanJobScope, buildInlineContentDisposition, buildModalityEligibleAppointmentsQuery, getRequestScanReceptionSummary, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, requestScanScope, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
 import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
 test("Request Scan file response is private and inline for PDF and JPEG previews", () => {
@@ -104,6 +104,31 @@ test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker 
   assert.match(query, /status = 'duplicate'.*Africa\/Tripoli/s);
   assert.match(query, /archive_pending/);
   assert.doesNotMatch(query, /limit 250/i);
+});
+
+test("Request Scan reception summary uses one Reception-scoped aggregate and maps its timestamps", async () => {
+  let query = "";
+  const summary = await getRequestScanReceptionSummary({
+    query: async (text) => {
+      query = text;
+      return { rows: [{ needs_attention_count: "6", latest_processed_at: "2026-08-30T08:15:00.000Z", latest_failed_at: "2026-08-30T08:20:00.000Z" }] };
+    },
+  });
+
+  assert.deepEqual(summary, { needsAttentionCount: 6, latestProcessedAt: "2026-08-30T08:15:00.000Z", latestFailedAt: "2026-08-30T08:20:00.000Z" });
+  assert.match(query, /count\(\*\) filter \(where status = 'failed' and dismissed_at is null\)/);
+  assert.match(query, /max\(completed_at\) filter \(where status = 'processed'\)/);
+  assert.match(query, /max\(completed_at\) filter \(where status = 'failed' and dismissed_at is null\)/);
+  assert.match(query, /where workflow_source = 'reception'/);
+});
+
+test("Request Scan reception summary preserves null timestamps", async () => {
+  const summary = await getRequestScanReceptionSummary({ query: async () => ({ rows: [{ needs_attention_count: 0, latest_processed_at: null, latest_failed_at: null }] }) });
+  assert.deepEqual(summary, { needsAttentionCount: 0, latestProcessedAt: null, latestFailedAt: null });
+});
+
+test("Request Scan reception summary propagates aggregate query failures", async () => {
+  await assert.rejects(() => getRequestScanReceptionSummary({ query: async () => { throw new Error("database unavailable"); } }), /database unavailable/);
 });
 
 test("Request Scan status propagates aggregate query failures to the standard route error handler", async () => {

@@ -61,6 +61,14 @@ export function sendRequestScanFileResponse(res: Response, job: Pick<RequestScan
 type RequestScanStatusCounts = { pending: number; processing: number; processed_today: number; duplicates_today: number; failed: number; dismissed?: number; archive_pending?: number; archive_last_attempt?: string | null; archive_last_success?: string | null; archive_last_error?: string | null; archive_next_retry?: string | null };
 type RequestScanStatusDependencies = { readSettings: typeof readRequestScanSettings; readRuntime?: typeof readRequestScanWorkerRuntime; query: (text: string, values?: unknown[]) => Promise<{ rows: RequestScanStatusCounts[] }> };
 const requestScanStatusDependencies: RequestScanStatusDependencies = { readSettings: readRequestScanSettings, readRuntime: readRequestScanWorkerRuntime, query: (text, values) => pool.query<RequestScanStatusCounts>(text, values) };
+type RequestScanReceptionSummaryRow = { needs_attention_count: number | string; latest_processed_at: string | null; latest_failed_at: string | null };
+type RequestScanReceptionSummaryDependencies = { query: (text: string) => Promise<{ rows: RequestScanReceptionSummaryRow[] }> };
+const requestScanReceptionSummaryDependencies: RequestScanReceptionSummaryDependencies = { query: (text) => pool.query<RequestScanReceptionSummaryRow>(text) };
+export async function getRequestScanReceptionSummary(dependencies: RequestScanReceptionSummaryDependencies = requestScanReceptionSummaryDependencies) {
+  const { rows } = await dependencies.query(`select count(*) filter (where status = 'failed' and dismissed_at is null)::int as needs_attention_count, max(completed_at) filter (where status = 'processed') as latest_processed_at, max(completed_at) filter (where status = 'failed' and dismissed_at is null) as latest_failed_at from request_scan_jobs where workflow_source = 'reception'`);
+  const summary = rows[0] ?? { needs_attention_count: 0, latest_processed_at: null, latest_failed_at: null };
+  return { needsAttentionCount: Number(summary.needs_attention_count), latestProcessedAt: summary.latest_processed_at, latestFailedAt: summary.latest_failed_at };
+}
 export async function getRequestScanStatus(now = new Date(), dependencies: RequestScanStatusDependencies = requestScanStatusDependencies) {
   const [settings, countResult, runtime] = await Promise.all([
     dependencies.readSettings(),
@@ -104,6 +112,7 @@ export async function queueRequestScanRetry(id: number, dependencies: RequestSca
 
 requestScansRouter.get("/", asyncRoute(async (req: Request, res: Response) => { const scope = requestScanScope(req); res.json({ jobs: (await listRequestScanJobs(req.query.status, req.query.category, scope.workflowSource, scope.modalityId)).map(withSafeRequestScanFilename) }); }));
 requestScansRouter.get("/status", asyncRoute(async (req: Request, res: Response) => { const scope = requestScanScope(req); res.json({ ...(await getScopedRequestScanStatus(scope)), canRetryArchives: ["supervisor", "super_admin"].includes(req.user!.role), devResetEnabled: isRequestScanDevResetEnabled() && req.user!.role === "super_admin" }); }));
+requestScansRouter.get("/reception-summary", asyncRoute(async (req: Request, res: Response) => { const scope = requestScanScope(req); if (scope.workflowSource !== "reception") throw new HttpError(403, "This summary is available only for Reception ingestion."); res.json(await getRequestScanReceptionSummary()); }));
 requestScansRouter.get("/dev-reset/preview", requireAnyRole(["super_admin"]), asyncRoute(async (_req: Request, res: Response) => { res.json(await previewRequestScanDevReset()); }));
 export function buildModalityEligibleAppointmentsQuery(qInput: unknown, now = new Date()) {
   const q = String(qInput || "").trim();

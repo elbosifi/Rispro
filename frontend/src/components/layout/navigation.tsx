@@ -10,7 +10,7 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
-import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallReceptionSummary } from "@/lib/api-hooks";
+import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallReceptionSummary, fetchRequestScanReceptionSummary } from "@/lib/api-hooks";
 import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
@@ -192,9 +192,47 @@ function NavButton({
   onClick: () => void;
 }) {
   const { data: recallSummary } = useQuery({ queryKey: ["complementary-recalls", "reception-summary"], queryFn: fetchComplementaryRecallReceptionSummary, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
+  const { data: requestScanSummary } = useQuery({ queryKey: ["request-scans", "reception-summary"], queryFn: fetchRequestScanReceptionSummary, enabled: item.route === "request.scans", refetchInterval: 15_000, staleTime: 10_000, refetchIntervalInBackground: false, retry: false });
+  const requestScanWatermarks = useRef<{ processed: number | null; failed: number | null } | null>(null);
+  const requestScanFlashTimer = useRef<number | null>(null);
+  const [requestScanEventFlash, setRequestScanEventFlash] = useState<"success" | "attention" | null>(null);
   const attentionPulse = (recallSummary?.unseenPendingCount ?? 0) > 0;
   const countLabel = language === "ar" ? `${recallSummary?.pendingCount ?? 0} طلبات تصوير إضافي بحاجة إلى حجز` : `${recallSummary?.pendingCount ?? 0} additional imaging requests need booking`;
   const newLabel = language === "ar" ? "طلب تصوير إضافي جديد" : "New additional imaging request";
+  const requestScanCountLabel = `${label}: ${requestScanSummary?.needsAttentionCount ?? 0}`;
+
+  useEffect(() => {
+    if (!requestScanSummary) return;
+    const toTimestamp = (value: string | null) => {
+      const timestamp = Date.parse(value ?? "");
+      return Number.isNaN(timestamp) ? null : timestamp;
+    };
+    const next = { processed: toTimestamp(requestScanSummary.latestProcessedAt), failed: toTimestamp(requestScanSummary.latestFailedAt) };
+    const highWatermarks = requestScanWatermarks.current;
+    if (!highWatermarks) {
+      requestScanWatermarks.current = next;
+      return;
+    }
+    const newerFailed = next.failed != null && (highWatermarks.failed == null || next.failed > highWatermarks.failed);
+    const newerProcessed = next.processed != null && (highWatermarks.processed == null || next.processed > highWatermarks.processed);
+    requestScanWatermarks.current = {
+      processed: next.processed != null && (highWatermarks.processed == null || next.processed > highWatermarks.processed) ? next.processed : highWatermarks.processed,
+      failed: next.failed != null && (highWatermarks.failed == null || next.failed > highWatermarks.failed) ? next.failed : highWatermarks.failed,
+    };
+    const eventFlash = newerFailed ? "attention" : newerProcessed ? "success" : null;
+    if (!eventFlash) return;
+    setRequestScanEventFlash(eventFlash);
+    if (requestScanFlashTimer.current != null) window.clearTimeout(requestScanFlashTimer.current);
+    requestScanFlashTimer.current = window.setTimeout(() => {
+      setRequestScanEventFlash(null);
+      requestScanFlashTimer.current = null;
+    }, 2_500);
+  }, [requestScanSummary]);
+
+  useEffect(() => () => {
+    if (requestScanFlashTimer.current != null) window.clearTimeout(requestScanFlashTimer.current);
+  }, []);
+
   return (
     <NavigationMenuItem
       icon={<NavIconGlyph icon={item.icon} size={16} />}
@@ -204,7 +242,8 @@ function NavButton({
       showTooltip={showTooltip}
       animationDelayMs={index * 40}
       attentionPulse={item.route === "recall.requests" && attentionPulse}
-      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : null}
+      eventFlash={item.route === "request.scans" ? requestScanEventFlash : null}
+      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : item.route === "request.scans" && (requestScanSummary?.needsAttentionCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={requestScanCountLabel} title={requestScanCountLabel}>{requestScanSummary!.needsAttentionCount}</span> : null}
       onClick={onClick}
     />
   );

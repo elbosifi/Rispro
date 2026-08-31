@@ -43,6 +43,12 @@ vi.mock("lucide-react", () => {
 });
 
 const matrixState: { value: unknown } = { value: DEFAULT_PAGE_VISIBILITY_MATRIX };
+const recallSummaryState: { value: unknown } = { value: { pendingCount: 0, unseenPendingCount: 0 } };
+const requestScanSummaryState: { value: { needsAttentionCount: number; latestProcessedAt: string | null; latestFailedAt: string | null } | undefined } = { value: undefined };
+
+function requestScanSideNav() {
+  return <SideNav currentRoute="dashboard" user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }} language="en" isRtl={false} onNavigate={() => {}} />;
+}
 
 function mockPointerMode(fine: boolean) {
   const matchMedia = vi.fn(() => ({
@@ -62,7 +68,12 @@ vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual("@tanstack/react-query");
   return {
     ...actual,
-    useQuery: () => ({ data: matrixState.value }),
+    useQuery: (options: { queryKey?: unknown[]; enabled?: boolean }) => {
+      if (options.enabled === false) return { data: undefined };
+      if (options.queryKey?.[0] === "complementary-recalls" && options.queryKey[1] === "reception-summary") return { data: recallSummaryState.value };
+      if (options.queryKey?.[0] === "request-scans" && options.queryKey[1] === "reception-summary") return { data: requestScanSummaryState.value };
+      return { data: matrixState.value };
+    },
   };
 });
 
@@ -1007,6 +1018,112 @@ describe("Navigation governance", () => {
     expect(item.getAttribute("title")).toBe("PACS remap");
     expect(item.getAttribute("aria-current")).toBe("page");
     expect(screen.queryByText("Clinical workflow")).toBeNull();
+  });
+
+  it("renders the Request Scans needs-attention count as a red badge", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 6, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:20:00.000Z" };
+    render(requestScanSideNav());
+
+    const requestScans = screen.getByRole("button", { name: "Request Scans" });
+    const badge = requestScans.querySelector("span.rounded-full.bg-red-600");
+    expect(badge?.textContent).toBe("6");
+    expect(badge?.getAttribute("aria-label")).toBe("Request Scans: 6");
+  });
+
+  it("does not render a Request Scans badge when no jobs need attention", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 0, latestProcessedAt: null, latestFailedAt: null };
+    render(requestScanSideNav());
+
+    expect(screen.getByRole("button", { name: "Request Scans" }).querySelector("span.rounded-full.bg-red-600")).toBeNull();
+  });
+
+  it("establishes the initial Request Scans summary as a non-flashing baseline", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 3, latestProcessedAt: "2026-08-30T08:00:00.000Z", latestFailedAt: "2026-08-30T08:05:00.000Z" };
+    render(requestScanSideNav());
+
+    const requestScans = screen.getByRole("button", { name: "Request Scans" });
+    expect(requestScans.getAttribute("data-event-flash")).toBeNull();
+    expect(requestScans.querySelector("span.rounded-full.bg-red-600")?.textContent).toBe("3");
+  });
+
+  it("briefly flashes Request Scans green for a newly processed Reception scan", () => {
+    vi.useFakeTimers();
+    try {
+      matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+      recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+      requestScanSummaryState.value = { needsAttentionCount: 0, latestProcessedAt: "2026-08-30T08:00:00.000Z", latestFailedAt: null };
+      const { rerender } = render(requestScanSideNav());
+      requestScanSummaryState.value = { needsAttentionCount: 0, latestProcessedAt: "2026-08-30T08:10:00.000Z", latestFailedAt: null };
+      rerender(requestScanSideNav());
+
+      expect(screen.getByRole("button", { name: "Request Scans" }).getAttribute("data-event-flash")).toBe("success");
+      act(() => vi.advanceTimersByTime(2_500));
+      expect(screen.getByRole("button", { name: "Request Scans" }).getAttribute("data-event-flash")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("briefly flashes Request Scans red for a newly failed Reception scan and retains its badge", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 1, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:00:00.000Z" };
+    const { rerender } = render(requestScanSideNav());
+    requestScanSummaryState.value = { needsAttentionCount: 2, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:10:00.000Z" };
+    rerender(requestScanSideNav());
+
+    const requestScans = screen.getByRole("button", { name: "Request Scans" });
+    expect(requestScans.getAttribute("data-event-flash")).toBe("attention");
+    expect(requestScans.querySelector("span.rounded-full.bg-red-600")?.textContent).toBe("2");
+  });
+
+  it("detects a new failed Request Scan even when the needs-attention count is unchanged", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 4, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:00:00.000Z" };
+    const { rerender } = render(requestScanSideNav());
+    requestScanSummaryState.value = { needsAttentionCount: 4, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:10:00.000Z" };
+    rerender(requestScanSideNav());
+
+    expect(screen.getByRole("button", { name: "Request Scans" }).getAttribute("data-event-flash")).toBe("attention");
+  });
+
+  it("prioritizes a Request Scans red flash when processed and failed timestamps both advance", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 1, latestProcessedAt: "2026-08-30T08:00:00.000Z", latestFailedAt: "2026-08-30T08:00:00.000Z" };
+    const { rerender } = render(requestScanSideNav());
+    requestScanSummaryState.value = { needsAttentionCount: 2, latestProcessedAt: "2026-08-30T08:10:00.000Z", latestFailedAt: "2026-08-30T08:10:00.000Z" };
+    rerender(requestScanSideNav());
+
+    expect(screen.getByRole("button", { name: "Request Scans" }).getAttribute("data-event-flash")).toBe("attention");
+  });
+
+  it("keeps Additional Imaging navigation badges and attentionPulse available", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 2, unseenPendingCount: 1 };
+    requestScanSummaryState.value = undefined;
+    render(requestScanSideNav());
+
+    const additionalImaging = screen.getByRole("button", { name: "Additional Imaging Requests" });
+    expect(additionalImaging.getAttribute("data-attention-pulse")).toBe("true");
+    expect(additionalImaging.querySelector("span.rounded-full.bg-red-600")?.textContent).toBe("2");
+    expect(screen.getByText("+")).toBeTruthy();
+  });
+
+  it("renders the same Request Scans badge in the MobileDrawer", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };
+    requestScanSummaryState.value = { needsAttentionCount: 6, latestProcessedAt: null, latestFailedAt: null };
+    render(<MobileDrawer isOpen currentRoute="dashboard" user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }} language="en" isRtl={false} onNavigate={() => {}} onClose={() => {}} onToggleLanguage={() => {}} onLogout={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Request Scans" }).querySelector("span.rounded-full.bg-red-600")?.textContent).toBe("6");
   });
 
   it("mirrors active accent and collapse edge in RTL", () => {

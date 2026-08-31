@@ -12,3 +12,4 @@ export * from "./api/integrations";
 export * from "./api/patient-import";
 export * from "./api/complementary-recalls";
 export * from "./api/modality-previous-studies";
+export * from "./api/request-scans";
