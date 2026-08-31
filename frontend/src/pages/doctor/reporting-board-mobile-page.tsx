@@ -157,6 +157,8 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
               Prior {row.linkedPreviousAccessionNumber ?? "-"} {row.linkedPreviousStudyDate ? `· ${row.linkedPreviousStudyDate}` : ""}
             </p>
           )}
+          {row.caseType === "comparison" && row.comparisonReason ? <p className="mt-1 line-clamp-2 text-xs text-slate-700">{row.comparisonReason}</p> : null}
+          {row.caseType === "comparison" && row.comparisonPreparationNote ? <p className="mt-1 line-clamp-2 text-xs text-slate-500">{row.comparisonPreparationNote}</p> : null}
         </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">

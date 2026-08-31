@@ -68,8 +68,13 @@ export interface ComparisonRequestRow {
   imageAvailabilityConfirmed: boolean;
   documentsAvailabilityConfirmed: boolean;
   selectedPriorConfirmed: boolean;
+  documentsDisposition: "attached_verified" | "not_required" | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  plannedReportingDoctorId: number | null;
+  plannedReportingDoctorName: string | null;
+  plannedReportingDoctorSetBy: number | null;
+  plannedReportingDoctorSetAt: string | null;
   finalizedBy: number | null;
   finalizedByName: string | null;
   finalizedAt: string | null;
@@ -81,6 +86,10 @@ export interface ComparisonRequestRow {
   cancelledBy: number | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  preparationReturnedBy: number | null;
+  preparationReturnedByName: string | null;
+  preparationReturnedAt: string | null;
+  preparationReturnReason: string | null;
   documentCount: number;
   remapJobId: number | null;
   remapJobStatus: string | null;
@@ -91,7 +100,7 @@ export interface ComparisonRequestRow {
 }
 
 const CREATE_ROLES = new Set<Role>(["receptionist", "administrative", "modality_staff", "doctor", "supervisor", "super_admin"]);
-const CONFIRM_ROLES = new Set<Role>(["modality_staff", "doctor", "supervisor", "super_admin"]);
+const CONFIRM_ROLES = new Set<Role>(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const CANCEL_ROLES = new Set<Role>(["supervisor", "super_admin"]);
 
 function optionalIso(value: unknown): string | null {
@@ -176,8 +185,13 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     imageAvailabilityConfirmed: Boolean(row.imageAvailabilityConfirmed),
     documentsAvailabilityConfirmed: Boolean(row.documentsAvailabilityConfirmed),
     selectedPriorConfirmed: Boolean(row.selectedPriorConfirmed),
+    documentsDisposition: row.documentsDisposition === "attached_verified" || row.documentsDisposition === "not_required" ? row.documentsDisposition : null,
     assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
     assignedDoctorName: row.assignedDoctorName == null ? null : String(row.assignedDoctorName),
+    plannedReportingDoctorId: row.plannedReportingDoctorId == null ? null : Number(row.plannedReportingDoctorId),
+    plannedReportingDoctorName: row.plannedReportingDoctorName == null ? null : String(row.plannedReportingDoctorName),
+    plannedReportingDoctorSetBy: row.plannedReportingDoctorSetBy == null ? null : Number(row.plannedReportingDoctorSetBy),
+    plannedReportingDoctorSetAt: optionalIso(row.plannedReportingDoctorSetAt),
     finalizedBy: row.finalizedBy == null ? null : Number(row.finalizedBy),
     finalizedByName: row.finalizedByName == null ? null : String(row.finalizedByName),
     finalizedAt: optionalIso(row.finalizedAt),
@@ -189,6 +203,10 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     cancelledBy: row.cancelledBy == null ? null : Number(row.cancelledBy),
     cancelledAt: optionalIso(row.cancelledAt),
     cancellationReason: row.cancellationReason == null ? null : String(row.cancellationReason),
+    preparationReturnedBy: row.preparationReturnedBy == null ? null : Number(row.preparationReturnedBy),
+    preparationReturnedByName: row.preparationReturnedByName == null ? null : String(row.preparationReturnedByName),
+    preparationReturnedAt: optionalIso(row.preparationReturnedAt),
+    preparationReturnReason: row.preparationReturnReason == null ? null : String(row.preparationReturnReason),
     documentCount: Number(row.documentCount ?? 0),
     remapJobId: row.remapJobId == null ? null : Number(row.remapJobId),
     remapJobStatus: row.remapJobStatus == null ? null : String(row.remapJobStatus),
@@ -225,8 +243,13 @@ const COMPARISON_SELECT = `
     cr.image_availability_confirmed as "imageAvailabilityConfirmed",
     cr.documents_availability_confirmed as "documentsAvailabilityConfirmed",
     cr.selected_prior_confirmed as "selectedPriorConfirmed",
+    cr.documents_disposition as "documentsDisposition",
     cr.assigned_doctor_id as "assignedDoctorId",
     assigned_doctor.display_name as "assignedDoctorName",
+    cr.planned_reporting_doctor_id as "plannedReportingDoctorId",
+    planned_doctor.display_name as "plannedReportingDoctorName",
+    cr.planned_reporting_doctor_set_by as "plannedReportingDoctorSetBy",
+    cr.planned_reporting_doctor_set_at as "plannedReportingDoctorSetAt",
     cr.finalized_by as "finalizedBy",
     finalized_by.full_name as "finalizedByName",
     cr.finalized_at as "finalizedAt",
@@ -238,6 +261,10 @@ const COMPARISON_SELECT = `
     cr.cancelled_by as "cancelledBy",
     cr.cancelled_at as "cancelledAt",
     cr.cancellation_reason as "cancellationReason",
+    cr.preparation_returned_by as "preparationReturnedBy",
+    returned_by.full_name as "preparationReturnedByName",
+    cr.preparation_returned_at as "preparationReturnedAt",
+    cr.preparation_return_reason as "preparationReturnReason",
     coalesce(comparison_documents.document_count, 0)::integer as "documentCount",
     latest_remap.id as "remapJobId",
     latest_remap.status as "remapJobStatus",
@@ -251,7 +278,9 @@ const COMPARISON_SELECT = `
   left join users confirmed_by on confirmed_by.id = cr.materials_confirmed_by
   left join users finalized_by on finalized_by.id = cr.finalized_by
   left join users created_by on created_by.id = cr.created_by
+  left join users returned_by on returned_by.id = cr.preparation_returned_by
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cr.assigned_doctor_id
+  left join doctor_portal.doctor_profiles planned_doctor on planned_doctor.id = cr.planned_reporting_doctor_id
   left join lateral (
     select count(*)::integer as document_count
     from comparison_request_documents crd
@@ -310,12 +339,16 @@ export async function listPreviousCompletedStudiesForPatient(patientIdInput: unk
 
 export async function createComparisonRequest(
   actor: ComparisonActor,
-  input: { patientId: unknown; linkedPreviousBookingId: unknown; reason: unknown }
+  input: { patientId: unknown; linkedPreviousBookingId: unknown; reason: unknown; plannedReportingDoctorId?: unknown }
 ): Promise<ComparisonRequestRow> {
   if (!CREATE_ROLES.has(actor.appRole)) throw new HttpError(403, "This role cannot create comparison requests.");
   const patientId = normalizeId(input.patientId, "patientId");
   const linkedPreviousBookingId = normalizeId(input.linkedPreviousBookingId, "linkedPreviousBookingId");
   const reason = cleanRequiredText(input.reason, "reason");
+  const isManager = actor.appRole === "supervisor" || actor.appRole === "super_admin";
+  const hasPlannedDoctor = input.plannedReportingDoctorId !== undefined && input.plannedReportingDoctorId !== null && input.plannedReportingDoctorId !== "";
+  if (hasPlannedDoctor && !isManager) throw new HttpError(403, "Only supervisors can plan a reporting doctor.");
+  const plannedReportingDoctorId = hasPlannedDoctor ? normalizeId(input.plannedReportingDoctorId, "plannedReportingDoctorId") : null;
 
   const client = await pool.connect();
   try {
@@ -344,6 +377,7 @@ export async function createComparisonRequest(
     );
     const previousRow = previous.rows[0];
     if (!previousRow) throw new HttpError(400, "A completed previous RISpro study is required.");
+    if (plannedReportingDoctorId) await assertDoctorCanReportComparison(plannedReportingDoctorId, Number(previousRow.modality_id));
 
     const created = await client.query(
       `
@@ -358,9 +392,12 @@ export async function createComparisonRequest(
           linked_exam_name,
           linked_study_date,
           reason,
-          created_by
+          created_by,
+          planned_reporting_doctor_id,
+          planned_reporting_doctor_set_by,
+          planned_reporting_doctor_set_at
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, case when $12 is null then null else now() end)
         returning id
       `,
       [
@@ -375,12 +412,15 @@ export async function createComparisonRequest(
         previousRow.study_date ?? null,
         reason,
         actor.userId,
+        plannedReportingDoctorId,
+        plannedReportingDoctorId ? actor.userId : null,
       ]
     );
     const request = await findComparisonRequestById(created.rows[0].id, client);
     if (!request) throw new HttpError(500, "Failed to create comparison request.");
     await audit(client, actor, "comparison_request_created", request, { reason }, reason);
     await audit(client, actor, "comparison_previous_study_selected", request, { linkedPreviousBookingId }, null);
+    if (plannedReportingDoctorId) await audit(client, actor, "comparison_planned_reporting_doctor_set", request, { doctorId: plannedReportingDoctorId }, null);
     await client.query("commit");
     return request;
   } catch (error) {
@@ -389,6 +429,28 @@ export async function createComparisonRequest(
   } finally {
     client.release();
   }
+}
+
+async function assertDoctorCanReportComparison(doctorId: number, modalityId: number): Promise<void> {
+  const doctor = await findAssignableDoctorForReporting(doctorId);
+  if (!doctor || !doctor.canFinalizeReports || !(await doctorCanReportAllModalities(doctorId, [modalityId]))) {
+    throw new HttpError(400, "Doctor cannot report this comparison modality.");
+  }
+}
+
+export async function listComparisonReportingDoctors(actor: ComparisonActor, modalityIdInput: unknown): Promise<Array<{ id: number; displayName: string }>> {
+  if (actor.appRole !== "supervisor" && actor.appRole !== "super_admin") throw new HttpError(403, "Only supervisors can select reporting doctors.");
+  const modalityId = normalizeId(modalityIdInput, "modalityId");
+  const result = await pool.query<{ id: number; displayName: string }>(
+    `select distinct dp.id, dp.display_name as "displayName"
+     from doctor_portal.doctor_profiles dp
+     join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
+     where dp.active = true and dp.can_finalize_reports = true
+       and dmp.modality_id = $1 and dmp.can_report = true and dmp.active = true
+     order by dp.display_name asc, dp.id asc`,
+    [modalityId]
+  );
+  return result.rows;
 }
 
 export async function findComparisonRequestById(idInput: unknown, db: PoolClient | typeof pool = pool): Promise<ComparisonRequestRow | null> {
@@ -622,12 +684,31 @@ async function lockComparisonRequest(id: number, client: PoolClient): Promise<Co
   return request;
 }
 
+async function createActiveComparisonAssignment(
+  client: PoolClient,
+  request: ComparisonRequestRow,
+  actor: ComparisonActor,
+  doctorId: number,
+  reason: string | null,
+  assignedByDoctorId: number | null
+): Promise<number> {
+  if (!request.linkedModalityId) throw new HttpError(409, "Comparison request modality is missing.");
+  await client.query(`update doctor_portal.comparison_case_assignments set status = 'superseded', updated_at = now() where comparison_request_id = $1 and status = 'active'`, [request.id]);
+  const inserted = await client.query<{ id: number }>(
+    `insert into doctor_portal.comparison_case_assignments (comparison_request_id, assigned_doctor_id, modality_id, assigned_by_user_id, assigned_by_doctor_id, reason)
+     values ($1, $2, $3, $4, $5, $6) returning id`,
+    [request.id, doctorId, request.linkedModalityId, actor.userId, assignedByDoctorId, reason]
+  );
+  return Number(inserted.rows[0].id);
+}
+
 export async function confirmComparisonMaterials(
   actor: ComparisonActor,
   idInput: unknown,
   input: {
     imageAvailabilityConfirmed?: unknown;
     documentsAvailabilityConfirmed?: unknown;
+    documentsDisposition?: unknown;
     selectedPriorConfirmed?: unknown;
     note?: unknown;
   }
@@ -645,19 +726,38 @@ export async function confirmComparisonMaterials(
     if (request.status !== "pending_upload_confirmation") {
       throw new HttpError(409, "Only pending comparison requests can be confirmed.");
     }
-    if (
-      input.imageAvailabilityConfirmed !== true ||
-      input.documentsAvailabilityConfirmed !== true ||
-      input.selectedPriorConfirmed !== true
-    ) {
+    if (input.imageAvailabilityConfirmed !== true || input.selectedPriorConfirmed !== true) {
       throw new HttpError(400, "All comparison readiness confirmations are required.");
     }
+    const documentCountResult = await client.query<{ count: number }>(
+      `select count(*)::integer as count from comparison_request_documents where comparison_request_id = $1`, [id]
+    );
+    const documentCount = Number(documentCountResult.rows[0]?.count ?? 0);
+    const documentsDisposition = input.documentsDisposition === "attached_verified" || input.documentsDisposition === "not_required"
+      ? input.documentsDisposition
+      : (input.documentsAvailabilityConfirmed === true && documentCount > 0 ? "attached_verified" : null);
+    if (!documentsDisposition) throw new HttpError(400, "A comparison paper disposition is required.");
+    if (documentsDisposition === "attached_verified" && documentCount === 0) throw new HttpError(400, "Attached papers must exist before they can be verified.");
+    if (documentsDisposition === "not_required" && documentCount > 0) throw new HttpError(400, "Attached papers cannot be marked not required.");
     const note = cleanOptionalText(input.note);
+    let activatedAssignmentId: number | null = null;
+    let activatedDoctorId: number | null = null;
+    let skippedPlannedDoctorId: number | null = null;
+    if (request.plannedReportingDoctorId && request.linkedModalityId) {
+      try {
+        await assertDoctorCanReportComparison(request.plannedReportingDoctorId, request.linkedModalityId);
+        activatedDoctorId = request.plannedReportingDoctorId;
+        activatedAssignmentId = await createActiveComparisonAssignment(client, request, actor, activatedDoctorId, "planned assignment activated on release", null);
+      } catch (error) {
+        if (error instanceof HttpError) skippedPlannedDoctorId = request.plannedReportingDoctorId;
+        else throw error;
+      }
+    }
     await client.query(
       `
         update comparison_requests
         set
-          status = 'ready_for_reporting',
+          status = case when $4::bigint is null then 'ready_for_reporting' else 'assigned' end,
           materials_confirmed = true,
           materials_confirmed_by = $2,
           materials_confirmed_at = now(),
@@ -665,16 +765,24 @@ export async function confirmComparisonMaterials(
           image_availability_confirmed = true,
           documents_availability_confirmed = true,
           selected_prior_confirmed = true,
+          documents_disposition = $5,
+          assigned_doctor_id = $4,
+          planned_reporting_doctor_id = case when $6::boolean then null else planned_reporting_doctor_id end,
+          planned_reporting_doctor_set_by = case when $6::boolean then null else planned_reporting_doctor_set_by end,
+          planned_reporting_doctor_set_at = case when $6::boolean then null else planned_reporting_doctor_set_at end,
           updated_at = now()
         where id = $1
       `,
-      [id, actor.userId, note]
+      [id, actor.userId, note, activatedDoctorId, documentsDisposition, Boolean(skippedPlannedDoctorId)]
     );
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
-    await audit(client, actor, "comparison_materials_confirmed", updated, { note }, note, actorProfile);
-    await audit(client, actor, "comparison_released_to_reporting_pool", updated, { linkedModalityId: updated.linkedModalityId }, null, actorProfile);
+    await audit(client, actor, "comparison_materials_confirmed", updated, { note, documentsDisposition }, note, actorProfile);
+    if (activatedAssignmentId && activatedDoctorId) await audit(client, actor, "comparison_assigned", updated, { assignmentId: activatedAssignmentId, doctorId: activatedDoctorId, planned: true }, null, actorProfile);
+    else await audit(client, actor, "comparison_released_to_reporting_pool", updated, { linkedModalityId: updated.linkedModalityId }, null, actorProfile);
+    if (skippedPlannedDoctorId) await audit(client, actor, "comparison_planned_assignment_skipped", updated, { doctorId: skippedPlannedDoctorId, reason: "doctor_no_longer_eligible" }, null, actorProfile);
     await client.query("commit");
+    if (activatedDoctorId) await createAssignedToMeNotifications({ doctorId: activatedDoctorId, comparisonRequestIds: [id] });
     return updated;
   } catch (error) {
     await client.query("rollback");
@@ -682,6 +790,83 @@ export async function confirmComparisonMaterials(
   } finally {
     client.release();
   }
+}
+
+export async function updateComparisonRequest(
+  actor: ComparisonActor,
+  idInput: unknown,
+  input: { reason?: unknown; linkedPreviousBookingId?: unknown; plannedReportingDoctorId?: unknown }
+): Promise<ComparisonRequestRow> {
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const hasReason = input.reason !== undefined;
+  const hasPrior = input.linkedPreviousBookingId !== undefined;
+  const hasPlanned = input.plannedReportingDoctorId !== undefined;
+  if (!hasReason && !hasPrior && !hasPlanned) throw new HttpError(400, "At least one editable comparison field is required.");
+  const manager = actor.appRole === "supervisor" || actor.appRole === "super_admin";
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const request = await lockComparisonRequest(id, client);
+    if (request.status !== "pending_upload_confirmation") throw new HttpError(409, "Only pending comparison requests can be edited.");
+    if (hasReason && !manager && request.createdBy !== actor.userId) throw new HttpError(403, "Only the creator or a supervisor can edit this reason.");
+    if ((hasPrior || hasPlanned) && !manager) throw new HttpError(403, "Only supervisors can change this comparison field.");
+    const reason = hasReason ? cleanRequiredText(input.reason, "reason") : request.reason;
+    let prior = null as Record<string, unknown> | null;
+    if (hasPrior) {
+      if (request.materialsConfirmed || request.documentCount > 0) throw new HttpError(409, "Previous study cannot change after preparation evidence exists.");
+      const remap = await client.query(`select 1 from dicom_remap_jobs where comparison_request_id = $1 limit 1`, [id]);
+      if (remap.rows[0]) throw new HttpError(409, "Previous study cannot change after a remap job exists.");
+      const bookingId = normalizeId(input.linkedPreviousBookingId, "linkedPreviousBookingId");
+      const result = await client.query(`select b.id, b.study_instance_uid, b.modality_id, m.code as modality_code, b.exam_type_id, et.name_en as exam_name, b.booking_date::text as study_date, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number from appointments_v2.bookings b join modalities m on m.id=b.modality_id left join exam_types et on et.id=b.exam_type_id where b.id=$1 and b.patient_id=$2 and b.status='completed' limit 1`, [bookingId, request.patientId]);
+      prior = result.rows[0] ?? null;
+      if (!prior) throw new HttpError(400, "A completed previous RISpro study for this patient is required.");
+    }
+    let plannedDoctorId = request.plannedReportingDoctorId;
+    if (hasPlanned) plannedDoctorId = input.plannedReportingDoctorId === null || input.plannedReportingDoctorId === "" ? null : normalizeId(input.plannedReportingDoctorId, "plannedReportingDoctorId");
+    const modalityId = prior ? Number(prior.modality_id) : request.linkedModalityId;
+    if (plannedDoctorId && modalityId) {
+      try { await assertDoctorCanReportComparison(plannedDoctorId, modalityId); }
+      catch (error) {
+        if (hasPlanned) throw error;
+        plannedDoctorId = null;
+      }
+    }
+    await client.query(
+      `update comparison_requests set reason=$2, linked_previous_booking_id=coalesce($3, linked_previous_booking_id), linked_previous_study_uid=case when $3 is null then linked_previous_study_uid else $4 end, linked_previous_accession_number=case when $3 is null then linked_previous_accession_number else $5 end, linked_modality_id=case when $3 is null then linked_modality_id else $6 end, linked_modality_code=case when $3 is null then linked_modality_code else $7 end, linked_exam_type_id=case when $3 is null then linked_exam_type_id else $8 end, linked_exam_name=case when $3 is null then linked_exam_name else $9 end, linked_study_date=case when $3 is null then linked_study_date else $10::date end, planned_reporting_doctor_id=$11, planned_reporting_doctor_set_by=case when $12 then $13 else planned_reporting_doctor_set_by end, planned_reporting_doctor_set_at=case when $12 then case when $11 is null then null else now() end else planned_reporting_doctor_set_at end, updated_at=now() where id=$1`,
+      [id, reason, prior?.id ?? null, prior?.study_instance_uid ?? null, prior?.accession_number ?? null, prior?.modality_id ?? null, prior?.modality_code ?? null, prior?.exam_type_id ?? null, prior?.exam_name ?? null, prior?.study_date ?? null, plannedDoctorId, hasPlanned || (Boolean(prior) && plannedDoctorId !== request.plannedReportingDoctorId), actor.userId]
+    );
+    const updated = await findComparisonRequestById(id, client);
+    if (!updated) throw new HttpError(404, "Comparison request not found.");
+    if (hasReason && reason !== request.reason) await audit(client, actor, "comparison_request_updated", updated, { changed: "reason" });
+    if (prior) await audit(client, actor, "comparison_request_updated", updated, { changed: "linkedPreviousBookingId", oldBookingId: request.linkedPreviousBookingId, newBookingId: updated.linkedPreviousBookingId });
+    if (updated.plannedReportingDoctorId !== request.plannedReportingDoctorId) await audit(client, actor, updated.plannedReportingDoctorId ? "comparison_planned_reporting_doctor_set" : "comparison_planned_reporting_doctor_cleared", updated, { previousDoctorId: request.plannedReportingDoctorId, doctorId: updated.plannedReportingDoctorId });
+    await client.query("commit");
+    return updated;
+  } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
+}
+
+export async function returnComparisonToPreparation(actor: ComparisonActor, idInput: unknown, reasonInput: unknown): Promise<ComparisonRequestRow> {
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const reason = cleanRequiredText(reasonInput, "reason");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const request = await lockComparisonRequest(id, client);
+    if (!['ready_for_reporting', 'assigned'].includes(request.status)) throw new HttpError(409, "Only released comparison requests can return to preparation.");
+    const profile = await findActiveDoctorProfileByUserId(actor.userId).catch(() => null);
+    const active = await client.query<{ id: number; doctorId: number }>(`select id, assigned_doctor_id as "doctorId" from doctor_portal.comparison_case_assignments where comparison_request_id=$1 and status='active' limit 1 for update`, [id]);
+    const activeAssignment = active.rows[0] ?? null;
+    const supervisor = actor.appRole === "supervisor" || actor.appRole === "super_admin";
+    const assignedDoctor = actor.appRole === "doctor" && profile?.canFinalizeReports === true && activeAssignment?.doctorId === profile.id;
+    if (!supervisor && !assignedDoctor) throw new HttpError(403, "You are not allowed to return this comparison to preparation.");
+    if (activeAssignment) await client.query(`update doctor_portal.comparison_case_assignments set status='cancelled', updated_at=now() where id=$1`, [activeAssignment.id]);
+    await client.query(`update comparison_requests set status='pending_upload_confirmation', assigned_doctor_id=null, planned_reporting_doctor_id=coalesce($2, planned_reporting_doctor_id), planned_reporting_doctor_set_by=case when $2 is null then planned_reporting_doctor_set_by else planned_reporting_doctor_set_by end, materials_confirmed=false, materials_confirmed_by=null, materials_confirmed_at=null, materials_confirmation_note=null, image_availability_confirmed=false, documents_availability_confirmed=false, selected_prior_confirmed=false, documents_disposition=null, preparation_returned_by=$3, preparation_returned_at=now(), preparation_return_reason=$4, updated_at=now() where id=$1`, [id, activeAssignment?.doctorId ?? null, actor.userId, reason]);
+    const updated = await findComparisonRequestById(id, client);
+    if (!updated) throw new HttpError(404, "Comparison request not found.");
+    await audit(client, actor, "comparison_returned_to_preparation", updated, { previousStatus: request.status, previousAssignedDoctorId: activeAssignment?.doctorId ?? null, previousMaterialsConfirmationNote: request.materialsConfirmationNote, returnReason: reason }, reason, profile);
+    await client.query("commit");
+    return updated;
+  } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 
 export async function cancelComparisonRequest(actor: ComparisonActor, idInput: unknown, reasonInput: unknown): Promise<ComparisonRequestRow> {
@@ -746,25 +931,7 @@ export async function assignComparisonRequest(
     if (!(await doctorCanReportAllModalities(doctorId, [request.linkedModalityId]))) {
       throw new HttpError(400, "Doctor cannot report this comparison modality.");
     }
-    await client.query(
-      `
-        update doctor_portal.comparison_case_assignments
-        set status = 'superseded', updated_at = now()
-        where comparison_request_id = $1 and status = 'active'
-      `,
-      [id]
-    );
-    const inserted = await client.query<{ id: number }>(
-      `
-        insert into doctor_portal.comparison_case_assignments (
-          comparison_request_id, assigned_doctor_id, modality_id, assigned_by_user_id, assigned_by_doctor_id, reason
-        )
-        values ($1, $2, $3, $4, $5, $6)
-        returning id
-      `,
-      [id, doctorId, request.linkedModalityId, actor.userId, manager.profile!.id, reason]
-    );
-    const assignmentId = Number(inserted.rows[0].id);
+    const assignmentId = await createActiveComparisonAssignment(client, request, actor, doctorId, reason, manager.profile!.id);
     await client.query(
       `update comparison_requests set status = 'assigned', assigned_doctor_id = $2, updated_at = now() where id = $1`,
       [id, doctorId]
@@ -949,6 +1116,8 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     linkedPreviousBookingId: Number(row.appointmentId),
     linkedPreviousStudyDate: row.linkedPreviousStudyDate == null ? null : String(row.linkedPreviousStudyDate),
     linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber == null ? null : String(row.linkedPreviousAccessionNumber),
+    comparisonReason: row.comparisonReason == null ? null : String(row.comparisonReason),
+    comparisonPreparationNote: row.comparisonPreparationNote == null ? null : String(row.comparisonPreparationNote),
     caseCategory: "comparison",
     appointmentStatus: status,
     requiresReport: true,
@@ -1022,6 +1191,8 @@ export async function listComparisonReportingBoardRows(
         cr.linked_exam_name as "examTypeName",
         cr.linked_study_date::text as "linkedPreviousStudyDate",
         cr.linked_previous_accession_number as "linkedPreviousAccessionNumber",
+        cr.reason as "comparisonReason",
+        cr.materials_confirmation_note as "comparisonPreparationNote",
         cr.status,
         cr.materials_confirmed_at as "completedAt",
         cca.assigned_at as "currentAssignedAt",

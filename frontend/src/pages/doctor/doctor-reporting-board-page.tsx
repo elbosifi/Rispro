@@ -31,6 +31,7 @@ import {
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
   finalizeComparisonRequest,
+  returnComparisonToPreparation,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   launchReportingBoardCaseInOhif,
@@ -558,6 +559,8 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
       `Comparison request: #${row.comparisonRequestId ?? "-"}`,
       `Linked previous accession: ${row.linkedPreviousAccessionNumber ?? row.accessionNumber}`,
       `Linked previous study date: ${row.linkedPreviousStudyDate ?? "-"}`,
+      `Comparison reason: ${row.comparisonReason ?? "-"}`,
+      `Preparation note: ${row.comparisonPreparationNote ?? "-"}`,
       `Pool: ${row.modalityCode}`,
       `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
       `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
@@ -642,6 +645,8 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
         <span className="mt-1 inline-flex rounded-full border border-teal-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-teal-700">
           Comparison request
         </span>
+        {row.comparisonReason ? <div className="mt-1 line-clamp-2 text-xs text-foreground">{row.comparisonReason}</div> : null}
+        {row.comparisonPreparationNote ? <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{row.comparisonPreparationNote}</div> : null}
       </div>
     );
   }
@@ -738,8 +743,10 @@ function AgingTatCell({ row }: { row: ReportingBoardCaseRow }) {
 function RowActionMenu({
   row,
   canManage,
+  canReturnToPreparation,
   onSelectForReassignment,
   onFinalize,
+  onReturnToPreparation,
   onMarkManualFinal,
   onClearManualFinal,
   onReconcileFinalizerAssignment,
@@ -750,8 +757,10 @@ function RowActionMenu({
 }: {
   row: ReportingBoardCaseRow;
   canManage: boolean;
+  canReturnToPreparation: boolean;
   onSelectForReassignment: (row: ReportingBoardCaseRow) => void;
   onFinalize: (row: ReportingBoardCaseRow, finalText: string) => Promise<void>;
+  onReturnToPreparation: (row: ReportingBoardCaseRow, reason: string) => Promise<void>;
   onMarkManualFinal: (row: ReportingBoardCaseRow) => void;
   onClearManualFinal: (row: ReportingBoardCaseRow) => void;
   onReconcileFinalizerAssignment: (row: ReportingBoardCaseRow) => void;
@@ -764,6 +773,8 @@ function RowActionMenu({
   const [copyMessage, setCopyMessage] = useState("");
   const [showFinalize, setShowFinalize] = useState(false);
   const [finalText, setFinalText] = useState("");
+  const [showReturn, setShowReturn] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
   const [viewerState, setViewerState] = useState<"idle" | "resolving" | "retrieving" | "failed">("idle");
   const [viewerMessage, setViewerMessage] = useState("");
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -960,6 +971,11 @@ function RowActionMenu({
               </div>
             </div>
           )}
+        </div>
+      )}
+      {row.caseType === "comparison" && canReturnToPreparation && (
+        <div className="mt-1 border-t pt-1" style={{ borderColor: "var(--border)" }}>
+          {!showReturn ? <button type="button" role="menuitem" onClick={() => setShowReturn(true)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">Return to preparation</button> : <div className="grid gap-2 px-2 py-1.5"><textarea aria-label="Return to preparation reason" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} className="min-h-16 rounded border px-2 py-1 text-xs" placeholder="Reason is required" /><div className="flex gap-2"><button type="button" disabled={!returnReason.trim()} onClick={async () => { await onReturnToPreparation(row, returnReason.trim()); setReturnReason(""); setShowReturn(false); setOpen(false); }} className="rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-amber-300">Return</button><button type="button" onClick={() => setShowReturn(false)} className="rounded border px-2 py-1 text-xs">Cancel</button></div></div>}
         </div>
       )}
       <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
@@ -1965,6 +1981,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
   });
+  const returnComparisonMutation = useMutation({
+    mutationFn: (payload: { row: ReportingBoardCaseRow; reason: string }) => {
+      if (!payload.row.comparisonRequestId) throw new Error("Comparison request ID is missing.");
+      return returnComparisonToPreparation(payload.row.comparisonRequestId, { reason: payload.reason });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }),
+      ]);
+    },
+  });
   const selectedReassignMutation = useMutation({
     mutationFn: (input: { appointmentIds: number[]; comparisonRequestIds: number[]; doctorId: number; doctorName: string; reason: string | null }) => {
       const request = {
@@ -2586,10 +2615,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                           <RowActionMenu
                             row={row}
                             canManage={canManage}
+                            canReturnToPreparation={canManage || (row.caseType === "comparison" && row.assignedDoctorId === me.profile?.id)}
                             ohifAvailability={ohifAvailabilityQuery.data ?? null}
                             onSelectForReassignment={(targetRow) => setSelectedCaseKeys((current) => current.includes(targetRow.caseKey) ? current : [...current, targetRow.caseKey])}
                             onFinalize={async (targetRow, finalText) => {
                               await finalizeComparisonMutation.mutateAsync({ row: targetRow, finalText });
+                            }}
+                            onReturnToPreparation={async (targetRow, reason) => {
+                              await returnComparisonMutation.mutateAsync({ row: targetRow, reason });
                             }}
                             onMarkManualFinal={(target) => {
                               setBoardActionMessage(null);

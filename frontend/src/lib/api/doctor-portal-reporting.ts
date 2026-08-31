@@ -904,8 +904,13 @@ function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
     imageAvailabilityConfirmed: Boolean(raw.imageAvailabilityConfirmed),
     documentsAvailabilityConfirmed: Boolean(raw.documentsAvailabilityConfirmed),
     selectedPriorConfirmed: Boolean(raw.selectedPriorConfirmed),
+    documentsDisposition: raw.documentsDisposition === "attached_verified" || raw.documentsDisposition === "not_required" ? raw.documentsDisposition : null,
     assignedDoctorId: rawNumber(raw.assignedDoctorId),
     assignedDoctorName: rawString(raw.assignedDoctorName),
+    plannedReportingDoctorId: rawNumber(raw.plannedReportingDoctorId),
+    plannedReportingDoctorName: rawString(raw.plannedReportingDoctorName),
+    plannedReportingDoctorSetBy: rawNumber(raw.plannedReportingDoctorSetBy),
+    plannedReportingDoctorSetAt: rawString(raw.plannedReportingDoctorSetAt),
     finalizedBy: rawNumber(raw.finalizedBy),
     finalizedByName: rawString(raw.finalizedByName),
     finalizedAt: rawString(raw.finalizedAt),
@@ -917,6 +922,10 @@ function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
     cancelledBy: rawNumber(raw.cancelledBy),
     cancelledAt: rawString(raw.cancelledAt),
     cancellationReason: rawString(raw.cancellationReason),
+    preparationReturnedBy: rawNumber(raw.preparationReturnedBy),
+    preparationReturnedByName: rawString(raw.preparationReturnedByName),
+    preparationReturnedAt: rawString(raw.preparationReturnedAt),
+    preparationReturnReason: rawString(raw.preparationReturnReason),
     documentCount: Number(raw.documentCount ?? 0),
     remapJobId: rawNumber(raw.remapJobId),
     remapJobStatus: rawString(raw.remapJobStatus),
@@ -949,6 +958,7 @@ export async function createComparisonRequest(payload: {
   patientId: number;
   linkedPreviousBookingId: number;
   reason: string;
+  plannedReportingDoctorId?: number | null;
 }): Promise<ComparisonRequest> {
   const raw = await api<{ comparisonRequest: RawRecord }>("/comparisons", {
     method: "POST",
@@ -976,6 +986,7 @@ export async function confirmComparisonMaterials(
   payload: {
     imageAvailabilityConfirmed: boolean;
     documentsAvailabilityConfirmed: boolean;
+    documentsDisposition?: "attached_verified" | "not_required" | null;
     selectedPriorConfirmed: boolean;
     materialsConfirmationNote?: string | null;
   }
@@ -1138,6 +1149,21 @@ export async function fetchDoctorProtocolingAppointments(filters: DoctorProtocol
 export async function fetchDoctorProtocolingAppointmentDetail(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
   const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}`);
   return raw.detail;
+}
+
+export async function updateComparisonRequest(id: number, payload: { reason?: string; linkedPreviousBookingId?: number; plannedReportingDoctorId?: number | null }): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function returnComparisonToPreparation(id: number, payload: { reason: string }): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}/return-to-preparation`, { method: "POST", body: JSON.stringify(payload) });
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function fetchComparisonReportingDoctors(modalityId: number): Promise<Array<{ id: number; displayName: string }>> {
+  const raw = await api<{ doctors: Array<{ id: number; displayName: string }> }>(`/comparisons/reporting-doctors?modalityId=${encodeURIComponent(String(modalityId))}`);
+  return raw.doctors ?? [];
 }
 
 export async function createComplementaryRecallRequest(appointmentId: number, payload: { receptionInstruction: string | null; technologistInstruction: string }) {

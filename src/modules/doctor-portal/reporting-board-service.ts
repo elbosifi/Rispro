@@ -1018,6 +1018,8 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
     overdue,
     linkedPreviousStudyDate: row.linkedPreviousStudyDate,
     linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber,
+    comparisonReason: row.comparisonReason ?? null,
+    comparisonPreparationNote: row.comparisonPreparationNote ?? null,
     sonicDicomStudyNote: includePacsNote ? row.sonicDicomStudyNote : null,
     sonicDicomStudyNoteCheckedAt: includePacsNote ? row.sonicDicomStudyNoteCheckedAt : null,
     sonicDicomStudyNoteSource: includePacsNote ? row.sonicDicomStudyNoteSource ?? null : null,

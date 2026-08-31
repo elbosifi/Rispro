@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { Button } from "@/components/shared";
-import { createComparisonRequest, fetchPreviousCompletedStudies } from "@/lib/api-hooks";
+import { createComparisonRequest, fetchComparisonReportingDoctors, fetchPreviousCompletedStudies } from "@/lib/api-hooks";
 import { pushToast } from "@/lib/toast";
+import { useAuth } from "@/providers/auth-provider";
 import type { PreviousCompletedStudy } from "@/types/api";
 
 function studyLabel(study: PreviousCompletedStudy) {
@@ -23,18 +24,27 @@ export function RequestComparisonModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [plannedReportingDoctorId, setPlannedReportingDoctorId] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const { data: studies = [], isLoading, error } = useQuery({
     queryKey: ["comparison-previous-studies", patientId],
     queryFn: () => fetchPreviousCompletedStudies(patientId),
+  });
+  const selectedStudy = studies.find((study) => study.bookingId === selectedBookingId) ?? null;
+  const canPlanDoctor = user?.role === "supervisor" || user?.role === "super_admin";
+  const doctorsQuery = useQuery({
+    queryKey: ["comparison-reporting-doctors", selectedStudy?.modalityId],
+    queryFn: () => fetchComparisonReportingDoctors(selectedStudy!.modalityId),
+    enabled: canPlanDoctor && Boolean(selectedStudy),
   });
   const mutation = useMutation({
     mutationFn: () => {
       if (!selectedBookingId) throw new Error("Select a previous completed RISpro study.");
       const cleanReason = reason.trim();
       if (!cleanReason) throw new Error("Reason is required.");
-      return createComparisonRequest({ patientId, linkedPreviousBookingId: selectedBookingId, reason: cleanReason });
+      return createComparisonRequest({ patientId, linkedPreviousBookingId: selectedBookingId, reason: cleanReason, plannedReportingDoctorId });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["comparison-requests"] });
@@ -114,6 +124,15 @@ export function RequestComparisonModal({
               placeholder="Clinical or operational reason"
             />
           </label>
+          {canPlanDoctor && selectedStudy ? (
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Assign reporting doctor</span>
+              <select aria-label="Assign reporting doctor" value={plannedReportingDoctorId ?? ""} onChange={(event) => setPlannedReportingDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded-lg border border-border bg-background px-3">
+                <option value="">Unassigned - send to reporting pool</option>
+                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+              </select>
+            </label>
+          ) : null}
         </div>
         <div className="flex justify-end gap-2 border-t border-border p-4">
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

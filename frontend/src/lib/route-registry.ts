@@ -225,7 +225,7 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     path: "/comparisons",
     titleKey: "routeTitle.comparisons",
     accessKey: "comparisons",
-    defaultRoles: ["modality_staff", "doctor", "supervisor", "super_admin"],
+    defaultRoles: ["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"],
     navLabelKey: "nav.comparisons",
     navIcon: "comparisons",
   },

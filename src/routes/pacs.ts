@@ -78,7 +78,7 @@ const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
 
-const COMPARISON_REMAP_ROLES = new Set(["modality_staff", "doctor", "supervisor", "super_admin"]);
+const COMPARISON_REMAP_ROLES = new Set(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const REMAP_PATIENT_SEARCH_MAX_LENGTH = 200;
 const REMAP_PATIENT_SEARCH_RESULT_LIMIT = 25;
 

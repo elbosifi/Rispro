@@ -501,6 +501,8 @@ export interface ReportingBoardCaseRow {
   linkedPreviousBookingId: number | null;
   linkedPreviousStudyDate: string | null;
   linkedPreviousAccessionNumber: string | null;
+  comparisonReason?: string | null;
+  comparisonPreparationNote?: string | null;
   caseCategory: string;
   appointmentStatus: string;
   requiresReport: boolean;
@@ -634,8 +636,13 @@ export interface ComparisonRequest {
   imageAvailabilityConfirmed: boolean;
   documentsAvailabilityConfirmed: boolean;
   selectedPriorConfirmed: boolean;
+  documentsDisposition?: "attached_verified" | "not_required" | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  plannedReportingDoctorId?: number | null;
+  plannedReportingDoctorName?: string | null;
+  plannedReportingDoctorSetBy?: number | null;
+  plannedReportingDoctorSetAt?: string | null;
   finalizedBy: number | null;
   finalizedByName: string | null;
   finalizedAt: string | null;
@@ -647,6 +654,10 @@ export interface ComparisonRequest {
   cancelledBy: number | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  preparationReturnedBy?: number | null;
+  preparationReturnedByName?: string | null;
+  preparationReturnedAt?: string | null;
+  preparationReturnReason?: string | null;
   documentCount: number;
   remapJobId: number | null;
   remapJobStatus: string | null;
@@ -835,6 +846,8 @@ export interface ReportingBoardMobileCase {
   actionDisabledReason: string | null;
   linkedPreviousStudyDate?: string | null;
   linkedPreviousAccessionNumber?: string | null;
+  comparisonReason?: string | null;
+  comparisonPreparationNote?: string | null;
   sonicDicomStudyNote?: string | null;
   sonicDicomStudyNoteCheckedAt?: string | null;
   sonicDicomStudyNoteSource?: "sonicdicom" | null;

@@ -208,18 +208,21 @@ describe("comparison preparation worklist behavior", () => {
     expect(link.getAttribute("href")).toBe("/comparisons/80/remap?comparisonRequestId=80&patientId=10&returnPath=%2Fcomparisons%2F80");
   });
 
-  it("keeps final release disabled until all three human confirmations are checked", async () => {
+  it("requires a truthful paper disposition before release", async () => {
     apiMocks.fetchMany.mockResolvedValue([comparison({ documentCount: 2, remapJobStatus: "sent" })]);
     apiMocks.confirm.mockResolvedValue(comparison({ status: "ready_for_reporting", materialsConfirmed: true }));
     renderPage();
     const release = await screen.findByRole("button", { name: "Confirm and send to reporting pool" }) as HTMLButtonElement;
     expect(release.disabled).toBe(true);
     for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
+    expect(release.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: "Attached papers verified" }));
     expect(release.disabled).toBe(false);
     fireEvent.click(release);
     await waitFor(() => expect(apiMocks.confirm).toHaveBeenCalledWith(77, {
       imageAvailabilityConfirmed: true,
       documentsAvailabilityConfirmed: true,
+      documentsDisposition: "attached_verified",
       selectedPriorConfirmed: true,
       materialsConfirmationNote: null,
     }));

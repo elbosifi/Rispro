@@ -139,6 +139,8 @@ export interface ReportingBoardCaseRow {
   linkedPreviousBookingId: number | null;
   linkedPreviousStudyDate: string | null;
   linkedPreviousAccessionNumber: string | null;
+  comparisonReason?: string | null;
+  comparisonPreparationNote?: string | null;
   caseCategory: string;
   appointmentStatus: string;
   requiresReport: boolean;

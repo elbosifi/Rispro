@@ -51,7 +51,7 @@ export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
   queue: ["receptionist", "supervisor", "modality_staff", "super_admin"],
   "queue.checkin": ["receptionist", "supervisor", "super_admin"],
   modality: ["modality_staff", "supervisor", "super_admin"],
-  comparisons: ["modality_staff", "doctor", "supervisor", "super_admin"],
+  comparisons: ["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"],
   doctor: ["doctor", "supervisor", "super_admin"],
   print: ["receptionist", "supervisor", "doctor", "super_admin"],
   statistics: ["administrative", "supervisor", "super_admin"],

@@ -16,9 +16,12 @@ import {
   findComparisonRequestById,
   getComparisonInternalLinkTarget,
   listComparisonRequestDocuments,
+  listComparisonReportingDoctors,
   listComparisonRequests,
   listPreviousCompletedStudiesForPatient,
   unassignComparisonRequest,
+  updateComparisonRequest,
+  returnComparisonToPreparation,
   uploadComparisonRequestDocument,
   type ComparisonActor,
 } from "../services/comparison-request-service.js";
@@ -52,7 +55,7 @@ const CREATE_ACCESS_ROLES = new Set<ComparisonRole>([
   "supervisor",
   "super_admin",
 ]);
-const WORKLIST_ACCESS_ROLES = new Set<ComparisonRole>(["modality_staff", "doctor", "supervisor", "super_admin"]);
+const WORKLIST_ACCESS_ROLES = new Set<ComparisonRole>(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 
 function requireComparisonRole(req: ComparisonsRequest, allowedRoles: Set<ComparisonRole>, message: string): ComparisonActor {
   const currentActor = actor(req);
@@ -95,8 +98,16 @@ comparisonsRouter.post(
       patientId: body.patientId,
       linkedPreviousBookingId: body.linkedPreviousBookingId,
       reason: body.reason,
+      plannedReportingDoctorId: body.plannedReportingDoctorId,
     });
     res.status(201).json({ comparisonRequest });
+  })
+);
+
+comparisonsRouter.get(
+  "/reporting-doctors",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    res.json({ doctors: await listComparisonReportingDoctors(actor(req), asOptionalString(req.query.modalityId)) });
   })
 );
 
@@ -167,10 +178,31 @@ comparisonsRouter.post(
     const comparisonRequest = await confirmComparisonMaterials(actor(req), req.params.comparisonRequestId, {
       imageAvailabilityConfirmed: body.imageAvailabilityConfirmed,
       documentsAvailabilityConfirmed: body.documentsAvailabilityConfirmed,
+      documentsDisposition: body.documentsDisposition,
       selectedPriorConfirmed: body.selectedPriorConfirmed,
       note: body.materialsConfirmationNote ?? body.note,
     });
     res.json({ comparisonRequest });
+  })
+);
+
+comparisonsRouter.patch(
+  "/:comparisonRequestId",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json({ comparisonRequest: await updateComparisonRequest(actor(req), req.params.comparisonRequestId, {
+      reason: body.reason,
+      linkedPreviousBookingId: body.linkedPreviousBookingId,
+      plannedReportingDoctorId: body.plannedReportingDoctorId,
+    }) });
+  })
+);
+
+comparisonsRouter.post(
+  "/:comparisonRequestId/return-to-preparation",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json({ comparisonRequest: await returnComparisonToPreparation(actor(req), req.params.comparisonRequestId, body.reason) });
   })
 );
 
