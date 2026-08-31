@@ -270,6 +270,20 @@ test("planned doctor activates on release, falls back when ineligible, and unass
   const request = await createRequest(supervisorBase, "planned activation");
   const supervisor = await createReportingDoctor("supervisor", request.linkedModalityId!);
   const doctor = await createReportingDoctor("doctor", request.linkedModalityId!);
+  const createdWithPlan = await createComparisonRequest(supervisor.actor, {
+    patientId: request.patientId,
+    linkedPreviousBookingId: request.linkedPreviousBookingId,
+    reason: `${marker} direct planned creation`,
+    plannedReportingDoctorId: doctor.doctorId,
+  });
+  created.comparisons.push(createdWithPlan.id);
+  assert.equal(createdWithPlan.status, "pending_upload_confirmation");
+  assert.equal(createdWithPlan.plannedReportingDoctorId, doctor.doctorId);
+  assert.equal(createdWithPlan.plannedReportingDoctorSetBy, Number(supervisor.actor.userId));
+  assert.ok(createdWithPlan.plannedReportingDoctorSetAt);
+  assert.equal(createdWithPlan.assignedDoctorId, null);
+  const directActive = await pool.query<{ count: string }>("select count(*)::text count from doctor_portal.comparison_case_assignments where comparison_request_id=$1 and status='active'", [createdWithPlan.id]);
+  assert.equal(Number(directActive.rows[0]!.count), 0);
   const planned = await updateComparisonRequest(supervisor.actor, request.id, { plannedReportingDoctorId: doctor.doctorId });
   assert.equal(planned.status, "pending_upload_confirmation");
   const before = await pool.query<{ count: string }>("select count(*)::text count from doctor_portal.comparison_case_assignments where comparison_request_id=$1 and status='active'", [request.id]);
