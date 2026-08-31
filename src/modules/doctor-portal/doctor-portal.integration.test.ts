@@ -207,11 +207,13 @@ async function createDoctorPortalTestApp() {
   const { createAppointmentsV2Router } = await import("../appointments-v2/index.js");
   const { createDoctorPortalRouter } = await import("./index.js");
   const { authRouter } = await import("../../routes/auth.js");
+  const { authoritativeOrthancRouter } = await import("../../routes/authoritative-orthanc.js");
   const app = express();
   app.use(express.json({ limit: "10mb" }));
   app.use(cookieParser());
   app.use("/api/auth", authRouter);
   app.use("/api/doctor", createDoctorPortalRouter());
+  app.use("/api/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/v2", createAppointmentsV2Router());
   app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
@@ -272,6 +274,7 @@ async function cleanupDoctorPortalTestData(extraUserIds: number[] = []) {
   await pool.query(`delete from doctor_portal.doctor_leave_requests where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.roster_templates where created_by = any($1::bigint[])`, [userIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.workload_unit_catalog where created_by = any($1::bigint[])`, [userIds]).catch(() => undefined);
+  await pool.query(`delete from patient_identity_reconciliation_jobs where patient_id = any($1::bigint[])`, [patientIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_profiles where id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]).catch(() => undefined);
@@ -607,6 +610,80 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     assert.equal(response.status, 200, JSON.stringify(response.data));
     assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, false);
+  });
+
+  it("authorizes Patient Identity Reconciliation by active modality canProtocol, not either canSupervise flag", async () => {
+    guard();
+    const path = `/api/doctor/protocoling/appointments/${appointmentId}/history`;
+    const reconcilePath = `${path}/patient-identity-reconciliation`;
+    const requestReconciliation = (cookie: string, suffix: string) => api(cookie, reconcilePath, {
+      method: "POST",
+      body: { studyInstanceUid: `1.2.826.0.1.3680043.10.543.${suffix}`, accessionNumber: `RECON-${suffix}` },
+    });
+    const setPermission = (doctor: TestUser, values: { canProtocol: boolean; active: boolean; canSupervise?: boolean }) => pool.query(
+      `update doctor_portal.doctor_modality_permissions
+       set can_protocol = $3, active = $4, can_supervise = coalesce($5, can_supervise)
+       where doctor_id = $1 and modality_id = $2`,
+      [doctor.doctorId, testData.modalityId, values.canProtocol, values.active, values.canSupervise ?? null]
+    );
+
+    let mriModalityId: number | null = null;
+    try {
+      await pool.query(`update doctor_portal.doctor_profiles set can_supervise = false where id = $1`, [normal.doctorId]);
+      await setPermission(normal, { canProtocol: true, active: true, canSupervise: false });
+      const normalHistory = await api(normal.cookie, path);
+      assert.equal(normalHistory.status, 200, JSON.stringify(normalHistory.data));
+      assert.equal((normalHistory.data as { canReconcilePatientIdentity: boolean }).canReconcilePatientIdentity, true);
+      assert.equal((await requestReconciliation(normal.cookie, "normal-ct")).status, 202);
+
+      await setPermission(normal, { canProtocol: false, active: true });
+      const noProtocolHistory = await api(normal.cookie, path);
+      assert.equal((noProtocolHistory.data as { canReconcilePatientIdentity: boolean }).canReconcilePatientIdentity, false);
+      assert.equal((await requestReconciliation(normal.cookie, "no-protocol")).status, 403);
+
+      await setPermission(normal, { canProtocol: true, active: true });
+      const mri = await pool.query<{ id: string }>(
+        `insert into modalities (name_ar, name_en, code, daily_capacity, is_active) values ($1, $2, $3, 10, true) returning id::text as id`,
+        [`${TEST_PREFIX} MRI AR`, `${TEST_PREFIX} MRI`, `${TEST_PREFIX}MRI`]
+      );
+      mriModalityId = Number(mri.rows[0]!.id);
+      await pool.query(`insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active) values ($1, $2, false, false, false, true)`, [normal.doctorId, mriModalityId]);
+      await pool.query(`update appointments_v2.bookings set modality_id = $2 where id = $1`, [appointmentId, mriModalityId]);
+      const mriHistory = await api(normal.cookie, path);
+      assert.equal((mriHistory.data as { canReconcilePatientIdentity: boolean }).canReconcilePatientIdentity, false);
+      assert.equal((await requestReconciliation(normal.cookie, "mri-no-protocol")).status, 403);
+      await pool.query(`update appointments_v2.bookings set modality_id = $2 where id = $1`, [appointmentId, testData.modalityId]);
+
+      await setPermission(normal, { canProtocol: true, active: false });
+      assert.equal((await requestReconciliation(normal.cookie, "inactive-permission")).status, 403);
+
+      await pool.query(`update doctor_portal.doctor_profiles set can_supervise = true where id = $1`, [normal.doctorId]);
+      await setPermission(normal, { canProtocol: false, active: true, canSupervise: true });
+      const globalSupervisorHistory = await api(normal.cookie, path);
+      assert.equal((globalSupervisorHistory.data as { canReconcilePatientIdentity: boolean }).canReconcilePatientIdentity, false);
+      assert.equal((await requestReconciliation(normal.cookie, "global-supervisor-only")).status, 403);
+
+      await setPermission(supervisor, { canProtocol: false, active: true });
+      await setPermission(admin, { canProtocol: false, active: true });
+      assert.equal((await requestReconciliation(supervisor.cookie, "core-supervisor")).status, 202);
+      assert.equal((await requestReconciliation(admin.cookie, "super-admin")).status, 202);
+    } finally {
+      await pool.query(`update appointments_v2.bookings set modality_id = $2 where id = $1`, [appointmentId, testData.modalityId]);
+      if (mriModalityId != null) {
+        await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = $1 and modality_id = $2`, [normal.doctorId, mriModalityId]);
+        await pool.query(`delete from modalities where id = $1`, [mriModalityId]);
+      }
+      await pool.query(`update doctor_portal.doctor_profiles set can_supervise = false where id = $1`, [normal.doctorId]);
+      await setPermission(normal, { canProtocol: true, active: true, canSupervise: true });
+      await setPermission(supervisor, { canProtocol: true, active: true, canSupervise: true });
+      await setPermission(admin, { canProtocol: true, active: true, canSupervise: true });
+    }
+  });
+
+  it("does not grant completed-reconciliation reversal to a normal Doctor Protocol user", async () => {
+    guard();
+    const response = await api(normal.cookie, "/api/authoritative-orthanc/operations/patient-identity-reconciliations/1/reverse", { method: "POST" });
+    assert.equal(response.status, 403);
   });
 
   it("runs availability, leave, conflict-blocked publish, templates, and draft generation", async () => {

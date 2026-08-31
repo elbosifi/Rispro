@@ -48,6 +48,12 @@ async function requireProtocolingAccess(req: DoctorRequest): Promise<number | nu
   return Number.isInteger(userId) ? userId : null;
 }
 
+async function requirePatientIdentityReconciliationAccessForAppointment(req: DoctorRequest, appointmentId: number): Promise<void> {
+  const detail = await getProtocolingAppointmentDetail(appointmentId);
+  if (!detail) throw new HttpError(404, "Appointment not found.");
+  await requirePatientIdentityReconciliationAccess(req.user!.sub, req.user!.role, detail.appointment.modalityId);
+}
+
 function positiveInteger(value: unknown, field: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new HttpError(400, `${field} must be a positive integer.`);
@@ -196,14 +202,19 @@ router.patch("/complementary-recalls/:recallId", asyncRoute(async (req: DoctorRe
   res.json({ recall });
 }));
 
-router.post("/appointments/:appointmentId/history/patient-identity-reconciliation",asyncRoute(async(req:DoctorRequest,res:Response)=>{const userId=await requireProtocolingAccess(req);await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);const body=asUnknownRecord(req.body);const job=await requestProtocolingPatientIdentityReconciliation(positiveInteger(req.params.appointmentId,"appointmentId"),asString(body.studyInstanceUid),asOptionalString(body.accessionNumber)??null,userId!);res.status(202).json({job});}));
+router.post("/appointments/:appointmentId/history/patient-identity-reconciliation",asyncRoute(async(req:DoctorRequest,res:Response)=>{const appointmentId=positiveInteger(req.params.appointmentId,"appointmentId");const userId=await requireProtocolingAccess(req);await requirePatientIdentityReconciliationAccessForAppointment(req,appointmentId);const body=asUnknownRecord(req.body);const job=await requestProtocolingPatientIdentityReconciliation(appointmentId,asString(body.studyInstanceUid),asOptionalString(body.accessionNumber)??null,userId!);res.status(202).json({job});}));
 
 router.get(
   "/appointments/:appointmentId/history",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const appointmentId = positiveInteger(req.params.appointmentId, "appointmentId");
     await requireProtocolingAccess(req);
-    const result=await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId"));
-    let canReconcilePatientIdentity=true;try{await requirePatientIdentityReconciliationAccess(req.user!.sub,req.user!.role);}catch{canReconcilePatientIdentity=false;}
+    let canReconcilePatientIdentity = true;
+    try { await requirePatientIdentityReconciliationAccessForAppointment(req, appointmentId); } catch (error) {
+      if (error instanceof HttpError && error.statusCode === 403) canReconcilePatientIdentity = false;
+      else throw error;
+    }
+    const result=await getProtocolingPatientHistory(appointmentId);
     res.json({...result,canReconcilePatientIdentity});
   })
 );

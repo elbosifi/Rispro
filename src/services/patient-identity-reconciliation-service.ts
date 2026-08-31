@@ -36,10 +36,23 @@ async function audit(job: PatientIdentityReconciliationJob, actionType: string, 
   await logAuditEntry({ entityType: "patient_identity_reconciliation", entityId: job.id, actionType, oldValues: null, newValues: { outcome, operation: job.operation_type, studyInstanceUid: job.study_instance_uid, code: code || null }, changedByUserId: job.requested_by_user_id });
 }
 
-export async function requirePatientIdentityReconciliationAccess(userId: UserId, role: string): Promise<void> {
+export async function requirePatientIdentityReconciliationAccess(userId: UserId, role: string, modalityId: number): Promise<void> {
   if (role === "supervisor" || role === "super_admin") return;
-  const result = await pool.query<{ can_supervise: boolean }>("select can_supervise from doctor_portal.doctor_profiles where user_id=$1 and active=true", [userId]);
-  if (!result.rows[0]?.can_supervise) throw new HttpError(403, "Patient Identity Reconciliation permission is required.", { code: "PATIENT_IDENTITY_RECONCILIATION_FORBIDDEN" });
+  const result = await pool.query<{ allowed: boolean }>(
+    `
+      select true as allowed
+      from doctor_portal.doctor_profiles dp
+      join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
+      where dp.user_id = $1
+        and dp.active = true
+        and dmp.modality_id = $2
+        and dmp.active = true
+        and dmp.can_protocol = true
+      limit 1
+    `,
+    [userId, modalityId]
+  );
+  if (!result.rows[0]?.allowed) throw new HttpError(403, "Patient Identity Reconciliation permission is required for this appointment modality.", { code: "PATIENT_IDENTITY_RECONCILIATION_FORBIDDEN" });
 }
 
 export async function requestPatientIdentityReconciliation(input: { patientId: number; studyInstanceUid: string; accessionNumber?: string | null; requestedByUserId: UserId }): Promise<PatientIdentityReconciliationJob> {
