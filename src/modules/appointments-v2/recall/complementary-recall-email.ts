@@ -1,96 +1,19 @@
-import type { PoolClient } from "pg";
+import crypto from "crypto";
+import type { Pool, PoolClient } from "pg";
+import { pool } from "../../../db/pool.js";
 import { enqueueEmail } from "../../../services/email-outbox-service.js";
 import { getEmailSettings } from "../../../services/email-settings-service.js";
 import { getEmailNotificationRule } from "../../../services/email-notification-rules-service.js";
+import { logAuditEntry } from "../../../services/audit-service.js";
+import { HttpError } from "../../../utils/http-error.js";
 import { formatV2AccessionNumber } from "../shared/utils/accession.js";
-
-const EMAIL_LIKE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-type RecallCompletionEmailContext = {
-  original_appointment_id: number;
-  recipient_user_id: number | null;
-  recipient_email: string | null;
-  recipient_is_active: boolean | null;
-  recipient_profile_active: boolean | null;
-  patient_display_name: string | null;
-  original_exam: string | null;
-  modality_code: string | null;
-  modality_name: string | null;
-  reporting_disposition: "supplement_original_report" | "separate_report" | "no_separate_report" | null;
-};
-
-const reportingDispositionLabels = {
-  supplement_original_report: "Supplement original report",
-  separate_report: "Separate report",
-  no_separate_report: "No separate report",
-} as const;
-
-export async function queueComplementaryRecallCompletedEmail(
-  client: PoolClient,
-  input: { recallRequestId: number; recallAppointmentId: number; actorUserId: number | null },
-): Promise<{ enqueued: boolean; reason?: string }> {
-  const settings = await getEmailSettings(client);
-  if (!settings.enabled) return { enqueued: false, reason: "email_disabled" };
-  const rule = await getEmailNotificationRule("additional_imaging_completed", client);
-  if (!rule.enabled) return { enqueued: false, reason: "notification_rule_disabled" };
-
-  const context = await client.query<RecallCompletionEmailContext>(
-    `select r.original_appointment_id,
-            assigned_user.id as recipient_user_id,
-            assigned_user.email as recipient_email,
-            assigned_user.is_active as recipient_is_active,
-            assigned_profile.active as recipient_profile_active,
-            coalesce(nullif(trim(p.english_full_name), ''), nullif(trim(p.arabic_full_name), '')) as patient_display_name,
-            et.name_en as original_exam,
-            m.code as modality_code,
-            m.name_en as modality_name,
-            r.reporting_disposition
-       from appointments_v2.complementary_recall_requests r
-       join appointments_v2.bookings original_booking on original_booking.id = r.original_appointment_id
-       join patients p on p.id = original_booking.patient_id
-       join modalities m on m.id = original_booking.modality_id
-       left join exam_types et on et.id = original_booking.exam_type_id
-       left join doctor_portal.case_team_assignments assignment on assignment.appointment_id = r.original_appointment_id and assignment.assignment_type = 'reporting' and assignment.status = 'active'
-       left join doctor_portal.doctor_profiles assigned_profile on assigned_profile.id = assignment.assigned_doctor_id
-       left join users assigned_user on assigned_user.id = assigned_profile.user_id
-      where r.id = $1 and r.recall_appointment_id = $2`,
-    [input.recallRequestId, input.recallAppointmentId],
-  );
-  const row = context.rows[0];
-  if (!row) return { enqueued: false, reason: "recall_context_unavailable" };
-  const recipientEmail = row.recipient_email?.trim() ?? "";
-  if (!row.recipient_user_id) return { enqueued: false, reason: "reporting_assignment_unavailable" };
-  if (!row.recipient_is_active) return { enqueued: false, reason: "assigned_user_inactive" };
-  if (!row.recipient_profile_active) return { enqueued: false, reason: "assigned_doctor_ineligible" };
-  if (!EMAIL_LIKE.test(recipientEmail)) return { enqueued: false, reason: "assigned_doctor_email_invalid" };
-
-  const originalAccession = formatV2AccessionNumber(row.original_appointment_id);
-  const recallAccession = formatV2AccessionNumber(input.recallAppointmentId);
-  const modality = [row.modality_code, row.modality_name].filter(Boolean).join(" / ");
-  const lines = [
-    "Additional imaging has been completed and is ready for review.",
-    "",
-    `Patient: ${row.patient_display_name ?? ""}`,
-    `Original examination: ${row.original_exam ?? ""}`,
-    `Modality: ${modality}`,
-    `Original accession: ${originalAccession}`,
-    `Additional imaging accession: ${recallAccession}`,
-    ...(row.reporting_disposition ? [`Reporting action: ${reportingDispositionLabels[row.reporting_disposition]}`] : []),
-    "",
-    "Please review the additional images and complete the appropriate reporting action.",
-    "",
-    "RISpro",
-  ];
-  await enqueueEmail({
-    eventType: "additional_imaging_completed",
-    recipientUserId: row.recipient_user_id,
-    recipientEmail,
-    subject: `RISpro: Additional imaging completed — ${recallAccession}`,
-    textBody: lines.join("\n"),
-    idempotencyKey: `additional_imaging_completed:${input.recallRequestId}:${input.recallAppointmentId}`,
-    relatedEntityType: "complementary_recall_request",
-    relatedEntityId: String(input.recallRequestId),
-    createdByUserId: input.actorUserId,
-  }, client);
-  return { enqueued: true };
-}
+const email=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const labels={supplement_original_report:"Supplement original report",separate_report:"Separate report",no_separate_report:"No separate report"} as const;
+type Row={id:number;original_appointment_id:number;recall_appointment_id:number|null;status:string;recipient_user_id:number|null;recipient_email:string|null;recipient_display_name:string|null;recipient_is_active:boolean|null;recipient_profile_active:boolean|null;patient_name:string|null;original_exam:string|null;modality_code:string|null;modality_name:string|null;reporting_disposition:keyof typeof labels|null};
+async function getContext(db:Pool|PoolClient,id:number,appointmentId?:number){const r=await db.query<Row>(`select r.id,r.original_appointment_id,r.recall_appointment_id,r.status,u.id recipient_user_id,u.email recipient_email,coalesce(nullif(trim(u.full_name),''),u.username) recipient_display_name,u.is_active recipient_is_active,dp.active recipient_profile_active,coalesce(nullif(trim(p.english_full_name),''),nullif(trim(p.arabic_full_name),'')) patient_name,et.name_en original_exam,m.code modality_code,m.name_en modality_name,r.reporting_disposition from appointments_v2.complementary_recall_requests r join appointments_v2.bookings b on b.id=r.original_appointment_id join patients p on p.id=b.patient_id join modalities m on m.id=b.modality_id left join exam_types et on et.id=b.exam_type_id left join doctor_portal.case_team_assignments c on c.appointment_id=r.original_appointment_id and c.assignment_type='reporting' and c.status='active' left join doctor_portal.doctor_profiles dp on dp.id=c.assigned_doctor_id left join users u on u.id=dp.user_id where r.id=$1 ${appointmentId==null?"":"and r.recall_appointment_id=$2"}`,[id,...(appointmentId==null?[]:[appointmentId])]);return r.rows[0]??null;}
+function assertRecipient(r:Row){if(!r.recipient_user_id)throw new HttpError(409,"No active reporting doctor is assigned.");if(!r.recipient_profile_active)throw new HttpError(409,"The assigned reporting doctor is not eligible.");if(!r.recipient_is_active)throw new HttpError(409,"The assigned reporting doctor is inactive.");if(!email.test(r.recipient_email?.trim()??""))throw new HttpError(409,"The assigned reporting doctor has no valid email address.");}
+async function render(db:Pool|PoolClient,r:Row){const rule=await getEmailNotificationRule("additional_imaging_completed",db);const values:Record<string,string>={patient_name:r.patient_name??"",original_examination:r.original_exam??"",modality:[r.modality_code,r.modality_name].filter(Boolean).join(" / "),original_accession:formatV2AccessionNumber(r.original_appointment_id),additional_imaging_accession:formatV2AccessionNumber(r.recall_appointment_id!),reporting_action:r.reporting_disposition?labels[r.reporting_disposition]:""};const apply=(t:string)=>t.replace(/{{\s*([^{}\s]+)\s*}}/g,(_m,k)=>values[k]??"");return{rule,subject:apply(rule.subjectTemplate),textBody:apply(rule.textBodyTemplate)};}
+export async function queueComplementaryRecallCompletedEmail(client:PoolClient,input:{recallRequestId:number;recallAppointmentId:number;actorUserId:number|null}){const settings=await getEmailSettings(client);if(!settings.enabled)return{enqueued:false,reason:"email_disabled"};const r=await getContext(client,input.recallRequestId,input.recallAppointmentId);if(!r)return{enqueued:false,reason:"recall_context_unavailable"};const message=await render(client,r);if(!message.rule.enabled)return{enqueued:false,reason:"notification_rule_disabled"};try{assertRecipient(r);}catch(e){return{enqueued:false,reason:e instanceof Error?e.message:"recipient_unavailable"};}await enqueueEmail({eventType:"additional_imaging_completed",recipientUserId:r.recipient_user_id!,recipientEmail:r.recipient_email!.trim(),subject:message.subject,textBody:message.textBody,idempotencyKey:`additional_imaging_completed:${r.id}:${r.recall_appointment_id}`,relatedEntityType:"complementary_recall_request",relatedEntityId:String(r.id),createdByUserId:input.actorUserId},client);return{enqueued:true};}
+export async function queueManualComplementaryRecallCompletedEmail(client:PoolClient,input:{recallRequestId:number;actorUserId:number;forceResend?:boolean}){const lock=await client.query("select id from appointments_v2.complementary_recall_requests where id=$1 for update",[input.recallRequestId]);if(!lock.rows[0])throw new HttpError(404,"Additional imaging request not found.");const r=await getContext(client,input.recallRequestId);if(!r||r.status!=="completed"||!r.recall_appointment_id)throw new HttpError(409,"Additional imaging request must be completed before sending email.");const settings=await getEmailSettings(client);if(!settings.enabled)throw new HttpError(409,"Outbound email is disabled.");if(!settings.passwordConfigured)throw new HttpError(409,"SMTP credentials are not configured.");assertRecipient(r);const prior=await client.query<{status:string}>("select status from email_outbox where event_type in ('additional_imaging_completed','additional_imaging_completed_manual') and related_entity_type='complementary_recall_request' and related_entity_id=$1 and recipient_user_id=$2",[String(r.id),r.recipient_user_id]);if(prior.rows.some(x=>["pending","processing","retry_scheduled"].includes(x.status)))throw new HttpError(409,"A notification email is already queued for the assigned doctor.");if(prior.rows.some(x=>x.status==="accepted")&&!input.forceResend)throw new HttpError(409,"The assigned doctor has already been notified by email.");const message=await render(client,r);const outbox=await enqueueEmail({eventType:"additional_imaging_completed_manual",recipientUserId:r.recipient_user_id!,recipientEmail:r.recipient_email!.trim(),subject:message.subject,textBody:message.textBody,idempotencyKey:`additional_imaging_completed_manual:${r.id}:${r.recall_appointment_id}:${crypto.randomUUID()}`,relatedEntityType:"complementary_recall_request",relatedEntityId:String(r.id),createdByUserId:input.actorUserId},client);await logAuditEntry({entityType:"complementary_recall_request",entityId:r.id,actionType:"complementary_recall_completion_email_manually_queued",newValues:{outboxId:outbox.id,recipientUserId:r.recipient_user_id,eventType:"additional_imaging_completed_manual"},changedByUserId:input.actorUserId},client);return{outboxId:outbox.id,status:outbox.status,recipientUserId:r.recipient_user_id,recipientEmail:r.recipient_email!.trim()};}
+export type CompletionEmailNotification={recipientUserId:number|null;recipientDisplayName:string|null;recipientEmail:string|null;hasAccepted:boolean;acceptedAt:string|null;latestStatus:"pending"|"processing"|"retry_scheduled"|"accepted"|"failed"|null;latestCreatedAt:string|null;latestAcceptedAt:string|null;sendCount:number};
+export async function getComplementaryRecallCompletionEmailStatuses(ids:number[],db:Pick<PoolClient,"query">=pool){const out=new Map<number,CompletionEmailNotification>();if(!ids.length)return out;const q=await db.query<any>(`select r.id,u.id recipient_user_id,coalesce(nullif(trim(u.full_name),''),u.username) recipient_display_name,u.email recipient_email,e.status,e.created_at,e.accepted_at from appointments_v2.complementary_recall_requests r left join doctor_portal.case_team_assignments c on c.appointment_id=r.original_appointment_id and c.assignment_type='reporting' and c.status='active' left join doctor_portal.doctor_profiles dp on dp.id=c.assigned_doctor_id left join users u on u.id=dp.user_id left join email_outbox e on e.related_entity_type='complementary_recall_request' and e.related_entity_id=r.id::text and e.recipient_user_id=u.id and e.event_type in ('additional_imaging_completed','additional_imaging_completed_manual') where r.id=any($1::bigint[]) order by r.id,e.created_at desc,e.id desc`,[ids]);for(const x of q.rows){let s=out.get(+x.id);if(!s){s={recipientUserId:x.recipient_user_id??null,recipientDisplayName:x.recipient_display_name??null,recipientEmail:x.recipient_email??null,hasAccepted:false,acceptedAt:null,latestStatus:null,latestCreatedAt:null,latestAcceptedAt:null,sendCount:0};out.set(+x.id,s);}if(x.status){s.sendCount++;if(!s.latestStatus){s.latestStatus=x.status;s.latestCreatedAt=new Date(x.created_at).toISOString();s.latestAcceptedAt=x.accepted_at?new Date(x.accepted_at).toISOString():null;}if(x.status==="accepted"){s.hasAccepted=true;s.acceptedAt=x.accepted_at?new Date(x.accepted_at).toISOString():s.acceptedAt;}}}for(const id of ids)if(!out.has(id))out.set(id,{recipientUserId:null,recipientDisplayName:null,recipientEmail:null,hasAccepted:false,acceptedAt:null,latestStatus:null,latestCreatedAt:null,latestAcceptedAt:null,sendCount:0});return out;}

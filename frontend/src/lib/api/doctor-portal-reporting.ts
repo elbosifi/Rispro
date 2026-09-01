@@ -1179,6 +1179,7 @@ export async function withdrawComplementaryRecallRequest(recallId: number): Prom
 export async function fetchDoctorComplementaryRecalls(): Promise<ComplementaryRecall[]> {
   return (await api<{ recalls: ComplementaryRecall[] }>("/doctor/protocoling/complementary-recalls")).recalls;
 }
+export async function sendDoctorComplementaryRecallCompletionEmail(id:number,payload:{forceResend:boolean}){return api(`/doctor/protocoling/complementary-recalls/${id}/send-completion-email`,{method:"POST",body:JSON.stringify(payload)});}
 
 export async function updateDoctorComplementaryRecallInstructions(recallId: number, payload: ComplementaryRecallRequestPayload): Promise<ComplementaryRecall> {
   return (await api<{ recall: ComplementaryRecall }>(`/doctor/protocoling/complementary-recalls/${recallId}`, { method: "PATCH", body: JSON.stringify(payload) })).recall;

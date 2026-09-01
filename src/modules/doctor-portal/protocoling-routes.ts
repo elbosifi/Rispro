@@ -27,6 +27,7 @@ import { requirePatientIdentityReconciliationAccess } from "../../services/patie
 import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingAppointmentStatusFilter, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
 import { createComplementaryRecall, listComplementaryRecalls, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
+import { queueManualComplementaryRecallCompletedEmail } from "../appointments-v2/recall/complementary-recall-email.js";
 
 const router = Router();
 
@@ -190,6 +191,7 @@ router.get("/complementary-recalls", asyncRoute(async (req: DoctorRequest, res: 
   await requireProtocolingAccess(req);
   res.json({ recalls: await listComplementaryRecalls() });
 }));
+router.post("/complementary-recalls/:recallId/send-completion-email", asyncRoute(async (req: DoctorRequest, res: Response) => { const userId = await requireProtocolingAccess(req); const result = await withTransaction((client) => queueManualComplementaryRecallCompletedEmail(client, { recallRequestId: positiveInteger(req.params.recallId, "recallId"), actorUserId: userId!, forceResend: req.body?.forceResend === true })); res.status(202).json(result); }));
 
 router.patch("/complementary-recalls/:recallId", asyncRoute(async (req: DoctorRequest, res: Response) => {
   const userId = await requireProtocolingAccess(req);
