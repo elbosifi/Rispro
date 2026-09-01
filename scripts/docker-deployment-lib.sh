@@ -1025,6 +1025,7 @@ EOF_DICOM
   "DicomServerEnabled": true,
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
+  "StableAge": 10,
   "DicomModalitiesInDatabase": true,
 ${orthanc_dicom_block}
   "HttpPort": 8042,

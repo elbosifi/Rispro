@@ -1975,6 +1975,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "pacs.remap.maintenance": "الصيانة",
   "pacs.remap.resendToPacs": "إعادة الإرسال إلى PACS",
   "pacs.remap.retryWithOrthanc": "إعادة المحاولة باستخدام Orthanc",
+  "pacs.remap.recoverSource": "استعادة المصدر",
   "pacs.remap.orthancRecoveryProcessing": "تجري معالجة الاسترداد باستخدام Orthanc. يتم التحقق من ملفات DICOM الأصلية المحفوظة وإعادة استخدامها.",
   "pacs.remap.orthancRecoveryFailed": "فشلت إعادة المحاولة باستخدام Orthanc.",
   "pacs.remap.orthancRecoveryError": "خطأ في الاسترداد باستخدام Orthanc",

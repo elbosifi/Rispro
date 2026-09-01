@@ -79,6 +79,9 @@ grep -q 'ORTHANC_CONFIG_CHANGED}" != "1"' scripts/docker-deployment-lib.sh || fa
 grep -q 'up -d --no-deps --force-recreate orthanc' scripts/docker-deployment-lib.sh || fail 'Targeted Orthanc recreation is missing'
 pass 'Orthanc recreation is limited to rendered content changes'
 
+grep -q '"StableAge": 10' scripts/docker-deployment-lib.sh || fail 'Internal Orthanc renderer is missing StableAge 10'
+pass 'Internal Orthanc renderer sets StableAge to 10 seconds'
+
 for target in production production-orthanc restore-validation; do
   grep -q "FROM runtime-base AS ${target}" Dockerfile || fail "missing runtime-base target ${target}"
 done

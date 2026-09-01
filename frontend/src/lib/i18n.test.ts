@@ -17,13 +17,13 @@ describe("i18n catalog parity", () => {
     const englishKeys = Object.keys(__i18nTestables.en).sort();
     const arabicKeys = Object.keys(__i18nTestables.ar).sort();
 
-    expect(englishKeys).toHaveLength(2478);
+    expect(englishKeys).toHaveLength(2479);
     expect(arabicKeys).toEqual(englishKeys);
   });
 
   it("keeps every translation key and value byte-for-byte stable", () => {
-    expect(catalogHash(__i18nTestables.en)).toBe("f74ada8e2ce4beda2ae2ad643e586ba740958bdf6304162328368dc12860cba6");
-    expect(catalogHash(__i18nTestables.ar)).toBe("f474597ca9195e46383ca7f32e1d31f9ccef8096fafa3604b9c1fb7a075575b8");
+    expect(catalogHash(__i18nTestables.en)).toBe("d6aa155034b3b56a29a4810e669432615eb1930681884af91639e0a10359797c");
+    expect(catalogHash(__i18nTestables.ar)).toBe("e538ab0e5ad5b79d7580dbcae0948e1c8040bcaaa7480270252b4595745ec336");
   });
 
   it("preserves interpolation and localized fallback behavior", () => {
@@ -31,6 +31,8 @@ describe("i18n catalog parity", () => {
     expect(chooseLocalized("ar", "", "English fallback")).toBe("English fallback");
     expect(chooseLocalized("en", "بديل عربي", "")).toBe("بديل عربي");
     expect(statusLabel("en", "not-a-status")).toBe("not-a-status");
+    expect(t("en", "pacs.remap.recoverSource")).toBe("Recover Source");
+    expect(t("ar", "pacs.remap.recoverSource")).toBe("استعادة المصدر");
   });
 
   it("provides English and Arabic copy for the request-document protocol policy", () => {

@@ -1691,6 +1691,36 @@ describe("PacsRemapPage five-step wizard", () => {
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/92/retry-with-orthanc", { method: "POST" }));
   });
 
+  it("keeps Orthanc recovery processing visible and prevents a duplicate retry while recovery is claimed", async () => {
+    const oldFailure = "Orthanc could not verify the remapped study.";
+    let job = { id: 93, status: "failed", processing_stage: "failed", error_message: oldFailure, processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", orthanc_recovery_status: "available", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(), staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null, send_attempt_count: 0 };
+    const recovery = deferred<{ job: typeof job }>();
+    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
+      if (path === "/pacs/remap/jobs/93/retry-with-orthanc" && options?.method === "POST") return recovery.promise;
+      return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("Remap History"));
+    fireEvent.click(await screen.findByRole("button", { name: /#93.*Failed/i }));
+    const retry = await screen.findByRole("button", { name: "Retry with Orthanc" });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    await waitFor(() => expect(apiMock.mock.calls.some(([path, options]) => path === "/pacs/remap/jobs/93/retry-with-orthanc" && (options as { method?: string } | undefined)?.method === "POST")).toBe(true));
+    expect(apiMock.mock.calls.filter(([path, options]) => path === "/pacs/remap/jobs/93/retry-with-orthanc" && (options as { method?: string } | undefined)?.method === "POST")).toHaveLength(1);
+    expect(await screen.findByText("Orthanc recovery is processing. Original staged DICOM bytes are being verified and reused.")).toBeTruthy();
+    expect(screen.queryByText(oldFailure)).toBeNull();
+
+    job = { ...job, orthanc_recovery_status: "processing" };
+    recovery.resolve({ job });
+    await waitFor(() => expect(screen.getByText("Orthanc recovery is processing. Original staged DICOM bytes are being verified and reused.")).toBeTruthy());
+    expect(screen.queryByText(oldFailure)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Processing" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry with Orthanc" })).toBeNull();
+  });
+
   it("shows Recover Source in an opened eligible failed historical job and streams it through normal navigation", async () => {
     const job = { id: 107, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_attempt_count: 5, orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString() };
     apiMock.mockImplementation((path: string) => {

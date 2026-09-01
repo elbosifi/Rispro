@@ -41,6 +41,7 @@ write_orthanc_config() {
   "DicomServerEnabled": true,
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
+  "StableAge": 10,
   "DicomModalities": {},
   "DicomCheckCalledAet": false,
   "DicomCheckModalityHost": false,

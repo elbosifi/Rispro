@@ -1934,6 +1934,7 @@ export const en = {
   "pacs.remap.maintenance": "Maintenance",
   "pacs.remap.resendToPacs": "Resend to PACS",
   "pacs.remap.retryWithOrthanc": "Retry with Orthanc",
+  "pacs.remap.recoverSource": "Recover Source",
   "pacs.remap.orthancRecoveryProcessing": "Orthanc recovery is processing. Original staged DICOM bytes are being verified and reused.",
   "pacs.remap.orthancRecoveryFailed": "Retry with Orthanc failed.",
   "pacs.remap.orthancRecoveryError": "Orthanc recovery error",

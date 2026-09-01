@@ -2554,7 +2554,7 @@ export default function PacsRemapPage() {
                         onClick={() => recoverSource(effectiveJobId)}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm"
                       >
-                        Recover Source
+                        {t(language, "pacs.remap.recoverSource")}
                       </button>
                     )}
                     {requiresDicomReupload(currentJob) && (
@@ -2651,7 +2651,7 @@ export default function PacsRemapPage() {
                       onClick={() => recoverSource(job.id)}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs"
                     >
-                      Recover Source
+                      {t(language, "pacs.remap.recoverSource")}
                     </button>
                   )}
                 </div>
