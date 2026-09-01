@@ -25,6 +25,7 @@ function updateComplementaryRecallInstructions(client: import("pg").PoolClient, 
 describe("Complementary recall — integration", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
   let testData: TestData;
+  let priorEmailEnabled: boolean;
 
   async function transaction<T>(run: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();
@@ -47,14 +48,89 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     await pool.query("update modalities set name_en = 'Computed tomography' where id = $1", [testData.modalityId]);
+    priorEmailEnabled = Boolean((await pool.query<{ enabled: boolean }>("select enabled from email_smtp_configuration where id = 1")).rows[0]?.enabled);
+    await pool.query("update users set username = $1 where id = $2", [`recall-requester-${testData.userId}@example.test`, testData.userId]);
+    await pool.query("insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_assign_protocols) values ($1, $2, 'consultant', true, true)", [testData.userId, "Recall Requester"]);
   });
 
   after(async () => {
     if (!testData) return;
+    await pool.query("delete from email_outbox where event_type = 'additional_imaging_completed' and recipient_user_id = $1", [testData.userId]);
+    await pool.query("update email_smtp_configuration set enabled = $1 where id = 1", [priorEmailEnabled]);
     await pool.query(`delete from appointment_protocol_assignments where appointment_id in (select recall_appointment_id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1 and recall_appointment_id is not null)`, [testData.userId]);
     await pool.query("delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id in (select id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1)", [testData.userId]);
     await pool.query("delete from appointments_v2.complementary_recall_requests where requested_by_user_id = $1", [testData.userId]);
+    await pool.query("delete from doctor_portal.doctor_profiles where user_id = $1", [testData.userId]);
     await testDb.cleanup();
+  });
+
+  async function scheduledRecall(reportingDisposition: "supplement_original_report" | "separate_report" | "no_separate_report" = "supplement_original_report") {
+    const originalId = await originalBooking();
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", reportingDisposition, requestedByUserId: testData.userId }));
+    const recallBookingId = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, recall, recallBookingId, testData.userId));
+    return { originalId, recall, recallBookingId };
+  }
+
+  it("queues an enabled additional-imaging completion email for the requesting radiologist", async () => {
+    if (!testData) return;
+    await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    const { originalId, recall, recallBookingId } = await scheduledRecall("supplement_original_report");
+    await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
+    const outbox = await pool.query<{ event_type: string; recipient_user_id: number; recipient_email: string; status: string; related_entity_type: string; related_entity_id: string; idempotency_key: string; subject: string; text_body: string }>("select event_type, recipient_user_id, recipient_email, status, related_entity_type, related_entity_id, idempotency_key, subject, text_body from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)]);
+    assert.equal(outbox.rows.length, 1);
+    const email = outbox.rows[0]!;
+    const patient = await pool.query<{ english_full_name: string; phone_1: string | null; national_id: string | null }>("select english_full_name, phone_1, national_id from patients where id = $1", [testData.patientId]);
+    const exam = await pool.query<{ name_en: string }>("select name_en from exam_types where id = $1", [testData.examTypeId]);
+    const originalAccession = `V2-${String(originalId).padStart(6, "0")}`;
+    const recallAccession = `V2-${String(recallBookingId).padStart(6, "0")}`;
+    assert.equal(email.event_type, "additional_imaging_completed");
+    assert.equal(Number(email.recipient_user_id), testData.userId);
+    assert.equal(email.recipient_email, `recall-requester-${testData.userId}@example.test`);
+    assert.equal(email.status, "pending");
+    assert.equal(email.related_entity_type, "complementary_recall_request");
+    assert.equal(email.related_entity_id, String(recall.id));
+    assert.equal(email.idempotency_key, `additional_imaging_completed:${recall.id}:${recallBookingId}`);
+    assert.match(email.subject, /Additional imaging completed/);
+    assert.match(email.subject, new RegExp(recallAccession));
+    assert.doesNotMatch(email.subject, new RegExp(patient.rows[0]!.english_full_name));
+    assert.match(email.text_body, new RegExp(patient.rows[0]!.english_full_name));
+    assert.match(email.text_body, new RegExp(exam.rows[0]!.name_en));
+    assert.match(email.text_body, new RegExp(originalAccession));
+    assert.match(email.text_body, new RegExp(recallAccession));
+    assert.match(email.text_body, /Supplement original report/);
+    if (patient.rows[0]!.phone_1) assert.doesNotMatch(email.text_body, new RegExp(patient.rows[0]!.phone_1));
+    if (patient.rows[0]!.national_id) assert.doesNotMatch(email.text_body, new RegExp(patient.rows[0]!.national_id));
+    assert.doesNotMatch(email.text_body, /Repeat acquisition/);
+  });
+
+  it("does not queue an additional-imaging completion email when outbound email is disabled", async () => {
+    if (!testData) return;
+    await pool.query("update email_smtp_configuration set enabled = false where id = 1");
+    const { recall, recallBookingId } = await scheduledRecall();
+    await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
+    assert.equal((await getComplementaryRecall(recall.id))?.status, "completed");
+    assert.equal((await pool.query("select id from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)])).rowCount, 0);
+  });
+
+  it("does not block completion when the requesting radiologist username is not an email address", async () => {
+    if (!testData) return;
+    await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    await pool.query("update users set username = 'recall-not-an-email' where id = $1", [testData.userId]);
+    const { recall, recallBookingId } = await scheduledRecall();
+    await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
+    assert.equal((await getComplementaryRecall(recall.id))?.status, "completed");
+    assert.equal((await pool.query("select id from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)])).rowCount, 0);
+    await pool.query("update users set username = $1 where id = $2", [`recall-requester-${testData.userId}@example.test`, testData.userId]);
+  });
+
+  it("does not duplicate the completion email for repeated completion of the same booking", async () => {
+    if (!testData) return;
+    await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    const { recall, recallBookingId } = await scheduledRecall();
+    await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
+    await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
+    assert.equal((await pool.query("select id from email_outbox where idempotency_key = $1", [`additional_imaging_completed:${recall.id}:${recallBookingId}`])).rowCount, 1);
   });
 
   it("records append-only contact history, exposes live phones, and auto-acknowledges without changing lifecycle", async () => {

@@ -3,6 +3,7 @@ import { pool } from "../../../db/pool.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { logAuditEntry } from "../../../services/audit-service.js";
 import { PROTOCOLING_MODALITY_SQL } from "../../../services/protocoling-modality.js";
+import { queueComplementaryRecallCompletedEmail } from "./complementary-recall-email.js";
 
 export type ComplementaryRecallStatus = "pending_scheduling" | "scheduled" | "completed" | "cancelled";
 export type ComplementaryRecallReasonCode = "missing_sequence_phase" | "incomplete_anatomical_coverage" | "motion_nondiagnostic_quality" | "incorrect_protocol" | "incorrect_contrast_phase_timing" | "additional_diagnostic_characterization" | "technical_equipment_problem" | "patient_related_limitation" | "other";
@@ -281,6 +282,15 @@ export async function completeComplementaryRecallForBooking(client: PoolClient, 
   const recall = map(result.rows[0]);
   await client.query("update appointments_v2.complementary_recall_requests set status = 'completed', completed_at = now() where id = $1", [recall.id]);
   await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_completed", oldValues: { status: "scheduled", recallAppointmentId: bookingId }, newValues: { status: "completed", recallAppointmentId: bookingId }, changedByUserId: actorUserId }, client);
+  await client.query("savepoint complementary_recall_email_enqueue");
+  try {
+    await queueComplementaryRecallCompletedEmail(client, { recallRequestId: recall.id, recallAppointmentId: bookingId, actorUserId });
+    await client.query("release savepoint complementary_recall_email_enqueue");
+  } catch (error) {
+    await client.query("rollback to savepoint complementary_recall_email_enqueue");
+    await client.query("release savepoint complementary_recall_email_enqueue");
+    console.warn({ type: "additional_imaging_completion_email_enqueue_failed", recallRequestId: recall.id, recallAppointmentId: bookingId, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 export async function withdrawComplementaryRecall(client: PoolClient, id: number, actorUserId: number): Promise<ComplementaryRecall> {
