@@ -47,6 +47,7 @@ const users: User[] = [
   {
     id: 10,
     username: "existing.doc",
+    email: "existing@nccb.ly",
     fullName: "Existing Doctor",
     role: "doctor",
     isActive: true,
@@ -150,6 +151,7 @@ describe("DoctorAdminDoctorsPage", () => {
     await waitFor(() => expect(createDoctorWithUserForAdminMock).toHaveBeenCalled());
     expect(createDoctorWithUserForAdminMock.mock.calls[0][0]).toMatchObject({
       username: "fresh.doc",
+      email: "",
       fullName: "Fresh Doctor",
       temporaryPassword: "Temp123!",
       doctorDisplayName: "Fresh Doctor",
@@ -254,10 +256,25 @@ describe("DoctorAdminDoctorsPage", () => {
     expect(await screen.findByText("existing.doc")).toBeTruthy();
     expect(screen.queryByText("@existing.doc")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    expect(within(drawer).getByLabelText("Email")).toHaveProperty("value", "existing@nccb.ly");
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: " Updated.Doc " } });
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Updated Doctor" } });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
-    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", fullName: "Updated Doctor", coreRole: "doctor", active: true }));
+    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", email: "existing@nccb.ly", fullName: "Updated Doctor", coreRole: "doctor", active: true }));
+  });
+
+  it("auto-fills only an untouched create email and preserves manual edits or clears", async () => {
+    renderPage();
+    const username = screen.getByPlaceholderText("Username");
+    const email = screen.getByPlaceholderText("Email");
+    fireEvent.change(username, { target: { value: "doctor@nccb.ly" } });
+    expect(email).toHaveProperty("value", "doctor@nccb.ly");
+    fireEvent.change(email, { target: { value: "" } });
+    fireEvent.change(username, { target: { value: "changed@nccb.ly" } });
+    expect(email).toHaveProperty("value", "");
+    fireEvent.change(username, { target: { value: "doctor.login" } });
+    expect(email).toHaveProperty("value", "");
   });
 
   it("keeps duplicate username errors visible and the drawer open", async () => {

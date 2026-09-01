@@ -9,6 +9,7 @@ import type { UserId } from "../../types/http.js";
 import { deriveDoctorCapabilities } from "./capabilities.js";
 import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
+import { emailFromUsername, normalizeOptionalEmail } from "../../utils/email-address.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -124,6 +125,7 @@ export async function createDoctorWithUserForAdmin(
   appRole: Role,
   input: {
     username: string;
+    email?: string | null;
     fullName: string;
     temporaryPassword: string;
     coreRole: Role | string;
@@ -145,6 +147,7 @@ export async function createDoctorWithUserForAdmin(
 ) {
   await requireDoctorAdmin(actorUserId, appRole);
   const username = normalizeUsername(input.username);
+  const email = input.email === undefined ? emailFromUsername(username) : normalizeOptionalEmail(input.email);
   const fullName = input.fullName.trim();
   const temporaryPassword = requireExactPassword(input.temporaryPassword, "temporaryPassword");
   const doctorDisplayName = input.doctorDisplayName.trim() || fullName;
@@ -169,6 +172,7 @@ export async function createDoctorWithUserForAdmin(
     const userResult = await client.query<{
       id: number;
       username: string;
+      email: string | null;
       full_name: string;
       role: Role;
       is_active: boolean;
@@ -178,10 +182,10 @@ export async function createDoctorWithUserForAdmin(
     }>(
       `
         insert into users (username, email, full_name, password_hash, role, is_active, must_change_password)
-        values ($1, case when $1 ~ '^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$' then $1 else null end, $2, $3, $4, $5, true)
-        returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+        values ($1, $2, $3, $4, $5, $6, true)
+        returning id, username, email, full_name, role, is_active, must_change_password, created_at, updated_at
       `,
-      [username, fullName, passwordHash, input.coreRole, input.userActive]
+      [username, email, fullName, passwordHash, input.coreRole, input.userActive]
     );
     const user = userResult.rows[0];
 
@@ -277,6 +281,7 @@ export async function createDoctorWithUserForAdmin(
       user: {
         id: user.id,
         username: user.username,
+        email: user.email,
         full_name: user.full_name,
         role: user.role,
         is_active: user.is_active,
@@ -321,6 +326,7 @@ export async function updateProfileForAdmin(
 type DoctorAdminUserRow = {
   id: number;
   username: string;
+  email: string | null;
   full_name: string;
   role: Role;
   is_active: boolean;
@@ -331,7 +337,7 @@ type DoctorAdminUserRow = {
 
 async function lockLinkedDoctorUser(client: import("pg").PoolClient, userId: number) {
   const result = await client.query<DoctorAdminUserRow & { profile_id: number; profile_active: boolean }>(
-    `select u.id, u.username, u.full_name, u.role, u.is_active,
+    `select u.id, u.username, u.email, u.full_name, u.role, u.is_active,
             coalesce(u.must_change_password, false) as must_change_password,
             u.created_at, u.updated_at, dp.id as profile_id, dp.active as profile_active
        from users u
@@ -355,7 +361,7 @@ export async function updateLinkedDoctorUserForAdmin(
   actorUserId: UserId,
   appRole: Role,
   targetUserId: number,
-  input: { username: string; fullName: string; coreRole: string; active: boolean }
+  input: { username: string; email?: string | null; fullName: string; coreRole: string; active: boolean }
 ) {
   await requireDoctorAdmin(actorUserId, appRole);
   const username = normalizeUsername(input.username);
@@ -367,6 +373,7 @@ export async function updateLinkedDoctorUserForAdmin(
   try {
     await client.query("begin");
     const previous = await lockLinkedDoctorUser(client, targetUserId);
+    const email = input.email === undefined ? previous.email : normalizeOptionalEmail(input.email);
     if (Number(actorUserId) === targetUserId && !input.active) {
       throw new HttpError(400, "You cannot deactivate your own account.");
     }
@@ -378,20 +385,20 @@ export async function updateLinkedDoctorUserForAdmin(
     }
     const result = await client.query<DoctorAdminUserRow>(
       `update users
-          set username = $2, full_name = $3, role = $4, is_active = $5, updated_at = now()
+          set username = $2, email = $3, full_name = $4, role = $5, is_active = $6, updated_at = now()
         where id = $1
-        returning id, username, full_name, role, is_active,
+        returning id, username, email, full_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   created_at, updated_at`,
-      [targetUserId, username, fullName, input.coreRole, input.active]
+      [targetUserId, username, email, fullName, input.coreRole, input.active]
     );
     const updatedUser = result.rows[0];
     await insertDoctorAuditEvent(client, {
       actorUserId, actorDoctorId: null, eventType: "doctor_linked_user_updated",
       targetType: "user", targetId: targetUserId,
       metadata: {
-        oldValues: { username: previous.username, fullName: previous.full_name, coreRole: previous.role, active: previous.is_active },
-        newValues: { username: updatedUser.username, fullName: updatedUser.full_name, coreRole: updatedUser.role, active: updatedUser.is_active },
+        oldValues: { username: previous.username, email: previous.email, fullName: previous.full_name, coreRole: previous.role, active: previous.is_active },
+        newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name, coreRole: updatedUser.role, active: updatedUser.is_active },
       },
       reason: null,
     });

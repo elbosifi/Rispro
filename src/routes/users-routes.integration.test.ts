@@ -73,6 +73,7 @@ test("users identity, active-state, and temporary-password routes preserve middl
   try {
     const identity = await request(`/${targetId}/identity`, "PUT", {
       username: `  IDENTITY_TARGET_${suffix}  `,
+      email: "  target@nccb.ly  ",
       fullName: "  Identity Target  ",
       role: "super_admin",
     });
@@ -83,6 +84,17 @@ test("users identity, active-state, and temporary-password routes preserve middl
     assert.equal(identity.data.user?.is_active, false);
     assert.equal(identity.data.user?.must_change_password, false);
     assert.equal(identity.data.user?.can_request_scheduling_override, false);
+    assert.equal((await pool.query<{ email: string | null }>("select email from users where id = $1", [targetId])).rows[0]?.email, "target@nccb.ly");
+    const clearedEmail = await request(`/${targetId}/identity`, "PUT", { username: `identity_target_${suffix}`, email: "   ", fullName: "Identity Target" });
+    assert.equal(clearedEmail.status, 200);
+    assert.equal((await pool.query<{ email: string | null }>("select email from users where id = $1", [targetId])).rows[0]?.email, null);
+    const invalidEmail = await request(`/${targetId}/identity`, "PUT", { username: `identity_target_${suffix}`, email: "not-an-email", fullName: "Identity Target" });
+    assert.equal(invalidEmail.status, 400);
+    const firstSharedEmail = await request("/", "POST", { username: `users_route_email_one_${suffix}`, email: "shared@nccb.ly", fullName: "Shared Email One", password: "TemporaryPass123", role: "receptionist" });
+    const secondSharedEmail = await request("/", "POST", { username: `users_route_email_two_${suffix}`, email: "shared@nccb.ly", fullName: "Shared Email Two", password: "TemporaryPass123", role: "receptionist" });
+    assert.equal(firstSharedEmail.status, 201);
+    assert.equal(secondSharedEmail.status, 201);
+    createdIds.push(firstSharedEmail.data.user!.id, secondSharedEmail.data.user!.id);
     const identityAudit = await pool.query<{ changed_by_user_id: number }>(
       `select changed_by_user_id
        from audit_log

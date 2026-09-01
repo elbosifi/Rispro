@@ -7,6 +7,7 @@ import type { Role } from "../types/domain.js";
 import type { NullableUserId, UserId } from "../types/http.js";
 import { syncDoctorWorklistForUser } from "../modules/doctor-portal/doctor-worklist-provisioning.js";
 import { normalizeUsername, requireExactPassword } from "../utils/credentials.js";
+import { normalizeOptionalEmail } from "../utils/email-address.js";
 
 export interface UserRow {
   id: number;
@@ -77,7 +78,7 @@ export async function createUser(
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const canonicalUsername = normalizeUsername(username);
-  const canonicalEmail = normalizeEmail(email);
+  const canonicalEmail = normalizeOptionalEmail(email);
   if (!canonicalUsername || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
@@ -159,14 +160,6 @@ export async function createUser(
   }
 }
 
-const EMAIL_LIKE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function normalizeEmail(value: string | null | undefined): string | null {
-  const email = String(value ?? "").trim();
-  if (!email) return null;
-  if (!EMAIL_LIKE.test(email)) throw new HttpError(400, "A valid email is required.");
-  return email;
-}
-
 export async function updateUserIdentity(
   userId: UserId,
   { username, email, fullName }: UserIdentityPayload,
@@ -178,7 +171,7 @@ export async function updateUserIdentity(
   }
 
   const canonicalUsername = normalizeUsername(username);
-  const canonicalEmail = normalizeEmail(email);
+  const canonicalEmail = normalizeOptionalEmail(email);
   const cleanFullName = String(fullName ?? "").trim();
   if (!canonicalUsername) throw new HttpError(400, "username is required.");
   if (!cleanFullName) throw new HttpError(400, "fullName is required.");

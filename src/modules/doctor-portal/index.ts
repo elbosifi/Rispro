@@ -140,6 +140,7 @@ router.patch(
     const body = asUnknownRecord(req.body);
     const result = await updateLinkedDoctorUserForAdmin(actor.sub, actor.role, asPositiveInteger(req.params.userId, "user id"), {
       username: asString(body.username),
+      ...(Object.prototype.hasOwnProperty.call(body, "email") ? { email: body.email === null ? null : asString(body.email) } : {}),
       fullName: asString(body.fullName),
       coreRole: asString(body.coreRole),
       active: asOptionalBoolean(body.active) ?? true,
@@ -167,6 +168,7 @@ router.post(
 
     const result = await createDoctorWithUserForAdmin(user.sub, user.role, {
       username: asString(body.username),
+      ...(Object.prototype.hasOwnProperty.call(body, "email") ? { email: body.email === null ? null : asString(body.email) } : {}),
       fullName: asString(body.fullName),
       temporaryPassword: asString(body.temporaryPassword),
       coreRole: asString(body.coreRole),

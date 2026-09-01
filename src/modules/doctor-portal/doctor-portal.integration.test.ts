@@ -839,6 +839,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const username = `${TEST_PREFIX.toLowerCase()}created_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const body = {
       username: `  ${username.toUpperCase()}  `,
+      email: "  doctor@nccb.ly  ",
       fullName: `${TEST_PREFIX} Created Doctor`,
       temporaryPassword: "TempPass123",
       coreRole: "doctor",
@@ -855,11 +856,12 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const created = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body });
     assert.equal(created.status, 201, JSON.stringify(created.data));
     const createdData = created.data as {
-      user: { id: number; must_change_password: boolean; is_active: boolean };
+      user: { id: number; email: string | null; must_change_password: boolean; is_active: boolean };
       profile: { id: number; active: boolean; canSupervise: boolean };
       modalities: Array<{ modalityId: number; canProtocol: boolean; canReport: boolean; active: boolean }>;
     };
     assert.equal(createdData.user.must_change_password, true);
+    assert.equal(createdData.user.email, "doctor@nccb.ly");
     assert.equal(createdData.user.is_active, true);
     assert.equal(createdData.profile.active, true);
     assert.equal(createdData.profile.canSupervise, true);
@@ -893,6 +895,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const sharedIpDoctor = `${username}_shared`;
     const sharedCreated = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: sharedIpDoctor, doctorDisplayName: `${TEST_PREFIX} Shared IP Doctor` } });
     assert.equal(sharedCreated.status, 201, JSON.stringify(sharedCreated.data));
+    assert.equal((sharedCreated.data as { user: { email: string | null } }).user.email, "doctor@nccb.ly", "departmental email addresses may be shared");
     assert.equal((await authRequest("/api/auth/login", { username: sharedIpDoctor, password: body.temporaryPassword })).status, 200, "one username's failures must not block another doctor on the same IP");
 
     const userCookie = createTestAuthCookie(createdData.user.id, "doctor");
@@ -924,6 +927,16 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     const missingPassword = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_missing`, temporaryPassword: "" } });
     assert.equal(missingPassword.status, 400);
+
+    const fallbackEmailUsername = `fallback${randomUUID().replace(/-/g, "").slice(0, 8)}@nccb.ly`;
+    const fallbackEmail = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: fallbackEmailUsername, doctorDisplayName: `${TEST_PREFIX} Fallback Email`, email: undefined } });
+    assert.equal(fallbackEmail.status, 201, JSON.stringify(fallbackEmail.data));
+    assert.equal((fallbackEmail.data as { user: { email: string | null } }).user.email, fallbackEmailUsername);
+    const nonEmailFallback = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_noemail`, doctorDisplayName: `${TEST_PREFIX} Null Email`, email: undefined } });
+    assert.equal(nonEmailFallback.status, 201, JSON.stringify(nonEmailFallback.data));
+    assert.equal((nonEmailFallback.data as { user: { email: string | null } }).user.email, null);
+    const invalidEmail = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_invalid_email`, doctorDisplayName: `${TEST_PREFIX} Invalid Email`, email: "not-an-email" } });
+    assert.equal(invalidEmail.status, 400);
 
     const normalDenied = await api(normal.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_denied` } });
     assert.equal(normalDenied.status, 403);
@@ -957,17 +970,28 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const updatedUsername = `${supervisorUsername}_updated`;
     const accountUpdated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
       method: "PATCH",
-      body: { username: `  ${updatedUsername.toUpperCase()}  `, fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+      body: { username: `  ${updatedUsername.toUpperCase()}  `, email: " new@nccb.ly ", fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
     });
     assert.equal(accountUpdated.status, 200, JSON.stringify(accountUpdated.data));
     assert.equal((accountUpdated.data as { user: { username: string; full_name: string; role: string; must_change_password: boolean } }).user.username, updatedUsername);
     assert.equal((accountUpdated.data as { user: { full_name: string } }).user.full_name, `${TEST_PREFIX} Updated Identity`);
     assert.equal((accountUpdated.data as { user: { role: string } }).user.role, "doctor");
+    assert.equal((accountUpdated.data as { user: { email: string | null } }).user.email, "new@nccb.ly");
+    const usernameOnlyUpdate = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
+      method: "PATCH", body: { username: `${updatedUsername}_again`, fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+    });
+    assert.equal(usernameOnlyUpdate.status, 200);
+    assert.equal((usernameOnlyUpdate.data as { user: { email: string | null } }).user.email, "new@nccb.ly");
+    const clearEmail = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
+      method: "PATCH", body: { username: `${updatedUsername}_again`, email: "   ", fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+    });
+    assert.equal(clearEmail.status, 200);
+    assert.equal((clearEmail.data as { user: { email: string | null } }).user.email, null);
     const preservedSecurity = await pool.query<{ password_hash: string; must_change_password: boolean }>("select password_hash, must_change_password from users where id = $1", [supervisorCreatedUserId]);
     assert.equal(preservedSecurity.rows[0].password_hash, originalSecurity.rows[0].password_hash);
     assert.equal(preservedSecurity.rows[0].must_change_password, originalSecurity.rows[0].must_change_password);
     const accountAudit = await pool.query<{ count: string }>("select count(*)::text as count from doctor_portal.doctor_module_audit_events where target_type = 'user' and target_id = $1 and event_type = 'doctor_linked_user_updated'", [supervisorCreatedUserId]);
-    assert.equal(Number(accountAudit.rows[0].count), 1);
+    assert.equal(Number(accountAudit.rows[0].count), 3);
 
     const duplicateTarget = await pool.query<{ username: string }>("select username from users where id = $1", [normal.id]);
     const duplicateAccount = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
@@ -1062,16 +1086,18 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
 
-    const imported = await pool.query<{ password_hash: string; must_change_password: boolean }>(
-      `select password_hash, must_change_password from users where username = $1 limit 1`,
+    const imported = await pool.query<{ password_hash: string; must_change_password: boolean; email: string | null }>(
+      `select password_hash, must_change_password, email from users where username = $1 limit 1`,
       [username]
     );
     assert.equal(imported.rows[0]?.must_change_password, true);
+    assert.equal(imported.rows[0]?.email, null);
 
     const csvRow = (temporaryPassword: string, resetPassword: string) => [
       "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
       `${username},${TEST_PREFIX} Imported Doctor,${temporaryPassword},doctor,true,consultant,true,true,true,false,${modalityCode},,,${resetPassword}`,
     ].join("\n");
+    await pool.query("update users set email = 'custom.import@nccb.ly' where username = $1", [username]);
     const resetWithoutPassword = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
       method: "POST",
       body: { fileContentBase64: Buffer.from(csvRow("", "true"), "utf8").toString("base64") },
@@ -1085,9 +1111,19 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       body: { fileContentBase64: Buffer.from(csvRow(resetPassword, "true"), "utf8").toString("base64") },
     });
     assert.equal(reset.status, 200, JSON.stringify(reset.data));
+    assert.equal((await pool.query<{ email: string | null }>("select email from users where username = $1", [username])).rows[0]?.email, "custom.import@nccb.ly");
     const resetUser = await pool.query<{ password_hash: string; must_change_password: boolean }>(`select password_hash, must_change_password from users where username = $1`, [username]);
     assert.equal(await bcrypt.compare(resetPassword, resetUser.rows[0].password_hash), true);
     assert.equal(resetUser.rows[0].must_change_password, true);
+
+    const emailUsername = `import${randomUUID().replace(/-/g, "").slice(0, 8)}@nccb.ly`;
+    const emailCsv = [
+      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${emailUsername},${TEST_PREFIX} Imported Email,TempPass123,doctor,true,consultant,true,true,true,false,${modalityCode},,,false`,
+    ].join("\n");
+    const emailImport = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", { method: "POST", body: { fileContentBase64: Buffer.from(emailCsv, "utf8").toString("base64") } });
+    assert.equal(emailImport.status, 200, JSON.stringify(emailImport.data));
+    assert.equal((await pool.query<{ email: string | null }>("select email from users where username = $1", [emailUsername])).rows[0]?.email, emailUsername);
 
     const preserve = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
       method: "POST",

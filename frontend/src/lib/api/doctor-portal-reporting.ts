@@ -79,6 +79,7 @@ export async function createDoctorProfileForAdmin(payload: {
 
 export async function createDoctorWithUserForAdmin(payload: {
   username: string;
+  email: string;
   fullName: string;
   temporaryPassword: string;
   coreRole: "doctor" | "supervisor";
@@ -167,7 +168,7 @@ export async function setDoctorUserActive(userId: number, active: boolean): Prom
   return mapUser(raw.user);
 }
 
-export async function updateDoctorLinkedUserForAdmin(userId: number, payload: { username: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean }): Promise<{ user: User; profile: DoctorProfile }> {
+export async function updateDoctorLinkedUserForAdmin(userId: number, payload: { username: string; email: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean }): Promise<{ user: User; profile: DoctorProfile }> {
   const raw = await api<{ user: RawRecord; profile: DoctorProfile }>(`/doctor/admin/doctors/${userId}/account`, {
     method: "PATCH",
     body: JSON.stringify(payload),

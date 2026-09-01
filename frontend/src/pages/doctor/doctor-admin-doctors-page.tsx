@@ -24,6 +24,7 @@ import type { DoctorMe, DoctorModalityPermission, DoctorProfile, DoctorProfileRo
 
 type CreateDoctorDraft = {
   username: string;
+  email: string;
   fullName: string;
   temporaryPassword: string;
   coreRole: "doctor" | "supervisor";
@@ -52,7 +53,7 @@ type ModalityPermissionDraft = {
   active: boolean;
 };
 
-type AccountDraft = { username: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean };
+type AccountDraft = { username: string; email: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean };
 type DrawerSection = "account" | "profile" | "modalities" | "security";
 
 type ModalityDraftOverride = {
@@ -79,6 +80,7 @@ const DEFAULT_PROFILE_DRAFT: DoctorProfileDraft = {
 
 const DEFAULT_CREATE_DOCTOR_DRAFT: CreateDoctorDraft = {
   username: "",
+  email: "",
   fullName: "",
   temporaryPassword: "",
   coreRole: "doctor",
@@ -114,6 +116,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [importPreview, setImportPreview] = useState<DoctorImportPreview | null>(null);
   const [importResult, setImportResult] = useState<DoctorImportResult | null>(null);
   const [createDoctorDraft, setCreateDoctorDraft] = useState<CreateDoctorDraft>(DEFAULT_CREATE_DOCTOR_DRAFT);
+  const [createDoctorEmailEdited, setCreateDoctorEmailEdited] = useState(false);
   const [createDoctorModalities, setCreateDoctorModalities] = useState<Record<number, {
     canProtocol: boolean;
     canReport: boolean;
@@ -124,7 +127,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
   const [modalityDraftOverride, setModalityDraftOverride] = useState<ModalityDraftOverride | null>(null);
   const [resetPassword, setResetPassword] = useState("");
-  const [accountDraft, setAccountDraft] = useState<AccountDraft>({ username: "", fullName: "", coreRole: "doctor", active: true });
+  const [accountDraft, setAccountDraft] = useState<AccountDraft>({ username: "", email: "", fullName: "", coreRole: "doctor", active: true });
   const [drawerSection, setDrawerSection] = useState<DrawerSection>("account");
   const [confirmLifecycle, setConfirmLifecycle] = useState<DoctorProfile | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
@@ -244,6 +247,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     onSuccess: async (result) => {
       setSelectedProfileId(result.profile.id);
       setCreateDoctorDraft(DEFAULT_CREATE_DOCTOR_DRAFT);
+      setCreateDoctorEmailEdited(false);
       setCreateDoctorModalities({});
       setAdminMessage({ tone: "success", text: "Doctor user and profile created." });
       await invalidateProfiles();
@@ -399,6 +403,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     const role = profile.coreRole ?? linkedUser?.role;
     setAccountDraft({
       username: profile.username ?? linkedUser?.username ?? "",
+      email: linkedUser?.email ?? "",
       fullName: profile.fullName ?? linkedUser?.fullName ?? "",
       coreRole: role === "supervisor" ? "supervisor" : "doctor",
       active: profile.userActive ?? linkedUser?.isActive ?? false,
@@ -468,7 +473,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           Creates the RISpro login account and Doctor Portal profile together.
         </p>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
+          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: !createDoctorEmailEdited && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : current.email }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
+          <input aria-label="Email" value={createDoctorDraft.email} onChange={(event) => { setCreateDoctorEmailEdited(true); setCreateDoctorDraft((current) => ({ ...current, email: event.target.value })); }} placeholder="Email" className="rounded-lg border px-3 py-2 text-sm" />
           <input value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({
             ...current,
             fullName: event.target.value,
@@ -645,6 +651,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
               {drawerSection === "account" ? <section aria-labelledby="account-section-title" className="space-y-4">
                 <div><h3 id="account-section-title" className="font-semibold">Account</h3><p className="text-sm text-muted-foreground">Login account active is separate from Doctor profile active.</p></div>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Username</span><input value={accountDraft.username} onChange={(event) => setAccountDraft((current) => ({ ...current, username: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Email</span><input aria-label="Email" value={accountDraft.email} onChange={(event) => setAccountDraft((current) => ({ ...current, email: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Full name</span><input value={accountDraft.fullName} onChange={(event) => setAccountDraft((current) => ({ ...current, fullName: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Core role</span><select value={accountDraft.coreRole} onChange={(event) => setAccountDraft((current) => ({ ...current, coreRole: event.target.value as AccountDraft['coreRole'] }))} className="rounded-lg border px-3 py-2"><option value="doctor">Doctor</option><option value="supervisor">Supervisor</option></select></label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={accountDraft.active} onChange={(event) => setAccountDraft((current) => ({ ...current, active: event.target.checked }))} /> Login account active</label>
