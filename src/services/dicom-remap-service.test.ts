@@ -2175,6 +2175,32 @@ test("dicom helper: strict recovery timeout accepts only one exact ModifiedFrom 
   }
 });
 
+test("dicom helper: recovery provenance polling reuses a delayed exact ModifiedFrom child without real waits", async () => {
+  let probes = 0;
+  let sleptMs = 0;
+  __dicomRemapTestables.setSleepForTests(async (ms) => { sleptMs += ms; });
+  __dicomRemapTestables.setOrthancFetchForTests(async (requestPath) => {
+    if (requestPath === "/studies/source-study") return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "SOURCE" } } });
+    if (requestPath === "/tools/find") {
+      probes += 1;
+      return orthancResult({ json: probes >= 31 ? ["modified-study"] : [] });
+    }
+    if (requestPath === "/studies/modified-study") return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "P1" } } });
+    if (requestPath === "/studies/modified-study/metadata/ModifiedFrom") return orthancResult({ json: "source-study", text: '"source-study"' });
+    throw new Error(`Unexpected Orthanc request: ${requestPath}`);
+  });
+
+  const studyId = await __dicomRemapTestables.waitForProvenOrthancRecoveryModifiedChild(
+    remapJob({ replacement_patient_id: "P1" }),
+    "source-study",
+    { renewLease: async () => {} },
+  );
+
+  assert.equal(studyId, "modified-study");
+  assert.equal(probes, 31);
+  assert.equal(sleptMs, 30_000);
+});
+
 test("dicom helper: verifySendCompletionAfterTimeout finds completed job when available", async () => {
   __dicomRemapTestables.setOrthancFetchForTests(async (path) => {
     if (path === "/jobs?expand") {

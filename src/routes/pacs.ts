@@ -62,7 +62,7 @@ import {
   listDicomRemapJobs,
   prepareDicomRemapSourceRecovery,
   prepareDicomRemapConfirmation,
-  retryFailedDicomRemapWithOrthanc,
+  startManualDicomRemapOrthancRecovery,
   resendDicomRemapJobToPacs,
   resetDicomRemapJob,
   validateDicomRemapUploadFilesInput,
@@ -1201,7 +1201,7 @@ pacsRouter.post(
       throw new HttpError(400, "jobId is required.");
     }
 
-    const result = await retryFailedDicomRemapWithOrthanc({ jobId, currentUserId });
+    const result = await startManualDicomRemapOrthancRecovery({ jobId, currentUserId });
     res.status(202).json(result);
   })
 );

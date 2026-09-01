@@ -2431,7 +2431,7 @@ export default function PacsRemapPage() {
                   {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
                 </p>
               ))}
-              {viewingPersistedJob && currentJob?.error_message && (
+              {viewingPersistedJob && !recoveryIsProcessing && currentJob?.error_message && (
                 <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800">
                   <strong>{language === "ar" ? "سبب الفشل المحفوظ" : "Persisted failure"}:</strong> {currentJob.error_message}
                 </p>

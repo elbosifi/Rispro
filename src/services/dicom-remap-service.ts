@@ -312,6 +312,8 @@ const DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS = readDicomRemapPositiveLimi
 const DICOM_REMAP_ORTHANC_STABILITY_POLL_MS = 1_000;
 const DICOM_REMAP_ORTHANC_LEASE_RENEWAL_INTERVAL_SECONDS = 10;
 const DICOM_REMAP_ORTHANC_SOP_READ_CONCURRENCY = 8;
+const DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_TIMEOUT_SECONDS = 90;
+const DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_POLL_MS = 1_000;
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
@@ -5818,7 +5820,36 @@ async function findProvenOrthancRecoveryModifiedChildren(
   return { exact, provenanceAvailable, searchConclusive: true };
 }
 
-export async function retryFailedDicomRemapWithOrthanc({
+async function waitForProvenOrthancRecoveryModifiedChild(
+  job: DicomRemapJobRow,
+  sourceStudyId: string,
+  options: { renewLease: () => Promise<void> },
+): Promise<string> {
+  let elapsedMs = 0;
+  let provenanceAvailable = false;
+  while (true) {
+    await options.renewLease();
+    const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, options);
+    provenanceAvailable ||= discovered.provenanceAvailable;
+    if (discovered.exact.length > 1) {
+      throw new HttpError(409, "Multiple exact Orthanc recovery children were found.", {
+        code: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN",
+        actualCount: discovered.exact.length,
+      });
+    }
+    if (discovered.searchConclusive && discovered.exact.length === 1) return discovered.exact[0]!;
+    if (elapsedMs >= DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_TIMEOUT_SECONDS * 1_000) {
+      throw new HttpError(409, "Orthanc recovery provenance could not prove the modified child.", {
+        code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+        provenanceAvailable,
+      });
+    }
+    await sleepForDicomRemap(DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_POLL_MS);
+    elapsedMs += DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_POLL_MS;
+  }
+}
+
+async function claimDicomRemapOrthancRecovery({
   jobId,
   currentUserId,
   automatic = false,
@@ -5826,19 +5857,19 @@ export async function retryFailedDicomRemapWithOrthanc({
   jobId: number | string;
   currentUserId: UserId;
   automatic?: boolean;
-}): Promise<{ job: DicomRemapJobRow }> {
+}): Promise<{ initial: DicomRemapJobRow; job: DicomRemapJobRow; leaseOwner: string; replacement: OrthancPatientSummary; possiblePreviousModify: boolean }> {
   const initial = await loadAccessibleDicomRemapJob(jobId);
   if (automatic && !shouldAutomaticallyAttemptOrthancRecovery(initial)) {
     throw new HttpError(409, "This job is not eligible for automatic Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
   }
   if (initial.orthanc_recovery_status === "completed") {
     if (initial.status === "remapped") {
-      return sendExistingDicomRemapJobToDestination({ job: initial, currentUserId, auditActionType: "pacs_send_enqueued" });
+      throw new HttpError(409, "This job is not eligible for Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
     }
-    return { job: initial };
+    throw new HttpError(409, "This job is not eligible for Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
   }
   if (initial.orthanc_recovery_status === "processing" && initial.orthanc_recovery_lease_expires_at && Date.parse(initial.orthanc_recovery_lease_expires_at) > Date.now()) {
-    return { job: initial };
+    return { initial, job: initial, leaseOwner: "", replacement: { patientId: "", patientName: "", patientSex: "", patientBirthDate: "" }, possiblePreviousModify: false };
   }
   if (initial.status !== "failed" || !["available", "failed", "processing"].includes(String(initial.orthanc_recovery_status || ""))) {
     throw new HttpError(409, "This job is not eligible for Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
@@ -5893,11 +5924,33 @@ export async function retryFailedDicomRemapWithOrthanc({
   let job = claimed.rows[0];
   if (!job) {
     const current = await loadAccessibleDicomRemapJob(initial.id);
-    if (current.orthanc_recovery_status === "completed" || current.orthanc_recovery_status === "processing") return { job: current };
+    if (current.orthanc_recovery_status === "processing") return { initial, job: current, leaseOwner: "", replacement, possiblePreviousModify };
     throw new HttpError(409, "Orthanc recovery state changed before it could be claimed.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
   }
   const reclaimed = initial.orthanc_recovery_status === "processing" || initial.orthanc_recovery_error_code === "DICOM_REMAP_ORTHANC_RECOVERY_INTERRUPTED";
   await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: reclaimed ? "dicom_remap_orthanc_recovery_reclaimed" : "dicom_remap_orthanc_recovery_started", oldValues: { orthancRecoveryStatus: initial.orthanc_recovery_status, recoveryStage: initial.orthanc_recovery_stage }, newValues: { orthancRecoveryStatus: "processing", recoveryStage: job.orthanc_recovery_stage, attemptNumber: job.orthanc_recovery_attempt_count, sourceCheckpointExists: Boolean(job.orthanc_recovery_source_study_id), modifiedCheckpointExists: Boolean(job.modified_orthanc_study_id) }, changedByUserId: currentUserId });
+
+  return { initial, job, leaseOwner, replacement, possiblePreviousModify };
+}
+
+async function continueClaimedDicomRemapOrthancRecovery({
+  initial,
+  job: claimedJob,
+  leaseOwner,
+  replacement,
+  possiblePreviousModify,
+  currentUserId,
+}: {
+  initial: DicomRemapJobRow;
+  job: DicomRemapJobRow;
+  leaseOwner: string;
+  replacement: OrthancPatientSummary;
+  possiblePreviousModify: boolean;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  if (!leaseOwner) return { job: claimedJob };
+  let job = claimedJob;
+  const leaseSeconds = Math.max(180, DICOM_REMAP_ORTHANC_RECOVERY_LEASE_SECONDS);
 
   let recoveredForSend: DicomRemapJobRow | null = null;
   const recoverySourceSummary = {
@@ -5979,15 +6032,20 @@ export async function retryFailedDicomRemapWithOrthanc({
       const mustReconcile = possiblePreviousModify || job.orthanc_recovery_stage === "modifying";
       if (mustReconcile) {
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying");
-        const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, {
+        modifiedStudyId = await waitForProvenOrthancRecoveryModifiedChild(job, sourceStudyId, {
           renewLease: async () => { job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying"); },
         });
-        if (discovered.exact.length > 1) throw new HttpError(409, "Multiple exact Orthanc recovery children were found.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN", actualCount: discovered.exact.length });
-        if (!discovered.searchConclusive || discovered.exact.length !== 1) throw new HttpError(409, "Orthanc recovery provenance could not prove the modified child.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED", provenanceAvailable: discovered.provenanceAvailable });
-        modifiedStudyId = discovered.exact[0]!;
       } else {
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying");
-        modifiedStudyId = await createModifiedStudyCopy(sourceStudyId, replacement, { requireExactModifiedFromProvenance: true });
+        try {
+          modifiedStudyId = await createModifiedStudyCopy(sourceStudyId, replacement, { requireExactModifiedFromProvenance: true });
+        } catch (error) {
+          const code = error instanceof HttpError ? String((error.details as { code?: unknown } | null)?.code || "") : "";
+          if (code !== "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED") throw error;
+          modifiedStudyId = await waitForProvenOrthancRecoveryModifiedChild(job, sourceStudyId, {
+            renewLease: async () => { job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying"); },
+          });
+        }
         if (afterOrthancRecoveryModifyForTests) await afterOrthancRecoveryModifyForTests({ jobId: job.id, sourceStudyId, modifiedStudyId });
       }
       const persisted = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -6035,6 +6093,51 @@ export async function retryFailedDicomRemapWithOrthanc({
   }
   if (!recoveredForSend) throw new HttpError(500, "Orthanc recovery did not produce a verified study.");
   return sendExistingDicomRemapJobToDestination({ job: recoveredForSend, currentUserId, auditActionType: "pacs_send_enqueued" });
+}
+
+export async function retryFailedDicomRemapWithOrthanc({
+  jobId,
+  currentUserId,
+  automatic = false,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+  automatic?: boolean;
+}): Promise<{ job: DicomRemapJobRow }> {
+  const existing = await loadAccessibleDicomRemapJob(jobId);
+  if (existing.orthanc_recovery_status === "completed") {
+    if (existing.status === "remapped") {
+      return sendExistingDicomRemapJobToDestination({ job: existing, currentUserId, auditActionType: "pacs_send_enqueued" });
+    }
+    return { job: existing };
+  }
+  const claim = await claimDicomRemapOrthancRecovery({ jobId, currentUserId, automatic });
+  return continueClaimedDicomRemapOrthancRecovery({ ...claim, currentUserId });
+}
+
+export async function startManualDicomRemapOrthancRecovery({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  const existing = await loadAccessibleDicomRemapJob(jobId);
+  if (existing.orthanc_recovery_status === "completed") {
+    if (existing.status === "remapped") {
+      return sendExistingDicomRemapJobToDestination({ job: existing, currentUserId, auditActionType: "pacs_send_enqueued" });
+    }
+    return { job: existing };
+  }
+  const claim = await claimDicomRemapOrthancRecovery({ jobId, currentUserId });
+  if (!claim.leaseOwner) return { job: claim.job };
+  setImmediate(() => {
+    void continueClaimedDicomRemapOrthancRecovery({ ...claim, currentUserId }).catch((error: unknown) => {
+      const errorCode = error instanceof HttpError ? String((error.details as { code?: unknown } | null)?.code || "") : "";
+      console.error("DICOM remap Orthanc recovery continuation failed.", { type: "dicom_remap_orthanc_recovery_continuation_failed", jobId: claim.job.id, errorCode });
+    });
+  });
+  return { job: claim.job };
 }
 
 export async function resendDicomRemapJobToPacs({
@@ -6229,6 +6332,7 @@ export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId)
 export const __dicomRemapTestables = {
   DICOM_REMAP_INTEGRITY_VERSION,
   REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+  DICOM_REMAP_ORTHANC_RECOVERY_RECONCILIATION_TIMEOUT_SECONDS,
   DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS,
   DICOM_REMAP_UPLOAD_CONCURRENCY,
   DICOM_REMAP_PREVIEW_HEADER_BYTES,
@@ -6287,6 +6391,7 @@ export const __dicomRemapTestables = {
   processingErrorCode,
   readOrthancModifiedFromStudyId,
   findProvenOrthancRecoveryModifiedChildren,
+  waitForProvenOrthancRecoveryModifiedChild,
   isOrthancBulkModifyRouteAvailable,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
