@@ -972,7 +972,7 @@ function hasSameReplacementIdentity(
 ): boolean {
   return (
     summary.patientId === replacement.patientId &&
-    summary.patientName === replacement.patientName &&
+    normalizeDicomPatientName(summary.patientName) === normalizeDicomPatientName(replacement.patientName) &&
     normalizePatientSex(summary.patientSex) === normalizePatientSex(replacement.patientSex) &&
     normalizeDicomBirthDate(summary.patientBirthDate) === normalizeDicomBirthDate(replacement.patientBirthDate)
   );
@@ -6249,6 +6249,7 @@ export const __dicomRemapTestables = {
   normalizeDicomBirthDate,
   normalizeDicomPatientIdForReplace,
   normalizeDicomPatientNameForReplace,
+  hasSameReplacementIdentity,
   validateOrthancReplacementIdentity,
   readNaturalizedStudySummary,
   getMyActiveDicomRemapJob,

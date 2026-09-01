@@ -956,6 +956,7 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(fake.state.uploadRecords.length, 2);
 
     __dicomRemapTestables.setAfterOrthancRecoveryModifyForTests(null);
+    fake.state.scenario.returnedPatientName = "Source Patient";
     fake.state.scenario.includeLookalike = true;
     fake.state.toolsFindCount = 0;
     fake.state.allStudiesListCount = 0;

@@ -1142,6 +1142,15 @@ test("dicom helper: replacement identity rejects control characters consistently
   );
 });
 
+test("dicom helper: recovery source identity accepts DICOM caret and Orthanc space PatientName forms only", () => {
+  const staged = { patientId: "4644-2026", patientName: "Alomom^Mansour^Mohamed", patientSex: "F", patientBirthDate: "19630808" };
+  assert.equal(__dicomRemapTestables.hasSameReplacementIdentity({ ...staged, patientName: "Alomom Mansour Mohamed" }, staged), true);
+  assert.equal(__dicomRemapTestables.hasSameReplacementIdentity({ ...staged, patientName: "Alomom Mansour Ali" }, staged), false);
+  assert.equal(__dicomRemapTestables.hasSameReplacementIdentity({ ...staged, patientId: "4645-2026" }, staged), false);
+  assert.equal(__dicomRemapTestables.hasSameReplacementIdentity({ ...staged, patientBirthDate: "19630809" }, staged), false);
+  assert.equal(__dicomRemapTestables.hasSameReplacementIdentity({ ...staged, patientSex: "M" }, staged), false);
+});
+
 test("dicom helper: rewriteDicomFileForRemap preserves source demographics and replaces only PatientID", async () => {
   const stagedFiles = await makeStagedFiles([
     {
