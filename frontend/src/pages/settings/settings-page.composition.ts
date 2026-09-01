@@ -32,6 +32,7 @@ export type SettingsSection =
   | "backup_restore"
   | "system_diagnostics"
   | "request_scan_automation"
+  | "email_notifications"
   | "authoritative_orthanc";
 
 export type SettingsMenuSection = Exclude<SettingsSection, "menu">;
@@ -69,6 +70,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "backup_restore",
   "system_diagnostics",
   "request_scan_automation",
+  "email_notifications",
   "authoritative_orthanc",
 ];
 
@@ -105,6 +107,7 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   backup_restore: "system",
   system_diagnostics: "system",
   request_scan_automation: "integrations",
+  email_notifications: "integrations",
   authoritative_orthanc: "integrations",
 };
 
@@ -116,7 +119,7 @@ export function initialSettingsSection(search: string): SettingsSection {
 }
 
 export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?: string): boolean {
-  if ((section === "system_diagnostics" || section === "passkey_configuration") && role !== "super_admin") {
+  if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications") && role !== "super_admin") {
     return false;
   }
   return true;

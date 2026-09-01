@@ -176,6 +176,7 @@ export interface EnvConfig {
   ohifCacheCleanupEnabled: boolean;
   requestScanWorkerProcessEnabled: boolean;
   requestScanMaxConcurrency: 1 | 2;
+  risproSecretEncryptionKey: string;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -273,6 +274,7 @@ export const env: EnvConfig = {
   // Missing values preserve the original in-process Request Scan behavior.
   requestScanWorkerProcessEnabled: readBoolean("REQUEST_SCAN_WORKER_PROCESS_ENABLED", true),
   requestScanMaxConcurrency: readRequestScanMaxConcurrency(process.env.REQUEST_SCAN_MAX_CONCURRENCY),
+  risproSecretEncryptionKey: String(process.env.RISPRO_SECRET_ENCRYPTION_KEY || "").trim(),
 };
 
 export function allowInsecureQzWebsocket(): boolean {

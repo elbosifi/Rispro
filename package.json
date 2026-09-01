@@ -70,6 +70,7 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",
+    "@types/nodemailer": "^8.0.1",
     "@types/web-push": "^3.6.4",
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
@@ -81,6 +82,7 @@
     "jsonwebtoken": "^9.0.2",
     "mdb-reader": "^3.2.0",
     "mssql": "^11.0.1",
+    "nodemailer": "^9.1.0",
     "pg": "^8.13.3",
     "playwright-core": "1.61.1",
     "qrcode": "^1.5.4",

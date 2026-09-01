@@ -127,6 +127,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
+    "email_notifications",
+    "integrations",
+  ],
+  [
     "authoritative_orthanc",
     "integrations",
   ],

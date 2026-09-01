@@ -1,0 +1,6 @@
+import { claimEmailOutbox, markEmailAccepted, markEmailFailure } from "./email-outbox-service.js";
+import { resolveEmailSettings } from "./email-settings-service.js";
+import { classifyEmailError, sendEmail } from "./email-service.js";
+export async function runEmailOutboxWorkerTick():Promise<void>{const jobs=await claimEmailOutbox();for(const job of jobs){try{const config=await resolveEmailSettings();if(!config.password) throw new Error("SMTP password is not configured.");const result=await sendEmail(config,{to:job.recipientEmail,subject:job.subject,text:job.textBody});if(!result.accepted.includes(job.recipientEmail)) throw Object.assign(new Error("SMTP server rejected the recipient."),{responseCode:550});await markEmailAccepted(job,result);}catch(error){await markEmailFailure(job,classifyEmailError(error));}}}
+export type EmailOutboxWorker={stop:()=>Promise<void>};
+export async function startEmailOutboxWorker():Promise<EmailOutboxWorker>{let running=false;const tick=async()=>{if(running)return;running=true;try{await runEmailOutboxWorkerTick();}catch(error){console.error("Email outbox worker tick failed.",error);}finally{running=false;}};await tick();const timer=setInterval(()=>void tick(),5000);timer.unref();return{stop:async()=>{clearInterval(timer);}};}

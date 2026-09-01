@@ -23,6 +23,7 @@ import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import RequestScanAutomationSection from "./request-scan-automation-section";
+import EmailNotificationsSection from "./email-notifications-section";
 import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import QzTrayPrintingSection from "./qz-tray-printing-section";
 import ExamTypesSection from "./exam-types-section";
@@ -84,6 +85,7 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   if (section === "request_scan_automation") {
     return "Request Scan Automation";
   }
+  if (section === "email_notifications") return "Email & Notifications";
   if (section === "authoritative_orthanc") {
     return "Authoritative Orthanc";
   }
@@ -273,6 +275,7 @@ export default function SettingsPage() {
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
             {section === "system_diagnostics" && user?.role === "super_admin" && <SystemDiagnosticsSection onReAuthRequired={requestReAuth} />}
             {section === "request_scan_automation" && user?.role === "super_admin" && <RequestScanAutomationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
+            {section === "email_notifications" && user?.role === "super_admin" && <EmailNotificationsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "authoritative_orthanc" && (user?.role === "supervisor" || user?.role === "super_admin") && <AuthoritativeOrthancSection onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
