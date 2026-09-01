@@ -59,7 +59,7 @@ import {
   getDicomRemapReplacementPreview,
   hardResetOrthancStudies,
   listDicomRemapDestinations,
-  listMyDicomRemapJobs,
+  listDicomRemapJobs,
   prepareDicomRemapSourceRecovery,
   prepareDicomRemapConfirmation,
   retryFailedDicomRemapWithOrthanc,
@@ -993,9 +993,14 @@ pacsRouter.get(
     const query = asUnknownRecord(request.query ?? {});
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const limit = asOptionalString(query.limit);
-    const jobs = await listMyDicomRemapJobs({
+    const scope = asOptionalString(query.scope) || "mine";
+    if (scope !== "mine" && scope !== "all") {
+      throw new HttpError(400, "scope must be mine or all.");
+    }
+    const jobs = await listDicomRemapJobs({
       currentUserId,
       limit: limit ? Number(limit) : 20,
+      scope,
     });
     res.json({ jobs });
   })
@@ -1021,7 +1026,7 @@ pacsRouter.get(
     if (!jobId) {
       throw new HttpError(400, "jobId is required.");
     }
-    const result = await getDicomRemapJob({ jobId, currentUserId });
+    const result = await getDicomRemapJob({ jobId });
     res.json(result);
   })
 );

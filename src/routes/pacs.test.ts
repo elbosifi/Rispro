@@ -106,6 +106,14 @@ test("Recover Source stays inside authenticated remap access and streams a neutr
   assert.doesNotMatch(routeSource, /recover-source[\s\S]{0,900}staged_storage_key/);
 });
 
+test("remap history keeps the existing remap access boundary and validates shared-history scope", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  assert.match(routeSource, /pacsRouter\.use\("\/remap", requireAuth, requirePacsRemapAccess\)/);
+  assert.match(routeSource, /const scope = asOptionalString\(query\.scope\) \|\| "mine"/);
+  assert.match(routeSource, /scope !== "mine" && scope !== "all"/);
+  assert.match(routeSource, /listDicomRemapJobs\(\{[\s\S]{0,150}scope,/);
+});
+
 test("remap patient search input and response remain bounded to picker fields", () => {
   assert.equal(__pacsRouteTestables.normalizeRemapPatientSearch("  Ja  "), "Ja");
   assert.throws(

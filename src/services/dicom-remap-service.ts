@@ -68,6 +68,8 @@ interface OrthancStudyMatchMetadata {
 export interface DicomRemapJobRow {
   id: number;
   created_by_user_id: number;
+  created_by_user_name?: string | null;
+  created_by_username?: string | null;
   comparison_request_id?: number | null;
   status: DicomRemapJobStatus;
   source_orthanc_study_id: string | null;
@@ -2467,15 +2469,14 @@ async function sendExistingDicomRemapJobToDestination({
           send_last_heartbeat_at = now(),
           updated_at = now()
       where id = $1
-        and created_by_user_id = $2
-        and status = any($3::text[])
+        and status = any($2::text[])
       returning *
     `,
-    [job.id, currentUserId, ["remapped", "failed", "sent"]]
+    [job.id, ["remapped", "failed", "sent"]]
   );
   const sendingJob = sendClaim.rows[0] || null;
   if (!sendingJob) {
-    const currentJob = await loadOwnedJob(job.id, currentUserId);
+    const currentJob = await loadAccessibleDicomRemapJob(job.id);
     if (currentJob.status === "sending" && currentJob.orthanc_send_job_id) return { job: currentJob };
     throw new HttpError(409, "Job is not ready for PACS send.", { status: currentJob.status });
   }
@@ -2751,17 +2752,16 @@ export async function monitorDicomRemapSendJob(job: DicomRemapJobRow): Promise<D
   return null;
 }
 
-async function loadOwnedJob(jobId: number | string, userId: UserId): Promise<DicomRemapJobRow> {
+async function loadAccessibleDicomRemapJob(jobId: number | string): Promise<DicomRemapJobRow> {
   const cleanJobId = normalizePositiveInteger(jobId, "jobId");
   const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
     `
       select *
       from dicom_remap_jobs
       where id = $1
-        and created_by_user_id = $2
       limit 1
     `,
-    [cleanJobId, userId]
+    [cleanJobId]
   );
 
   const job = rows[0];
@@ -2778,7 +2778,7 @@ export async function assertDicomRemapJobComparisonAccess(
 ): Promise<void> {
   const comparisonRequestId = normalizePositiveInteger(comparisonRequestIdInput, "comparisonRequestId");
   if (!comparisonRequestId) throw new HttpError(400, "comparisonRequestId is required.");
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const job = await loadAccessibleDicomRemapJob(jobId);
   if (Number(job.comparison_request_id || 0) !== comparisonRequestId) {
     throw new HttpError(403, "DICOM remap job does not belong to this comparison request.");
   }
@@ -3622,7 +3622,7 @@ export async function prepareDicomRemapSourceRecovery({
   jobId: number | string;
   currentUserId: UserId;
 }): Promise<DicomRemapSourceRecovery> {
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const job = await loadAccessibleDicomRemapJob(jobId);
   if (!isDicomRemapSourceRecoveryAvailable(job)) sourceRecoveryUnavailable();
 
   const { manifest, directory } = await readDicomRemapStagingManifestMetadata(job);
@@ -5080,7 +5080,7 @@ export async function processDicomRemapMultipartJob({
     return { job: sentResult.job, skippedFilesCount };
   } catch (error) {
     if (job) {
-      const current = await loadOwnedJob(job.id, currentUserId).catch(() => null);
+      const current = await loadAccessibleDicomRemapJob(job.id).catch(() => null);
       if (current && current.status !== "failed") {
         await failDicomRemapUploadJob(job.id, error);
         await logDicomRemapAuditEntry({
@@ -5103,30 +5103,38 @@ export async function processDicomRemapMultipartJob({
 
 export async function getDicomRemapJob({
   jobId,
-  currentUserId,
 }: {
   jobId: number | string;
-  currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow; comparison: ConfirmComparison | null }> {
-  const ownedJob = await loadOwnedJob(jobId, currentUserId);
-  const job = { ...ownedJob, source_recovery_available: isDicomRemapSourceRecoveryAvailable(ownedJob) };
-  const comparison = job.replacement_patient_id
+  const cleanJobId = normalizePositiveInteger(jobId, "jobId");
+  const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
+    `select j.*, u.full_name as created_by_user_name, u.username as created_by_username
+       from dicom_remap_jobs j
+       left join users u on u.id = j.created_by_user_id
+      where j.id = $1
+      limit 1`,
+    [cleanJobId]
+  );
+  const job = rows[0];
+  if (!job) throw new HttpError(404, "DICOM remap job not found.");
+  const jobWithSourceRecovery = { ...job, source_recovery_available: isDicomRemapSourceRecoveryAvailable(job) };
+  const comparison = jobWithSourceRecovery.replacement_patient_id
     ? {
       original: {
-        patientId: job.original_patient_id || "",
-        patientName: job.original_patient_name || "",
-        patientSex: job.original_patient_sex || "",
-        patientBirthDate: job.original_patient_birth_date || "",
+        patientId: jobWithSourceRecovery.original_patient_id || "",
+        patientName: jobWithSourceRecovery.original_patient_name || "",
+        patientSex: jobWithSourceRecovery.original_patient_sex || "",
+        patientBirthDate: jobWithSourceRecovery.original_patient_birth_date || "",
       },
       replacement: {
-        patientId: job.replacement_patient_id || "",
-        patientName: job.replacement_patient_name || "",
-        patientSex: job.replacement_patient_sex || "",
-        patientBirthDate: job.replacement_patient_birth_date || "",
+        patientId: jobWithSourceRecovery.replacement_patient_id || "",
+        patientName: jobWithSourceRecovery.replacement_patient_name || "",
+        patientSex: jobWithSourceRecovery.replacement_patient_sex || "",
+        patientBirthDate: jobWithSourceRecovery.replacement_patient_birth_date || "",
       },
     }
     : null;
-  return { job, comparison };
+  return { job: jobWithSourceRecovery, comparison };
 }
 
 export async function getMyActiveDicomRemapJob({
@@ -5139,26 +5147,33 @@ export async function getMyActiveDicomRemapJob({
   if (await markStaleActiveJobFailedIfSourceMissing(activeJob)) {
     return { job: null, comparison: null };
   }
-  return getDicomRemapJob({ jobId: activeJob.id, currentUserId });
+  return getDicomRemapJob({ jobId: activeJob.id });
 }
 
-export async function listMyDicomRemapJobs({
+export async function listDicomRemapJobs({
   currentUserId,
   limit = 20,
+  scope = "mine",
 }: {
   currentUserId: UserId;
   limit?: number;
+  scope?: "mine" | "all";
 }): Promise<DicomRemapJobRow[]> {
   const cleanLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
-    `
-      select *
-      from dicom_remap_jobs
-      where created_by_user_id = $1
-      order by created_at desc
-      limit $2
-    `,
-    [currentUserId, cleanLimit]
+    scope === "all"
+      ? `select j.*, u.full_name as created_by_user_name, u.username as created_by_username
+           from dicom_remap_jobs j
+           left join users u on u.id = j.created_by_user_id
+           order by j.created_at desc
+           limit $1`
+      : `select j.*, u.full_name as created_by_user_name, u.username as created_by_username
+           from dicom_remap_jobs j
+           left join users u on u.id = j.created_by_user_id
+           where j.created_by_user_id = $1
+           order by j.created_at desc
+           limit $2`,
+    scope === "all" ? [cleanLimit] : [currentUserId, cleanLimit]
   );
   return rows.map((job) => ({ ...job, source_recovery_available: isDicomRemapSourceRecoveryAvailable(job) }));
 }
@@ -5192,20 +5207,19 @@ export async function cancelDicomRemapJob({
     `
       update dicom_remap_jobs
       set status = 'cancelled',
-          cancellation_reason = nullif($3, ''),
+          cancellation_reason = nullif($2, ''),
           processing_stage = 'cancelled',
           processing_lease_owner = null,
           processing_lease_expires_at = null,
           updated_at = now()
       where id = $1
-        and created_by_user_id = $2
         and status = 'awaiting_confirmation'
         and processing_stage = 'awaiting_confirmation'
-        and staged_manifest_version = $4
+        and staged_manifest_version = $3
         and staged_storage_key is not null
       returning *
     `,
-    [cleanJobId, currentUserId, cleanReason, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION]
+    [cleanJobId, cleanReason, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION]
   );
 
   const cancelledJob = result.rows[0];
@@ -5230,7 +5244,7 @@ export async function cancelDicomRemapJob({
     return { job: cancelledJob };
   }
 
-  const currentJob = await loadOwnedJob(cleanJobId, currentUserId);
+  const currentJob = await loadAccessibleDicomRemapJob(cleanJobId);
   if (currentJob.status === "cancelled") {
     return { job: currentJob };
   }
@@ -5255,7 +5269,7 @@ export async function resetDicomRemapJob({
   jobId: number | string;
   currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow; summary: OrthancResetSummary }> {
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const job = await loadAccessibleDicomRemapJob(jobId);
   if (job.status === "processing" && job.processing_lease_expires_at && new Date(job.processing_lease_expires_at).getTime() > Date.now()) {
     throw new HttpError(409, "This DICOM remap job is actively processing and cannot be reset safely.");
   }
@@ -5279,10 +5293,9 @@ export async function resetDicomRemapJob({
           error_message = null,
           updated_at = now()
       where id = $1
-        and created_by_user_id = $2
       returning *
     `,
-    [job.id, currentUserId]
+    [job.id]
   );
   const resetJob = updateResult.rows[0];
   if (!resetJob) {
@@ -5417,7 +5430,7 @@ export async function prepareDicomRemapConfirmation({
   destinationPacsKey: string;
   currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow; comparison: ConfirmComparison }> {
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const job = await loadAccessibleDicomRemapJob(jobId);
   assertJobStatus(job.status, "uploaded", "Job is not in uploaded state.");
   await assertJobSourceStudyExists(job);
 
@@ -5543,7 +5556,7 @@ export async function confirmStagedDicomRemapJob({
   const selectedUid = normalizeSelectedStudyInstanceUid(selectedStudyInstanceUID);
   const destination = normalizeOrthancModalityKey(destinationPacsKey, "destinationPacsKey");
 
-  const initialJob = await loadOwnedJob(cleanJobId, currentUserId);
+  const initialJob = await loadAccessibleDicomRemapJob(cleanJobId);
   await assertDicomRemapComparisonPatient(initialJob, patientId);
   if (initialJob.status !== "awaiting_confirmation") {
     if (initialJob.status !== "cancelled" && isMatchingStagedConfirmation(initialJob, selectedUid, patientId, destination)) {
@@ -5580,13 +5593,13 @@ export async function confirmStagedDicomRemapJob({
 
   const result = await queryDicomRemapDb<DicomRemapJobRow>(
     `update dicom_remap_jobs
-        set selected_study_instance_uid = $3,
-            rispro_patient_id = $4,
-            destination_pacs_key = $5,
-            replacement_patient_id = $6,
-            replacement_patient_name = $7,
-            replacement_patient_sex = $8,
-            replacement_patient_birth_date = $9,
+        set selected_study_instance_uid = $2,
+            rispro_patient_id = $3,
+            destination_pacs_key = $4,
+            replacement_patient_id = $5,
+            replacement_patient_name = $6,
+            replacement_patient_sex = $7,
+            replacement_patient_birth_date = $8,
             status = 'uploaded',
             processing_stage = 'queued',
             processing_error_code = null,
@@ -5594,14 +5607,12 @@ export async function confirmStagedDicomRemapJob({
             error_message = null,
             updated_at = now()
       where id = $1
-        and created_by_user_id = $2
         and status = 'awaiting_confirmation'
         and processing_stage = 'awaiting_confirmation'
-        and staged_manifest_version = $10
+        and staged_manifest_version = $9
       returning *`,
     [
       cleanJobId,
-      currentUserId,
       selectedUid,
       patientId,
       destination,
@@ -5614,7 +5625,7 @@ export async function confirmStagedDicomRemapJob({
   );
   const job = result.rows[0];
   if (!job) {
-    const current = await loadOwnedJob(cleanJobId, currentUserId);
+    const current = await loadAccessibleDicomRemapJob(cleanJobId);
     if (isMatchingStagedConfirmation(current, selectedUid, patientId, destination)) return { job: current };
     throw new HttpError(409, "Job changed before staged confirmation completed.", { status: current.status });
   }
@@ -5816,7 +5827,7 @@ export async function retryFailedDicomRemapWithOrthanc({
   currentUserId: UserId;
   automatic?: boolean;
 }): Promise<{ job: DicomRemapJobRow }> {
-  const initial = await loadOwnedJob(jobId, currentUserId);
+  const initial = await loadAccessibleDicomRemapJob(jobId);
   if (automatic && !shouldAutomaticallyAttemptOrthancRecovery(initial)) {
     throw new HttpError(409, "This job is not eligible for automatic Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
   }
@@ -5868,20 +5879,20 @@ export async function retryFailedDicomRemapWithOrthanc({
             orthanc_recovery_completed_at = null,
             orthanc_recovery_error_code = null,
             orthanc_recovery_error_details = null,
-            orthanc_recovery_lease_owner = $3,
-            orthanc_recovery_lease_expires_at = now() + ($4::text || ' seconds')::interval,
+            orthanc_recovery_lease_owner = $2,
+            orthanc_recovery_lease_expires_at = now() + ($3::text || ' seconds')::interval,
             orthanc_recovery_last_heartbeat_at = now(),
             updated_at = now()
-      where id = $1 and created_by_user_id = $2 and status = 'failed'
+      where id = $1 and status = 'failed'
         and staged_storage_key is not null and staging_cleanup_completed_at is null and orthanc_recovery_expires_at > now()
-        and ($5::boolean = false or coalesce(orthanc_recovery_attempt_count, 0) = 0)
+        and ($4::boolean = false or coalesce(orthanc_recovery_attempt_count, 0) = 0)
         and (orthanc_recovery_status in ('available', 'failed') or (orthanc_recovery_status = 'processing' and (orthanc_recovery_lease_expires_at is null or orthanc_recovery_lease_expires_at <= now())))
       returning *`,
-    [initial.id, currentUserId, leaseOwner, leaseSeconds, automatic]
+    [initial.id, leaseOwner, leaseSeconds, automatic]
   );
   let job = claimed.rows[0];
   if (!job) {
-    const current = await loadOwnedJob(initial.id, currentUserId);
+    const current = await loadAccessibleDicomRemapJob(initial.id);
     if (current.orthanc_recovery_status === "completed" || current.orthanc_recovery_status === "processing") return { job: current };
     throw new HttpError(409, "Orthanc recovery state changed before it could be claimed.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
   }
@@ -6035,7 +6046,7 @@ export async function resendDicomRemapJobToPacs({
   currentUserId: UserId;
   confirmDestinationChecked?: boolean;
 }): Promise<{ job: DicomRemapJobRow }> {
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const job = await loadAccessibleDicomRemapJob(jobId);
   if (job.status === "sending" && job.orthanc_send_job_id) {
     return { job };
   }
@@ -6102,8 +6113,8 @@ export async function confirmDicomRemapAndSend({
       acknowledgement: { acknowledgedAt: new Date().toISOString(), acknowledgedByUserId: Number(currentUserId) },
     };
     const acknowledged = await queryDicomRemapDb<DicomRemapJobRow>(
-      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', processing_selection_counts = $3::jsonb, updated_at = now() where id = $1 and created_by_user_id = $2 and status = 'awaiting_confirmation' and processing_stage = 'awaiting_send_confirmation' returning *`,
-      [cleanJobId, currentUserId, JSON.stringify(selectionCounts)]
+      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', processing_selection_counts = $2::jsonb, updated_at = now() where id = $1 and status = 'awaiting_confirmation' and processing_stage = 'awaiting_send_confirmation' returning *`,
+      [cleanJobId, JSON.stringify(selectionCounts)]
     );
     const acknowledgedJob = acknowledged.rows[0];
     if (!acknowledgedJob) throw new HttpError(409, "Partial-study confirmation state changed before send.");
@@ -6116,17 +6127,16 @@ export async function confirmDicomRemapAndSend({
       set status = 'remapped',
           updated_at = now()
       where id = $1
-        and created_by_user_id = $2
         and status = 'awaiting_confirmation'
         and processing_stage is distinct from 'awaiting_send_confirmation'
       returning *
     `,
-    [cleanJobId, currentUserId]
+    [cleanJobId]
   );
 
   const job = claimResult.rows[0];
   if (!job) {
-    const currentJob = await loadOwnedJob(cleanJobId, currentUserId);
+    const currentJob = await loadAccessibleDicomRemapJob(cleanJobId);
     if (currentJob.status === "awaiting_confirmation" && currentJob.processing_stage === "awaiting_send_confirmation") {
       return confirmPartialJob(currentJob);
     }
@@ -6170,7 +6180,7 @@ export async function confirmDicomRemapAndSend({
       [job.id, modifiedStudyId]
     );
     if (!remappedResult.rows[0]) {
-      const currentJob = await loadOwnedJob(job.id, currentUserId);
+      const currentJob = await loadAccessibleDicomRemapJob(job.id);
       throw new HttpError(409, "Job status changed before send could start.", {
         status: currentJob.status,
       });
@@ -6181,7 +6191,7 @@ export async function confirmDicomRemapAndSend({
       auditActionType: "pacs_send_enqueued",
     });
   } catch (error) {
-    const current = await loadOwnedJob(job.id, currentUserId).catch(() => null);
+    const current = await loadAccessibleDicomRemapJob(job.id).catch(() => null);
     if (current && current.status !== "failed") {
       const message = error instanceof Error ? error.message : "DICOM remap send failed.";
       await queryDicomRemapDb(

@@ -28,6 +28,7 @@ type RemapProcessingStage =
 
 type PatientLookupMode = "filtered_appointments" | "all_appointments" | "all_patients";
 type SecureStagingStatus = "idle" | "uploading" | "awaiting_confirmation" | "failed";
+type RemapHistoryScope = "mine" | "all";
 
 interface ProvisionalSourceIdentity {
   studyInstanceUid: string;
@@ -56,6 +57,9 @@ interface ResumedJobSelection {
 
 interface RemapJob {
   id: number;
+  created_by_user_id?: number;
+  created_by_user_name?: string | null;
+  created_by_username?: string | null;
   comparison_request_id?: number | null;
   status: JobStatus;
   source_orthanc_study_id: string | null;
@@ -497,6 +501,7 @@ export default function PacsRemapPage() {
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
   const [workflowJobId, setWorkflowJobId] = useState<number | null>(null);
   const [viewedRecentJobId, setViewedRecentJobId] = useState<number | null>(null);
+  const [historyScope, setHistoryScope] = useState<RemapHistoryScope>("mine");
   const viewedRecentJobIdRef = useRef<number | null>(null);
   const [activeResumedJobId, setActiveResumedJobId] = useState<number | null>(null);
   const [resumedJobSelections, setResumedJobSelections] = useState<Record<number, ResumedJobSelection>>({});
@@ -654,9 +659,9 @@ export default function PacsRemapPage() {
   });
 
   const jobsQuery = useQuery({
-    queryKey: ["pacs", "remap", "jobs"],
+    queryKey: ["pacs", "remap", "jobs", historyScope],
     queryFn: async () => {
-      const response = await api<{ jobs?: unknown }>(remapApiPath("/pacs/remap/jobs?limit=20"));
+      const response = await api<{ jobs?: unknown }>(remapApiPath(`/pacs/remap/jobs?limit=20&scope=${historyScope}`));
       return { ...response, jobs: Array.isArray(response.jobs) ? response.jobs.map(normalizeRemapJob).filter((job): job is RemapJob => job != null) : [] };
     },
     enabled: !comparisonRequestId,
@@ -1589,7 +1594,6 @@ export default function PacsRemapPage() {
       method: "POST",
       body: JSON.stringify({ reason: "Operator cancelled secure staging before final confirmation." }),
     }).then(() => {
-      queryClient.setQueryData(["pacs", "remap", "active-job"], { job: null, comparison: null });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     }).catch((error: unknown) => {
@@ -2580,7 +2584,11 @@ export default function PacsRemapPage() {
 
         <div className="space-y-4">
           <details className="card-shell p-4 space-y-2 text-xs">
-            <summary className="cursor-pointer font-semibold text-sm">{t(language, "pacs.remap.viewRecentJobs")}</summary>
+            <summary className="cursor-pointer font-semibold text-sm">{language === "ar" ? "سجل إعادة التعيين" : "Remap History"}</summary>
+            <div className="flex gap-1" role="group" aria-label="Remap history scope">
+              <button type="button" onClick={() => setHistoryScope("mine")} aria-pressed={historyScope === "mine"} className="btn-secondary px-2 py-1 rounded-lg text-xs">My Jobs</button>
+              <button type="button" onClick={() => setHistoryScope("all")} aria-pressed={historyScope === "all"} className="btn-secondary px-2 py-1 rounded-lg text-xs">All Users</button>
+            </div>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {(jobsQuery.data?.jobs || []).map((job) => (
                 <div key={job.id} className="rounded border p-2 space-y-2">
@@ -2604,6 +2612,7 @@ export default function PacsRemapPage() {
                     })()}
                     <p className="truncate"><strong>{job.original_patient_name || "—"}</strong></p>
                     <p className="truncate">{job.replacement_patient_name || "—"} • {job.destination_pacs_key || "—"}</p>
+                    <p className="text-[11px] text-slate-600">Created by: {job.created_by_user_name || job.created_by_username || "Unknown user"}</p>
                     {(job.processing_selection_counts?.partial || job.processing_selection_counts?.completenessUncertain) && (
                       <p className="text-[11px] font-semibold text-amber-800">
                         {job.processing_selection_counts.partial ? "Partial study" : "Completeness uncertain"}: {job.processing_selection_counts.acceptedUniqueInstances || 0} accepted unique instances

@@ -23,7 +23,9 @@ import {
   DICOM_REMAP_STAGING_MAX_TOTAL_BYTES,
   failStaleDicomRemapSendEnqueues,
   finalizeDicomRemapAwaitingConfirmationStagingJob,
+  getDicomRemapJob,
   getMyActiveDicomRemapJob,
+  listDicomRemapJobs,
   monitorDicomRemapSendJob,
   previewDicomRemapMultipartUpload,
   prepareDicomRemapSourceRecovery,
@@ -292,26 +294,47 @@ test("Recover Source archives only pristine selected-study bytes with neutral na
   }
 });
 
-test("Recover Source is owner-scoped and preserves failed job state after repeated Orthanc recovery attempts", async () => {
+test("Recover Source is shared and audits the acting user without changing the creator", async () => {
   const fixture = await makeSourceRecoveryFixture();
   const jobBefore = JSON.parse(JSON.stringify(fixture.job));
-  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
-  queueQueryResults([{ rows: [] }]);
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEntries.push(entry as unknown as Record<string, unknown>);
+    return {} as never;
+  });
+  const calls = queueQueryResults([{ rows: [fixture.job] }]);
   try {
-    await assert.rejects(
-      () => prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 99 }),
-      (error: unknown) => error instanceof HttpError && error.statusCode === 404,
-    );
     const manifestBefore = await readFile(path.join(fixture.directory, "manifest.json"));
     const sourceBefore = await readFile(path.join(fixture.directory, fixture.files[0]!.relativePath));
-    queueQueryResults([{ rows: [fixture.job] }]);
-    await zipRecoveredSource(await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 }));
+    await zipRecoveredSource(await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 99 }));
+    assert.doesNotMatch(calls[0]!.sql, /created_by_user_id/i);
+    assert.equal(auditEntries[0]?.changedByUserId, 99);
+    assert.equal(fixture.job.created_by_user_id, 42);
     assert.deepEqual(fixture.job, jobBefore);
     assert.deepEqual(await readFile(path.join(fixture.directory, "manifest.json")), manifestBefore);
     assert.deepEqual(await readFile(path.join(fixture.directory, fixture.files[0]!.relativePath)), sourceBefore);
   } finally {
     await fixture.cleanup();
   }
+});
+
+test("remap history defaults to mine, supports all users, and includes creator metadata", async () => {
+  const mine = remapJob({ id: 11, created_by_user_id: 42, created_by_user_name: "User A", created_by_username: "user-a" });
+  const other = remapJob({ id: 12, created_by_user_id: 99, created_by_user_name: null, created_by_username: null });
+  const calls = queueQueryResults([{ rows: [mine] }, { rows: [mine, other] }, { rows: [other] }]);
+
+  assert.deepEqual((await listDicomRemapJobs({ currentUserId: 42 })).map(({ id, created_by_user_id, created_by_user_name, created_by_username }) => ({ id, created_by_user_id, created_by_user_name, created_by_username })), [{ id: 11, created_by_user_id: 42, created_by_user_name: "User A", created_by_username: "user-a" }]);
+  assert.deepEqual((await listDicomRemapJobs({ currentUserId: 42, scope: "all" })).map(({ id, created_by_user_id }) => ({ id, created_by_user_id })), [{ id: 11, created_by_user_id: 42 }, { id: 12, created_by_user_id: 99 }]);
+  const detail = await getDicomRemapJob({ jobId: other.id });
+
+  assert.match(calls[0]!.sql, /left join users/i);
+  assert.match(calls[0]!.sql, /where j\.created_by_user_id = \$1/i);
+  assert.match(calls[1]!.sql, /left join users/i);
+  assert.doesNotMatch(calls[1]!.sql, /where j\.created_by_user_id/i);
+  assert.match(calls[2]!.sql, /left join users/i);
+  assert.equal(detail.job.created_by_user_id, 99);
+  assert.equal(detail.job.created_by_user_name, null);
+  assert.equal(detail.job.created_by_username, null);
 });
 
 test("Recover Source fails closed for expired, cleaned, missing, hashed, and ambiguous preserved staging", async () => {
@@ -2270,7 +2293,7 @@ test("cancelDicomRemapJob cancels only an unconfirmed staged draft and audits it
   assert.equal(auditEvents.length, 1);
   assert.match(calls[0]?.sql || "", /status = 'awaiting_confirmation'/i);
   assert.match(calls[0]?.sql || "", /processing_stage = 'awaiting_confirmation'/i);
-  assert.match(calls[0]?.sql || "", /staged_manifest_version = \$4/i);
+  assert.match(calls[0]?.sql || "", /staged_manifest_version = \$3/i);
 });
 
 test("persisted remap upload accepts AlreadyStored only after replacement study and SOP verification", async () => {

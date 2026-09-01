@@ -250,14 +250,14 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: awaitingDrafts });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: awaitingDrafts });
       return Promise.resolve({ items: [] });
     });
     renderPage();
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
     expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false);
     expect(screen.queryByText(/resumed automatically/i)).toBeNull();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     expect(await screen.findByRole("button", { name: /#41.*Awaiting confirmation/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /#42.*Awaiting confirmation/i })).toBeTruthy();
   });
@@ -283,7 +283,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string, options?: { body?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [partialJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [partialJob] });
       if (path === "/pacs/remap/jobs/610") return Promise.resolve({ job: partialJob, comparison: null });
       if (path === "/pacs/remap/jobs/610/confirm-send") {
         expect(JSON.parse(options?.body || "{}")).toEqual({ confirm: true, confirmIncompleteStudy: true });
@@ -327,7 +327,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: uploadedJob, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [uploadedJob, sendingJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [uploadedJob, sendingJob] });
       if (path === "/pacs/remap/jobs/52") return Promise.resolve({ job: uploadedJob, comparison: null });
       if (path === "/pacs/remap/jobs/53") return Promise.resolve({ job: sendingJob, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [] });
@@ -337,7 +337,7 @@ describe("PacsRemapPage five-step wizard", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     const queuedProgress = await screen.findByRole("progressbar", { name: /Job #52/i });
     expect(queuedProgress.getAttribute("data-state")).toBe("indeterminate");
     expect(queuedProgress.hasAttribute("aria-valuenow")).toBe(false);
@@ -379,7 +379,7 @@ describe("PacsRemapPage five-step wizard", () => {
         { key: "DEST-B", name: "Persisted Destination B" },
       ] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [persistedJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [persistedJob] });
       if (path === "/pacs/remap/jobs/77") return Promise.resolve({ job: persistedJob, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 301, patient_id: 31, appointment_date: "2026-01-01", english_full_name: "Draft Patient A", national_id: "DRAFT-A" }] });
       if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "DRAFT-A", patientName: "Draft^PatientA", patientSex: "F", patientBirthDate: "19920202" } });
@@ -400,7 +400,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(draftSummary.textContent).toContain("Draft Patient A");
     expect(draftSummary.textContent).toContain("Draft Destination A");
 
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#77.*Processing/i }));
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
 
@@ -458,7 +458,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-B", name: "Viewed Destination B" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [viewedJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [viewedJob] });
       if (path === "/pacs/remap/jobs/202") return Promise.resolve({ job: viewedJob, comparison: null });
       if (path === "/pacs/remap/jobs/88") return Promise.resolve({ job: workflowJob, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
@@ -471,7 +471,7 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
     await screen.findByRole("heading", { name: "Patient" });
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#202.*Processing/i }));
     expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Viewed^SourceB");
 
@@ -497,7 +497,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Workflow Destination A", isDefault: true }, { key: "DEST-B", name: "Viewed Destination B" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [viewedJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [viewedJob] });
       if (path === "/pacs/remap/jobs/88") return Promise.resolve({ job: workflowJob, comparison: null });
       if (path === "/pacs/remap/jobs/203") return Promise.resolve({ job: viewedJob, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, appointment_date: "2026-01-01", english_full_name: "Workflow Patient A" }] });
@@ -516,7 +516,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/88"));
 
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#203.*Sending/i }));
     expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Viewed^B");
     const workflowQueriesBeforeReturn = apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88").length;
@@ -538,13 +538,13 @@ describe("PacsRemapPage five-step wizard", () => {
         activeJobRequests += 1;
         return Promise.resolve({ job: activeJobRequests === 1 ? null : unrelatedAwaitingJob, comparison: null });
       }
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [missingJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [missingJob] });
       if (path === "/pacs/remap/jobs/204") return Promise.reject(new ApiError("Job 204 no longer exists", 404));
       return Promise.resolve({ appointments: [], items: [] });
     });
 
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#204.*Processing/i }));
 
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
@@ -570,7 +570,7 @@ describe("PacsRemapPage five-step wizard", () => {
         activeJobRequests += 1;
         return Promise.resolve({ job: activeJobRequests === 1 ? awaitingJob : null, comparison: null });
       }
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [] });
       if (path === "/pacs/remap/jobs/206") {
         jobRequests += 1;
         return jobRequests === 1
@@ -612,7 +612,7 @@ describe("PacsRemapPage five-step wizard", () => {
       apiMock.mockImplementation((path: string) => {
         if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-207", name: "Transient Destination" }] });
         if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: awaitingJob, comparison: null });
-        if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+        if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [] });
         if (path === "/pacs/remap/jobs/207") {
           jobRequests += 1;
           return retrievalFails
@@ -663,7 +663,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Draft Destination A" }, { key: "DEST-B", name: "Staged Destination B" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [stagedJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [stagedJob] });
       if (path === "/pacs/remap/jobs/302") return Promise.resolve({ job: stagedJob, comparison: null });
       if (path === "/pacs/remap/jobs/302/confirm-staged" && options?.method === "POST") {
         confirmedBody = JSON.parse(options.body || "{}");
@@ -692,7 +692,7 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
 
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#302.*Awaiting confirmation/i }));
     expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
     const stagedSummary = screen.getByLabelText("Selection summary");
@@ -734,7 +734,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-B", name: "Destination B" }, { key: "DEST-C", name: "Destination C" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [jobB, jobC] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [jobB, jobC] });
       if (path === "/pacs/remap/jobs/401") return Promise.resolve({ job: jobB, comparison: null });
       if (path === "/pacs/remap/jobs/402") return Promise.resolve({ job: jobC, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 501, patient_id: 21, appointment_date: "2026-01-01", english_full_name: "Patient B" }, { id: 502, patient_id: 22, appointment_date: "2026-01-01", english_full_name: "Patient C" }] });
@@ -743,7 +743,7 @@ describe("PacsRemapPage five-step wizard", () => {
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#401.*Awaiting confirmation/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Patient B/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
@@ -771,7 +771,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Draft Destination A" }, { key: "DEST-B", name: "Resend Destination B" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [recentJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [recentJob] });
       if (path === "/pacs/remap/jobs/502") return Promise.resolve({ job: recentJob, comparison: null });
       if (path === "/pacs/remap/jobs/502/resend" && options?.method === "POST") {
         if (outcome === "failure") return Promise.reject(new Error("Resend B transport failure"));
@@ -790,7 +790,7 @@ describe("PacsRemapPage five-step wizard", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-A" } });
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: "Resend to PACS" }));
 
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
@@ -820,7 +820,7 @@ describe("PacsRemapPage five-step wizard", () => {
       apiMock.mockImplementation((path: string) => {
         if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
         if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-        if (path === "/pacs/remap/jobs?limit=20") {
+        if (path === "/pacs/remap/jobs?limit=20&scope=mine") {
           jobsRequestCount += 1;
           const job = jobsRequestCount === 1
             ? { id: 78, status: "processing", processing_stage: "rewriting", staged_file_count: 4, processed_file_count: 1 }
@@ -834,7 +834,7 @@ describe("PacsRemapPage five-step wizard", () => {
 
       renderPage();
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      fireEvent.click(screen.getByText("View recent jobs"));
+      fireEvent.click(screen.getByText("Remap History"));
       expect(screen.getByRole("progressbar", { name: /Job #78/i }).getAttribute("aria-valuenow")).toBe("25");
       expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
 
@@ -1089,12 +1089,33 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByText(/75%|90%/)).toBeNull();
   });
 
+  it("defaults history to My Jobs and fetches All Users separately without resetting the wizard", async () => {
+    const mine = { id: 301, status: "failed", created_by_user_name: "My User", source_recovery_available: false };
+    const other = { id: 302, status: "failed", created_by_user_name: "Other User", source_recovery_available: false };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [mine] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=all") return Promise.resolve({ jobs: [mine, other] });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText("Remap History"));
+    expect(await screen.findByText("Created by: My User")).toBeTruthy();
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs?limit=20&scope=mine");
+    fireEvent.click(screen.getByRole("button", { name: "All Users" }));
+    expect(await screen.findByText("Created by: Other User")).toBeTruthy();
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs?limit=20&scope=all");
+    expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
+  });
+
   it.each(["93", 93])("accepts a %s multipart job ID and polls the normalized job", async (jobId) => {
     const job = { id: jobId, status: "processing", processing_stage: "uploading_to_orthanc", staged_file_count: 5425, processed_file_count: 4 };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [] });
       if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, english_full_name: "John Doe", national_id: "N1" }] });
       if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
@@ -1126,13 +1147,13 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
     });
 
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#93.*Processing/i }));
 
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/93"));
@@ -1150,7 +1171,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [] });
       if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
     });
@@ -1473,7 +1494,7 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "MAIN", name: "Main PACS" }, { key: "BACKGROUND", name: "Background PACS" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: awaitingJob, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [backgroundJob] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [backgroundJob] });
       if (path === "/pacs/remap/jobs/73") return Promise.resolve({ job: awaitingJob, comparison: null });
       if (path === "/pacs/remap/jobs/74") return Promise.resolve({ job: backgroundJob, comparison: null });
       if (path === "/pacs/remap/jobs/73/confirm-staged" && options?.method === "POST") {
@@ -1495,7 +1516,7 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
 
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#74.*Processing/i }));
     expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Background^Source");
     fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
@@ -1517,12 +1538,12 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/81") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#81.*Processing/i }));
     const progress = await screen.findByRole("progressbar", { name: "Rewriting DICOM" });
     expect(progress.getAttribute("aria-valuenow")).toBe("25");
@@ -1533,13 +1554,13 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/82") return Promise.resolve({ job, comparison: null });
       if (path === "/pacs/remap/jobs/82/resend" && options?.method === "POST") return Promise.reject(new Error("Retry transport failed"));
       return Promise.resolve({ appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#82.*Failed/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Resend to PACS" }));
     expect(await screen.findByText("Original persisted failure")).toBeTruthy();
@@ -1580,12 +1601,12 @@ describe("PacsRemapPage five-step wizard", () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/83") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#83.*Failed/i }));
     const details = await screen.findByText(/EXPECTED_ACTUAL_COUNT_MISMATCH/);
     expect(details.textContent).toContain("expectedCount");
@@ -1598,13 +1619,13 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: 91, status: "failed", source_orthanc_study_id: "s", modified_orthanc_study_id: "s", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether PACS received this study.", dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/91") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ appointments: [], items: [] });
     });
     renderPage();
     expect(screen.queryByText(/#91/)).toBeNull();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#91.*Failed/i }));
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
     expect(screen.getAllByText(/could not confirm whether PACS received/i).length).toBeGreaterThan(0);
@@ -1640,7 +1661,7 @@ describe("PacsRemapPage five-step wizard", () => {
         job: { id: invalidJobId, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2 },
         comparison: null,
       });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [] });
       return Promise.resolve({ items: [] });
     });
 
@@ -1653,7 +1674,7 @@ describe("PacsRemapPage five-step wizard", () => {
     let job = { id: 92, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", processing_error_details: { failedInvariant: "TransferSyntaxUID" }, orthanc_recovery_status: "available", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(), staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null as string | null, send_error_code: null, send_attempt_count: 0, dicom_integrity_version: null as number | null, dicom_integrity_verified_at: null as string | null };
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/92") return Promise.resolve({ job, comparison: null });
       if (path === "/pacs/remap/jobs/92/retry-with-orthanc" && options?.method === "POST") {
         job = { ...job, status: "sending", processing_stage: "enqueueing_send", orthanc_recovery_status: "completed", modified_orthanc_study_id: "orthanc-modified", dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
@@ -1662,7 +1683,7 @@ describe("PacsRemapPage five-step wizard", () => {
       return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#92.*Failed/i }));
     expect(await screen.findByRole("button", { name: "Retry with Orthanc" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
@@ -1674,14 +1695,14 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: 107, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_attempt_count: 5, orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString() };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
       if (path === "/pacs/remap/jobs/107") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ jobs: [] });
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#107.*Failed/i }));
     const recover = await screen.findByRole("button", { name: "Recover Source" });
     fireEvent.click(recover);
@@ -1694,13 +1715,13 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: 108, status: "failed", processing_stage: "failed", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString() };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
       return Promise.resolve({ jobs: [] });
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: "Recover Source" }));
     expect(click).toHaveBeenCalledTimes(1);
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/108");
@@ -1711,13 +1732,13 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: 109, status: "failed", processing_stage: "failed", source_recovery_available: false, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
       if (path === "/pacs/remap/jobs/109") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ jobs: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#109.*Failed/i }));
     expect(screen.queryByRole("button", { name: "Recover Source" })).toBeNull();
     expect((await screen.findAllByText("Preserved source files are no longer available.")).length).toBeGreaterThan(0);
@@ -1727,12 +1748,12 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: 93, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", orthanc_recovery_status: "available", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z", staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null, send_error_code: null, send_attempt_count: 0 };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#93.*Failed/i }));
     expect((await screen.findAllByText("Re-upload required")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Retry with Orthanc" })).toBeNull();
@@ -1743,12 +1764,12 @@ describe("PacsRemapPage five-step wizard", () => {
     const job = { id: status === "remapped" ? 94 : 95, status, processing_stage: status === "remapped" ? "enqueueing_send" : "completed", modified_orthanc_study_id: "verified-study", destination_pacs_key: "1", send_error_code: null, dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z", send_attempt_count: 1 };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
       if (path === `/pacs/remap/jobs/${job.id}`) return Promise.resolve({ job, comparison: null });
       return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
     });
     renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: new RegExp(`#${job.id}.*${status}`, "i") }));
     expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
   });
