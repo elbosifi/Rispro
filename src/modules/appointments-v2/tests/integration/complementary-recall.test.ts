@@ -4,7 +4,7 @@ import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
 import { voidBookingByStaff } from "../../booking/services/void-booking.service.js";
-import { acknowledgeComplementaryRecall, completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall as createComplementaryRecallRecord, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions as updateComplementaryRecallRecord, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { acknowledgeComplementaryRecall, completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall as createComplementaryRecallRecord, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, recordComplementaryRecallContactAttempt, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions as updateComplementaryRecallRecord, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
@@ -52,8 +52,85 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
   after(async () => {
     if (!testData) return;
     await pool.query(`delete from appointment_protocol_assignments where appointment_id in (select recall_appointment_id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1 and recall_appointment_id is not null)`, [testData.userId]);
+    await pool.query("delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id in (select id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1)", [testData.userId]);
     await pool.query("delete from appointments_v2.complementary_recall_requests where requested_by_user_id = $1", [testData.userId]);
     await testDb.cleanup();
+  });
+
+  it("records append-only contact history, exposes live phones, and auto-acknowledges without changing lifecycle", async () => {
+    if (!testData) return;
+    await pool.query("update patients set phone_1 = $1, phone_2 = $2 where id = $3", ["0912345678", "0923456789", testData.patientId]);
+    const originalId = await originalBooking();
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", requestedByUserId: testData.userId }));
+    const before = (await listComplementaryRecalls()).find((item) => item.id === recall.id);
+    assert.deepEqual(before?.contactAttempts, []);
+    assert.equal(before?.patientPhone1, "0912345678");
+    assert.equal(before?.patientPhone2, "0923456789");
+
+    const first = await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "phone", contactValue: " 0912345678 ", outcome: "no_answer", note: "Left voicemail", followUpAt: "2039-06-12T08:30:00.000Z", actorUserId: testData.userId }));
+    const afterFirst = await getComplementaryRecall(recall.id);
+    assert.equal(afterFirst?.receptionAcknowledgedByUserId, testData.userId);
+    assert.ok(afterFirst?.receptionAcknowledgedAt);
+    assert.ok(afterFirst?.receptionSeenAt);
+    assert.equal(afterFirst?.status, "pending_scheduling");
+    const audit = await pool.query<{ count: string }>("select count(*)::text as count from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_contact_attempt_recorded'", [recall.id]);
+    assert.equal(audit.rows[0]?.count, "1");
+
+    await pool.query("update patients set phone_1 = $1, phone_2 = null where id = $2", ["0999999999", testData.patientId]);
+    const second = await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "in_person", contactValue: null, outcome: "other", note: "Patient asked to return later", followUpAt: null, actorUserId: testData.userId }));
+    const listed = (await listComplementaryRecalls()).find((item) => item.id === recall.id)!;
+    assert.equal(listed.patientPhone1, "0999999999");
+    assert.equal(listed.contactAttempts.length, 2);
+    assert.equal(listed.contactAttempts[0]?.id, second.id);
+    assert.equal(listed.contactAttempts[1]?.id, first.id);
+    assert.equal(listed.contactAttempts[1]?.contactValue, "0912345678");
+    assert.equal(listed.contactAttempts[1]?.recordedByUserId, testData.userId);
+    assert.ok(listed.contactAttempts[1]?.createdAt);
+    assert.equal((await pool.query<{ count: string }>("select count(*)::text as count from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_acknowledged'", [recall.id])).rows[0]?.count, "1");
+  });
+
+  it("validates contact methods, outcomes, and timestamps while leaving every outcome pending", async () => {
+    if (!testData) return;
+    const originalId = await originalBooking();
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", requestedByUserId: testData.userId }));
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "invalid", contactValue: null, outcome: "no_answer", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 400 });
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "phone", contactValue: "", outcome: "no_answer", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 400 });
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "whatsapp", contactValue: null, outcome: "no_answer", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 400 });
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "other", contactValue: null, outcome: "other", note: "", followUpAt: null, actorUserId: testData.userId })), { statusCode: 400 });
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "other", contactValue: null, outcome: "no_answer", note: null, followUpAt: "not-a-timestamp", actorUserId: testData.userId })), { statusCode: 400 });
+    for (const outcome of ["reached_agreed", "no_answer", "unreachable", "wrong_number", "callback_requested", "declined", "temporarily_unavailable", "inpatient", "completed_elsewhere", "other"] as const) {
+      await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "clinical_team", contactValue: null, outcome, note: outcome === "other" ? "Other factual note" : null, followUpAt: null, actorUserId: testData.userId }));
+      assert.equal((await getComplementaryRecall(recall.id))?.status, "pending_scheduling");
+    }
+  });
+
+  it("preserves history across doctor edits and reopen, while rejecting booked, completed, and cancelled recalls", async () => {
+    if (!testData) return;
+    const originalId = await originalBooking();
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", requestedByUserId: testData.userId }));
+    await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "phone", contactValue: "0912345678", outcome: "callback_requested", note: null, followUpAt: null, actorUserId: testData.userId }));
+    await transaction((client) => updateComplementaryRecallInstructions(client, recall.id, { receptionInstruction: null, technologistInstruction: "Updated acquisition", reasonCode: "technical_equipment_problem", qaClassification: "technical_repeat", urgency: "routine", dueAt: null, reportingDisposition: "supplement_original_report", actorUserId: testData.userId }));
+    assert.equal((await listComplementaryRecalls()).find((item) => item.id === recall.id)?.contactAttempts.length, 1);
+    await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "clinical_team", contactValue: null, outcome: "reached_agreed", note: null, followUpAt: null, actorUserId: testData.userId }));
+    await transaction((client) => updateComplementaryRecallInstructions(client, recall.id, { receptionInstruction: null, technologistInstruction: "Updated acquisition", reasonCode: "technical_equipment_problem", qaClassification: "protocol_error", urgency: "routine", dueAt: null, reportingDisposition: "no_separate_report", actorUserId: testData.userId }));
+    assert.equal((await listComplementaryRecalls()).find((item) => item.id === recall.id)?.contactAttempts.length, 2);
+
+    const created = await createBooking({ complementaryRecallRequestId: recall.id, patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-20", bookingTime: "10:00", caseCategory: "non_oncology" }, testData.userId, "supervisor", testData.policySetKey);
+    const bookingId = Number(created.booking.id);
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "other", contactValue: null, outcome: "no_answer", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 409 });
+    await cancelBooking(bookingId, testData.userId);
+    assert.equal((await getComplementaryRecall(recall.id))?.status, "pending_scheduling");
+    assert.equal((await listComplementaryRecalls()).find((item) => item.id === recall.id)?.contactAttempts.length, 2);
+    await transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "other", contactValue: null, outcome: "declined", note: null, followUpAt: null, actorUserId: testData.userId }));
+    const completedBooking = await createBooking({ complementaryRecallRequestId: recall.id, patientId: testData.patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-21", bookingTime: "10:00", caseCategory: "non_oncology" }, testData.userId, "supervisor", testData.policySetKey);
+    const completedBookingId = Number(completedBooking.booking.id);
+    await transaction((client) => completeComplementaryRecallForBooking(client, completedBookingId, testData.userId));
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, recall.id, { contactMethod: "other", contactValue: null, outcome: "no_answer", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 409 });
+
+    const cancelledOriginalId = await originalBooking();
+    const cancelled = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: cancelledOriginalId, receptionInstruction: null, technologistInstruction: "Cancelled recall", requestedByUserId: testData.userId }));
+    await transaction((client) => withdrawComplementaryRecall(client, cancelled.id, testData.userId));
+    await assert.rejects(() => transaction((client) => recordComplementaryRecallContactAttempt(client, cancelled.id, { contactMethod: "other", contactValue: null, outcome: "completed_elsewhere", note: null, followUpAt: null, actorUserId: testData.userId })), { statusCode: 409 });
   });
 
   it("validates eligible originals, instruction, and duplicate active recalls", async () => {

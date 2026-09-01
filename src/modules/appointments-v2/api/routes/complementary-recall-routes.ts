@@ -4,7 +4,7 @@ import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { withTransaction } from "../../shared/utils/transactions.js";
-import { acknowledgeComplementaryRecall, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, getComplementaryRecall, getComplementaryRecallBookingContext, listComplementaryRecalls, markComplementaryRecallSeen, markComplementaryRecallsSeen, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { acknowledgeComplementaryRecall, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, getComplementaryRecall, getComplementaryRecallBookingContext, listComplementaryRecalls, markComplementaryRecallSeen, markComplementaryRecallsSeen, recordComplementaryRecallContactAttempt, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 
 interface RecallRequest extends Request { user?: AuthenticatedUserContext; }
@@ -20,4 +20,5 @@ complementaryRecallRouter.get("/:id/booking-context", asyncRoute(async (req: Rec
 complementaryRecallRouter.post("/mark-seen", asyncRoute(async (req: RecallRequest, res: Response) => { const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : []; await withTransaction((client) => markComplementaryRecallsSeen(client, ids, Number(req.user!.sub))); res.status(204).end(); }));
 complementaryRecallRouter.post("/:id/mark-seen", asyncRoute(async (req: RecallRequest, res: Response) => { await withTransaction((client) => markComplementaryRecallSeen(client, id(req.params.id), Number(req.user!.sub))); res.status(204).end(); }));
 complementaryRecallRouter.post("/:id/acknowledge", asyncRoute(async (req: RecallRequest, res: Response) => { const recall = await withTransaction((client) => acknowledgeComplementaryRecall(client, id(req.params.id), Number(req.user!.sub))); res.json({ recall }); }));
+complementaryRecallRouter.post("/:id/contact-attempts", asyncRoute(async (req: RecallRequest, res: Response) => { const contactAttempt = await withTransaction((client) => recordComplementaryRecallContactAttempt(client, id(req.params.id), { contactMethod: req.body?.contactMethod, contactValue: req.body?.contactValue, outcome: req.body?.outcome, note: req.body?.note, followUpAt: req.body?.followUpAt, actorUserId: Number(req.user!.sub) })); res.status(201).json({ contactAttempt }); }));
 complementaryRecallRouter.post("/:id/withdraw", asyncRoute(async (req: RecallRequest, res: Response) => { if (!["supervisor", "super_admin"].includes(req.user!.role)) throw new HttpError(403, "Only supervisors may withdraw additional imaging requests."); const recall = await withTransaction((client) => withdrawComplementaryRecall(client, id(req.params.id), Number(req.user!.sub))); res.json({ recall }); }));

@@ -9,11 +9,28 @@ export type ComplementaryRecallReasonCode = "missing_sequence_phase" | "incomple
 export type ComplementaryRecallQaClassification = "diagnostic_addition" | "technical_repeat" | "protocol_error" | "acquisition_error" | "equipment_failure" | "patient_related_unavoidable" | "other";
 export type ComplementaryRecallUrgency = "same_day" | "within_24_hours" | "within_72_hours" | "routine";
 export type ComplementaryRecallReportingDisposition = "supplement_original_report" | "separate_report" | "no_separate_report";
+export type ComplementaryRecallContactMethod = "phone" | "whatsapp" | "in_person" | "clinical_team" | "other";
+export type ComplementaryRecallContactOutcome = "reached_agreed" | "no_answer" | "unreachable" | "wrong_number" | "callback_requested" | "declined" | "temporarily_unavailable" | "inpatient" | "completed_elsewhere" | "other";
 
 const REASON_CODES: readonly ComplementaryRecallReasonCode[] = ["missing_sequence_phase", "incomplete_anatomical_coverage", "motion_nondiagnostic_quality", "incorrect_protocol", "incorrect_contrast_phase_timing", "additional_diagnostic_characterization", "technical_equipment_problem", "patient_related_limitation", "other"];
 const QA_CLASSIFICATIONS: readonly ComplementaryRecallQaClassification[] = ["diagnostic_addition", "technical_repeat", "protocol_error", "acquisition_error", "equipment_failure", "patient_related_unavoidable", "other"];
 const URGENCIES: readonly ComplementaryRecallUrgency[] = ["same_day", "within_24_hours", "within_72_hours", "routine"];
 const REPORTING_DISPOSITIONS: readonly ComplementaryRecallReportingDisposition[] = ["supplement_original_report", "separate_report", "no_separate_report"];
+const CONTACT_METHODS: readonly ComplementaryRecallContactMethod[] = ["phone", "whatsapp", "in_person", "clinical_team", "other"];
+const CONTACT_OUTCOMES: readonly ComplementaryRecallContactOutcome[] = ["reached_agreed", "no_answer", "unreachable", "wrong_number", "callback_requested", "declined", "temporarily_unavailable", "inpatient", "completed_elsewhere", "other"];
+
+export interface ComplementaryRecallContactAttempt {
+  id: number;
+  recallRequestId: number;
+  contactMethod: ComplementaryRecallContactMethod;
+  contactValue: string | null;
+  outcome: ComplementaryRecallContactOutcome;
+  note: string | null;
+  followUpAt: string | null;
+  recordedByUserId: number;
+  recordedByDisplayName: string;
+  createdAt: string;
+}
 
 export interface ComplementaryRecall {
   id: number;
@@ -55,6 +72,9 @@ export interface ComplementaryRecall {
   previousAttemptAppointmentId?: number | null;
   previousAttemptReason?: string | null;
   previousAttemptAt?: string | null;
+  patientPhone1?: string | null;
+  patientPhone2?: string | null;
+  contactAttempts: ComplementaryRecallContactAttempt[];
 }
 export interface ComplementaryRecallBookingContext extends ComplementaryRecall { patientId: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; }
 
@@ -66,12 +86,18 @@ type RecallRow = {
   requested_by_user_id: number; requested_at: string; reception_seen_at: string | null;
   reception_acknowledged_at: string | Date | null; reception_acknowledged_by_user_id: number | null;
   scheduled_at: string | null; completed_at: string | null; cancelled_at: string | null;
+  patient_phone_1?: string | null; patient_phone_2?: string | null; contact_attempts?: unknown;
 };
 type Queryable = Pick<PoolClient, "query">;
 
 function map(row: RecallRow): ComplementaryRecall {
   const extra = row as RecallRow & Record<string, unknown>;
-  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, reasonCode: row.reason_code, qaClassification: row.qa_classification, urgency: row.urgency, dueAt: row.due_at == null ? null : new Date(row.due_at).toISOString(), reportingDisposition: row.reporting_disposition, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, receptionAcknowledgedAt: row.reception_acknowledged_at == null ? null : new Date(row.reception_acknowledged_at).toISOString(), receptionAcknowledgedByUserId: row.reception_acknowledged_by_user_id == null ? null : Number(row.reception_acknowledged_by_user_id), scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at, patientDisplayName: extra.patient_display_name == null ? null : String(extra.patient_display_name), patientMrn: extra.patient_mrn == null ? null : String(extra.patient_mrn), patientIdentifier: extra.patient_identifier == null ? null : String(extra.patient_identifier), patientArabicName: extra.patient_arabic_name == null ? null : String(extra.patient_arabic_name), patientEnglishName: extra.patient_english_name == null ? null : String(extra.patient_english_name), originalAccession: extra.original_accession == null ? undefined : String(extra.original_accession), originalExam: extra.original_exam == null ? null : String(extra.original_exam), originalExamAr: extra.original_exam_ar == null ? null : String(extra.original_exam_ar), originalExamEn: extra.original_exam_en == null ? null : String(extra.original_exam_en), modalityName: extra.modality_name == null ? null : String(extra.modality_name), modalityNameAr: extra.modality_name_ar == null ? null : String(extra.modality_name_ar), modalityNameEn: extra.modality_name_en == null ? null : String(extra.modality_name_en), modalityCode: extra.modality_code == null ? null : String(extra.modality_code), requesterDisplayName: extra.requester_display_name == null ? null : String(extra.requester_display_name), receptionAcknowledgedByDisplayName: extra.reception_acknowledged_by_display_name == null ? null : String(extra.reception_acknowledged_by_display_name), recallAppointmentAccession: extra.recall_appointment_accession == null ? null : String(extra.recall_appointment_accession), recallAppointmentDate: extra.recall_appointment_date == null ? null : String(extra.recall_appointment_date), previousAttemptAppointmentId: extra.previous_attempt_appointment_id == null ? null : Number(extra.previous_attempt_appointment_id), previousAttemptReason: extra.previous_attempt_reason == null ? null : String(extra.previous_attempt_reason), previousAttemptAt: extra.previous_attempt_at == null ? null : String(extra.previous_attempt_at) };
+  const contactAttempts = Array.isArray(extra.contact_attempts) ? extra.contact_attempts.filter((attempt): attempt is Record<string, unknown> => typeof attempt === "object" && attempt !== null).map(mapContactAttempt) : [];
+  return { id: Number(row.id), originalAppointmentId: Number(row.original_appointment_id), recallAppointmentId: row.recall_appointment_id == null ? null : Number(row.recall_appointment_id), receptionInstruction: row.reception_instruction, technologistInstruction: row.technologist_instruction, reasonCode: row.reason_code, qaClassification: row.qa_classification, urgency: row.urgency, dueAt: row.due_at == null ? null : new Date(row.due_at).toISOString(), reportingDisposition: row.reporting_disposition, status: row.status, requestedByUserId: Number(row.requested_by_user_id), requestedAt: row.requested_at, receptionSeenAt: row.reception_seen_at, receptionAcknowledgedAt: row.reception_acknowledged_at == null ? null : new Date(row.reception_acknowledged_at).toISOString(), receptionAcknowledgedByUserId: row.reception_acknowledged_by_user_id == null ? null : Number(row.reception_acknowledged_by_user_id), scheduledAt: row.scheduled_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at, patientDisplayName: extra.patient_display_name == null ? null : String(extra.patient_display_name), patientMrn: extra.patient_mrn == null ? null : String(extra.patient_mrn), patientIdentifier: extra.patient_identifier == null ? null : String(extra.patient_identifier), patientArabicName: extra.patient_arabic_name == null ? null : String(extra.patient_arabic_name), patientEnglishName: extra.patient_english_name == null ? null : String(extra.patient_english_name), originalAccession: extra.original_accession == null ? undefined : String(extra.original_accession), originalExam: extra.original_exam == null ? null : String(extra.original_exam), originalExamAr: extra.original_exam_ar == null ? null : String(extra.original_exam_ar), originalExamEn: extra.original_exam_en == null ? null : String(extra.original_exam_en), modalityName: extra.modality_name == null ? null : String(extra.modality_name), modalityNameAr: extra.modality_name_ar == null ? null : String(extra.modality_name_ar), modalityNameEn: extra.modality_name_en == null ? null : String(extra.modality_name_en), modalityCode: extra.modality_code == null ? null : String(extra.modality_code), requesterDisplayName: extra.requester_display_name == null ? null : String(extra.requester_display_name), receptionAcknowledgedByDisplayName: extra.reception_acknowledged_by_display_name == null ? null : String(extra.reception_acknowledged_by_display_name), recallAppointmentAccession: extra.recall_appointment_accession == null ? null : String(extra.recall_appointment_accession), recallAppointmentDate: extra.recall_appointment_date == null ? null : String(extra.recall_appointment_date), previousAttemptAppointmentId: extra.previous_attempt_appointment_id == null ? null : Number(extra.previous_attempt_appointment_id), previousAttemptReason: extra.previous_attempt_reason == null ? null : String(extra.previous_attempt_reason), previousAttemptAt: extra.previous_attempt_at == null ? null : String(extra.previous_attempt_at), patientPhone1: row.patient_phone_1 ?? null, patientPhone2: row.patient_phone_2 ?? null, contactAttempts };
+}
+
+function mapContactAttempt(row: Record<string, unknown>): ComplementaryRecallContactAttempt {
+  return { id: Number(row.id), recallRequestId: Number(row.recallRequestId ?? row.recall_request_id), contactMethod: String(row.contactMethod ?? row.contact_method) as ComplementaryRecallContactMethod, contactValue: row.contactValue == null && row.contact_value == null ? null : String(row.contactValue ?? row.contact_value), outcome: String(row.outcome) as ComplementaryRecallContactOutcome, note: row.note == null ? null : String(row.note), followUpAt: row.followUpAt == null && row.follow_up_at == null ? null : new Date(String(row.followUpAt ?? row.follow_up_at)).toISOString(), recordedByUserId: Number(row.recordedByUserId ?? row.recorded_by_user_id), recordedByDisplayName: String(row.recordedByDisplayName ?? row.recorded_by_display_name ?? ""), createdAt: new Date(String(row.createdAt ?? row.created_at)).toISOString() };
 }
 
 const SELECT = `id, original_appointment_id, recall_appointment_id, reception_instruction, technologist_instruction, reason_code, qa_classification, urgency, due_at, reporting_disposition, status, requested_by_user_id, requested_at, reception_seen_at, reception_acknowledged_at, reception_acknowledged_by_user_id, scheduled_at, completed_at, cancelled_at`;
@@ -85,6 +111,12 @@ function normalizeEnum<T extends string>(value: unknown, allowed: readonly T[], 
 function normalizeDueAt(value: unknown): string | null {
   if (value == null || (typeof value === "string" && !value.trim())) return null;
   if (typeof value !== "string" || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Due date/time must be a valid timestamp.");
+  return new Date(value).toISOString();
+}
+
+function normalizeFollowUpAt(value: unknown): string | null {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  if (typeof value !== "string" || !/(?:Z|[+-]\d{2}:?\d{2})$/.test(value.trim()) || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Follow-up date/time must be a valid timestamp.");
   return new Date(value).toISOString();
 }
 
@@ -128,7 +160,7 @@ export async function getComplementaryRecallBookingContext(id: number, client: Q
 }
 
 export async function listComplementaryRecalls(client: Queryable = pool): Promise<ComplementaryRecall[]> {
-  const result = await client.query<RecallRow>(`select r.${SELECT.replaceAll(", ", ", r.")}, coalesce(nullif(trim(p.english_full_name), ''), nullif(trim(p.arabic_full_name), '')) as patient_display_name, p.arabic_full_name as patient_arabic_name, p.english_full_name as patient_english_name, p.mrn as patient_mrn, coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_identifier, ('V2-' || lpad(original_booking.id::text, 6, '0')) as original_accession, et.name_en as original_exam, et.name_ar as original_exam_ar, et.name_en as original_exam_en, m.name_en as modality_name, m.name_ar as modality_name_ar, m.name_en as modality_name_en, m.code as modality_code, coalesce(nullif(trim(requester.full_name), ''), requester.username) as requester_display_name, coalesce(nullif(trim(acknowledgement_user.full_name), ''), acknowledgement_user.username) as reception_acknowledged_by_display_name, case when return_booking.id is null then null else ('V2-' || lpad(return_booking.id::text, 6, '0')) end as recall_appointment_accession, return_booking.booking_date::text as recall_appointment_date, previous_attempt.previous_attempt_appointment_id, previous_attempt.previous_attempt_reason, previous_attempt.previous_attempt_at from appointments_v2.complementary_recall_requests r join appointments_v2.bookings original_booking on original_booking.id = r.original_appointment_id join patients p on p.id = original_booking.patient_id join modalities m on m.id = original_booking.modality_id left join exam_types et on et.id = original_booking.exam_type_id left join users requester on requester.id = r.requested_by_user_id left join users acknowledgement_user on acknowledgement_user.id = r.reception_acknowledged_by_user_id left join appointments_v2.bookings return_booking on return_booking.id = r.recall_appointment_id left join lateral (select pi.value from patient_identifiers pi where pi.patient_id = p.id and pi.is_primary = true order by pi.id asc limit 1) primary_identifier on true left join lateral (select case when audit.new_values->>'previousRecallAppointmentId' ~ '^[1-9][0-9]{0,17}$' then (audit.new_values->>'previousRecallAppointmentId')::bigint else null end as previous_attempt_appointment_id, audit.new_values->>'reason' as previous_attempt_reason, audit.created_at::text as previous_attempt_at from audit_log audit where audit.entity_type = 'complementary_recall_request' and audit.entity_id = r.id and audit.action_type = 'complementary_recall_reopened_after_uncompleted_booking' order by audit.created_at desc, audit.id desc limit 1) previous_attempt on true order by r.requested_at desc, r.id desc`);
+  const result = await client.query<RecallRow>(`select r.${SELECT.replaceAll(", ", ", r.")}, p.phone_1 as patient_phone_1, p.phone_2 as patient_phone_2, coalesce(nullif(trim(p.english_full_name), ''), nullif(trim(p.arabic_full_name), '')) as patient_display_name, p.arabic_full_name as patient_arabic_name, p.english_full_name as patient_english_name, p.mrn as patient_mrn, coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_identifier, ('V2-' || lpad(original_booking.id::text, 6, '0')) as original_accession, et.name_en as original_exam, et.name_ar as original_exam_ar, et.name_en as original_exam_en, m.name_en as modality_name, m.name_ar as modality_name_ar, m.name_en as modality_name_en, m.code as modality_code, coalesce(nullif(trim(requester.full_name), ''), requester.username) as requester_display_name, coalesce(nullif(trim(acknowledgement_user.full_name), ''), acknowledgement_user.username) as reception_acknowledged_by_display_name, case when return_booking.id is null then null else ('V2-' || lpad(return_booking.id::text, 6, '0')) end as recall_appointment_accession, return_booking.booking_date::text as recall_appointment_date, previous_attempt.previous_attempt_appointment_id, previous_attempt.previous_attempt_reason, previous_attempt.previous_attempt_at, contact_history.contact_attempts from appointments_v2.complementary_recall_requests r join appointments_v2.bookings original_booking on original_booking.id = r.original_appointment_id join patients p on p.id = original_booking.patient_id join modalities m on m.id = original_booking.modality_id left join exam_types et on et.id = original_booking.exam_type_id left join users requester on requester.id = r.requested_by_user_id left join users acknowledgement_user on acknowledgement_user.id = r.reception_acknowledged_by_user_id left join appointments_v2.bookings return_booking on return_booking.id = r.recall_appointment_id left join lateral (select pi.value from patient_identifiers pi where pi.patient_id = p.id and pi.is_primary = true order by pi.id asc limit 1) primary_identifier on true left join lateral (select case when audit.new_values->>'previousRecallAppointmentId' ~ '^[1-9][0-9]{0,17}$' then (audit.new_values->>'previousRecallAppointmentId')::bigint else null end as previous_attempt_appointment_id, audit.new_values->>'reason' as previous_attempt_reason, audit.created_at::text as previous_attempt_at from audit_log audit where audit.entity_type = 'complementary_recall_request' and audit.entity_id = r.id and audit.action_type = 'complementary_recall_reopened_after_uncompleted_booking' order by audit.created_at desc, audit.id desc limit 1) previous_attempt on true left join lateral (select json_agg(json_build_object('id', attempt.id, 'recallRequestId', attempt.recall_request_id, 'contactMethod', attempt.contact_method, 'contactValue', attempt.contact_value, 'outcome', attempt.outcome, 'note', attempt.note, 'followUpAt', attempt.follow_up_at, 'recordedByUserId', attempt.recorded_by_user_id, 'recordedByDisplayName', coalesce(nullif(trim(recorded_by.full_name), ''), recorded_by.username), 'createdAt', attempt.created_at) order by attempt.created_at desc, attempt.id desc) as contact_attempts from appointments_v2.complementary_recall_contact_attempts attempt join users recorded_by on recorded_by.id = attempt.recorded_by_user_id where attempt.recall_request_id = r.id) contact_history on true order by r.requested_at desc, r.id desc`);
   return result.rows.map(map);
 }
 
@@ -164,6 +196,44 @@ export async function acknowledgeComplementaryRecall(client: PoolClient, id: num
     await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_acknowledged", oldValues: { status: recall.status, acknowledgedAt: recall.receptionAcknowledgedAt, acknowledgedByUserId: recall.receptionAcknowledgedByUserId }, newValues: { acknowledgedAt: acknowledged.receptionAcknowledgedAt, acknowledgedByUserId: acknowledged.receptionAcknowledgedByUserId, changedByUserId: actorUserId }, changedByUserId: actorUserId }, client);
   }
   return acknowledged;
+}
+
+type ContactAttemptRow = {
+  id: number;
+  recall_request_id: number;
+  contact_method: ComplementaryRecallContactMethod;
+  contact_value: string | null;
+  outcome: ComplementaryRecallContactOutcome;
+  note: string | null;
+  follow_up_at: string | Date | null;
+  recorded_by_user_id: number;
+  recorded_by_display_name: string;
+  created_at: string | Date;
+};
+
+function mapInsertedContactAttempt(row: ContactAttemptRow): ComplementaryRecallContactAttempt {
+  return { id: Number(row.id), recallRequestId: Number(row.recall_request_id), contactMethod: row.contact_method, contactValue: row.contact_value, outcome: row.outcome, note: row.note, followUpAt: row.follow_up_at == null ? null : new Date(row.follow_up_at).toISOString(), recordedByUserId: Number(row.recorded_by_user_id), recordedByDisplayName: row.recorded_by_display_name, createdAt: new Date(row.created_at).toISOString() };
+}
+
+export async function recordComplementaryRecallContactAttempt(client: PoolClient, id: number, input: { contactMethod: unknown; contactValue: unknown; outcome: unknown; note: unknown; followUpAt: unknown; actorUserId: number }): Promise<ComplementaryRecallContactAttempt> {
+  const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where id = $1 for update`, [id]);
+  if (!result.rows[0]) throw new HttpError(404, "Additional imaging request not found.");
+  const recall = map(result.rows[0]);
+  if (recall.status !== "pending_scheduling" || recall.recallAppointmentId != null) throw new HttpError(409, "Contact attempts can only be recorded before a complementary appointment is booked.");
+
+  const contactMethod = normalizeEnum(input.contactMethod, CONTACT_METHODS, "contact method");
+  const outcome = normalizeEnum(input.outcome, CONTACT_OUTCOMES, "contact outcome");
+  const contactValue = input.contactValue == null ? null : String(input.contactValue).trim() || null;
+  if ((contactMethod === "phone" || contactMethod === "whatsapp") && contactValue == null) throw new HttpError(400, "Contact used is required for phone and WhatsApp attempts.");
+  const note = input.note == null ? null : String(input.note).trim() || null;
+  if (outcome === "other" && note == null) throw new HttpError(400, "A note is required for the other contact outcome.");
+  const followUpAt = normalizeFollowUpAt(input.followUpAt);
+
+  await acknowledgeComplementaryRecall(client, id, input.actorUserId);
+  const inserted = await client.query<ContactAttemptRow>(`with inserted as (insert into appointments_v2.complementary_recall_contact_attempts (recall_request_id, contact_method, contact_value, outcome, note, follow_up_at, recorded_by_user_id) values ($1, $2, $3, $4, $5, $6, $7) returning id, recall_request_id, contact_method, contact_value, outcome, note, follow_up_at, recorded_by_user_id, created_at) select inserted.*, coalesce(nullif(trim(recorded_by.full_name), ''), recorded_by.username) as recorded_by_display_name from inserted join users recorded_by on recorded_by.id = inserted.recorded_by_user_id`, [id, contactMethod, contactValue, outcome, note, followUpAt, input.actorUserId]);
+  const attempt = mapInsertedContactAttempt(inserted.rows[0]!);
+  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_contact_attempt_recorded", newValues: { contactAttemptId: attempt.id, contactMethod: attempt.contactMethod, outcome: attempt.outcome, followUpAt: attempt.followUpAt, changedByUserId: input.actorUserId }, changedByUserId: input.actorUserId }, client);
+  return attempt;
 }
 
 export async function lockComplementaryRecallForBooking(client: PoolClient, recallId: number, payload: { patientId: number; modalityId: number; examTypeId: number | null }): Promise<ComplementaryRecall> {

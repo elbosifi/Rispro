@@ -6,11 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import RecallRequestsPage from "./recall-requests-page";
 
-const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockMarkSeen } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockMarkSeen: vi.fn() }));
+const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn() }));
 
 vi.mock("@/lib/api/complementary-recalls", () => ({
   fetchComplementaryRecalls: mockFetchRecalls,
   acknowledgeComplementaryRecall: mockAcknowledge,
+  recordComplementaryRecallContactAttempt: mockRecordContact,
   withdrawComplementaryRecall: vi.fn(),
 }));
 vi.mock("@/lib/api/doctor-portal-reporting", () => ({
@@ -53,8 +54,12 @@ const recall: ComplementaryRecall = {
   modalityName: "Computed tomography",
   modalityNameEn: "Computed tomography",
   requesterDisplayName: "Doctor One",
+  patientPhone1: "0912345678",
+  patientPhone2: "0923456789",
+  contactAttempts: [],
 };
 const acknowledgedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One" };
+const contactedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One", contactAttempts: [{ id: 1, recallRequestId: 42, contactMethod: "phone", contactValue: "0912345678", outcome: "no_answer", note: "Left callback request", followUpAt: "2026-09-01T08:30:00.000Z", recordedByUserId: 7, recordedByDisplayName: "Reception One", createdAt: "2026-09-01T08:30:00.000Z" }] };
 
 function renderPage(mode: "reception" | "doctor") {
   return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><RecallRequestsPage mode={mode} /></QueryClientProvider></MemoryRouter>);
@@ -66,11 +71,54 @@ describe("Recall Requests metadata", () => {
     mockFetchDoctorRecalls.mockReset();
     mockUpdateRecall.mockReset();
     mockAcknowledge.mockReset();
+    mockRecordContact.mockReset();
     mockMarkSeen.mockReset();
     mockFetchRecalls.mockResolvedValue([recall]);
     mockFetchDoctorRecalls.mockResolvedValue([recall]);
     mockUpdateRecall.mockResolvedValue(recall);
     mockAcknowledge.mockResolvedValue(acknowledgedRecall);
+    mockRecordContact.mockResolvedValue(contactedRecall.contactAttempts[0]);
+  });
+
+  it("shows live patient phones, empty contact state, and the reception action", async () => {
+    renderPage("reception");
+
+    expect(await screen.findByText("Phone 1:")).toBeTruthy();
+    expect(screen.getByText("0912345678")).toBeTruthy();
+    expect(screen.getByText("0923456789")).toBeTruthy();
+    expect(screen.getByText("Not contacted")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Record contact attempt" })).toBeTruthy();
+  });
+
+  it("records a phone contact with the manual value and Tripoli follow-up instant", async () => {
+    mockFetchRecalls.mockReset();
+    mockFetchRecalls.mockResolvedValueOnce([recall]).mockResolvedValue([contactedRecall]);
+    renderPage("reception");
+    await userEvent.click(await screen.findByRole("button", { name: "Record contact attempt" }));
+    expect(screen.getByLabelText("Contact method")).toBeTruthy();
+    expect(screen.getByLabelText("Contact used")).toBeTruthy();
+    expect(screen.getByLabelText("Outcome")).toBeTruthy();
+    expect(screen.getByLabelText("Follow-up date/time")).toBeTruthy();
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+
+    await userEvent.type(screen.getByLabelText("Contact used"), "0987654321");
+    await userEvent.type(screen.getByLabelText("Follow-up date/time"), "2026-09-01T10:30");
+    await userEvent.click(screen.getByRole("button", { name: "Record attempt" }));
+
+    await waitFor(() => expect(mockRecordContact).toHaveBeenCalledWith(42, { contactMethod: "phone", contactValue: "0987654321", outcome: "no_answer", note: null, followUpAt: "2026-09-01T08:30:00.000Z" }));
+    await waitFor(() => expect(mockFetchRecalls.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("shows contact history read-only for doctors and renders newest contact details", async () => {
+    mockFetchDoctorRecalls.mockResolvedValue([contactedRecall]);
+    renderPage("doctor");
+
+    expect((await screen.findAllByText((_, element) => Boolean(element?.textContent?.includes("Last contact: No answer")))).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((content) => content.includes("No answer")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Contact history (1)")).toBeTruthy();
+    await userEvent.click(screen.getByText("Contact history (1)"));
+    expect(screen.getByText("0912345678")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Record contact attempt" })).toBeNull();
   });
 
   it("renders structured metadata for reception", async () => {
