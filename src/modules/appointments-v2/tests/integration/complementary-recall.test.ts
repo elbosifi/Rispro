@@ -425,4 +425,53 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     await transaction((client) => withdrawComplementaryRecall(client, withdrawn.id, testData.userId));
     await assert.rejects(() => transaction((client) => updateComplementaryRecallInstructions(client, withdrawn.id, { receptionInstruction: null, technologistInstruction: "Nope", actorUserId: testData.userId })), { statusCode: 409 });
   });
+
+  it("derives operational attention from the target, latest contact, and complementary booking without persisting it", async () => {
+    if (!testData) return;
+    const explicitOriginal = await originalBooking(); const within24Original = await originalBooking(); const overdueOriginal = await originalBooking(); const dueTodayOriginal = await originalBooking(); const sameDayOriginal = await originalBooking();
+    const explicit = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: explicitOriginal, receptionInstruction: null, technologistInstruction: "Explicit target", urgency: "within_72_hours", dueAt: "2039-06-18T08:00:00.000Z", requestedByUserId: testData.userId }));
+    const within24 = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: within24Original, receptionInstruction: null, technologistInstruction: "24 hour target", urgency: "within_24_hours", dueAt: null, requestedByUserId: testData.userId }));
+    const overdue = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: overdueOriginal, receptionInstruction: null, technologistInstruction: "Overdue target", urgency: "routine", dueAt: null, requestedByUserId: testData.userId }));
+    const dueToday = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: dueTodayOriginal, receptionInstruction: null, technologistInstruction: "Today target", urgency: "routine", dueAt: null, requestedByUserId: testData.userId }));
+    const sameDay = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: sameDayOriginal, receptionInstruction: null, technologistInstruction: "Same day target", urgency: "same_day", dueAt: null, requestedByUserId: testData.userId }));
+    await pool.query("update appointments_v2.complementary_recall_requests set requested_at = now() - interval '25 hours' where id = $1", [within24.id]);
+    await pool.query("update appointments_v2.complementary_recall_requests set due_at = now() - interval '2 hours' where id = $1", [overdue.id]);
+    await pool.query("update appointments_v2.complementary_recall_requests set due_at = now() + interval '2 hours' where id = $1", [dueToday.id]);
+
+    await transaction((client) => recordComplementaryRecallContactAttempt(client, overdue.id, { contactMethod: "phone", contactValue: "0912345678", outcome: "no_answer", note: null, followUpAt: new Date(Date.now() - 60_000).toISOString(), actorUserId: testData.userId }));
+    const beforeSuppression = (await listComplementaryRecalls()).find((row) => row.id === overdue.id)!;
+    assert.equal(beforeSuppression.isOverdue, true);
+    assert.equal(beforeSuppression.isFollowUpDue, true);
+    assert.ok(beforeSuppression.latestFollowUpAt);
+    await transaction((client) => recordComplementaryRecallContactAttempt(client, overdue.id, { contactMethod: "in_person", contactValue: null, outcome: "reached_agreed", note: null, followUpAt: null, actorUserId: testData.userId }));
+
+    const returnBooking = await originalBooking();
+    await pool.query("update appointments_v2.bookings set booking_date = ((now() at time zone 'Africa/Tripoli')::date + 1), booking_time = '10:00'::time where id = $1", [returnBooking]);
+    await transaction((client) => linkComplementaryRecallBooking(client, overdue, returnBooking, testData.userId));
+    const rows = await listComplementaryRecalls();
+    const explicitRow = rows.find((row) => row.id === explicit.id)!;
+    const within24Row = rows.find((row) => row.id === within24.id)!;
+    const overdueRow = rows.find((row) => row.id === overdue.id)!;
+    const todayRow = rows.find((row) => row.id === dueToday.id)!;
+    const sameDayRow = rows.find((row) => row.id === sameDay.id)!;
+    assert.equal(explicitRow.effectiveDueAt, "2039-06-18T08:00:00.000Z");
+    assert.ok(within24Row.effectiveDueAt);
+    assert.equal(within24Row.isOverdue, true);
+    assert.equal(todayRow.isDueToday, true);
+    assert.equal(todayRow.isOverdue, false);
+    assert.ok(sameDayRow.effectiveDueAt);
+    const expectedSameDay = await pool.query<{ target: Date }>("select ((date_trunc('day', requested_at at time zone 'Africa/Tripoli') + interval '1 day' - interval '1 millisecond') at time zone 'Africa/Tripoli') as target from appointments_v2.complementary_recall_requests where id = $1", [sameDay.id]);
+    assert.equal(sameDayRow.effectiveDueAt, expectedSameDay.rows[0]?.target.toISOString());
+    assert.equal(overdueRow.status, "scheduled");
+    assert.equal(overdueRow.isOverdue, true);
+    assert.equal(overdueRow.latestFollowUpAt, null);
+    assert.equal(overdueRow.isFollowUpDue, false);
+    assert.equal(overdueRow.recallAppointmentTime, "10:00:00");
+    assert.ok(overdueRow.recallAppointmentStartsAt);
+    assert.equal(overdueRow.isScheduledAfterTarget, true);
+    const summary = await complementaryRecallReceptionSummary();
+    assert.ok(summary.dueTodayCount >= 1);
+    assert.ok(summary.overdueCount >= 2);
+    assert.equal(typeof summary.followUpDueCount, "number");
+  });
 });

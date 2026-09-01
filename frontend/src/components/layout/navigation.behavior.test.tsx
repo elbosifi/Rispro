@@ -1117,6 +1117,18 @@ describe("Navigation governance", () => {
     expect(screen.getByText("+")).toBeTruthy();
   });
 
+  it("shows a persistent operational attention indicator independently of the booking badge", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0, dueTodayCount: 0, overdueCount: 2, followUpDueCount: 1 };
+    requestScanSummaryState.value = undefined;
+    render(requestScanSideNav());
+
+    const additionalImaging = screen.getByRole("button", { name: "Additional Imaging Requests" });
+    expect(screen.getByLabelText("2 overdue · 1 follow-up due").textContent).toBe("!");
+    expect(additionalImaging.getAttribute("data-attention-pulse")).toBe("false");
+    expect(additionalImaging.querySelector("span.rounded-full.bg-red-600")).toBeNull();
+  });
+
   it("renders the same Request Scans badge in the MobileDrawer", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     recallSummaryState.value = { pendingCount: 0, unseenPendingCount: 0 };

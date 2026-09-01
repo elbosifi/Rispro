@@ -200,6 +200,8 @@ function NavButton({
   const countLabel = language === "ar" ? `${recallSummary?.pendingCount ?? 0} طلبات تصوير إضافي بحاجة إلى حجز` : `${recallSummary?.pendingCount ?? 0} additional imaging requests need booking`;
   const newLabel = language === "ar" ? "طلب تصوير إضافي جديد" : "New additional imaging request";
   const requestScanCountLabel = `${label}: ${requestScanSummary?.needsAttentionCount ?? 0}`;
+  const recallAttentionLabel = language === "ar" ? `${recallSummary?.overdueCount ?? 0} متأخر · ${recallSummary?.followUpDueCount ?? 0} متابعة مستحقة` : `${recallSummary?.overdueCount ?? 0} overdue · ${recallSummary?.followUpDueCount ?? 0} follow-up due`;
+  const recallNeedsAttention = (recallSummary?.overdueCount ?? 0) > 0 || (recallSummary?.followUpDueCount ?? 0) > 0;
 
   useEffect(() => {
     if (!requestScanSummary) return;
@@ -243,7 +245,7 @@ function NavButton({
       animationDelayMs={index * 40}
       attentionPulse={item.route === "recall.requests" && attentionPulse}
       eventFlash={item.route === "request.scans" ? requestScanEventFlash : null}
-      trailing={item.route === "recall.requests" && (recallSummary?.pendingCount ?? 0) > 0 ? <span className="flex items-center gap-1"><span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span>{recallSummary!.unseenPendingCount > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}</span> : item.route === "request.scans" && (requestScanSummary?.needsAttentionCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={requestScanCountLabel} title={requestScanCountLabel}>{requestScanSummary!.needsAttentionCount}</span> : null}
+      trailing={item.route === "recall.requests" && ((recallSummary?.pendingCount ?? 0) > 0 || recallNeedsAttention) ? <span className="flex items-center gap-1">{(recallSummary?.pendingCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span> : null}{(recallSummary?.unseenPendingCount ?? 0) > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}{recallNeedsAttention ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-950 dark:bg-amber-950/30 dark:text-amber-100" aria-label={recallAttentionLabel} title={recallAttentionLabel}>!</span> : null}</span> : item.route === "request.scans" && (requestScanSummary?.needsAttentionCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={requestScanCountLabel} title={requestScanCountLabel}>{requestScanSummary!.needsAttentionCount}</span> : null}
       onClick={onClick}
     />
   );

@@ -167,7 +167,7 @@ describe("Recall Requests metadata", () => {
     expect(screen.getByText("Acquisition error")).toBeTruthy();
     expect(screen.getByText("Within 24 hours")).toBeTruthy();
     expect(screen.getByText("Separate report")).toBeTruthy();
-    expect(screen.getByText("Due date/time:")).toBeTruthy();
+    expect(screen.queryByText("Due date/time:")).toBeNull();
     await waitFor(() => expect(mockMarkSeen).toHaveBeenCalledWith([42]));
   });
 
@@ -221,5 +221,41 @@ describe("Recall Requests metadata", () => {
       dueAt: "2026-09-01T08:00:00.000Z",
       reportingDisposition: "no_separate_report",
     })));
+  });
+
+  it("shows computed operational attention, filters across statuses, and keeps it read-only for doctors", async () => {
+    const overdue = { ...recall, id: 50, patientDisplayName: "Overdue patient", patientEnglishName: "Overdue patient", effectiveDueAt: "2026-08-31T08:00:00.000Z", latestFollowUpAt: "2026-08-31T09:00:00.000Z", isOverdue: true, isFollowUpDue: true, dueAt: null };
+    const dueToday = { ...recall, id: 51, patientDisplayName: "Today patient", patientEnglishName: "Today patient", effectiveDueAt: "2026-09-01T12:00:00.000Z", isDueToday: true, dueAt: null };
+    const scheduledLate = { ...recall, id: 52, patientDisplayName: "Scheduled late patient", patientEnglishName: "Scheduled late patient", status: "scheduled" as const, recallAppointmentId: 99, effectiveDueAt: "2026-09-02T08:00:00.000Z", recallAppointmentDate: "2026-09-03", recallAppointmentTime: "10:00:00", recallAppointmentStartsAt: "2026-09-03T08:00:00.000Z", isOverdue: true, isScheduledAfterTarget: true };
+    mockFetchRecalls.mockResolvedValue([recall, dueToday, scheduledLate, overdue]);
+    mockFetchDoctorRecalls.mockResolvedValue([overdue]);
+    renderPage("reception");
+
+    expect(await screen.findByText("Overdue patient")).toBeTruthy();
+    expect((await screen.findAllByRole("button", { name: /Needs booking/ })).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Due today/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Overdue/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Follow-up due/ })).toBeTruthy();
+    expect(screen.getByText(/^OVERDUE/)).toBeTruthy();
+    expect(screen.getByText(/^FOLLOW-UP DUE/)).toBeTruthy();
+    expect(screen.getAllByText("Target:").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: /Overdue/ }));
+    expect(screen.getByText("Overdue patient")).toBeTruthy();
+    expect(screen.getByText("Scheduled late patient")).toBeTruthy();
+    expect(screen.getByText("SCHEDULED AFTER TARGET")).toBeTruthy();
+    expect(screen.getByText(/Appointment: 03\/09\/2026, 10:00/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Due today/ }));
+    expect(screen.getByText("Today patient")).toBeTruthy();
+    expect(screen.queryByText("Overdue patient")).toBeNull();
+
+  });
+
+  it("shows operational attention read-only for doctors", async () => {
+    const doctorOverdue = { ...recall, effectiveDueAt: "2026-08-31T08:00:00.000Z", isOverdue: true, isFollowUpDue: true };
+    mockFetchDoctorRecalls.mockResolvedValue([doctorOverdue]);
+    renderPage("doctor");
+
+    expect(await screen.findByText(/^OVERDUE/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Record contact attempt" })).toBeNull();
   });
 });
