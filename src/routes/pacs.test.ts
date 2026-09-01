@@ -96,6 +96,16 @@ test("remap patient search keeps patient lookup within the remap authorization b
   assert.match(patientsRouteSource, /patientsRouter\.use\(requirePageAccess\("patients"\)\)/);
 });
 
+test("Recover Source stays inside authenticated remap access and streams a neutral ZIP attachment", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  assert.match(routeSource, /pacsRouter\.get\(\s*"\/remap\/jobs\/:jobId\/recover-source",\s*\.\.\.authMiddleware/);
+  assert.match(routeSource, /prepareDicomRemapSourceRecovery\(\{ jobId, currentUserId \}\)/);
+  assert.match(routeSource, /Content-Type", "application\/zip"/);
+  assert.match(routeSource, /dicom-remap-source-job-\$\{recovery\.jobId\}\.zip/);
+  assert.match(routeSource, /if \(!res\.destroyed\) res\.destroy\(error\)/);
+  assert.doesNotMatch(routeSource, /recover-source[\s\S]{0,900}staged_storage_key/);
+});
+
 test("remap patient search input and response remain bounded to picker fields", () => {
   assert.equal(__pacsRouteTestables.normalizeRemapPatientSearch("  Ja  "), "Ja");
   assert.throws(

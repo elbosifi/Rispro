@@ -60,6 +60,7 @@ import {
   hardResetOrthancStudies,
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
+  prepareDicomRemapSourceRecovery,
   prepareDicomRemapConfirmation,
   retryFailedDicomRemapWithOrthanc,
   resendDicomRemapJobToPacs,
@@ -1022,6 +1023,26 @@ pacsRouter.get(
     }
     const result = await getDicomRemapJob({ jobId, currentUserId });
     res.json(result);
+  })
+);
+
+pacsRouter.get(
+  "/remap/jobs/:jobId/recover-source",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) throw new HttpError(400, "jobId is required.");
+
+    const recovery = await prepareDicomRemapSourceRecovery({ jobId, currentUserId });
+    res.status(200);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="dicom-remap-source-job-${recovery.jobId}.zip"`);
+    const streaming = recovery.streamTo(res);
+    void streaming.completed.catch((error) => {
+      if (!res.destroyed) res.destroy(error);
+    });
   })
 );
 

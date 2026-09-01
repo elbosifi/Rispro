@@ -86,6 +86,7 @@ interface RemapJob {
   processing_error_code?: string | null;
   processing_error_details?: unknown;
   staging_cleanup_completed_at?: string | null;
+  source_recovery_available?: boolean;
   dicom_integrity_version?: number | null;
   dicom_integrity_verified_at?: string | null;
   orthanc_recovery_status?: "none" | "available" | "processing" | "failed" | "completed" | null;
@@ -351,6 +352,10 @@ function normalizePositiveJobId(value: unknown): number | null {
   if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function canRecoverSource(job: RemapJob | null | undefined): boolean {
+  return Boolean(job && job.status === "failed" && job.source_recovery_available === true && !job.staging_cleanup_completed_at);
 }
 
 function normalizeRemapJob(value: unknown): RemapJob | null {
@@ -1386,6 +1391,15 @@ export default function PacsRemapPage() {
       localResumedJobIdBeforeRecentRef.current = activeResumedJobId;
     }
     attachToExistingRemapJob(job);
+  };
+
+  const recoverSource = (jobId: number): void => {
+    const anchor = document.createElement("a");
+    anchor.href = `/api${remapApiPath(`/pacs/remap/jobs/${jobId}/recover-source`)}`;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   };
 
   useEffect(() => {
@@ -2530,9 +2544,23 @@ export default function PacsRemapPage() {
                         {orthancRecoveryMutation.isPending ? t(language, "pacs.remap.orthancRecoveryProcessing") : t(language, "pacs.remap.retryWithOrthanc")}
                       </button>
                     )}
+                    {canRecoverSource(currentJob) && (
+                      <button
+                        type="button"
+                        onClick={() => recoverSource(effectiveJobId)}
+                        className="btn-secondary px-3 py-2 rounded-lg text-sm"
+                      >
+                        Recover Source
+                      </button>
+                    )}
                     {requiresDicomReupload(currentJob) && (
                       <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
                         {t(language, "pacs.remap.reuploadRequired")}
+                      </p>
+                    )}
+                    {currentJob?.status === "failed" && currentJob.source_recovery_available === false && (
+                      <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+                        Preserved source files are no longer available.
                       </p>
                     )}
                     <button
@@ -2586,6 +2614,7 @@ export default function PacsRemapPage() {
                     )}
                     {job.orthanc_recovery_status === "processing" && <p className="text-[11px] font-semibold text-teal-800">{t(language, "pacs.remap.orthancRecoveryProcessing")}</p>}
                     {requiresDicomReupload(job) && <p className="text-[11px] font-semibold text-amber-800">{t(language, "pacs.remap.reuploadRequired")}</p>}
+                    {job.status === "failed" && job.source_recovery_available === false && <p className="text-[11px] font-semibold text-amber-800">Preserved source files are no longer available.</p>}
                   </button>
                   {canResendJob(job) && viewedRecentJobId !== job.id && (
                     <button
@@ -2605,6 +2634,15 @@ export default function PacsRemapPage() {
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >
                       {t(language, "pacs.remap.retryWithOrthanc")}
+                    </button>
+                  )}
+                  {canRecoverSource(job) && viewedRecentJobId !== job.id && (
+                    <button
+                      type="button"
+                      onClick={() => recoverSource(job.id)}
+                      className="btn-secondary px-2 py-1 rounded-lg text-xs"
+                    >
+                      Recover Source
                     </button>
                   )}
                 </div>

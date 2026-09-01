@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
+import AdmZip from "adm-zip";
 import dcmjs from "dcmjs";
 import {
   __dicomRemapTestables,
@@ -25,6 +26,7 @@ import {
   getMyActiveDicomRemapJob,
   monitorDicomRemapSendJob,
   previewDicomRemapMultipartUpload,
+  prepareDicomRemapSourceRecovery,
   resendDicomRemapJobToPacs,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
@@ -253,6 +255,118 @@ function selectedStudyManifest(
 
 test.afterEach(() => {
   __dicomRemapTestables.resetTestOverrides();
+});
+
+test("Recover Source archives only pristine selected-study bytes with neutral names and sanitized audit metadata", async () => {
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const malformed = removeTerminalPixelDelimiter(makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 1, 2])));
+  const selectedSecond = makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid, SOPInstanceUID: "1.2.3.4.5.7" });
+  const otherStudy = makeSyntheticDicomBuffer({ StudyInstanceUID: "2.25.200", PatientID: "OTHER", SOPInstanceUID: "2.25.200.1" });
+  const fixture = await makeSourceRecoveryFixture({ selectedBodies: [malformed, selectedSecond], otherBodies: [otherStudy] });
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEntries.push(entry as unknown as Record<string, unknown>);
+    return {} as never;
+  });
+  queueQueryResults([{ rows: [fixture.job] }]);
+  try {
+    const recovery = await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 });
+    assert.equal(recovery.objectCount, 2);
+    assert.equal(recovery.totalBytes, malformed.length + selectedSecond.length);
+    const zip = new AdmZip(await zipRecoveredSource(recovery));
+    const entries = zip.getEntries();
+    assert.deepEqual(entries.map((entry) => entry.entryName), ["000001.dcm", "000002.dcm"]);
+    assert.equal(createHash("sha256").update(entries[0]!.getData()).digest("hex"), fixture.files[0]!.sha256);
+    assert.equal(createHash("sha256").update(entries[1]!.getData()).digest("hex"), fixture.files[1]!.sha256);
+    assert.equal(entries[0]!.getData().equals(malformed), true);
+    assert.equal(entries[0]!.getData().subarray(-8).equals(Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0, 0, 0, 0])), false);
+    assert.equal(auditEntries.length, 1);
+    assert.deepEqual(auditEntries[0]?.newValues, {
+      jobId: fixture.job.id,
+      objectCount: 2,
+      totalBytes: malformed.length + selectedSecond.length,
+      selectedStudyConfirmed: true,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("Recover Source is owner-scoped and preserves failed job state after repeated Orthanc recovery attempts", async () => {
+  const fixture = await makeSourceRecoveryFixture();
+  const jobBefore = JSON.parse(JSON.stringify(fixture.job));
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([{ rows: [] }]);
+  try {
+    await assert.rejects(
+      () => prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 99 }),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 404,
+    );
+    const manifestBefore = await readFile(path.join(fixture.directory, "manifest.json"));
+    const sourceBefore = await readFile(path.join(fixture.directory, fixture.files[0]!.relativePath));
+    queueQueryResults([{ rows: [fixture.job] }]);
+    await zipRecoveredSource(await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 }));
+    assert.deepEqual(fixture.job, jobBefore);
+    assert.deepEqual(await readFile(path.join(fixture.directory, "manifest.json")), manifestBefore);
+    assert.deepEqual(await readFile(path.join(fixture.directory, fixture.files[0]!.relativePath)), sourceBefore);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("Recover Source fails closed for expired, cleaned, missing, hashed, and ambiguous preserved staging", async () => {
+  const expired = await makeSourceRecoveryFixture({ jobOverrides: { orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" } });
+  const cleaned = await makeSourceRecoveryFixture({ jobOverrides: { staging_cleanup_completed_at: "2026-09-01T00:00:00.000Z" } });
+  const missing = await makeSourceRecoveryFixture();
+  const mismatched = await makeSourceRecoveryFixture();
+  const ambiguous = await makeSourceRecoveryFixture({
+    version: 1,
+    otherBodies: [makeSyntheticDicomBuffer({ StudyInstanceUID: "2.25.200", SOPInstanceUID: "2.25.200.1" })],
+  });
+  try {
+    queueQueryResults([{ rows: [expired.job] }]);
+    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: expired.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message === "Preserved source files are no longer available.");
+
+    queueQueryResults([{ rows: [cleaned.job] }]);
+    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: cleaned.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message === "Preserved source files are no longer available.");
+
+    await unlink(path.join(missing.directory, missing.files[0]!.relativePath));
+    queueQueryResults([{ rows: [missing.job] }]);
+    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: missing.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && error.statusCode === 409);
+
+    await writeFile(path.join(mismatched.directory, mismatched.files[0]!.relativePath), Buffer.from("changed"));
+    queueQueryResults([{ rows: [mismatched.job] }]);
+    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: mismatched.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH");
+
+    queueQueryResults([{ rows: [ambiguous.job] }]);
+    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: ambiguous.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED");
+  } finally {
+    await expired.cleanup();
+    await cleaned.cleanup();
+    await missing.cleanup();
+    await mismatched.cleanup();
+    await ambiguous.cleanup();
+  }
+});
+
+test("interrupted Recover Source download does not emit a successful audit entry", async () => {
+  const fixture = await makeSourceRecoveryFixture();
+  const auditEntries: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEntries.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([{ rows: [fixture.job] }]);
+  try {
+    const recovery = await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 });
+    const output = new PassThrough();
+    const streaming = recovery.streamTo(output);
+    output.destroy();
+    await assert.rejects(() => streaming.completed, /interrupted/i);
+    assert.equal(auditEntries.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
 });
 
 test("validateDicomRemapUploadFilesInput rejects empty payloads", () => {
@@ -1071,6 +1185,77 @@ for (const transferSyntaxUid of [
     const mediaStorageSop = outputFile.meta["00020003"] as { Value?: unknown[] } | undefined;
     assert.equal(String(mediaStorageSop?.Value?.[0] || ""), rewritten.replacementSopInstanceUid);
   });
+}
+
+async function makeSourceRecoveryFixture(options: {
+  selectedBodies?: Buffer[];
+  otherBodies?: Buffer[];
+  version?: 1 | 2;
+  jobOverrides?: Partial<DicomRemapJobRow>;
+} = {}) {
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const storageKey = `jobs/source-recovery-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  const bodies = [
+    ...(options.selectedBodies || [makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid })]).map((body) => ({ body, study: selectedUid })),
+    ...(options.otherBodies || []).map((body) => ({ body, study: "other" })),
+  ];
+  const files = await Promise.all(bodies.map(async ({ body }, index) => {
+    const id = `source-recovery-${String(index + 1).padStart(4, "0")}`;
+    const relativePath = `files/${id}.dcm`;
+    await writeFile(path.join(directory, relativePath), body);
+    return {
+      id,
+      relativePath,
+      displayName: `${index + 1}.dcm`,
+      mimeType: "application/dicom",
+      byteSize: body.length,
+      sha256: createHash("sha256").update(body).digest("hex"),
+    };
+  }));
+  const version = options.version || 2;
+  const manifest = version === 2
+    ? selectedStudyManifest(selectedUid, files)
+    : {
+      version: 1,
+      selectedStudyInstanceUID: selectedUid,
+      uploadMode: "single_study_folder_unverified" as const,
+      fileCount: files.length,
+      totalBytes: files.reduce((total, file) => total + file.byteSize, 0),
+      files,
+    };
+  await writeFile(path.join(directory, "manifest.json"), JSON.stringify(manifest));
+  const job = remapJob({
+    id: 107,
+    status: "failed",
+    staged_storage_key: storageKey,
+    staged_file_count: files.length,
+    staged_total_bytes: files.reduce((total, file) => total + file.byteSize, 0),
+    staging_cleanup_completed_at: null,
+    selected_study_instance_uid: selectedUid,
+    processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED",
+    orthanc_recovery_status: "failed",
+    orthanc_recovery_attempt_count: 5,
+    orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    ...options.jobOverrides,
+  });
+  return {
+    job,
+    directory,
+    files,
+    selectedUid,
+    async cleanup() { await cleanupDicomRemapStagingStorage(storageKey); },
+  };
+}
+
+async function zipRecoveredSource(recovery: Awaited<ReturnType<typeof prepareDicomRemapSourceRecovery>>): Promise<Buffer> {
+  const output = new PassThrough();
+  const chunks: Buffer[] = [];
+  output.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+  const streaming = recovery.streamTo(output);
+  await streaming.completed;
+  return Buffer.concat(chunks);
 }
 
 test("dicom helper: native Explicit VR Little Endian pixel bytes remain unchanged", async () => {

@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { Readable } from "node:stream";
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { Readable, type Writable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import dcmjs from "dcmjs";
+import archiver from "archiver";
 import { pool } from "../db/pool.js";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
@@ -107,6 +108,7 @@ export interface DicomRemapJobRow {
   processing_error_code?: string | null;
   processing_error_details?: unknown;
   staging_cleanup_completed_at?: string | null;
+  source_recovery_available?: boolean;
   dicom_integrity_version?: number | null;
   dicom_integrity_verified_at?: string | null;
   orthanc_recovery_status?: DicomRemapOrthancRecoveryStatus | null;
@@ -3545,6 +3547,202 @@ async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ m
   return { manifest, directory };
 }
 
+function isDicomRemapSourceRecoveryAvailable(job: DicomRemapJobRow): boolean {
+  return job.status === "failed"
+    && Boolean(String(job.staged_storage_key || "").trim())
+    && !job.staging_cleanup_completed_at
+    && Date.parse(String(job.orthanc_recovery_expires_at || "")) > Date.now();
+}
+
+function sourceRecoveryUnavailable(): never {
+  throw new HttpError(409, "Preserved source files are no longer available.", { code: "DICOM_REMAP_SOURCE_RECOVERY_UNAVAILABLE" });
+}
+
+function sourceRecoveryConflict(message: string, code: string): never {
+  throw new HttpError(409, message, { code });
+}
+
+async function hashDicomRemapStagedFile(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function readDicomRemapSourceStudyUid(filePath: string, byteSize: number): Promise<string> {
+  const handle = await open(filePath, "r");
+  try {
+    const preview = Buffer.alloc(Math.min(Math.max(byteSize, 0), DICOM_REMAP_PREVIEW_HEADER_BYTES));
+    const { bytesRead } = await handle.read(preview, 0, preview.length, 0);
+    const studyInstanceUid = normalizeDicomUid(parseDicomPreviewTags(preview.subarray(0, bytesRead))["0020000d"]);
+    if (!studyInstanceUid) {
+      sourceRecoveryConflict("A preserved source DICOM cannot be safely assigned to the selected study.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
+    }
+    return studyInstanceUid;
+  } finally {
+    await handle.close();
+  }
+}
+
+function confirmedDicomRemapSourceStudyUid(job: DicomRemapJobRow, manifest: DicomRemapStagingManifest): string {
+  try {
+    if (manifest.version === DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION) {
+      const provisionalUid = normalizeSelectedStudyInstanceUid(manifest.provisionalSelectedStudyInstanceUID);
+      const confirmedUid = normalizeSelectedStudyInstanceUid(job.selected_study_instance_uid);
+      if (provisionalUid !== confirmedUid) {
+        sourceRecoveryConflict("The confirmed selected study is unavailable.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
+      }
+      return confirmedUid;
+    }
+    return normalizeSelectedStudyInstanceUid(manifest.selectedStudyInstanceUID);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      sourceRecoveryConflict("The confirmed selected study is unavailable.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
+    }
+    throw error;
+  }
+}
+
+interface DicomRemapSourceRecoveryFile {
+  path: string;
+}
+
+export interface DicomRemapSourceRecovery {
+  jobId: number;
+  objectCount: number;
+  totalBytes: number;
+  streamTo(destination: Writable): { completed: Promise<void>; abort: () => void };
+}
+
+export async function prepareDicomRemapSourceRecovery({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<DicomRemapSourceRecovery> {
+  const job = await loadOwnedJob(jobId, currentUserId);
+  if (!isDicomRemapSourceRecoveryAvailable(job)) sourceRecoveryUnavailable();
+
+  const { manifest, directory } = await readDicomRemapStagingManifestMetadata(job);
+  const selectedStudyUid = confirmedDicomRemapSourceStudyUid(job, manifest);
+  const selectedFiles: DicomRemapSourceRecoveryFile[] = [];
+  let selectedTotalBytes = 0;
+  let manifestTotalBytes = 0;
+  const parsedStudyUids = new Set<string>();
+  const manifestFileIds = new Set<string>();
+  const manifestRelativePaths = new Set<string>();
+
+  for (const file of manifest.files) {
+    if (!file || !/^[a-z0-9-]{10,}$/i.test(String(file.id || "")) || !/^files\/[a-z0-9-]+\.dcm$/i.test(String(file.relativePath || "")) || !/^[a-f0-9]{64}$/i.test(String(file.sha256 || "")) || manifestFileIds.has(file.id) || manifestRelativePaths.has(file.relativePath)) {
+      sourceRecoveryConflict("DICOM remap manifest is invalid.", "DICOM_REMAP_MANIFEST_INVALID");
+    }
+    manifestFileIds.add(file.id);
+    manifestRelativePaths.add(file.relativePath);
+    const filePath = path.resolve(directory, file.relativePath);
+    if (!filePath.startsWith(`${directory}${path.sep}`)) {
+      sourceRecoveryConflict("DICOM remap manifest is invalid.", "DICOM_REMAP_MANIFEST_INVALID");
+    }
+    const info = await stat(filePath).catch(() => null);
+    if (!info?.isFile()) {
+      sourceRecoveryConflict("A preserved source DICOM file is missing.", "DICOM_REMAP_STAGED_FILE_MISSING");
+    }
+    if (info.size !== Number(file.byteSize)) {
+      sourceRecoveryConflict("A preserved source DICOM file failed integrity validation.", "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH");
+    }
+    manifestTotalBytes += info.size;
+    if (await hashDicomRemapStagedFile(filePath) !== file.sha256) {
+      sourceRecoveryConflict("A preserved source DICOM file failed integrity validation.", "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH");
+    }
+
+    if (isSkippableDicomRemapFolderEntry(file.displayName) || !isLikelyDicomFile(file.displayName, file.mimeType)) {
+      continue;
+    }
+    const sourceStudyUid = await readDicomRemapSourceStudyUid(filePath, info.size);
+    parsedStudyUids.add(sourceStudyUid);
+    if (sourceStudyUid === selectedStudyUid) {
+      selectedFiles.push({ path: filePath });
+      selectedTotalBytes += info.size;
+    } else if (manifest.version !== DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION) {
+      sourceRecoveryConflict("Preserved source files cannot be safely separated into the selected study.", "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED");
+    }
+  }
+
+  if (manifestTotalBytes !== Number(manifest.totalBytes)) {
+    sourceRecoveryConflict("DICOM remap manifest is invalid.", "DICOM_REMAP_MANIFEST_INVALID");
+  }
+
+  if (!selectedFiles.length || !parsedStudyUids.has(selectedStudyUid)) {
+    sourceRecoveryConflict("The confirmed selected study was not found in preserved staging.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
+  }
+
+  return {
+    jobId: job.id,
+    objectCount: selectedFiles.length,
+    totalBytes: selectedTotalBytes,
+    streamTo(destination) {
+      const archive = archiver("zip", { store: true });
+      const sourceStreams = new Set<Readable>();
+      let aborted = false;
+      let settled = false;
+      let resolveCompleted!: () => void;
+      let rejectCompleted!: (error: Error) => void;
+      const completed = new Promise<void>((resolve, reject) => {
+        resolveCompleted = resolve;
+        rejectCompleted = reject;
+      });
+      const fail = (error: unknown) => {
+        if (settled || aborted) return;
+        settled = true;
+        rejectCompleted(error instanceof Error ? error : new Error("DICOM source recovery download failed."));
+      };
+      const abort = () => {
+        if (aborted || settled) return;
+        aborted = true;
+        for (const source of sourceStreams) source.destroy();
+        archive.abort();
+        settled = true;
+        rejectCompleted(new Error("DICOM source recovery download was interrupted."));
+      };
+
+      archive.on("error", fail);
+      destination.once("error", fail);
+      destination.once("close", () => {
+        if (!(destination as { writableFinished?: boolean }).writableFinished) abort();
+      });
+      destination.once("finish", () => {
+        if (aborted || settled) return;
+        void logDicomRemapAuditEntry({
+          entityType: "dicom_remap_job",
+          entityId: job.id,
+          actionType: "dicom_remap_source_recovered",
+          oldValues: null,
+          newValues: { jobId: job.id, objectCount: selectedFiles.length, totalBytes: selectedTotalBytes, selectedStudyConfirmed: true },
+          changedByUserId: currentUserId,
+        }).then(() => {
+          if (settled || aborted) return;
+          settled = true;
+          resolveCompleted();
+        }).catch(fail);
+      });
+      archive.pipe(destination);
+      for (const [index, file] of selectedFiles.entries()) {
+        const source = createReadStream(file.path);
+        sourceStreams.add(source);
+        source.once("close", () => sourceStreams.delete(source));
+        source.once("error", (error) => {
+          archive.destroy(error);
+          fail(error);
+        });
+        archive.append(source, { name: `${String(index + 1).padStart(6, "0")}.dcm`, store: true });
+      }
+      void archive.finalize().catch(fail);
+      return { completed, abort };
+    },
+  };
+}
+
 function parseStagedDicomSummary(buffer: Buffer): { summary: OrthancStudySummary; seriesInstanceUid: string; sopInstanceUid: string; numberOfFrames?: number } {
   try {
     const dicom = DicomMessage.readFile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
@@ -4910,7 +5108,8 @@ export async function getDicomRemapJob({
   jobId: number | string;
   currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow; comparison: ConfirmComparison | null }> {
-  const job = await loadOwnedJob(jobId, currentUserId);
+  const ownedJob = await loadOwnedJob(jobId, currentUserId);
+  const job = { ...ownedJob, source_recovery_available: isDicomRemapSourceRecoveryAvailable(ownedJob) };
   const comparison = job.replacement_patient_id
     ? {
       original: {
@@ -4961,7 +5160,7 @@ export async function listMyDicomRemapJobs({
     `,
     [currentUserId, cleanLimit]
   );
-  return rows;
+  return rows.map((job) => ({ ...job, source_recovery_available: isDicomRemapSourceRecoveryAvailable(job) }));
 }
 
 export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: string; name: string; isDefault: boolean }>> {

@@ -25,6 +25,7 @@ This contract protects the behavior-preserving DICOM remap refactor. It does not
 - Orthanc verification requires exact Study Instance UID and SOP Instance UID set equality; no count-only success.
 - Lease renewal/reclaim, retry, cancel, reset, cleanup, and asynchronous send behavior remain unchanged.
 - Public exports from `dicom-remap-service.ts` and all HTTP route contracts remain stable.
+- `GET /api/pacs/remap/jobs/:jobId/recover-source` is a read-only failed-job export: owner access, retained private staging, manifest/hash/size validation, and confirmed selected-study membership are required before streaming pristine source bytes. It does not enter the Orthanc recovery state machine or alter job state.
 
 ## Required validation
 

@@ -1670,6 +1670,59 @@ describe("PacsRemapPage five-step wizard", () => {
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/92/retry-with-orthanc", { method: "POST" }));
   });
 
+  it("shows Recover Source in an opened eligible failed historical job and streams it through normal navigation", async () => {
+    const job = { id: 107, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_attempt_count: 5, orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString() };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs/107") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ jobs: [] });
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#107.*Failed/i }));
+    const recover = await screen.findByRole("button", { name: "Recover Source" });
+    fireEvent.click(recover);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((click.mock.instances[0] as HTMLAnchorElement).href).toContain("/api/pacs/remap/jobs/107/recover-source");
+    expect(apiMock.mock.calls.some(([path]) => String(path).includes("recover-source"))).toBe(false);
+  });
+
+  it("shows Recover Source directly on an eligible History row without changing the selected historical job", async () => {
+    const job = { id: 108, status: "failed", processing_stage: "failed", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString() };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      return Promise.resolve({ jobs: [] });
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: "Recover Source" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/108");
+    expect(apiMock.mock.calls.some(([path]) => String(path).includes("recover-source"))).toBe(false);
+  });
+
+  it("does not offer Recover Source after preserved staging is unavailable", async () => {
+    const job = { id: 109, status: "failed", processing_stage: "failed", source_recovery_available: false, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs/109") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ jobs: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#109.*Failed/i }));
+    expect(screen.queryByRole("button", { name: "Recover Source" })).toBeNull();
+    expect((await screen.findAllByText("Preserved source files are no longer available.")).length).toBeGreaterThan(0);
+  });
+
   it("shows Re-upload required when Orthanc recovery staging has expired", async () => {
     const job = { id: 93, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", orthanc_recovery_status: "available", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z", staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null, send_error_code: null, send_attempt_count: 0 };
     apiMock.mockImplementation((path: string) => {
