@@ -207,6 +207,21 @@ function removeTerminalPixelDelimiter(buffer: Buffer): Buffer {
   return Buffer.from(buffer.subarray(0, -delimiter.length));
 }
 
+function makeSyntheticDicomWithStudyUidBeyondPreview(selectedStudyUid: string): Buffer {
+  const source = makeSyntheticDicomBuffer({ StudyInstanceUID: selectedStudyUid });
+  const studyTag = Buffer.from([0x20, 0x00, 0x0d, 0x00]);
+  const studyOffset = source.indexOf(studyTag);
+  assert.ok(studyOffset > 132, "synthetic fixture must contain Study Instance UID after file meta");
+  const payload = Buffer.alloc(600 * 1024, 0x20);
+  const privateElement = Buffer.alloc(12 + payload.length);
+  privateElement.writeUInt16LE(0x0009, 0);
+  privateElement.writeUInt16LE(0x0010, 2);
+  privateElement.write("OB", 4, "ascii");
+  privateElement.writeUInt32LE(payload.length, 8);
+  payload.copy(privateElement, 12);
+  return Buffer.concat([source.subarray(0, studyOffset), privateElement, source.subarray(studyOffset)]);
+}
+
 async function makeStagedFiles(files: Array<{ fileName: string; content?: string; mimeType?: string }>) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-test-"));
   const staged = [];
@@ -265,7 +280,11 @@ test("Recover Source archives only pristine selected-study bytes with neutral na
   const malformed = removeTerminalPixelDelimiter(makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 1, 2])));
   const selectedSecond = makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid, SOPInstanceUID: "1.2.3.4.5.7" });
   const otherStudy = makeSyntheticDicomBuffer({ StudyInstanceUID: "2.25.200", PatientID: "OTHER", SOPInstanceUID: "2.25.200.1" });
-  const fixture = await makeSourceRecoveryFixture({ selectedBodies: [malformed, selectedSecond], otherBodies: [otherStudy] });
+  const fixture = await makeSourceRecoveryFixture({
+    selectedBodies: [malformed, selectedSecond],
+    otherBodies: [otherStudy],
+    jobOverrides: { status: "sent", processing_stage: "completed", orthanc_recovery_status: "completed", orthanc_recovery_expires_at: null },
+  });
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
     auditEntries.push(entry as unknown as Record<string, unknown>);
@@ -295,8 +314,17 @@ test("Recover Source archives only pristine selected-study bytes with neutral na
   }
 });
 
-test("Recover Source is shared and audits the acting user without changing the creator", async () => {
-  const fixture = await makeSourceRecoveryFixture();
+test("Recover Source is shared for a sent job and audits the acting user without mutating its send state or creator", async () => {
+  const fixture = await makeSourceRecoveryFixture({
+    jobOverrides: {
+      status: "sent",
+      processing_stage: "completed",
+      send_attempt_count: 4,
+      orthanc_recovery_attempt_count: 2,
+      modified_orthanc_study_id: "modified-study",
+      orthanc_recovery_expires_at: null,
+    },
+  });
   const jobBefore = JSON.parse(JSON.stringify(fixture.job));
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
@@ -338,7 +366,7 @@ test("remap history defaults to mine, supports all users, and includes creator m
   assert.equal(detail.job.created_by_username, null);
 });
 
-test("Recover Source fails closed for expired, cleaned, missing, hashed, and ambiguous preserved staging", async () => {
+test("Recover Source remains available after Orthanc recovery expiry and fails closed for cleaned, missing, hashed, and ambiguous preserved staging", async () => {
   const expired = await makeSourceRecoveryFixture({ jobOverrides: { orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" } });
   const cleaned = await makeSourceRecoveryFixture({ jobOverrides: { staging_cleanup_completed_at: "2026-09-01T00:00:00.000Z" } });
   const missing = await makeSourceRecoveryFixture();
@@ -348,8 +376,9 @@ test("Recover Source fails closed for expired, cleaned, missing, hashed, and amb
     otherBodies: [makeSyntheticDicomBuffer({ StudyInstanceUID: "2.25.200", SOPInstanceUID: "2.25.200.1" })],
   });
   try {
+    __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
     queueQueryResults([{ rows: [expired.job] }]);
-    await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: expired.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message === "Preserved source files are no longer available.");
+    assert.equal((await zipRecoveredSource(await prepareDicomRemapSourceRecovery({ jobId: expired.job.id, currentUserId: 42 }))).length > 0, true);
 
     queueQueryResults([{ rows: [cleaned.job] }]);
     await assert.rejects(() => prepareDicomRemapSourceRecovery({ jobId: cleaned.job.id, currentUserId: 42 }), (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message === "Preserved source files are no longer available.");
@@ -371,6 +400,45 @@ test("Recover Source fails closed for expired, cleaned, missing, hashed, and amb
     await mismatched.cleanup();
     await ambiguous.cleanup();
   }
+});
+
+test("Recover Source falls back to the full staged DICOM parser when preview cannot prove Study Instance UID", async () => {
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const source = makeSyntheticDicomWithStudyUidBeyondPreview(selectedUid);
+  const fixture = await makeSourceRecoveryFixture({ selectedBodies: [source] });
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([{ rows: [fixture.job] }]);
+  try {
+    const zip = new AdmZip(await zipRecoveredSource(await prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 })));
+    assert.equal(zip.getEntries()[0]?.getData().equals(source), true);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("Recover Source fails closed when neither preview nor the full staged DICOM parser can prove Study Instance UID", async () => {
+  const fixture = await makeSourceRecoveryFixture({ selectedBodies: [makeSyntheticDicomBuffer({ StudyInstanceUID: "" })] });
+  queueQueryResults([{ rows: [fixture.job] }]);
+  try {
+    await assert.rejects(
+      () => prepareDicomRemapSourceRecovery({ jobId: fixture.job.id, currentUserId: 42 }),
+      (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("source recovery availability depends on finalized retained staging, not job status or Orthanc recovery fields", async () => {
+  const retainedSent = remapJob({ status: "sent", staged_storage_key: "jobs/sent", staged_manifest_version: 2, staging_cleanup_completed_at: null, orthanc_recovery_status: "completed", orthanc_recovery_expires_at: null });
+  const expiredFailed = remapJob({ status: "failed", staged_storage_key: "jobs/failed", staged_manifest_version: 1, staging_cleanup_completed_at: null, orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" });
+  const cleanedSent = remapJob({ status: "sent", staged_storage_key: "jobs/cleaned", staged_manifest_version: 2, staging_cleanup_completed_at: "2026-09-01T00:00:00.000Z" });
+  const unfinalized = remapJob({ status: "sent", staged_storage_key: "jobs/unfinalized", staged_manifest_version: null, staging_cleanup_completed_at: null });
+  queueQueryResults([{ rows: [retainedSent] }, { rows: [expiredFailed] }, { rows: [cleanedSent] }, { rows: [unfinalized] }]);
+  assert.equal((await getDicomRemapJob({ jobId: retainedSent.id })).job.source_recovery_available, true);
+  assert.equal((await getDicomRemapJob({ jobId: expiredFailed.id })).job.source_recovery_available, true);
+  assert.equal((await getDicomRemapJob({ jobId: cleanedSent.id })).job.source_recovery_available, false);
+  assert.equal((await getDicomRemapJob({ jobId: unfinalized.id })).job.source_recovery_available, false);
 });
 
 test("interrupted Recover Source download does not emit a successful audit entry", async () => {
@@ -1290,6 +1358,7 @@ async function makeSourceRecoveryFixture(options: {
     id: 107,
     status: "failed",
     staged_storage_key: storageKey,
+    staged_manifest_version: version,
     staged_file_count: files.length,
     staged_total_bytes: files.reduce((total, file) => total + file.byteSize, 0),
     staging_cleanup_completed_at: null,

@@ -3550,10 +3550,11 @@ async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ m
 }
 
 function isDicomRemapSourceRecoveryAvailable(job: DicomRemapJobRow): boolean {
-  return job.status === "failed"
-    && Boolean(String(job.staged_storage_key || "").trim())
+  return Boolean(
+    String(job.staged_storage_key || "").trim()
     && !job.staging_cleanup_completed_at
-    && Date.parse(String(job.orthanc_recovery_expires_at || "")) > Date.now();
+    && [DICOM_REMAP_STAGING_MANIFEST_VERSION, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION].includes(Number(job.staged_manifest_version))
+  );
 }
 
 function sourceRecoveryUnavailable(): never {
@@ -3578,13 +3579,19 @@ async function readDicomRemapSourceStudyUid(filePath: string, byteSize: number):
     const preview = Buffer.alloc(Math.min(Math.max(byteSize, 0), DICOM_REMAP_PREVIEW_HEADER_BYTES));
     const { bytesRead } = await handle.read(preview, 0, preview.length, 0);
     const studyInstanceUid = normalizeDicomUid(parseDicomPreviewTags(preview.subarray(0, bytesRead))["0020000d"]);
-    if (!studyInstanceUid) {
-      sourceRecoveryConflict("A preserved source DICOM cannot be safely assigned to the selected study.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
-    }
-    return studyInstanceUid;
+    if (studyInstanceUid) return studyInstanceUid;
   } finally {
     await handle.close();
   }
+
+  try {
+    const parsed = parseStagedDicomSummary(await readFile(filePath));
+    const studyInstanceUid = normalizeDicomUid(parsed.summary.studyInstanceUid);
+    if (studyInstanceUid) return studyInstanceUid;
+  } catch {
+    // Fall through to the existing fail-closed source recovery error.
+  }
+  return sourceRecoveryConflict("A preserved source DICOM cannot be safely assigned to the selected study.", "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
 }
 
 function confirmedDicomRemapSourceStudyUid(job: DicomRemapJobRow, manifest: DicomRemapStagingManifest): string {

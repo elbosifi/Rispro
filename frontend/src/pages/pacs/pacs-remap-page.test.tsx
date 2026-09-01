@@ -1728,6 +1728,60 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(apiMock.mock.calls.some(([path]) => String(path).includes("recover-source"))).toBe(false);
   });
 
+  it("shows Recover Source for another user's eligible sent job in All Users history", async () => {
+    const mine = { id: 120, status: "sent", processing_stage: "completed", source_recovery_available: false, created_by_user_name: "My User" };
+    const other = { id: 121, status: "sent", processing_stage: "completed", source_recovery_available: true, staging_cleanup_completed_at: null, created_by_user_name: "Other User" };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [mine] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=all") return Promise.resolve({ jobs: [mine, other] });
+      return Promise.resolve({ jobs: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("Remap History"));
+    fireEvent.click(screen.getByRole("button", { name: "All Users" }));
+    expect(await screen.findByText("Created by: Other User")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Recover Source" })).toBeTruthy();
+  });
+
+  it("shows Recover Source for an eligible sent job and uses the normal download navigation without changing its success state", async () => {
+    const job = { id: 110, status: "sent", processing_stage: "completed", source_recovery_available: true, staging_cleanup_completed_at: null, orthanc_recovery_status: "completed", orthanc_recovery_expires_at: null };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs/110") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ jobs: [] });
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    renderPage();
+    fireEvent.click(screen.getByText("Remap History"));
+    fireEvent.click(await screen.findByRole("button", { name: /#110.*Sent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recover Source" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((click.mock.instances[0] as HTMLAnchorElement).href).toContain("/api/pacs/remap/jobs/110/recover-source");
+    expect(screen.getAllByText(/sent/i).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    { id: 111, source_recovery_available: false, staging_cleanup_completed_at: null },
+    { id: 112, source_recovery_available: true, staging_cleanup_completed_at: "2026-09-01T00:00:00.000Z" },
+  ])("does not offer Recover Source for an unavailable or cleaned sent job", async (jobState) => {
+    const job = { ...jobState, status: "sent", processing_stage: "completed" };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20&scope=mine") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === `/pacs/remap/jobs/${job.id}`) return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ jobs: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("Remap History"));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`#${job.id}.*Sent`, "i") }));
+    expect(screen.queryByRole("button", { name: "Recover Source" })).toBeNull();
+  });
+
   it("does not offer Recover Source after preserved staging is unavailable", async () => {
     const job = { id: 109, status: "failed", processing_stage: "failed", source_recovery_available: false, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z" };
     apiMock.mockImplementation((path: string) => {

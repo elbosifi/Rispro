@@ -359,7 +359,7 @@ function normalizePositiveJobId(value: unknown): number | null {
 }
 
 function canRecoverSource(job: RemapJob | null | undefined): boolean {
-  return Boolean(job && job.status === "failed" && job.source_recovery_available === true && !job.staging_cleanup_completed_at);
+  return Boolean(job && job.source_recovery_available === true && !job.staging_cleanup_completed_at);
 }
 
 function normalizeRemapJob(value: unknown): RemapJob | null {
