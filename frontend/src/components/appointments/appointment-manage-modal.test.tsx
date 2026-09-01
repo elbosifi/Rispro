@@ -252,6 +252,7 @@ describe("AppointmentManageModal", () => {
   it("opens a finalized report in a protected new tab without navigating the modal", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const currentHref = window.location.href;
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, requiresReport: true } as AppointmentWithDetails);
     renderModal({ initialTab: "documents" });
 
     await userEvent.click(await screen.findByRole("button", { name: /Check report/i }));
@@ -760,7 +761,7 @@ describe("AppointmentManageModal", () => {
     expect(onOpenAppointment).toHaveBeenCalledWith(17);
   });
 
-  it("shows Reporting Board assignment and final/draft status context in the header", async () => {
+  it("shows assigned doctor and report status context in the header when a report is required", async () => {
     mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, requiresReport: true, assignedReportingDoctorName: "Dr Noor", reportingAssignmentStatus: "assigned", reportStatus: "final" });
     renderModal({ initialTab: "documents" });
     expect(await screen.findByText("Assigned: Dr Noor")).toBeTruthy();
@@ -771,6 +772,25 @@ describe("AppointmentManageModal", () => {
     renderModal({ initialTab: "documents" });
     expect(await screen.findByText("Unassigned")).toBeTruthy();
     expect(screen.getByText("Draft report")).toBeTruthy();
+  });
+
+  it("hides reporting badges and report controls when an additional appointment does not require its own report", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      isAdditionalImaging: true,
+      requiresReport: false,
+      assignedReportingDoctorName: "Dr Noor",
+      reportingAssignmentStatus: "assigned",
+      reportStatus: "final",
+    } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents" });
+
+    const cluster = await screen.findByTestId("appointment-header-badge-cluster");
+    expect(cluster.textContent).not.toContain("Assigned: Dr Noor");
+    expect(cluster.textContent).not.toContain("Unassigned");
+    expect(cluster.textContent).not.toContain("Report final");
+    expect(screen.queryByRole("button", { name: "Check report" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open report" })).toBeNull();
   });
 
   it("uses the shared compact MRI screening indicator in the high-value header", async () => {
@@ -784,7 +804,8 @@ describe("AppointmentManageModal", () => {
     const onOpenAppointment = vi.fn();
     mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "scheduled", reasonCode: "missing_sequence_phase", originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 77, additionalAccession: "ACC-77", additionalAppointmentDate: "2026-07-28", additionalAppointmentTime: "10:30", additionalAppointmentStatus: "scheduled" } });
     renderModal({ initialTab: "details", onOpenAppointment });
-    expect(await screen.findByText("Additional imaging · Scheduled")).toBeTruthy();
+    const additionalImagingBadge = await screen.findByText("Additional imaging · Scheduled");
+    expect(additionalImagingBadge.className).toContain("bg-violet-50");
     expect(screen.getByText("ACC-77")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open additional appointment" }));
     expect(onOpenAppointment).toHaveBeenCalledWith(77);
