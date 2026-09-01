@@ -295,14 +295,14 @@ describe("AppointmentManageModal", () => {
     const cluster = screen.getByTestId("appointment-header-badge-cluster");
     expect(cluster.textContent).toContain("Non-Oncology");
     expect(cluster.textContent).toContain("Scheduled");
-    expect(cluster.textContent).toContain("Priority not assigned");
-    expect(cluster.textContent).toContain("Report not required");
-    expect(cluster.textContent).toContain("Protocol not assigned");
+    expect(cluster.textContent).not.toContain("Priority not assigned");
+    expect(cluster.textContent).not.toContain("Report not required");
+    expect(cluster.textContent).not.toContain("Protocol not assigned");
     expect(cluster.textContent).not.toContain("Additional Imaging");
     expect(cluster.textContent).not.toContain("scheduled");
   });
 
-  it("shows assigned priority, report requirement, and protocol state without adding protocol badges to ultrasound", async () => {
+  it("keeps the compact header focused on high-value reporting signals", async () => {
     const protocolAppointment = {
       ...appointment,
       modalityCode: "MRI",
@@ -323,9 +323,9 @@ describe("AppointmentManageModal", () => {
     mocks.getAppointmentById.mockResolvedValueOnce(protocolAppointment);
     renderModal({ initialTab: "documents" });
     const cluster = await screen.findByTestId("appointment-header-badge-cluster");
-    expect(cluster.textContent).toContain("STAT");
-    expect(cluster.textContent).toContain("Report required");
-    expect(cluster.textContent).toContain("Protocol assigned");
+    expect(cluster.textContent).toContain("Unassigned");
+    expect(cluster.textContent).not.toContain("STAT");
+    expect(cluster.textContent).not.toContain("Protocol assigned");
 
     cleanup();
     mocks.getAppointmentById.mockResolvedValueOnce({ ...protocolAppointment, modalityCode: "US", modalityNameEn: "Ultrasound", protocolAssignmentSummary: null });
@@ -350,7 +350,7 @@ describe("AppointmentManageModal", () => {
     } as AppointmentWithDetails);
     renderModal({ initialTab: "documents" });
 
-    expect(await screen.findByText("Protocol assigned")).toBeTruthy();
+    await screen.findByTestId("request-documents-panel");
     expect(screen.getByText("Free-text protocol")).toBeTruthy();
     expect(screen.getByText("CT neck, chest, abdomen and pelvis with IV contrast; portal venous phase.")).toBeTruthy();
     expect(screen.getByText("Scanner").parentElement?.textContent).toContain("Not selected");
@@ -396,10 +396,10 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByText("Not required")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Patient details" }).parentElement?.parentElement?.textContent).toContain("Female");
     expect(screen.queryByText(/^F$/)).toBeNull();
-    expect(screen.getByText("Time not assigned")).toBeTruthy();
+    expect(screen.getByText(/Time not assigned/)).toBeTruthy();
     expect(screen.queryByLabelText("Appointment summary")).toBeNull();
     expect(screen.getByRole("heading", { name: "Examination" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Schedule and workflow" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Appointment" })).toBeTruthy();
     const demographics = screen.getByRole("button", { name: "More demographics" });
     expect(demographics.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(demographics);
@@ -755,7 +755,6 @@ describe("AppointmentManageModal", () => {
     const originalExaminationRow = screen.getByText(/Original examination:/);
     expect(originalExaminationRow.textContent).toContain("CT Chest");
     expect(originalExaminationRow.textContent).toContain("ACC-17");
-    expect(screen.getByText("Reported with original examination")).toBeTruthy();
     expect(screen.queryByText("Report not required")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open original appointment" }));
     expect(onOpenAppointment).toHaveBeenCalledWith(17);
@@ -774,6 +773,13 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByText("Draft report")).toBeTruthy();
   });
 
+  it("uses the shared compact MRI screening indicator in the high-value header", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, modalityCode: "MR", modalitySafetyWorkflowType: "mri_primary_implant_screening", mriPrimaryScreening: { result: "no_known_implant_reported" } } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents" });
+    const indicator = await screen.findByTitle("Primary MRI screening complete — no known implant/device reported.");
+    expect(indicator.className).toContain("border-emerald");
+  });
+
   it("shows original additional-imaging state and opens its booked complementary appointment from Information", async () => {
     const onOpenAppointment = vi.fn();
     mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "scheduled", reasonCode: "missing_sequence_phase", originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 77, additionalAccession: "ACC-77", additionalAppointmentDate: "2026-07-28", additionalAppointmentTime: "10:30", additionalAppointmentStatus: "scheduled" } });
@@ -787,11 +793,11 @@ describe("AppointmentManageModal", () => {
   it("renders pending and completed additional-imaging states without unrelated relationship UI", async () => {
     mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "pending_scheduling", reasonCode: null, originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: null, additionalAccession: null, additionalAppointmentDate: null, additionalAppointmentTime: null, additionalAppointmentStatus: null } });
     renderModal();
-    expect(await screen.findByText("Additional imaging · Awaiting booking")).toBeTruthy();
+    expect((await screen.findAllByText("Additional imaging · Awaiting booking")).length).toBeGreaterThan(0);
     cleanup();
     mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "completed", reasonCode: null, originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 77, additionalAccession: "ACC-77", additionalAppointmentDate: "2026-07-28", additionalAppointmentTime: "10:30", additionalAppointmentStatus: "completed" } });
     renderModal();
-    expect(await screen.findByText("Additional imaging · Completed")).toBeTruthy();
+    expect((await screen.findAllByText("Additional imaging · Completed")).length).toBeGreaterThan(0);
   });
 
   it("uses the compact mobile document workspace, collapses an empty protocol panel, and keeps one More action in the footer", async () => {

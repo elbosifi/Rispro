@@ -59,6 +59,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   const edit = useMutation({ mutationFn: () => updateDoctorComplementaryRecallInstructions(editTarget!.id, { receptionInstruction: receptionInstruction.trim() || null, technologistInstruction: technologistInstruction.trim(), reasonCode: reasonCode as ComplementaryRecallReasonCode, qaClassification: qaClassification as ComplementaryRecallQaClassification, urgency, dueAt: tripoliDateTimeLocalToIso(dueAt), reportingDisposition }), onSuccess: () => { setEditTarget(null); void queryClient.invalidateQueries({ queryKey: key }); } });
   const completionEmail = useMutation({ mutationFn: ({ recall, forceResend }: { recall: ComplementaryRecall; forceResend: boolean }) => mode === "doctor" ? sendDoctorComplementaryRecallCompletionEmail(recall.id, { forceResend }) : sendComplementaryRecallCompletionEmail(recall.id, { forceResend }), onSuccess: () => { setResendTarget(null); void queryClient.invalidateQueries({ queryKey: key }); } });
   const rows = useMemo(() => recalls.data ?? EMPTY_RECALLS, [recalls.data]); const canWithdraw = user?.role === "supervisor" || user?.role === "super_admin";
+  const selectedRecall = useMemo(() => selectedAppointmentId == null ? null : rows.find((recall) => recall.originalAppointmentId === selectedAppointmentId || recall.recallAppointmentId === selectedAppointmentId) ?? null, [rows, selectedAppointmentId]);
   const counts = useMemo(() => Object.fromEntries(statuses.map((status) => [status, rows.filter((row) => row.status === status).length])) as Record<RecallStatus, number>, [rows]);
   const attentionCounts = useMemo(() => ({ needsBooking: rows.filter((row) => row.status === "pending_scheduling").length, dueToday: rows.filter((row) => row.isDueToday === true).length, overdue: rows.filter((row) => row.isOverdue === true).length, followUpDue: rows.filter((row) => row.isFollowUpDue === true).length }), [rows]);
   const filtered = useMemo(() => {
@@ -160,6 +161,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
         appointmentId={selectedAppointmentId}
         open
         initialTab="details"
+        recallContext={selectedRecall}
         onClose={() => setSelectedAppointmentId(null)}
         onOpenAppointment={(appointmentId) => setSelectedAppointmentId(appointmentId)}
       />

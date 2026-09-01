@@ -29,9 +29,9 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); localStorage.removeItem("rispro-language"); vi.restoreAllMocks(); });
 
-function renderInformation(appointmentOverride: AppointmentWithDetails = appointment) {
+function renderInformation(appointmentOverride: AppointmentWithDetails = appointment, props: Partial<Parameters<typeof AppointmentInformationView>[0]> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<LanguageProvider><QueryClientProvider client={queryClient}><AppointmentInformationView appointment={appointmentOverride} lookups={{ modalities: [], examTypes: [], priorities: [{ id: 2, code: "routine", nameAr: "عادي", nameEn: "Routine", sortOrder: 1 }], specialReasons: [] }} onBack={vi.fn()} onOpenPatientProfile={vi.fn()} onOpenStatus={vi.fn()} onAppointmentUpdated={vi.fn()} /></QueryClientProvider></LanguageProvider>);
+  return render(<LanguageProvider><QueryClientProvider client={queryClient}><AppointmentInformationView appointment={appointmentOverride} lookups={{ modalities: [], examTypes: [], priorities: [{ id: 2, code: "routine", nameAr: "عادي", nameEn: "Routine", sortOrder: 1 }], specialReasons: [] }} onBack={vi.fn()} onOpenPatientProfile={vi.fn()} onOpenStatus={vi.fn()} onAppointmentUpdated={vi.fn()} {...props} /></QueryClientProvider></LanguageProvider>);
 }
 
 describe("AppointmentInformationView", () => {
@@ -68,10 +68,24 @@ describe("AppointmentInformationView", () => {
       protocolAssignmentSummary: { assignmentId: 1, protocolName: null, versionNumber: null, freeTextProtocol: "Repeat delayed phase.", scannerName: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null },
     } as AppointmentWithDetails);
 
-    expect(await screen.findByText("Reported with original examination")).toBeTruthy();
+    expect(await screen.findByText("With original examination")).toBeTruthy();
     expect(screen.queryByText("Not required")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Technical PACS details" }));
-    expect(screen.getByText("Free-text protocol")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Protocol" })).toBeTruthy();
     expect(screen.getByText("Repeat delayed phase.")).toBeTruthy();
+  });
+
+  it("uses warning for draft and success for final report states", () => {
+    const { rerender } = renderInformation({ ...appointment, reportStatus: "draft" } as AppointmentWithDetails, { reportStatus: { state: "draft" } });
+    expect(screen.getByTestId("report-status-badge").className).toContain("state-chip--warning");
+    rerender(<LanguageProvider><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AppointmentInformationView appointment={{ ...appointment, reportStatus: "final" } as AppointmentWithDetails} lookups={{ modalities: [], examTypes: [], priorities: [], specialReasons: [] }} reportStatus={{ state: "final" }} onBack={vi.fn()} onOpenPatientProfile={vi.fn()} onOpenStatus={vi.fn()} onAppointmentUpdated={vi.fn()} /></QueryClientProvider></LanguageProvider>);
+    expect(screen.getByTestId("report-status-badge").className).toContain("state-chip--success");
+  });
+
+  it("renders only real recall context and opens its linked appointment", () => {
+    const onOpenAppointment = vi.fn();
+    renderInformation({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 9, recallStatus: "scheduled", reasonCode: "missing_sequence_phase", originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 88, additionalAccession: "ACC-88", additionalAppointmentDate: null, additionalAppointmentTime: null, additionalAppointmentStatus: "scheduled" } } as AppointmentWithDetails, { recallContext: { id: 9, originalAppointmentId: 42, recallAppointmentId: 88, receptionInstruction: "Call before booking", technologistInstruction: "Use repeat sequence", status: "scheduled", requestedByUserId: 4, requestedAt: "2026-07-25T08:00:00Z", receptionSeenAt: null, receptionAcknowledgedAt: null, receptionAcknowledgedByUserId: null, scheduledAt: null, completedAt: null, cancelledAt: null, reasonCode: "missing_sequence_phase", qaClassification: null, urgency: null, dueAt: null, reportingDisposition: null, contactAttempts: [], requesterDisplayName: "Dr Noor", recallAppointmentAccession: "ACC-88" }, onOpenAppointment });
+    expect(screen.getByTestId("appointment-additional-imaging-context").textContent).toContain("Call before booking");
+    fireEvent.click(screen.getByRole("button", { name: "Open additional appointment" }));
+    expect(onOpenAppointment).toHaveBeenCalledWith(88);
   });
 });

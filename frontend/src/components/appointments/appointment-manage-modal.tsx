@@ -44,6 +44,7 @@ import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/Sch
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
 import { inferSupportedOverrideTypesFromExamRuleMetadata as inferSupportedOverrideTypesFromExamRuleMetadataRaw, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
 import { useAuth } from "@/providers/auth-provider";
+import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 
 function inferSupportedOverrideTypesFromExamRuleMetadata(params: Parameters<typeof inferSupportedOverrideTypesFromExamRuleMetadataRaw>[0]) {
   return inferSupportedOverrideTypesFromExamRuleMetadataRaw({ ...params, capacityResolutionMode: "standard" });
@@ -68,6 +69,8 @@ export type AppointmentManageModalProps = {
   onOpenAppointment?: (appointmentId: number) => void;
   onAppointmentUpdated?: (appointment: AppointmentWithDetails) => void;
   onAppointmentDeleted?: (appointmentId: number) => void;
+  /** Reuses the Recall Requests row when that workflow opened this modal. */
+  recallContext?: ComplementaryRecall | null;
 };
 
 const MANAGE_TABS: AppointmentManageTab[] = ["details", "documents", "report", "reschedule", "cancel"];
@@ -128,11 +131,6 @@ function protocolVersionText(appointment: AppointmentWithDetails): string | null
   return [summary.protocolName, summary.versionNumber ? `v${summary.versionNumber}` : null].filter(Boolean).join(" ");
 }
 
-function isProtocolModality(appointment: AppointmentWithDetails): boolean {
-  const code = String(appointment.modalityCode || "").trim().toUpperCase();
-  return code === "CT" || code === "MRI";
-}
-
 function appointmentStatusVariant(status: string): "success" | "warning" | "error" | "info" | "neutral" {
   if (status === "completed") return "success";
   if (["no-show", "cancelled", "voided"].includes(status)) return "error";
@@ -141,16 +139,9 @@ function appointmentStatusVariant(status: string): "success" | "warning" | "erro
   return "neutral";
 }
 
-function priorityVariant(priority: string | null | undefined): "warning" | "error" | "neutral" {
-  const normalized = String(priority || "").toLowerCase();
-  if (!normalized) return "neutral";
-  if (normalized.includes("stat") || normalized.includes("urgent")) return "error";
-  return "warning";
-}
-
 function reportingStatusBadge(language: "ar" | "en", status: AppointmentWithDetails["reportStatus"]) {
   const labels = { final: ["التقرير نهائي", "Report final"], draft: ["تقرير مسودة", "Draft report"], no_report: ["لم يصدر تقرير", "Not reported"], study_not_found: ["الدراسة غير موجودة للتقرير", "Report study not found"], unavailable: ["حالة التقرير غير متاحة", "Report status unavailable"] } as const;
-  const variants = { final: "success", draft: "info", no_report: "warning", study_not_found: "warning", unavailable: "neutral" } as const;
+  const variants = { final: "success", draft: "warning", no_report: "neutral", study_not_found: "warning", unavailable: "neutral" } as const;
   return status ? { label: chooseLocalized(language, labels[status][0], labels[status][1]), variant: variants[status] } : null;
 }
 
@@ -161,24 +152,18 @@ function additionalImagingBadge(language: "ar" | "en", status: NonNullable<Appoi
 }
 
 function AppointmentHeaderBadgeCluster({ appointment, language, compact = false }: { appointment: AppointmentWithDetails; language: "ar" | "en"; compact?: boolean }) {
-  const priority = chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn);
-  const protocolAssigned = Boolean(appointment.protocolAssignmentSummary);
   const reportingStatus = reportingStatusBadge(language, appointment.reportStatus);
   const complementary = appointment.complementaryImagingContext ?? { relationship: null, recallStatus: null };
-  const additionalImaging = complementary.relationship === "original_with_recall"
+  const additionalImaging = complementary.relationship !== null
     ? additionalImagingBadge(language, complementary.recallStatus)
     : null;
   return <div data-testid="appointment-header-badge-cluster" className={`flex min-w-0 flex-wrap items-center ${compact ? "gap-1.5" : "gap-2"}`}>
     <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset size={compact ? "sm" : "default"} />
     <Badge size={compact ? "sm" : "default"} variant={appointmentStatusVariant(appointment.status)} className="whitespace-nowrap">{statusLabel(language, appointment.status)}</Badge>
-    <Badge size={compact ? "sm" : "default"} variant={priorityVariant(priority)} className="whitespace-nowrap">{priority || chooseLocalized(language, "الأولوية غير محددة", "Priority not assigned")}</Badge>
-    <Badge size={compact ? "sm" : "default"} variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.isAdditionalImaging ? chooseLocalized(language, "يُدرج التقرير مع الفحص الأصلي", "Reported with original examination") : appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
     {appointment.requiresReport ? <Badge size={compact ? "sm" : "default"} variant={appointment.reportingAssignmentStatus === "assigned" ? "info" : "neutral"} className="whitespace-nowrap">{appointment.reportingAssignmentStatus === "assigned" && appointment.assignedReportingDoctorName ? chooseLocalized(language, `الطبيب: ${appointment.assignedReportingDoctorName}`, `Assigned: ${appointment.assignedReportingDoctorName}`) : chooseLocalized(language, "غير معين", "Unassigned")}</Badge> : null}
     {appointment.requiresReport && reportingStatus ? <Badge size={compact ? "sm" : "default"} variant={reportingStatus.variant} className="whitespace-nowrap">{reportingStatus.label}</Badge> : null}
     {additionalImaging ? <Badge size={compact ? "sm" : "default"} variant={additionalImaging.variant} className="whitespace-nowrap">{additionalImaging.label}</Badge> : null}
-    {appointment.isAdditionalImaging ? <Badge size={compact ? "sm" : "default"} variant="info" className="whitespace-nowrap">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</Badge> : null}
-    {isProtocolModality(appointment) ? <Badge size={compact ? "sm" : "default"} variant={protocolAssigned ? "success" : "neutral"} className="whitespace-nowrap">{protocolAssigned ? chooseLocalized(language, "البروتوكول معين", "Protocol assigned") : chooseLocalized(language, "البروتوكول غير معين", "Protocol not assigned")}</Badge> : null}
-    {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} /> : null}
+    {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact /> : null}
   </div>;
 }
 
@@ -193,6 +178,7 @@ export function AppointmentManageModal({
   onOpenAppointment,
   onAppointmentUpdated,
   onAppointmentDeleted,
+  recallContext = null,
 }: AppointmentManageModalProps) {
   const { language, t } = useLanguage();
   const { user } = useAuth();
@@ -713,6 +699,14 @@ export function AppointmentManageModal({
       <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" className="min-h-9 flex-1 text-xs" disabled={!publicAppointmentToken(appointment) || reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : null}{reportStatusMutation.isPending ? t("registrations.reportChecking") : t("registrations.reportCheck")}</Button>{reportStatus?.canViewReport ? <Button type="button" size="sm" className="min-h-9 flex-1 text-xs" onClick={openReport}><ExternalLink size={14} className="me-1.5" aria-hidden="true" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button> : null}</div>
     </section>
   ) : null;
+  const supplementaryRecallContext = appointment && appointment.complementaryImagingContext?.relationship ? (() => {
+    const context = appointment.complementaryImagingContext;
+    const original = context.relationship === "original_with_recall";
+    const linkedId = original ? context.additionalAppointmentId : context.originalAppointmentId;
+    const status = recallContext?.status ?? context.recallStatus;
+    const statusBadge = additionalImagingBadge(language, status);
+    return <section data-testid="document-additional-imaging-context" className="rounded-xl border border-accent/20 bg-accent/5 p-2.5 text-xs md:p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="font-semibold text-foreground">{original ? chooseLocalized(language, "تصوير إضافي", "Additional imaging") : chooseLocalized(language, "الفحص الأصلي", "Original examination")}</p>{statusBadge ? <Badge className="mt-1" size="sm" variant={statusBadge.variant}>{statusBadge.label}</Badge> : null}<p className="mt-2 text-muted-foreground">{original ? chooseLocalized(language, "السبب", "Reason") : chooseLocalized(language, "رقم الوصول الأصلي", "Original accession")}: <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{original ? (recallContext?.reasonCode ?? context.reasonCode ?? "—") : (recallContext?.originalAccession ?? context.originalAccession ?? "—")}</span></p>{original && recallContext?.receptionInstruction ? <p className="mt-1 whitespace-pre-wrap text-foreground"><span className="font-medium">{chooseLocalized(language, "تعليمات الاستقبال", "Reception instruction")}:</span> {recallContext.receptionInstruction}</p> : null}</div>{typeof linkedId === "number" && linkedId > 0 ? <Button type="button" variant="secondary" size="sm" onClick={() => onOpenAppointment?.(linkedId)}>{original ? chooseLocalized(language, "فتح الموعد الإضافي", "Open additional appointment") : chooseLocalized(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}</div></section>;
+  })() : null;
   const protocolPanel = appointment ? (() => {
     const summary = appointment.protocolAssignmentSummary;
     const protocolVersion = protocolVersionText(appointment);
@@ -745,8 +739,8 @@ export function AppointmentManageModal({
       >
         <DialogHeader closeLabel={t("toast.close")} className="sticky top-0 z-30 !mb-0 !items-start shrink-0 border-b border-border bg-background px-2.5 py-2 md:px-5 md:py-3">
           {appointment ? <div data-testid="compact-document-appointment-header" className="grid min-w-0 gap-2 md:gap-3 lg:grid-cols-[minmax(220px,1.1fr)_minmax(240px,1fr)_minmax(280px,1.4fr)_auto] lg:items-center">
-            <div className="min-w-0"><DialogTitle className="truncate text-base font-semibold sm:text-lg">{dialogTitle}</DialogTitle><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</span><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.accessionNumber}</span></div></div>
-            <div className="min-w-0 lg:border-s lg:border-border lg:ps-3"><p className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p></div>
+            <div className="min-w-0"><DialogTitle className="truncate text-base font-semibold sm:text-lg">{appointment.arabicFullName || dialogTitle}</DialogTitle>{appointment.englishFullName && appointment.englishFullName !== appointment.arabicFullName ? <p className="mt-0.5 truncate text-xs text-muted-foreground" dir="ltr">{appointment.englishFullName}</p> : null}<p dir="ltr" className="mt-1 font-mono-data text-xs text-muted-foreground [unicode-bidi:isolate]">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</p></div>
+            <div className="min-w-0 lg:border-s lg:border-border lg:ps-3"><p className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p><p dir="ltr" className="mt-1 font-mono-data text-xs text-muted-foreground [unicode-bidi:isolate]">{appointment.accessionNumber}</p></div>
             <div className="min-w-0 lg:border-s lg:border-border lg:ps-3"><AppointmentHeaderBadgeCluster appointment={appointment} language={language} compact={isMobileViewport} /><p className="mt-1.5 md:mt-2 text-xs text-muted-foreground"><span dir="ltr" className="[unicode-bidi:isolate]">{formatDateLy(appointment.appointmentDate)} · {appointment.bookingTime || chooseLocalized(language, "الوقت غير محدد", "Time not assigned")}</span></p></div>
             <div className="relative flex flex-wrap items-center justify-start gap-1.5 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => selectTab("details")}><Edit3 size={14} className="sm:me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => void printDocument()} disabled={printingKind != null}>{printingKind === "document" ? <Loader2 size={14} className="sm:me-1.5 animate-spin" aria-hidden="true" /> : <Printer size={14} className="sm:me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => void printLabel()} disabled={printingKind != null}>{printingKind === "label" ? <Loader2 size={14} className="sm:me-1.5 animate-spin" aria-hidden="true" /> : <Tags size={14} className="sm:me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">Print label</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0 sm:!w-auto sm:!px-3 text-xs" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="sm:me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={mobileDocumentFooterVisible ? <span aria-hidden="true" /> : <Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
           </div> : <DialogTitle>{t("registrations.manage")}</DialogTitle>}
@@ -835,10 +829,10 @@ export function AppointmentManageModal({
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 
-          {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onOpenAppointment={onOpenAppointment} onAppointmentUpdated={updateDisplayedAppointment} /></div> : null}
+          {appointment && activeTab === "details" ? <div data-testid="appointment-details-scroll-surface" className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} recallContext={recallContext} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onOpenReport={openReport} onOpenAppointment={onOpenAppointment} onAppointmentUpdated={updateDisplayedAppointment} /></div> : null}
 
 
-          {appointment && activeTab === "documents" ? <div className={mobileDocumentsWorkspace ? "min-h-0" : "h-full min-h-0"}><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" workspaceRailSize="wide" compactMobileWorkspace supplementaryPanelPlacement="before-documents" pdfUtilityToolbarPlacement="top" pdfInitialSizingMode="fit-width" hideSatisfiedProtocolEligibilityStatus supplementaryPanel={<>{protocolPanel}{reportPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["registrations"] })} /></div> : null}
+          {appointment && activeTab === "documents" ? <div className={mobileDocumentsWorkspace ? "min-h-0" : "h-full min-h-0"}><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" workspaceRailSize="wide" compactMobileWorkspace supplementaryPanelPlacement="before-documents" pdfUtilityToolbarPlacement="top" pdfInitialSizingMode="fit-width" hideSatisfiedProtocolEligibilityStatus supplementaryPanel={<>{supplementaryRecallContext}{protocolPanel}{reportPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["registrations"] })} /></div> : null}
 
           <div className={activeTab !== "documents" && activeTab !== "details" ? "absolute inset-2 z-20 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5" : "hidden"}>
           {appointment && activeTab === "report" ? (
