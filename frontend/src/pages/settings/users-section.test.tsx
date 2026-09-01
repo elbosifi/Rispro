@@ -105,6 +105,29 @@ describe("UsersSection", () => {
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users" && (init as RequestInit).method === "POST")).toBe(true));
   });
 
+  it("keeps an untouched create email synchronized with the username", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+    const username = screen.getByLabelText("Username");
+    const email = screen.getByLabelText("Email");
+
+    await user.type(username, "doctor@nccb.ly");
+    expect((email as HTMLInputElement).value).toBe("doctor@nccb.ly");
+    await user.clear(username);
+    await user.type(username, "doctor.login");
+    expect((email as HTMLInputElement).value).toBe("");
+    await user.clear(username);
+    await user.type(username, "another@nccb.ly");
+    expect((email as HTMLInputElement).value).toBe("another@nccb.ly");
+    await user.clear(email);
+    await user.type(email, "manual@nccb.ly");
+    await user.clear(username);
+    await user.type(username, "final@nccb.ly");
+    expect((email as HTMLInputElement).value).toBe("manual@nccb.ly");
+  });
+
   it("uses role-aware Doctor Portal profile status and links unconfigured doctors to Doctors Directory", async () => {
     doctorProfiles = [];
     renderSection();
@@ -225,7 +248,7 @@ describe("UsersSection", () => {
     await userEvent.clear(within(dialog).getByRole("textbox", { name: "Full Name" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Full Name" }), "Updated User");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/identity" && (init as RequestInit).method === "PUT" && String((init as RequestInit).body) === JSON.stringify({ username: "UpdatedUser", fullName: "Updated User" }))).toBe(true));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/identity" && (init as RequestInit).method === "PUT" && String((init as RequestInit).body) === JSON.stringify({ username: "UpdatedUser", email: "", fullName: "Updated User" }))).toBe(true));
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "discard");

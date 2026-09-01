@@ -68,6 +68,7 @@ const profiles: DoctorProfile[] = [
     id: 1,
     userId: 10,
     username: "existing.doc",
+    email: "existing@nccb.ly",
     fullName: "Existing Doctor",
     coreRole: "doctor",
     userActive: true,
@@ -264,14 +265,36 @@ describe("DoctorAdminDoctorsPage", () => {
     await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", email: "existing@nccb.ly", fullName: "Updated Doctor", coreRole: "doctor", active: true }));
   });
 
+  it("preserves the profile response email while the linked user query is still loading", async () => {
+    fetchUsersMock.mockReturnValue(new Promise<{ users: User[] }>(() => {}));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    expect(within(drawer).getByLabelText("Email")).toHaveProperty("value", "existing@nccb.ly");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save account" }));
+
+    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, {
+      username: "existing.doc",
+      email: "existing@nccb.ly",
+      fullName: "Existing Doctor",
+      coreRole: "doctor",
+      active: true,
+    }));
+  });
+
   it("auto-fills only an untouched create email and preserves manual edits or clears", async () => {
     renderPage();
     const username = screen.getByPlaceholderText("Username");
     const email = screen.getByPlaceholderText("Email");
     fireEvent.change(username, { target: { value: "doctor@nccb.ly" } });
     expect(email).toHaveProperty("value", "doctor@nccb.ly");
-    fireEvent.change(email, { target: { value: "" } });
+    fireEvent.change(username, { target: { value: "doctor.login" } });
+    expect(email).toHaveProperty("value", "");
     fireEvent.change(username, { target: { value: "changed@nccb.ly" } });
+    expect(email).toHaveProperty("value", "changed@nccb.ly");
+    fireEvent.change(email, { target: { value: "" } });
+    fireEvent.change(username, { target: { value: "another@nccb.ly" } });
     expect(email).toHaveProperty("value", "");
     fireEvent.change(username, { target: { value: "doctor.login" } });
     expect(email).toHaveProperty("value", "");

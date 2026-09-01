@@ -403,7 +403,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     const role = profile.coreRole ?? linkedUser?.role;
     setAccountDraft({
       username: profile.username ?? linkedUser?.username ?? "",
-      email: linkedUser?.email ?? "",
+      email: profile.email ?? linkedUser?.email ?? "",
       fullName: profile.fullName ?? linkedUser?.fullName ?? "",
       coreRole: role === "supervisor" ? "supervisor" : "doctor",
       active: profile.userActive ?? linkedUser?.isActive ?? false,
@@ -473,7 +473,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           Creates the RISpro login account and Doctor Portal profile together.
         </p>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: !createDoctorEmailEdited && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : current.email }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
+          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: createDoctorEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
           <input aria-label="Email" value={createDoctorDraft.email} onChange={(event) => { setCreateDoctorEmailEdited(true); setCreateDoctorDraft((current) => ({ ...current, email: event.target.value })); }} placeholder="Email" className="rounded-lg border px-3 py-2 text-sm" />
           <input value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({
             ...current,

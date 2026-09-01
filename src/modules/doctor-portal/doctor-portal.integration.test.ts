@@ -867,6 +867,12 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(createdData.profile.canSupervise, true);
     assert.equal(createdData.modalities.some((permission) => Number(permission.modalityId) === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
 
+    const listedProfiles = await api(admin.cookie, "/api/doctor/profiles");
+    assert.equal(listedProfiles.status, 200, JSON.stringify(listedProfiles.data));
+    const listedProfile = (listedProfiles.data as { profiles: Array<{ id: number; email?: string | null }> }).profiles
+      .find((profile) => profile.id === createdData.profile.id);
+    assert.equal(listedProfile?.email, "doctor@nccb.ly");
+
     const initialLogin = await authRequest("/api/auth/login", { username: `  ${username.toUpperCase()} `, password: body.temporaryPassword });
     assert.equal(initialLogin.status, 200, JSON.stringify(initialLogin.data));
     assert.equal(((initialLogin.data.user as { mustChangePassword: boolean }).mustChangePassword), true);

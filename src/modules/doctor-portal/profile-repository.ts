@@ -8,6 +8,7 @@ export interface DoctorProfileRow {
   id: number;
   userId: number;
   username: string | null;
+  email?: string | null;
   fullName: string | null;
   coreRole: string | null;
   userActive: boolean | null;
@@ -55,11 +56,12 @@ export interface UpdateDoctorProfileInput {
 
 type Db = Pick<PoolClient, "query"> | typeof pool;
 
-const PROFILE_SELECT = `
+const profileSelect = (includeEmail = false) => `
   select
     dp.id,
     dp.user_id as "userId",
     u.username,
+    ${includeEmail ? "u.email," : ""}
     u.full_name as "fullName",
     u.role as "coreRole",
     u.is_active as "userActive",
@@ -78,7 +80,7 @@ const PROFILE_SELECT = `
 export async function findActiveDoctorProfileByUserId(userId: UserId): Promise<DoctorProfileRow | null> {
   const result = await pool.query<DoctorProfileRow>(
     `
-      ${PROFILE_SELECT}
+      ${profileSelect()}
       where dp.user_id = $1
         and dp.active = true
       limit 1
@@ -91,7 +93,7 @@ export async function findActiveDoctorProfileByUserId(userId: UserId): Promise<D
 export async function findDoctorProfileByUserId(userId: UserId): Promise<DoctorProfileRow | null> {
   const result = await pool.query<DoctorProfileRow>(
     `
-      ${PROFILE_SELECT}
+      ${profileSelect()}
       where dp.user_id = $1
       order by dp.active desc, dp.id asc
       limit 1
@@ -101,9 +103,9 @@ export async function findDoctorProfileByUserId(userId: UserId): Promise<DoctorP
   return result.rows[0] ?? null;
 }
 
-export async function listDoctorProfiles(): Promise<DoctorProfileRow[]> {
+export async function listDoctorProfiles(includeEmail = false): Promise<DoctorProfileRow[]> {
   const result = await pool.query<DoctorProfileRow>(`
-    ${PROFILE_SELECT}
+    ${profileSelect(includeEmail)}
     order by dp.active desc, dp.display_name asc, dp.id asc
   `);
   return result.rows;

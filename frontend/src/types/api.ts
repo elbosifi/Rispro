@@ -50,6 +50,7 @@ export interface DoctorProfile {
   id: number;
   userId: number;
   username?: string | null;
+  email?: string | null;
   fullName?: string | null;
   coreRole?: Role | string | null;
   userActive?: boolean | null;

@@ -476,7 +476,7 @@ export default function UsersSection({
               <input
                 value={createForm.username}
                 onChange={(event) =>
-                  setCreateForm({ ...createForm, username: event.target.value, email: !createEmailEdited && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : createForm.email })
+                  setCreateForm((current) => ({ ...current, username: event.target.value, email: createEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))
                 }
                 className="w-full rounded border px-3 py-2 dark:bg-stone-900"
               />

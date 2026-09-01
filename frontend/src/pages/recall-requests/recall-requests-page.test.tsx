@@ -285,13 +285,27 @@ describe("Recall Requests metadata", () => {
     expect(screen.getAllByText(/^متأخر/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain("Ø");
   });
+  it("localizes the completed-request email notification card and resend confirmation in Arabic", async () => {
+    languageState.value = "ar";
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ hasAccepted: true, latestStatus: "accepted", acceptedAt: "2039-06-15T10:30:00.000Z", recipientDisplayName: "د. رانيا فرج" }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^مكتمل/ }));
+    expect(await screen.findByText("إشعار البريد الإلكتروني")).toBeTruthy();
+    expect(screen.getByText("تم قبولها بواسطة خادم البريد")).toBeTruthy();
+    expect(screen.getByText("الطبيب المُعيَّن: د. رانيا فرج")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إرسال إشعار البريد الإلكتروني مرة أخرى" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Accepted by mail server");
+    await userEvent.click(screen.getByRole("button", { name: "إرسال إشعار البريد الإلكتروني مرة أخرى" }));
+    expect(await screen.findByText("إرسال إشعار البريد الإلكتروني مرة أخرى؟")).toBeTruthy();
+  });
+
   it("shows an unnotified completed request and sends through the reception endpoint", async () => {
     mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ recipientDisplayName: "Doctor A" }))]);
     renderPage("reception");
     await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
     expect(await screen.findByText("No email sent")).toBeTruthy();
     expect(screen.getByText("Assigned doctor: Doctor A")).toBeTruthy();
-    expect(screen.getByText("Email: reporting@example.test")).toBeTruthy();
+    expect(screen.getByText((_, element) => element?.tagName === "P" && element.textContent === "Email: reporting@example.test")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Send notification email now" }));
     await waitFor(() => expect(mockSendReception).toHaveBeenCalledWith(42, { forceResend: false }));
   });

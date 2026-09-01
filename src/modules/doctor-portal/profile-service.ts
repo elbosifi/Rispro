@@ -106,7 +106,7 @@ export async function requireDoctorAdmin(userId: UserId, appRole: Role): Promise
 
 export async function listProfilesForAdmin(userId: UserId, appRole: Role): Promise<DoctorProfileRow[]> {
   await requireDoctorAdmin(userId, appRole);
-  return listDoctorProfiles();
+  return listDoctorProfiles(true);
 }
 
 export async function createProfileForAdmin(
