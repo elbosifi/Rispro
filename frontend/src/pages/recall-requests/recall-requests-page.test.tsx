@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import RecallRequestsPage from "./recall-requests-page";
 
 const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn() }));
+const languageState = vi.hoisted(() => ({ value: "en" as "en" | "ar" }));
 
 vi.mock("@/lib/api/complementary-recalls", () => ({
   fetchComplementaryRecalls: mockFetchRecalls,
@@ -21,7 +22,7 @@ vi.mock("@/lib/api/doctor-portal-reporting", () => ({
 }));
 vi.mock("@/lib/api-hooks", () => ({ markComplementaryRecallsSeen: mockMarkSeen }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { role: "doctor" } }) }));
-vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false }) }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.value, isArabic: languageState.value === "ar" }) }));
 vi.mock("@/components/appointments/appointment-manage-modal", () => ({ AppointmentManageModal: () => null }));
 
 const recall: ComplementaryRecall = {
@@ -60,6 +61,7 @@ const recall: ComplementaryRecall = {
 };
 const acknowledgedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One" };
 const contactedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One", contactAttempts: [{ id: 1, recallRequestId: 42, contactMethod: "phone", contactValue: "0912345678", outcome: "no_answer", note: "Left callback request", followUpAt: "2026-09-01T08:30:00.000Z", recordedByUserId: 7, recordedByDisplayName: "Reception One", createdAt: "2026-09-01T08:30:00.000Z" }] };
+const secondRecall: ComplementaryRecall = { ...recall, id: 43, originalAppointmentId: 10, patientDisplayName: "Patient B", patientEnglishName: "Patient B", patientMrn: "MRN-43", originalAccession: "V2-000010", patientPhone1: "0934567890", patientPhone2: null, contactAttempts: [{ id: 2, recallRequestId: 43, contactMethod: "whatsapp", contactValue: "0934567890", outcome: "reached_agreed", note: null, followUpAt: null, recordedByUserId: 8, recordedByDisplayName: "Reception Two", createdAt: "2026-09-01T09:30:00.000Z" }] };
 
 function renderPage(mode: "reception" | "doctor") {
   return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><RecallRequestsPage mode={mode} /></QueryClientProvider></MemoryRouter>);
@@ -67,6 +69,7 @@ function renderPage(mode: "reception" | "doctor") {
 
 describe("Recall Requests metadata", () => {
   beforeEach(() => {
+    languageState.value = "en";
     mockFetchRecalls.mockReset();
     mockFetchDoctorRecalls.mockReset();
     mockUpdateRecall.mockReset();
@@ -88,6 +91,42 @@ describe("Recall Requests metadata", () => {
     expect(screen.getByText("0923456789")).toBeTruthy();
     expect(screen.getByText("Not contacted")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Record contact attempt" })).toBeTruthy();
+  });
+
+  it("keeps each contact workflow inside its recall article", async () => {
+    mockFetchRecalls.mockResolvedValue([recall, secondRecall]);
+    renderPage("reception");
+
+    const articles = await screen.findAllByRole("article");
+    const articleA = articles.find((article) => within(article).queryByText("Recall Patient"));
+    const articleB = articles.find((article) => within(article).queryByText("Patient B"));
+    expect(articleA).toBeTruthy();
+    expect(articleB).toBeTruthy();
+    expect(within(articleA as HTMLElement).getByText("Not contacted")).toBeTruthy();
+    expect(within(articleA as HTMLElement).getByRole("button", { name: "Record contact attempt" })).toBeTruthy();
+    expect(within(articleA as HTMLElement).queryByText("Reached / agreed")).toBeNull();
+    expect(within(articleB as HTMLElement).getAllByText((_, element) => Boolean(element?.textContent?.includes("Last contact: Reached / agreed"))).length).toBeGreaterThan(0);
+    expect(within(articleB as HTMLElement).getAllByText("0934567890").length).toBeGreaterThan(0);
+    expect(within(articleB as HTMLElement).getByText("Contact history (1)")).toBeTruthy();
+    expect(screen.getAllByText("Patient contact").every((node) => node.closest("article"))).toBe(true);
+  });
+
+  it("renders AR-06 contact labels in Arabic without mojibake", async () => {
+    languageState.value = "ar";
+    renderPage("reception");
+
+    expect(await screen.findByText("تواصل المريض")).toBeTruthy();
+    expect(screen.getByText("لم يتم التواصل")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "تسجيل محاولة تواصل" }));
+    expect(screen.getByText("طريقة التواصل")).toBeTruthy();
+    expect(screen.getByText("النتيجة")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "هاتف" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "لم يرد" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "تسجيل" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إلغاء" })).toBeTruthy();
+    const renderedText = document.body.textContent ?? "";
+    expect(renderedText).not.toContain("Â·");
+    expect(renderedText).not.toContain("Savingâ€¦");
   });
 
   it("records a phone contact with the manual value and Tripoli follow-up instant", async () => {
