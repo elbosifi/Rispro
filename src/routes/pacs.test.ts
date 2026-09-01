@@ -80,6 +80,14 @@ test("comparison-only remap access is request, patient, and job scoped", async (
   assert.doesNotMatch(comparisonScopeMiddleware, /patient-search/);
 });
 
+test("DICOM Remap retention PACS settings remain supervisor re-auth protected", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  assert.match(routeSource, /pacsRouter\.get\(\s*"\/dicom-remap-retention",\s*\.\.\.supervisorMiddleware/);
+  assert.match(routeSource, /pacsRouter\.put\(\s*"\/dicom-remap-retention",\s*\.\.\.supervisorMiddleware/);
+  assert.match(routeSource, /readDicomRemapRetentionSettings\(\)/);
+  assert.match(routeSource, /saveDicomRemapRetentionSettings\(\{ sentSourceRetentionDays: body\.sentSourceRetentionDays/);
+});
+
 test("both full DICOM remap multipart parsers use the authoritative configured file limit", async () => {
   const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
   assert.equal((routeSource.match(/files: DICOM_REMAP_STAGING_MAX_FILES/g) || []).length, 2);

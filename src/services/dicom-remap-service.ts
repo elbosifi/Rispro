@@ -2615,18 +2615,6 @@ function classifyOrthancSendFailure(details: Record<string, unknown>): string {
   return "ORTHANC_SEND_JOB_FAILED";
 }
 
-async function cleanupSentDicomRemapStaging(job: DicomRemapJobRow): Promise<void> {
-  if (!job.staged_storage_key || job.staging_cleanup_completed_at) return;
-  await cleanupDicomRemapStagingStorage(job.staged_storage_key);
-  const cleaned = await queryDicomRemapDb<DicomRemapJobRow>(
-    `update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1 and status = 'sent' and staging_cleanup_completed_at is null returning *`,
-    [job.id]
-  );
-  if (cleaned.rows[0]) {
-    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_cleaned", oldValues: null, newValues: { sendStatus: "sent" }, changedByUserId: null });
-  }
-}
-
 function orthancJobState(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const record = payload as Record<string, unknown>;
@@ -2725,7 +2713,6 @@ export async function monitorDicomRemapSendJob(job: DicomRemapJobRow): Promise<D
     const sent = result.rows[0] || null;
     if (sent) {
       await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: sent.id, actionType: "pacs_send_completed", oldValues: { status: "sending" }, newValues: { status: "sent", orthancJobId: sent.orthanc_send_job_id, attemptNumber: sent.send_attempt_count }, changedByUserId: null });
-      await cleanupSentDicomRemapStaging(sent).catch(() => undefined);
     }
     return sent;
   }
@@ -3366,13 +3353,59 @@ export async function cleanupExpiredAwaitingDicomRemapStaging(retentionHours: nu
   return cleaned;
 }
 
+export async function cleanupExpiredSentDicomRemapStaging(retentionHours: number, limit = 25): Promise<number> {
+  const safeHours = Math.max(1, Math.min(Math.floor(retentionHours), 24 * 365));
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+  const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
+    `select *
+       from dicom_remap_jobs
+      where status = 'sent'
+        and staged_storage_key is not null
+        and staging_cleanup_completed_at is null
+        and coalesce(send_completed_at, updated_at) < now() - ($1::text || ' hours')::interval
+      order by coalesce(send_completed_at, updated_at) asc
+      limit $2`,
+    [safeHours, safeLimit]
+  );
+  let cleaned = 0;
+  for (const job of rows) {
+    try {
+      await cleanupDicomRemapStagingStorage(String(job.staged_storage_key));
+      const result = await queryDicomRemapDb<DicomRemapJobRow>(
+        `update dicom_remap_jobs
+            set staging_cleanup_completed_at = now(), updated_at = now()
+          where id = $1 and status = 'sent' and staging_cleanup_completed_at is null
+          returning *`,
+        [job.id]
+      );
+      if (!result.rows[0]) continue;
+      cleaned += 1;
+      await logDicomRemapAuditEntry({
+        entityType: "dicom_remap_job",
+        entityId: job.id,
+        actionType: "dicom_remap_staging_cleaned",
+        oldValues: null,
+        newValues: { retentionHours: safeHours, status: "sent" },
+        changedByUserId: null,
+      });
+    } catch {
+      // A later worker tick retries sent rows whose private staging remains.
+    }
+  }
+  return cleaned;
+}
+
 export async function cleanupExpiredDicomRemapStaging(
   failedRetentionHours: number,
-  awaitingConfirmationRetentionHours: number
+  awaitingConfirmationRetentionHours: number,
+  sentRetentionHours?: number | null
 ): Promise<number> {
   const failed = await cleanupExpiredFailedDicomRemapStaging(failedRetentionHours);
   const awaiting = await cleanupExpiredAwaitingDicomRemapStaging(awaitingConfirmationRetentionHours);
-  return failed + awaiting;
+  const sent = typeof sentRetentionHours === "number" && Number.isFinite(sentRetentionHours)
+    ? await cleanupExpiredSentDicomRemapStaging(sentRetentionHours)
+    : 0;
+  return failed + awaiting + sent;
 }
 
 function processingErrorCode(error: unknown): string {

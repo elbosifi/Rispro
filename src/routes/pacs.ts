@@ -27,6 +27,7 @@ import {
 } from "../services/orthanc-pacs-service.js";
 import { synchronizeAuthoritativeOrthancCdRobots } from "../services/authoritative-orthanc-service.js";
 import { readClinicalDocumentExportSettings, saveClinicalDocumentExportSettings } from "../services/clinical-document-export-settings-service.js";
+import { readDicomRemapRetentionSettings, saveDicomRemapRetentionSettings } from "../services/dicom-remap-retention-settings-service.js";
 import {
   listPacsAutoCompletionSettings,
   listPacsAutoCompletionTargets,
@@ -1028,6 +1029,25 @@ pacsRouter.get(
     }
     const result = await getDicomRemapJob({ jobId });
     res.json(result);
+  })
+);
+
+pacsRouter.get(
+  "/dicom-remap-retention",
+  ...supervisorMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json({ settings: await readDicomRemapRetentionSettings() });
+  })
+);
+
+pacsRouter.put(
+  "/dicom-remap-retention",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext };
+    const body = asUnknownRecord(request.body ?? {});
+    const settings = await saveDicomRemapRetentionSettings({ sentSourceRetentionDays: body.sentSourceRetentionDays as number }, request.user.sub as UserId);
+    res.json({ settings });
   })
 );
 

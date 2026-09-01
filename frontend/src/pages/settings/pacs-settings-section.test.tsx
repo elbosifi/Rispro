@@ -141,8 +141,40 @@ describe("PacsSettingsSection auto-completion controls", () => {
           },
         };
       }
+      if (path === "/pacs/clinical-document-export") {
+        return { settings: { enabled: false, destinationKey: "" } };
+      }
+      if (path === "/pacs/dicom-remap-retention" && options?.method === "PUT") {
+        return { settings: JSON.parse(String(options.body)) };
+      }
+      if (path === "/pacs/dicom-remap-retention") {
+        return { settings: { sentSourceRetentionDays: 4 } };
+      }
       throw new Error(`Unexpected API call ${path}`);
     });
+  });
+
+  it("loads, validates, and saves DICOM Remap source retention", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    expect(await screen.findByText("DICOM Remap Source Retention")).toBeTruthy();
+    const input = screen.getByLabelText("Keep successful source for") as HTMLInputElement;
+    expect(input.value).toBe("4");
+    expect(screen.getByText("days")).toBeTruthy();
+
+    for (const invalid of ["0", "31", "1.5", ""]) {
+      await user.clear(input);
+      if (invalid) await user.type(input, invalid);
+      await user.click(screen.getByRole("button", { name: "Save retention" }));
+      expect(screen.getByText("Retention must be a whole number from 1 to 30 days.")).toBeTruthy();
+      expect(vi.mocked(api)).not.toHaveBeenCalledWith("/pacs/dicom-remap-retention", expect.objectContaining({ method: "PUT" }));
+    }
+
+    await user.type(input, "7");
+    await user.click(screen.getByRole("button", { name: "Save retention" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/pacs/dicom-remap-retention", { method: "PUT", body: JSON.stringify({ sentSourceRetentionDays: 7 }) }));
+    expect(await screen.findByText("DICOM Remap source retention saved.")).toBeTruthy();
   });
 
   it("renders and saves per-modality auto-completion settings", async () => {

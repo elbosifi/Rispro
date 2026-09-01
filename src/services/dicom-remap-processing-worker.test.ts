@@ -19,6 +19,10 @@ test("processing worker uses the durable claim path and is idle when no job is q
   assert.ok(calls.some((sql) => /for update skip locked/i.test(sql)));
 });
 
+test.beforeEach(() => {
+  __dicomRemapProcessingWorkerTestables.setDependencies({ readRetentionSettings: async () => ({ sentSourceRetentionDays: 4 }) });
+});
+
 test("non-test processing workers cannot claim from the disposable integration database", async () => {
   let claims = 0;
   __dicomRemapProcessingWorkerTestables.setDependencies({
@@ -81,14 +85,15 @@ test("test processing workers retain the disposable-database claim path", async 
   }
 });
 
-test("processing worker runs failed and abandoned-awaiting staging retention before claiming", async () => {
-  let cleanupArgs: [number, number] | null = null;
+test("processing worker runs failed, abandoned-awaiting, and sent staging retention before claiming", async () => {
+  let cleanupArgs: [number, number, number | null | undefined] | null = null;
   __dicomRemapProcessingWorkerTestables.setDependencies({
     releaseRecoveries: async () => 0,
-    cleanup: async (failedHours, awaitingHours) => {
-      cleanupArgs = [failedHours, awaitingHours];
+    cleanup: async (failedHours, awaitingHours, sentHours) => {
+      cleanupArgs = [failedHours, awaitingHours, sentHours];
       return 0;
     },
+    readRetentionSettings: async () => ({ sentSourceRetentionDays: 4 }),
     claim: async () => null,
   });
   const result = await runDicomRemapProcessingWorkerTick({ owner: "cleanup-worker", batchSize: 1, leaseSeconds: 120 });
@@ -96,7 +101,28 @@ test("processing worker runs failed and abandoned-awaiting staging retention bef
   assert.deepEqual(cleanupArgs, [
     Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
     Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24)),
+    96,
   ]);
+});
+
+test("processing worker reads the configured sent retention and skips only sent cleanup if that read fails", async () => {
+  const cleanupCalls: Array<[number, number, number | null | undefined]> = [];
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
+    cleanup: async (failed, awaiting, sent) => { cleanupCalls.push([failed, awaiting, sent]); return 0; },
+    readRetentionSettings: async () => ({ sentSourceRetentionDays: 7 }),
+    claim: async () => null,
+  });
+  await runDicomRemapProcessingWorkerTick({ owner: "retention-worker", batchSize: 1 });
+  assert.equal(cleanupCalls[0]?.[2], 168);
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    releaseRecoveries: async () => 0,
+    cleanup: async (failed, awaiting, sent) => { cleanupCalls.push([failed, awaiting, sent]); return 0; },
+    readRetentionSettings: async () => { throw new Error("settings unavailable"); },
+    claim: async () => null,
+  });
+  await runDicomRemapProcessingWorkerTick({ owner: "retention-read-failure-worker", batchSize: 1 });
+  assert.equal(cleanupCalls[1]?.[2], undefined);
 });
 
 test("processing worker continues after one claimed job fails", async () => {

@@ -70,6 +70,7 @@ interface PacsAutoCompletionTestDiagnostics {
 }
 
 type ClinicalDocumentExportSettings = { enabled: boolean; destinationKey: string };
+type DicomRemapRetentionSettings = { sentSourceRetentionDays: number };
 
 interface PacsAutoCompletionTestResponse {
   result: { status: string; lastError?: string | null };
@@ -134,6 +135,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     queryKey: ["pacs", "clinical-document-export"],
     queryFn: () => api<{ settings: ClinicalDocumentExportSettings }>("/pacs/clinical-document-export", {}, SETTINGS_LOAD_TIMEOUT_MS)
   });
+  const dicomRemapRetentionQuery = useQuery<{ settings: DicomRemapRetentionSettings }>({
+    queryKey: ["pacs", "dicom-remap-retention"],
+    queryFn: () => api<{ settings: DicomRemapRetentionSettings }>("/pacs/dicom-remap-retention", {}, SETTINGS_LOAD_TIMEOUT_MS)
+  });
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -146,6 +151,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [autoTestResults, setAutoTestResults] = useState<Record<number, PacsAutoCompletionTestResponse>>({});
   const [clinicalDraft, setClinicalDraft] = useState<ClinicalDocumentExportSettings | null>(null);
   const [clinicalMessage, setClinicalMessage] = useState<string | null>(null);
+  const [dicomRemapRetentionDays, setDicomRemapRetentionDays] = useState<string | null>(null);
+  const [dicomRemapRetentionMessage, setDicomRemapRetentionMessage] = useState<string | null>(null);
 
   const emptyForm: OrthancModalityFormState = {
     key: "",
@@ -253,6 +260,15 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     mutationFn: (targetKey: string) => api("/pacs/test", { method: "POST", body: JSON.stringify({ targetKey }) }),
     onSuccess: () => setClinicalMessage("DICOM C-ECHO successful."),
     onError: (err: Error) => setClinicalMessage(err.message)
+  });
+  const saveDicomRemapRetentionMutation = useMutation({
+    mutationFn: (sentSourceRetentionDays: number) => api<{ settings: DicomRemapRetentionSettings }>("/pacs/dicom-remap-retention", { method: "PUT", body: JSON.stringify({ sentSourceRetentionDays }) }),
+    onSuccess: async () => {
+      setDicomRemapRetentionMessage("DICOM Remap source retention saved.");
+      setDicomRemapRetentionDays(null);
+      await queryClient.invalidateQueries({ queryKey: ["pacs", "dicom-remap-retention"] });
+    },
+    onError: (err: Error) => setDicomRemapRetentionMessage(err.message)
   });
 
   const saveAutoMutation = useMutation({
@@ -447,6 +463,26 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           <p className="text-xs text-muted-foreground">Test destination checks DICOM connectivity (C-ECHO). It does not create a test study.</p>
         </div>;
       })())}
+      <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3" data-testid="dicom-remap-retention-settings">
+        <div>
+          <h4 className="font-semibold text-stone-900 dark:text-white">DICOM Remap Source Retention</h4>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">Keep the original uploaded DICOM source available for Recover Source after a successful PACS send.</p>
+        </div>
+        {dicomRemapRetentionQuery.error ? <p className="text-sm text-red-600">Could not load DICOM Remap source retention settings: {(dicomRemapRetentionQuery.error as Error).message}</p> : (
+          <>
+            <label className="block text-sm">Keep successful source for<input aria-label="Keep successful source for" type="number" min={1} max={30} step={1} className="input mt-1 w-28" value={dicomRemapRetentionDays ?? String(dicomRemapRetentionQuery.data?.settings.sentSourceRetentionDays ?? 4)} onChange={(event) => { setDicomRemapRetentionDays(event.target.value); setDicomRemapRetentionMessage(null); }} /> <span className="ml-1">days</span></label>
+            {dicomRemapRetentionMessage && <p className="text-sm">{dicomRemapRetentionMessage}</p>}
+            <Button type="button" disabled={saveDicomRemapRetentionMutation.isPending || dicomRemapRetentionQuery.isLoading} onClick={() => {
+              const value = dicomRemapRetentionDays ?? String(dicomRemapRetentionQuery.data?.settings.sentSourceRetentionDays ?? 4);
+              const days = Number(value);
+              if (!value.trim() || !Number.isInteger(days) || days < 1 || days > 30) { setDicomRemapRetentionMessage("Retention must be a whole number from 1 to 30 days."); return; }
+              saveDicomRemapRetentionMutation.mutate(days);
+            }}>Save retention</Button>
+          </>
+        )}
+        <p className="text-xs text-muted-foreground">After this period the private staged source is automatically removed. Changing this does not restore source files that were already deleted.</p>
+        <p className="text-xs text-amber-700 dark:text-amber-300">Reducing the retention period can cause older retained sources to be removed on the next cleanup cycle.</p>
+      </div>
       <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3">
         <div>
           <h4 className="font-semibold text-stone-900 dark:text-white">{t(language, "settings.pacs.autoCompletion")}</h4>

@@ -14,6 +14,7 @@ import {
   claimNextDicomRemapProcessingJob,
   cleanupExpiredAwaitingDicomRemapStaging,
   cleanupExpiredFailedDicomRemapStaging,
+  cleanupExpiredSentDicomRemapStaging,
   cleanupDicomRemapStagingStorage,
   confirmStagedDicomRemapJob,
   confirmDicomRemapAndSend,
@@ -1034,7 +1035,7 @@ test("monitor marks unknown job state without heartbeat and keeps recognized run
 });
 
 test("send monitor keeps running jobs in sending and completes only after Orthanc success", async () => {
-  const runningJob = remapJob({ status: "sending", orthanc_send_job_id: "job-running", send_attempt_count: 1, destination_pacs_key: "PACS_MAIN" });
+  const runningJob = remapJob({ status: "sending", orthanc_send_job_id: "job-running", send_attempt_count: 1, destination_pacs_key: "PACS_MAIN", staged_storage_key: "jobs/sent-no-immediate-cleanup", staged_manifest_version: 2, staging_cleanup_completed_at: null });
   const runningCalls = queueQueryResults([{ rows: [] }]);
   queueOrthancResults([orthancResult({ json: { ID: "job-running", State: "Running", Type: "DicomModalityStore" } })]);
   assert.equal(await monitorDicomRemapSendJob(runningJob), null);
@@ -1044,11 +1045,40 @@ test("send monitor keeps running jobs in sending and completes only after Orthan
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
   const sentJob = remapJob({ ...runningJob, status: "sent", send_completed_at: "2026-07-11T00:00:00.000Z" });
-  queueQueryResults([{ rows: [sentJob] }]);
+  const sentCalls = queueQueryResults([{ rows: [sentJob] }]);
   queueOrthancResults([orthancResult({ json: { ID: "job-running", State: "Success", Type: "DicomModalityStore" } })]);
   const result = await monitorDicomRemapSendJob(runningJob);
   assert.equal(result?.status, "sent");
+  assert.equal(result?.staged_storage_key, runningJob.staged_storage_key);
+  assert.equal(result?.staging_cleanup_completed_at == null, true);
+  assert.equal(sentCalls.length, 1);
   assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_send_completed"), true);
+});
+
+test("sent staging cleanup uses successful-send time, preserves sent rows, and audits retention", async () => {
+  const storageKey = `jobs/sent-retention-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(directory, "files", "staged.dcm"), Buffer.from("synthetic-dicom"));
+  const sent = remapJob({ id: 904, status: "sent", staged_storage_key: storageKey, staged_manifest_version: 2, send_completed_at: "2026-08-20T00:00:00.000Z", staging_cleanup_completed_at: null });
+  const audits: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { audits.push(entry as unknown as Record<string, unknown>); return {} as never; });
+  const calls = queueQueryResults([{ rows: [sent] }, { rows: [{ ...sent, staging_cleanup_completed_at: "2026-08-24T00:00:00.000Z" }] }]);
+  assert.equal(await cleanupExpiredSentDicomRemapStaging(96), 1);
+  assert.match(calls[0]!.sql, /status = 'sent'/i);
+  assert.match(calls[0]!.sql, /coalesce\(send_completed_at, updated_at\)/i);
+  assert.deepEqual(calls[0]!.params, [96, 25]);
+  assert.match(calls[1]!.sql, /status = 'sent' and staging_cleanup_completed_at is null/i);
+  assert.equal((audits[0]?.newValues as { status?: string; retentionHours?: number }).status, "sent");
+  assert.equal((audits[0]?.newValues as { status?: string; retentionHours?: number }).retentionHours, 96);
+  await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
+});
+
+test("sent staging cleanup does not mark staging complete when storage cleanup fails", async () => {
+  const sent = remapJob({ id: 905, status: "sent", staged_storage_key: "../../outside-staging", staging_cleanup_completed_at: null });
+  const calls = queueQueryResults([{ rows: [sent] }]);
+  assert.equal(await cleanupExpiredSentDicomRemapStaging(96), 0);
+  assert.equal(calls.length, 1);
 });
 
 test("send monitor sanitizes failure classification and missing Orthanc jobs safely", async () => {

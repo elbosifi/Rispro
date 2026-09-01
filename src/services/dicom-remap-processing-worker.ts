@@ -6,6 +6,7 @@ import {
   processClaimedDicomRemapJob,
 } from "./dicom-remap-service.js";
 import type { DicomRemapJobRow } from "./dicom-remap-service.js";
+import { readDicomRemapRetentionSettings } from "./dicom-remap-retention-settings-service.js";
 
 export interface DicomRemapProcessingWorker {
   stop(): Promise<void>;
@@ -20,6 +21,7 @@ let claimJob = claimNextDicomRemapProcessingJob;
 let processJob = processClaimedDicomRemapJob;
 let cleanupStaging = cleanupExpiredDicomRemapStaging;
 let releaseExpiredRecoveries = releaseExpiredDicomRemapOrthancRecoveryClaims;
+let readRetentionSettings = readDicomRemapRetentionSettings;
 
 function databaseNameFromUrl(value: string | undefined): string | null {
   if (!value) return null;
@@ -54,10 +56,15 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
   let failed = 0;
   try {
     await releaseExpiredRecoveries().catch(() => 0);
-    await cleanupStaging(
-      Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
-      Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24))
-    ).catch(() => 0);
+    const failedRetentionHours = Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72));
+    const awaitingConfirmationRetentionHours = Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24));
+    let sentRetentionHours: number | undefined;
+    try {
+      sentRetentionHours = (await readRetentionSettings()).sentSourceRetentionDays * 24;
+    } catch {
+      console.warn(JSON.stringify({ type: "dicom_remap_sent_retention_settings_read_failed" }));
+    }
+    await cleanupStaging(failedRetentionHours, awaitingConfirmationRetentionHours, sentRetentionHours).catch(() => 0);
     let queueExhausted = false;
     let claimAttempts = 0;
     const runLane = async (): Promise<void> => {
@@ -93,19 +100,22 @@ export const __dicomRemapProcessingWorkerTestables = {
   setDependencies(dependencies: {
     claim?: (owner: string, leaseSeconds: number) => Promise<ClaimJob>;
     process?: typeof processClaimedDicomRemapJob;
-    cleanup?: (failedRetentionHours: number, awaitingConfirmationRetentionHours: number) => Promise<number>;
+    cleanup?: (failedRetentionHours: number, awaitingConfirmationRetentionHours: number, sentRetentionHours?: number | null) => Promise<number>;
     releaseRecoveries?: () => Promise<number>;
+    readRetentionSettings?: typeof readDicomRemapRetentionSettings;
   }): void {
-    claimJob = dependencies.claim || claimNextDicomRemapProcessingJob;
-    processJob = dependencies.process || processClaimedDicomRemapJob;
-    cleanupStaging = dependencies.cleanup || cleanupExpiredDicomRemapStaging;
-    releaseExpiredRecoveries = dependencies.releaseRecoveries || releaseExpiredDicomRemapOrthancRecoveryClaims;
+    if (dependencies.claim) claimJob = dependencies.claim;
+    if (dependencies.process) processJob = dependencies.process;
+    if (dependencies.cleanup) cleanupStaging = dependencies.cleanup;
+    if (dependencies.releaseRecoveries) releaseExpiredRecoveries = dependencies.releaseRecoveries;
+    if (dependencies.readRetentionSettings) readRetentionSettings = dependencies.readRetentionSettings;
   },
   resetDependencies(): void {
     claimJob = claimNextDicomRemapProcessingJob;
     processJob = processClaimedDicomRemapJob;
     cleanupStaging = cleanupExpiredDicomRemapStaging;
     releaseExpiredRecoveries = releaseExpiredDicomRemapOrthancRecoveryClaims;
+    readRetentionSettings = readDicomRemapRetentionSettings;
     stopped = false;
   },
   normalizeProcessingConcurrency,
