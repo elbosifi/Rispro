@@ -62,6 +62,8 @@ const recall: ComplementaryRecall = {
 const acknowledgedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedAt: "2039-06-15T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One" };
 const contactedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedAt: "2026-09-01T08:30:00.000Z", receptionAcknowledgedByUserId: 7, receptionAcknowledgedByDisplayName: "Reception One", contactAttempts: [{ id: 1, recallRequestId: 42, contactMethod: "phone", contactValue: "0912345678", outcome: "no_answer", note: "Left callback request", followUpAt: "2026-09-01T08:30:00.000Z", recordedByUserId: 7, recordedByDisplayName: "Reception One", createdAt: "2026-09-01T08:30:00.000Z" }] };
 const secondRecall: ComplementaryRecall = { ...recall, id: 43, originalAppointmentId: 10, patientDisplayName: "Patient B", patientEnglishName: "Patient B", patientMrn: "MRN-43", originalAccession: "V2-000010", patientPhone1: "0934567890", patientPhone2: null, contactAttempts: [{ id: 2, recallRequestId: 43, contactMethod: "whatsapp", contactValue: "0934567890", outcome: "reached_agreed", note: null, followUpAt: null, recordedByUserId: 8, recordedByDisplayName: "Reception Two", createdAt: "2026-09-01T09:30:00.000Z" }] };
+const asSeen = (value: ComplementaryRecall): ComplementaryRecall => ({ ...value, receptionSeenAt: "2026-09-01T08:30:00.000Z" });
+const attentionRecall = (id: number, name: string, fields: Partial<ComplementaryRecall> = {}): ComplementaryRecall => asSeen({ ...recall, id, originalAppointmentId: id + 100, patientDisplayName: name, patientEnglishName: name, dueAt: null, ...fields });
 
 function renderPage(mode: "reception" | "doctor") {
   return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><RecallRequestsPage mode={mode} /></QueryClientProvider></MemoryRouter>);
@@ -223,39 +225,54 @@ describe("Recall Requests metadata", () => {
     })));
   });
 
-  it("shows computed operational attention, filters across statuses, and keeps it read-only for doctors", async () => {
-    const overdue = { ...recall, id: 50, patientDisplayName: "Overdue patient", patientEnglishName: "Overdue patient", effectiveDueAt: "2026-08-31T08:00:00.000Z", latestFollowUpAt: "2026-08-31T09:00:00.000Z", isOverdue: true, isFollowUpDue: true, dueAt: null };
-    const dueToday = { ...recall, id: 51, patientDisplayName: "Today patient", patientEnglishName: "Today patient", effectiveDueAt: "2026-09-01T12:00:00.000Z", isDueToday: true, dueAt: null };
-    const scheduledLate = { ...recall, id: 52, patientDisplayName: "Scheduled late patient", patientEnglishName: "Scheduled late patient", status: "scheduled" as const, recallAppointmentId: 99, effectiveDueAt: "2026-09-02T08:00:00.000Z", recallAppointmentDate: "2026-09-03", recallAppointmentTime: "10:00:00", recallAppointmentStartsAt: "2026-09-03T08:00:00.000Z", isOverdue: true, isScheduledAfterTarget: true };
-    mockFetchRecalls.mockResolvedValue([recall, dueToday, scheduledLate, overdue]);
-    mockFetchDoctorRecalls.mockResolvedValue([overdue]);
+  it("filters AR-07 attention, clears it with a status filter, and keeps attention read-only for doctors", async () => {
+    const overdue = attentionRecall(50, "Overdue patient", { effectiveDueAt: "2026-08-31T08:00:00.000Z", latestFollowUpAt: "2026-08-31T09:00:00.000Z", isOverdue: true, isFollowUpDue: true });
+    const dueToday = attentionRecall(51, "Today patient", { effectiveDueAt: "2026-09-01T12:00:00.000Z", isDueToday: true });
+    const scheduledLate = attentionRecall(52, "Scheduled late patient", { status: "scheduled", recallAppointmentId: 99, effectiveDueAt: "2026-09-02T08:00:00.000Z", recallAppointmentDate: "2026-09-03", recallAppointmentTime: "10:00:00", recallAppointmentStartsAt: "2026-09-03T08:00:00.000Z", isOverdue: true, isScheduledAfterTarget: true });
+    mockFetchRecalls.mockResolvedValue([dueToday, scheduledLate, overdue]);
     renderPage("reception");
-
     expect(await screen.findByText("Overdue patient")).toBeTruthy();
-    expect((await screen.findAllByRole("button", { name: /Needs booking/ })).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Due today/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Overdue/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Follow-up due/ })).toBeTruthy();
-    expect(screen.getByText(/^OVERDUE/)).toBeTruthy();
-    expect(screen.getByText(/^FOLLOW-UP DUE/)).toBeTruthy();
-    expect(screen.getAllByText("Target:").length).toBeGreaterThan(0);
-    await userEvent.click(screen.getByRole("button", { name: /Overdue/ }));
-    expect(screen.getByText("Overdue patient")).toBeTruthy();
+    const overdueArticle = screen.getAllByRole("article").find((article) => within(article).queryByText("Overdue patient"))!;
+    expect(within(overdueArticle).getByText(/^OVERDUE/)).toBeTruthy();
+    expect(within(overdueArticle).getByText(/^FOLLOW-UP DUE/)).toBeTruthy();
+    expect(within(overdueArticle).getByText("Target:").parentElement?.textContent).toContain("31/08/2026, 10:00");
+    await userEvent.click(screen.getByRole("button", { name: /^Overdue/ }));
     expect(screen.getByText("Scheduled late patient")).toBeTruthy();
     expect(screen.getByText("SCHEDULED AFTER TARGET")).toBeTruthy();
-    expect(screen.getByText(/Appointment: 03\/09\/2026, 10:00/)).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: /Due today/ }));
-    expect(screen.getByText("Today patient")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /^Scheduled \(1\)$/ }));
+    expect(screen.getByText("Scheduled late patient")).toBeTruthy();
     expect(screen.queryByText("Overdue patient")).toBeNull();
-
   });
 
-  it("shows operational attention read-only for doctors", async () => {
-    const doctorOverdue = { ...recall, effectiveDueAt: "2026-08-31T08:00:00.000Z", isOverdue: true, isFollowUpDue: true };
-    mockFetchDoctorRecalls.mockResolvedValue([doctorOverdue]);
-    renderPage("doctor");
+  it("filters follow-up due and sorts the default and attention queues by their backend-provided values", async () => {
+    const routine = attentionRecall(60, "Routine patient");
+    const dueToday = attentionRecall(61, "Due today patient", { effectiveDueAt: "2026-09-01T12:00:00.000Z", isDueToday: true });
+    const followLater = attentionRecall(62, "Follow later patient", { latestFollowUpAt: "2026-08-31T10:00:00.000Z", isFollowUpDue: true });
+    const followEarlier = attentionRecall(63, "Follow earlier patient", { latestFollowUpAt: "2026-08-31T09:00:00.000Z", isFollowUpDue: true });
+    const overdueLater = attentionRecall(64, "Overdue later patient", { effectiveDueAt: "2026-08-31T09:00:00.000Z", isOverdue: true });
+    const overdueEarlier = attentionRecall(65, "Overdue earlier patient", { effectiveDueAt: "2026-08-31T08:00:00.000Z", isOverdue: true });
+    mockFetchRecalls.mockResolvedValue([routine, dueToday, followLater, overdueLater, followEarlier, overdueEarlier]);
+    renderPage("reception");
+    await screen.findByText("Routine patient");
+    const names = () => screen.getAllByRole("article").map((article) => article.querySelector("h2")?.textContent);
+    expect(names()).toEqual(["Overdue earlier patient", "Overdue later patient", "Follow earlier patient", "Follow later patient", "Due today patient", "Routine patient"]);
+    await userEvent.click(screen.getByRole("button", { name: /^Follow-up due/ }));
+    expect(names()).toEqual(["Follow earlier patient", "Follow later patient"]);
+    await userEvent.click(screen.getByRole("button", { name: /^Overdue/ }));
+    expect(names()).toEqual(["Overdue earlier patient", "Overdue later patient"]);
+  });
 
-    expect(await screen.findByText(/^OVERDUE/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Record contact attempt" })).toBeNull();
+  it("renders Arabic AR-07 labels without mojibake and keeps doctor attention read-only", async () => {
+    const overdue = attentionRecall(70, "Arabic attention patient", { effectiveDueAt: "2026-08-31T08:00:00.000Z", isOverdue: true });
+    languageState.value = "ar";
+    mockFetchRecalls.mockResolvedValue([overdue]);
+    mockFetchDoctorRecalls.mockResolvedValue([overdue]);
+    renderPage("reception");
+    expect((await screen.findAllByText("بحاجة إلى حجز")).length).toBeGreaterThan(0);
+    expect(screen.getByText("مستحق اليوم")).toBeTruthy();
+    expect(screen.getByText("متأخر")).toBeTruthy();
+    expect(screen.getByText("متابعة مستحقة")).toBeTruthy();
+    expect(screen.getAllByText(/^متأخر/).length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("Ø");
   });
 });
