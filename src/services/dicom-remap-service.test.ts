@@ -30,6 +30,7 @@ import {
   previewDicomRemapMultipartUpload,
   prepareDicomRemapSourceRecovery,
   resendDicomRemapJobToPacs,
+  retryFailedDicomRemapWithOrthanc,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
   writeDicomRemapStagedFile,
@@ -747,6 +748,33 @@ test("only positively classified technical failures qualify for automatic Orthan
   assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: unclassified })), false);
   assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH" })), false);
   assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED" })), true);
+});
+
+test("Retry with Orthanc lets a second user claim an eligible job and audits that actor", async () => {
+  const creatorJob = remapJob({
+    id: 77,
+    created_by_user_id: 42,
+    status: "failed",
+    processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED",
+    orthanc_recovery_status: "available",
+    orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    staged_storage_key: "jobs/missing-cross-user-retry",
+    replacement_patient_id: "PAT-77",
+    replacement_patient_name: "Patient^SeventySeven",
+    destination_pacs_key: "PACS_MAIN",
+  });
+  const claimed = remapJob({ ...creatorJob, orthanc_recovery_status: "processing", orthanc_recovery_stage: "validating_staging", orthanc_recovery_attempt_count: 1 });
+  const failed = remapJob({ ...claimed, orthanc_recovery_status: "failed", orthanc_recovery_stage: "failed" });
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
+  const calls = queueQueryResults([{ rows: [creatorJob] }, { rows: [claimed] }, { rows: [claimed] }, { rows: [failed] }]);
+
+  await assert.rejects(() => retryFailedDicomRemapWithOrthanc({ jobId: creatorJob.id, currentUserId: 99 }));
+
+  assert.doesNotMatch(calls[0]!.sql, /created_by_user_id/i);
+  assert.doesNotMatch(calls[1]!.sql, /created_by_user_id/i);
+  assert.equal(creatorJob.created_by_user_id, 42);
+  assert.equal(auditEntries.every((entry) => entry.changedByUserId === 99), true);
 });
 
 test("durable staging allows the 5,428-file sequence and the configured 10,000-file boundary", async () => {
@@ -2284,13 +2312,14 @@ test("cancelDicomRemapJob cancels only an unconfirmed staged draft and audits it
 
   const result = await cancelDicomRemapJob({
     jobId: 1,
-    currentUserId: 42,
+    currentUserId: 99,
     reason: "User reset",
   });
 
   assert.equal(result.job.status, "cancelled");
   assert.equal(result.job.cancellation_reason, "User reset");
   assert.equal(auditEvents.length, 1);
+  assert.equal((auditEvents[0] as { changedByUserId?: number }).changedByUserId, 99);
   assert.match(calls[0]?.sql || "", /status = 'awaiting_confirmation'/i);
   assert.match(calls[0]?.sql || "", /processing_stage = 'awaiting_confirmation'/i);
   assert.match(calls[0]?.sql || "", /staged_manifest_version = \$3/i);
@@ -2532,7 +2561,7 @@ test("resetDicomRemapJob deletes linked source and modified studies, ignores 404
 
   const result = await __dicomRemapTestables.resetDicomRemapJob({
     jobId: 1,
-    currentUserId: 42,
+    currentUserId: 99,
   });
 
   assert.equal(result.job.status, "cancelled");
@@ -2542,6 +2571,7 @@ test("resetDicomRemapJob deletes linked source and modified studies, ignores 404
   assert.equal(result.summary.studiesAlreadyMissing, 1);
   assert.deepEqual(calls.map((call) => call.path), ["/studies/source-study", "/studies/modified-study"]);
   assert.equal(auditEvents.length, 1);
+  assert.equal((auditEvents[0] as { changedByUserId?: number }).changedByUserId, 99);
 });
 
 test("resetDicomRemapJob fails clearly on non-404 Orthanc delete errors", async () => {
@@ -3143,7 +3173,7 @@ test("createDicomRemapUploadJob creates a fresh upload without inspecting anothe
   assert.match(queryCalls[0]?.sql || "", /insert into dicom_remap_jobs/i);
 });
 
-test("confirmDicomRemapAndSend claim failure returns already-sent job without Orthanc calls", async () => {
+test("confirm/send can read another user's already-sent job without Orthanc calls", async () => {
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
   globalThis.fetch = (async () => {
@@ -3151,19 +3181,21 @@ test("confirmDicomRemapAndSend claim failure returns already-sent job without Or
     throw new Error("Orthanc should not be called when confirm claim fails");
   }) as typeof fetch;
   try {
-    queueQueryResults([
+    const calls = queueQueryResults([
       { rows: [] },
       { rows: [remapJob({ status: "sent" })] },
     ]);
 
     const result = await confirmDicomRemapAndSend({
       jobId: 1,
-      currentUserId: 42,
+      currentUserId: 99,
       confirm: true,
     });
 
     assert.equal(result.job.status, "sent");
     assert.equal(fetchCalls, 0);
+    assert.doesNotMatch(calls[1]!.sql, /created_by_user_id/i);
+    assert.equal(result.job.created_by_user_id, 42);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -3227,12 +3259,13 @@ test("resendDicomRemapJobToPacs atomically enqueues an asynchronous Orthanc job"
 
   const result = await resendDicomRemapJobToPacs({
     jobId: 21,
-    currentUserId: 42,
+    currentUserId: 99,
   });
 
   assert.equal(result.job.status, "sending");
   assert.equal(result.job.orthanc_send_job_id, "orthanc-send-21");
   assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_resend_enqueued"), true);
+  assert.equal(auditEntries.find((entry) => entry.actionType === "pacs_resend_enqueued")?.changedByUserId, 99);
 });
 
 test("confirmDicomRemapAndSend blocks partial-study send without the dedicated acknowledgement", async () => {
