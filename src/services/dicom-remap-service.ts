@@ -318,6 +318,7 @@ let orthancBulkModifyAvailableForTests: boolean | null = null;
 let afterRemappedInstanceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
 let afterOrthancRecoverySourceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
 let afterOrthancRecoveryModifyForTests: ((details: { jobId: number; sourceStudyId: string; modifiedStudyId: string }) => void | Promise<void>) | null = null;
+let beforeDicomRemapProcessingCompletionForTests: (() => void | Promise<void>) | null = null;
 let mutateStagedRewriteBeforeIntegrityForTests: ((output: Buffer) => Buffer) | null = null;
 let failDicomSerializationForTests = false;
 
@@ -889,8 +890,9 @@ function sanitizeOrthancErrorResponse(payload: unknown): Record<string, string |
 }
 
 function formatOrthancUploadFailureMessage(_fileName: string, fileIndex: number, response: OrthancFetchResult): string {
-  const shape = describeOrthancPayloadShape(response.json);
-  return `Orthanc rejected File ${fileIndex} during DICOM upload (status=${response.status}, shape=${shape}).`;
+  const message = sanitizeOrthancErrorResponse(response.json).Message;
+  const detail = typeof message === "string" ? ` — ${message}` : "";
+  return `Orthanc rejected File ${fileIndex} (HTTP ${response.status}${detail}).`;
 }
 
 function isOrthancInvalidDicomUploadRejection(response: OrthancFetchResult): boolean {
@@ -1193,7 +1195,7 @@ function inspectMissingPixelSequenceDelimiter(buffer: Buffer): { state: "not_app
   const botGroup = buffer.readUInt16LE(cursor);
   const botElement = buffer.readUInt16LE(cursor + 2);
   const botLength = buffer.readUInt32LE(cursor + 4);
-  if (botGroup !== 0xfffe || botElement !== 0xe000 || botLength === 0xffffffff || cursor + 8 + botLength > buffer.length) return { state: "not_applicable" };
+  if (botGroup !== 0xfffe || botElement !== 0xe000 || botLength === 0xffffffff || botLength % 4 !== 0 || cursor + 8 + botLength > buffer.length) return { state: "not_applicable" };
   cursor += 8 + botLength;
   const payloads: Buffer[] = [];
   let fragmentCount = 0;
@@ -1209,7 +1211,7 @@ function inspectMissingPixelSequenceDelimiter(buffer: Buffer): { state: "not_app
       const payload = hashDicomPixelPayload(payloads);
       return { state: "already_terminated", transferSyntax: fileMeta.transferSyntax, fragmentCount, pixelPayloadSha256: payload.sha256, pixelPayloadLength: payload.byteLength };
     }
-    if (element !== 0xe000 || length === 0xffffffff || cursor + length > buffer.length) return { state: "not_applicable" };
+    if (element !== 0xe000 || length === 0xffffffff || length % 2 !== 0 || cursor + length > buffer.length) return { state: "not_applicable" };
     payloads.push(buffer.subarray(cursor, cursor + length));
     fragmentCount += 1;
     cursor += length;
@@ -3374,7 +3376,7 @@ function processingErrorCode(error: unknown): string {
     const code = String((error.details as { code?: unknown } | null)?.code || "");
     if (code.startsWith("DICOM_REMAP_")) return code;
   }
-  return "DICOM_REMAP_ORTHANC_UPLOAD_FAILED";
+  return "DICOM_REMAP_PROCESSING_UNCLASSIFIED";
 }
 
 function processingErrorMessage(code: string): string {
@@ -3395,6 +3397,7 @@ function processingErrorMessage(code: string): string {
     DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT: "Orthanc reported a conflicting remapped instance.",
     DICOM_REMAP_ORTHANC_VERIFICATION_FAILED: "Orthanc could not verify the remapped study.",
     DICOM_REMAP_IDENTITY_VERIFICATION_FAILED: "Orthanc did not verify the selected replacement identity.",
+    DICOM_REMAP_PROCESSING_UNCLASSIFIED: "DICOM remap processing failed unexpectedly.",
     DICOM_REMAP_PROCESSING_LEASE_LOST: "DICOM remap processing lease was lost and will be recovered safely.",
   };
   return messages[code] || "DICOM remap processing failed.";
@@ -3455,6 +3458,9 @@ const ORTHANC_RECOVERY_ELIGIBLE_PROCESSING_ERRORS = new Set([
   "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED",
   "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED",
   "DICOM_REMAP_MULTIFRAME_OBJECT_FAILED",
+  // Operators may explicitly decide whether a preserved source is safe to recover.
+  // This intentionally remains outside the automatic-fallback allowlist below.
+  "DICOM_REMAP_PROCESSING_UNCLASSIFIED",
 ]);
 
 // Automatic fallback is intentionally narrower than operator-invoked recovery.
@@ -4259,6 +4265,8 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
     if (!hasExpectedRemappedPatientId(summary, replacement.patientId)) throw new HttpError(502, "Orthanc did not verify replacement PatientID.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
 
     const requiresAcknowledgement = Boolean(finalSelectionCounts.partial || finalSelectionCounts.completenessUncertain);
+
+    if (beforeDicomRemapProcessingCompletionForTests) await beforeDicomRemapProcessingCompletionForTests();
 
     const remapped = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = $13, processing_stage = $14, source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processed_file_count = $15, processing_selection_counts = $12::jsonb, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, dicom_integrity_version = $16, dicom_integrity_verified_at = now(), orthanc_recovery_status = 'none', orthanc_recovery_expires_at = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
@@ -6066,6 +6074,7 @@ export const __dicomRemapTestables = {
   hasCurrentDicomIntegrityVerification,
   hasUnexpiredOrthancRecovery,
   isOrthancRecoveryEligibleProcessingError,
+  processingErrorCode,
   readOrthancModifiedFromStudyId,
   findProvenOrthancRecoveryModifiedChildren,
   isOrthancBulkModifyRouteAvailable,
@@ -6110,6 +6119,9 @@ export const __dicomRemapTestables = {
   setAfterOrthancRecoveryModifyForTests(hook: ((details: { jobId: number; sourceStudyId: string; modifiedStudyId: string }) => void | Promise<void>) | null): void {
     afterOrthancRecoveryModifyForTests = hook;
   },
+  setBeforeDicomRemapProcessingCompletionForTests(hook: (() => void | Promise<void>) | null): void {
+    beforeDicomRemapProcessingCompletionForTests = hook;
+  },
   setMutateStagedRewriteBeforeIntegrityForTests(hook: ((output: Buffer) => Buffer) | null): void {
     mutateStagedRewriteBeforeIntegrityForTests = hook;
   },
@@ -6127,6 +6139,7 @@ export const __dicomRemapTestables = {
     afterRemappedInstanceUploadForTests = null;
     afterOrthancRecoverySourceUploadForTests = null;
     afterOrthancRecoveryModifyForTests = null;
+    beforeDicomRemapProcessingCompletionForTests = null;
     mutateStagedRewriteBeforeIntegrityForTests = null;
     failDicomSerializationForTests = false;
   },

@@ -518,12 +518,38 @@ test("Orthanc recovery repairs only a proven missing JPEG pixel delimiter withou
   const original = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9]));
   const missingDelimiter = removeTerminalPixelDelimiter(original);
   const prepared = __dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(missingDelimiter);
+  const readAttributes = (body: Buffer) => {
+    const parsed = DicomMessage.readFile(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
+    const dataset = DicomMetaDictionary.naturalizeDataset(parsed.dict) as Record<string, unknown>;
+    const meta = DicomMetaDictionary.naturalizeDataset(parsed.meta) as Record<string, unknown>;
+    return Object.fromEntries([
+      ["TransferSyntaxUID", meta.TransferSyntaxUID],
+      ["StudyInstanceUID", dataset.StudyInstanceUID],
+      ["SeriesInstanceUID", dataset.SeriesInstanceUID],
+      ["SOPInstanceUID", dataset.SOPInstanceUID],
+      ["Rows", dataset.Rows],
+      ["Columns", dataset.Columns],
+      ["SamplesPerPixel", dataset.SamplesPerPixel],
+      ["PhotometricInterpretation", dataset.PhotometricInterpretation],
+      ["BitsAllocated", dataset.BitsAllocated],
+      ["BitsStored", dataset.BitsStored],
+      ["HighBit", dataset.HighBit],
+      ["PixelRepresentation", dataset.PixelRepresentation],
+    ]);
+  };
+  const before = readAttributes(original);
+  const beforePixel = __dicomRemapTestables.inspectMissingPixelSequenceDelimiter(original);
   assert.equal(prepared.structurallyRepaired, true);
   assert.equal(prepared.body.length, missingDelimiter.length + 8);
   assert.equal(prepared.body.subarray(0, missingDelimiter.length).equals(missingDelimiter), true);
   assert.equal(prepared.body.subarray(-8).equals(Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0, 0, 0, 0])), true);
   assert.equal(prepared.pixelPayloadSha256, createHash("sha256").update(Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9, 0x00])).digest("hex"));
-  assert.equal(__dicomRemapTestables.inspectMissingPixelSequenceDelimiter(prepared.body).state, "already_terminated");
+  const afterPixel = __dicomRemapTestables.inspectMissingPixelSequenceDelimiter(prepared.body);
+  assert.equal(afterPixel.state, "already_terminated");
+  assert.deepEqual(readAttributes(prepared.body), before);
+  assert.equal(afterPixel.pixelPayloadSha256, beforePixel.pixelPayloadSha256);
+  assert.equal(afterPixel.pixelPayloadLength, beforePixel.pixelPayloadLength);
+  assert.equal(afterPixel.fragmentCount, beforePixel.fragmentCount);
   assert.equal(__dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(original).body.equals(original), true);
 });
 
@@ -537,6 +563,12 @@ test("Orthanc recovery delimiter repair rejects non-JPEG, native, truncated, une
     Buffer.concat([missing.subarray(0, -1)]),
     removeTerminalPixelDelimiter(makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd8]))),
   ];
+  const pixelOffset = missing.indexOf(Buffer.from([0xe0, 0x7f, 0x10, 0x00])) + 12;
+  const oddBasicOffsetTable = Buffer.from(missing);
+  oddBasicOffsetTable.writeUInt32LE(2, pixelOffset + 4);
+  const oddFragmentLength = Buffer.from(missing);
+  oddFragmentLength.writeUInt32LE(5, pixelOffset + 12);
+  cases.push(oddBasicOffsetTable, oddFragmentLength);
   for (const body of cases) {
     const prepared = __dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(body);
     assert.equal(prepared.structurallyRepaired, false);
@@ -561,6 +593,23 @@ test("Orthanc upload sanitizer preserves only allowlisted safe error fields", ()
   const truncated = __dicomRemapTestables.sanitizeOrthancErrorResponse({ Details: "x".repeat(999) }).Details;
   assert.equal(typeof truncated === "string" ? truncated.length : 0, 320);
   assert.deepEqual(__dicomRemapTestables.sanitizeOrthancErrorResponse({ Details: "Authorization: Bearer secret" }), {});
+});
+
+test("only positively classified technical failures qualify for automatic Orthanc recovery", () => {
+  const unclassified = __dicomRemapTestables.processingErrorCode(new Error("unexpected failure"));
+  assert.equal(unclassified, "DICOM_REMAP_PROCESSING_UNCLASSIFIED");
+  assert.equal(__dicomRemapTestables.isOrthancRecoveryEligibleProcessingError(unclassified), true, "operators retain the manual recovery option");
+  const available = {
+    status: "failed" as const,
+    orthanc_recovery_status: "available" as const,
+    staged_storage_key: "jobs/preserved",
+    staging_cleanup_completed_at: null,
+    orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    orthanc_recovery_attempt_count: 0,
+  };
+  assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: unclassified })), false);
+  assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH" })), false);
+  assert.equal(__dicomRemapTestables.shouldAutomaticallyAttemptOrthancRecovery(remapJob({ ...available, processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED" })), true);
 });
 
 test("durable staging allows the 5,428-file sequence and the configured 10,000-file boundary", async () => {
@@ -839,9 +888,14 @@ test("dicom helper: upload failure message uses a generated label and omits raw 
 
   assert.doesNotMatch(message, /bad\.dcm/);
   assert.match(message, /File 7/);
-  assert.match(message, /status=400/);
+  assert.match(message, /HTTP 400/);
   assert.doesNotMatch(message, /invalid string length/);
   assert.doesNotMatch(message, /secret-token/);
+
+  assert.equal(
+    __dicomRemapTestables.formatOrthancUploadFailureMessage("bad.dcm", 1, orthancResult({ status: 400, ok: false, json: { Message: "Bad file format", Details: "safe technical detail" } })),
+    "Orthanc rejected File 1 (HTTP 400 — Bad file format)."
+  );
 });
 
 test("dicom helper: patient sex and birth date normalization", () => {

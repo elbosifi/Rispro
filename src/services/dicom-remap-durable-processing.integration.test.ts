@@ -94,6 +94,37 @@ function syntheticDicom(sopInstanceUid: string, overrides: Record<string, unknow
   }));
 }
 
+function syntheticEncapsulatedDicom(sopInstanceUid: string): Buffer {
+  const payload = new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9]);
+  return Buffer.from(datasetToBuffer({
+    _meta: { TransferSyntaxUID: { vr: "UI", Value: ["1.2.840.10008.1.2.4.70"] } },
+    _vrMap: { PixelData: "OB" },
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.2",
+    SOPInstanceUID: sopInstanceUid,
+    StudyInstanceUID: "1.2.840.10008.1.2.3.4.5",
+    SeriesInstanceUID: "1.2.840.10008.1.2.3.4.5.1",
+    PatientID: "SOURCE-ID",
+    PatientName: "Source^Patient",
+    PatientSex: "M",
+    PatientBirthDate: "19900101",
+    Rows: 1,
+    Columns: 1,
+    SamplesPerPixel: 1,
+    PhotometricInterpretation: "MONOCHROME2",
+    BitsAllocated: 16,
+    BitsStored: 16,
+    HighBit: 15,
+    PixelRepresentation: 0,
+    PixelData: [payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)],
+  }));
+}
+
+function removeTerminalPixelDelimiter(buffer: Buffer): Buffer {
+  const delimiter = Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0x00, 0x00, 0x00, 0x00]);
+  assert.equal(buffer.subarray(-delimiter.length).equals(delimiter), true);
+  return Buffer.from(buffer.subarray(0, -delimiter.length));
+}
+
 function parseDicom(buffer: Buffer): { study: string; series: string; sop: string; patientId: string; patientName: string; patientSex: string; patientBirthDate: string } {
   const parsed = DicomMessage.readFile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as { dict: Record<string, unknown> };
   const dataset = DicomMetaDictionary.naturalizeDataset(parsed.dict) as Record<string, unknown>;
@@ -726,6 +757,60 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
     await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id = $1`, [integrityJobId]);
     await pool.query(`delete from dicom_remap_jobs where id = $1`, [integrityJobId]);
 
+    resetFakeOrthancState(fake.state, { uploadFailureAfterAccepted: 0 });
+    __dicomRemapTestables.setFailDicomSerializationForTests(true);
+    const failedRecoveryForm = new FormData();
+    failedRecoveryForm.append("files", new Blob([new Uint8Array(sourceA)], { type: "application/dicom" }), "recovery-failure.dcm");
+    failedRecoveryForm.append("selectedStudyInstanceUID", "1.2.840.10008.1.2.3.4.5");
+    failedRecoveryForm.append("risproPatientId", String(patientId));
+    failedRecoveryForm.append("destinationPacsKey", "PACS_TEST");
+    failedRecoveryForm.append("confirm", "true");
+    const failedRecoveryUpload = await fetch(`${risproUrl}/api/pacs/remap/jobs/process-multipart`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` }, body: failedRecoveryForm });
+    assert.equal(failedRecoveryUpload.status, 202);
+    const failedRecoveryPayload = await failedRecoveryUpload.json() as { job: { id: number; staged_storage_key: string } };
+    const failedRecoveryJobId = Number(failedRecoveryPayload.job.id);
+    jobIds.push(failedRecoveryJobId);
+    const failedRecoveryDirectory = path.join(stagingRoot, failedRecoveryPayload.job.staged_storage_key);
+    const failedRecoveryManifest = await fs.readFile(path.join(failedRecoveryDirectory, "manifest.json"), "utf8");
+    const failedRecoveryRelativePath = (JSON.parse(failedRecoveryManifest) as { files: Array<{ relativePath: string }> }).files[0]!.relativePath;
+    const failedRecoveryFile = await fs.readFile(path.join(failedRecoveryDirectory, failedRecoveryRelativePath));
+    const failedRecoveryRun = await runDicomRemapProcessingWorkerTick({ owner: "matrix-recovery-failure", batchSize: 1, leaseSeconds: 120 });
+    assert.deepEqual(failedRecoveryRun, { claimed: 1, completed: 0, failed: 1 });
+    const failedRecoveryRow = await pool.query<{ status: string; orthanc_recovery_status: string; orthanc_recovery_attempt_count: number; staging_cleanup_completed_at: string | null; orthanc_send_job_id: string | null }>(`select status, orthanc_recovery_status, orthanc_recovery_attempt_count, staging_cleanup_completed_at, orthanc_send_job_id from dicom_remap_jobs where id = $1`, [failedRecoveryJobId]);
+    assert.deepEqual(failedRecoveryRow.rows[0], { status: "failed", orthanc_recovery_status: "failed", orthanc_recovery_attempt_count: 1, staging_cleanup_completed_at: null, orthanc_send_job_id: null });
+    assert.equal(fake.state.sendCount, 0);
+    assert.equal((await fs.readFile(path.join(failedRecoveryDirectory, "manifest.json"), "utf8")), failedRecoveryManifest);
+    assert.equal(Buffer.compare(await fs.readFile(path.join(failedRecoveryDirectory, failedRecoveryRelativePath)), failedRecoveryFile), 0);
+    assert.deepEqual(await runDicomRemapProcessingWorkerTick({ owner: "matrix-no-auto-retry", batchSize: 1, leaseSeconds: 120 }), { claimed: 0, completed: 0, failed: 0 });
+    assert.equal(Number((await pool.query<{ orthanc_recovery_attempt_count: number }>(`select orthanc_recovery_attempt_count from dicom_remap_jobs where id = $1`, [failedRecoveryJobId])).rows[0]?.orthanc_recovery_attempt_count), 1);
+    __dicomRemapTestables.setFailDicomSerializationForTests(false);
+    await fs.rm(failedRecoveryDirectory, { recursive: true, force: true });
+    await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id = $1`, [failedRecoveryJobId]);
+    await pool.query(`delete from dicom_remap_jobs where id = $1`, [failedRecoveryJobId]);
+
+    resetFakeOrthancState(fake.state);
+    __dicomRemapTestables.setBeforeDicomRemapProcessingCompletionForTests(() => { throw new Error("unexpected primary processing error"); });
+    const unclassifiedForm = new FormData();
+    unclassifiedForm.append("files", new Blob([new Uint8Array(sourceA)], { type: "application/dicom" }), "unclassified.dcm");
+    unclassifiedForm.append("selectedStudyInstanceUID", "1.2.840.10008.1.2.3.4.5");
+    unclassifiedForm.append("risproPatientId", String(patientId));
+    unclassifiedForm.append("destinationPacsKey", "PACS_TEST");
+    unclassifiedForm.append("confirm", "true");
+    const unclassifiedUpload = await fetch(`${risproUrl}/api/pacs/remap/jobs/process-multipart`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` }, body: unclassifiedForm });
+    assert.equal(unclassifiedUpload.status, 202);
+    const unclassifiedPayload = await unclassifiedUpload.json() as { job: { id: number; staged_storage_key: string } };
+    const unclassifiedJobId = Number(unclassifiedPayload.job.id);
+    jobIds.push(unclassifiedJobId);
+    const unclassifiedRun = await runDicomRemapProcessingWorkerTick({ owner: "matrix-unclassified", batchSize: 1, leaseSeconds: 120 });
+    assert.deepEqual(unclassifiedRun, { claimed: 1, completed: 0, failed: 1 });
+    const unclassifiedRow = await pool.query<{ status: string; processing_error_code: string; orthanc_recovery_status: string; orthanc_recovery_attempt_count: number; orthanc_send_job_id: string | null }>(`select status, processing_error_code, orthanc_recovery_status, orthanc_recovery_attempt_count, orthanc_send_job_id from dicom_remap_jobs where id = $1`, [unclassifiedJobId]);
+    assert.deepEqual(unclassifiedRow.rows[0], { status: "failed", processing_error_code: "DICOM_REMAP_PROCESSING_UNCLASSIFIED", orthanc_recovery_status: "available", orthanc_recovery_attempt_count: 0, orthanc_send_job_id: null });
+    assert.equal(fake.state.sendCount, 0);
+    __dicomRemapTestables.setBeforeDicomRemapProcessingCompletionForTests(null);
+    await fs.rm(path.join(stagingRoot, unclassifiedPayload.job.staged_storage_key), { recursive: true, force: true });
+    await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id = $1`, [unclassifiedJobId]);
+    await pool.query(`delete from dicom_remap_jobs where id = $1`, [unclassifiedJobId]);
+
     const scenarios: Array<{ name: string; scenario: FakeOrthancScenario; code: string; verificationReason?: string }> = [
       { name: "wrong Study Instance UID", scenario: { returnedStudyUid: "1.2.3.999" }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "STUDY_UID_MISMATCH" },
       { name: "wrong replacement identity", scenario: { returnedPatientId: "WRONG-ID" }, code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" },
@@ -749,7 +834,7 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
       jobIds.push(jobId);
       const result = await runDicomRemapProcessingWorkerTick({ owner: `matrix-${scenarioCase.name}`, batchSize: 1, leaseSeconds: 120 });
       assert.equal(result.failed, 1, scenarioCase.name);
-      const row = await pool.query<{ status: string; processing_stage: string; processing_error_code: string; processing_lease_owner: string | null; processing_lease_expires_at: string | null; modified_orthanc_study_id: string | null; orthanc_send_job_id: string | null; processing_error_details: unknown; orthanc_recovery_status: string; orthanc_recovery_expires_at: string | null; staging_cleanup_completed_at: string | null }>(`select status, processing_stage, processing_error_code, processing_lease_owner, processing_lease_expires_at, modified_orthanc_study_id, orthanc_send_job_id, processing_error_details, orthanc_recovery_status, orthanc_recovery_expires_at, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
+      const row = await pool.query<{ status: string; processing_stage: string; processing_error_code: string; processing_lease_owner: string | null; processing_lease_expires_at: string | null; modified_orthanc_study_id: string | null; orthanc_send_job_id: string | null; processing_error_details: unknown; orthanc_recovery_status: string; orthanc_recovery_attempt_count: number; orthanc_recovery_expires_at: string | null; staging_cleanup_completed_at: string | null }>(`select status, processing_stage, processing_error_code, processing_lease_owner, processing_lease_expires_at, modified_orthanc_study_id, orthanc_send_job_id, processing_error_details, orthanc_recovery_status, orthanc_recovery_attempt_count, orthanc_recovery_expires_at, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
       assert.equal(row.rows[0]?.status, "failed", scenarioCase.name);
       assert.equal(row.rows[0]?.processing_stage, "failed", scenarioCase.name);
       assert.equal(row.rows[0]?.processing_error_code, scenarioCase.code, scenarioCase.name);
@@ -758,6 +843,7 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
       assert.equal(row.rows[0]?.modified_orthanc_study_id, null, scenarioCase.name);
       assert.equal(row.rows[0]?.orthanc_send_job_id, null, scenarioCase.name);
       assert.equal(row.rows[0]?.orthanc_recovery_status, "available", scenarioCase.name);
+      assert.equal(row.rows[0]?.orthanc_recovery_attempt_count, 0, scenarioCase.name);
       assert.ok(row.rows[0]?.orthanc_recovery_expires_at, scenarioCase.name);
       assert.equal(row.rows[0]?.staging_cleanup_completed_at, null, scenarioCase.name);
       await fs.access(path.join(stagingRoot, payload.job.staged_storage_key, "manifest.json"));
@@ -831,7 +917,7 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     const risproUrl = `http://127.0.0.1:${address.port}`;
     const token = jwt.sign({ sub: userId, role: "supervisor", username, fullName: `DICOM Recovery ${suffix}` }, env.jwtSecret);
     const sourceA = syntheticDicom("1.2.840.10008.1.2.3.4.5.31");
-    const sourceB = syntheticDicom("1.2.840.10008.1.2.3.4.5.32");
+    const sourceB = removeTerminalPixelDelimiter(syntheticEncapsulatedDicom("1.2.840.10008.1.2.3.4.5.32"));
     const form = new FormData();
     form.append("files", new Blob([new Uint8Array(sourceA)], { type: "application/dicom" }), "recovery-a.dcm");
     form.append("files", new Blob([new Uint8Array(sourceB)], { type: "application/dicom" }), "recovery-b.dcm");
@@ -844,6 +930,8 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     const payload = await upload.json() as { job: { id: number; staged_storage_key: string } };
     jobId = Number(payload.job.id);
     storageKey = payload.job.staged_storage_key;
+    const stagedManifestBeforeRecovery = await fs.readFile(path.join(stagingRoot, storageKey, "manifest.json"), "utf8");
+    const stagedFilesBeforeRecovery = await Promise.all((JSON.parse(stagedManifestBeforeRecovery) as { files: Array<{ relativePath: string }> }).files.map(async (file) => ({ relativePath: file.relativePath, body: await fs.readFile(path.join(stagingRoot, storageKey, file.relativePath)) })));
     await pool.query(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = 'DICOM_REMAP_PIXEL_INTEGRITY_FAILED', processing_error_details = '{"code":"DICOM_REMAP_PIXEL_INTEGRITY_FAILED","failedInvariant":"TransferSyntaxUID"}'::jsonb, orthanc_recovery_status = 'available', orthanc_recovery_expires_at = now() + interval '7 days' where id = $1`, [jobId]);
 
     let interrupted = false;
@@ -883,7 +971,8 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(fake.state.allStudiesListCount, 0);
     assert.deepEqual(fake.state.lastToolsFindBody, { Level: "Study", Query: { PatientID: recovered.job.replacement_patient_id, StudyDate: "20260813", AccessionNumber: "RECOVERY-1" } });
     assert.equal(Buffer.compare(fake.state.uploadRecords[0]!.body, sourceA), 0);
-    assert.equal(Buffer.compare(fake.state.uploadRecords[1]!.body, sourceB), 0);
+    assert.equal(fake.state.uploadRecords[1]!.body.subarray(0, sourceB.length).equals(sourceB), true);
+    assert.equal(fake.state.uploadRecords[1]!.body.subarray(-8).equals(Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0, 0, 0, 0])), true);
     const persisted = await pool.query<{ orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string; dicom_integrity_version: number; orthanc_recovery_status: string; staging_cleanup_completed_at: string | null }>(`select orthanc_recovery_source_study_id, modified_orthanc_study_id, dicom_integrity_version, orthanc_recovery_status, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
     assert.equal(persisted.rows[0]?.orthanc_recovery_source_study_id, fake.state.studyId);
     assert.equal(persisted.rows[0]?.modified_orthanc_study_id, fake.state.modifiedStudyId);
@@ -891,6 +980,8 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(persisted.rows[0]?.orthanc_recovery_status, "completed");
     assert.equal(persisted.rows[0]?.staging_cleanup_completed_at, null);
     await fs.access(path.join(stagingRoot, storageKey, "manifest.json"));
+    assert.equal(await fs.readFile(path.join(stagingRoot, storageKey, "manifest.json"), "utf8"), stagedManifestBeforeRecovery);
+    for (const staged of stagedFilesBeforeRecovery) assert.equal(Buffer.compare(await fs.readFile(path.join(stagingRoot, storageKey, staged.relativePath)), staged.body), 0);
 
     const repeatedResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
     assert.equal(repeatedResponse.status, 202);
@@ -921,6 +1012,31 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(fake.state.modifyCount, 1);
     assert.equal(fake.state.sendCount, 0);
     await fs.access(path.join(stagingRoot, storageKey, "manifest.json"));
+    assert.equal(await fs.readFile(path.join(stagingRoot, storageKey, "manifest.json"), "utf8"), stagedManifestBeforeRecovery);
+    for (const staged of stagedFilesBeforeRecovery) assert.equal(Buffer.compare(await fs.readFile(path.join(stagingRoot, storageKey, staged.relativePath)), staged.body), 0);
+
+    resetFakeOrthancState(fake.state);
+    const jobCountBeforeHistoricalRetry = Number((await pool.query<{ count: string }>(`select count(*)::text as count from dicom_remap_jobs where created_by_user_id = $1`, [userId])).rows[0]?.count || 0);
+    await pool.query(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = 'DICOM_REMAP_PIXEL_INTEGRITY_FAILED', orthanc_recovery_status = 'failed', orthanc_recovery_stage = 'failed', orthanc_recovery_attempt_count = 4, orthanc_recovery_source_study_id = null, source_orthanc_study_id = null, modified_orthanc_study_id = null, orthanc_recovery_error_code = 'DICOM_REMAP_ORTHANC_RECOVERY_FAILED', orthanc_recovery_error_details = '{"code":"DICOM_REMAP_ORTHANC_RECOVERY_FAILED"}'::jsonb, orthanc_recovery_expires_at = now() + interval '7 days', staging_cleanup_completed_at = null, dicom_integrity_version = null, dicom_integrity_verified_at = null where id = $1`, [jobId]);
+    const historicalResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
+    assert.equal(historicalResponse.status, 202);
+    const historical = await historicalResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>;
+    assert.equal(Number(historical.job.id), jobId);
+    assert.equal(historical.job.status, "sending");
+    assert.equal(historical.job.orthanc_recovery_attempt_count, 5);
+    assert.equal(historical.job.orthanc_recovery_status, "completed");
+    assert.equal(Number((await pool.query<{ count: string }>(`select count(*)::text as count from dicom_remap_jobs where created_by_user_id = $1`, [userId])).rows[0]?.count || 0), jobCountBeforeHistoricalRetry);
+    assert.equal(fake.state.sendCount, 1);
+    assert.equal(fake.state.uploadRecords.length, 2);
+    assert.equal(Buffer.compare(fake.state.uploadRecords[0]!.body, sourceA), 0);
+    assert.equal(fake.state.uploadRecords[1]!.body.subarray(0, sourceB.length).equals(sourceB), true);
+    assert.equal(fake.state.uploadRecords[1]!.body.subarray(-8).equals(Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0, 0, 0, 0])), true);
+    assert.equal(await fs.readFile(path.join(stagingRoot, storageKey, "manifest.json"), "utf8"), stagedManifestBeforeRecovery);
+    for (const staged of stagedFilesBeforeRecovery) assert.equal(Buffer.compare(await fs.readFile(path.join(stagingRoot, storageKey, staged.relativePath)), staged.body), 0);
+    const repeatedHistoricalResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
+    assert.equal(repeatedHistoricalResponse.status, 202);
+    assert.equal((await repeatedHistoricalResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>).job.orthanc_send_job_id, historical.job.orthanc_send_job_id);
+    assert.equal(fake.state.sendCount, 1);
   } finally {
     __dicomRemapTestables.resetTestOverrides();
     __resetOrthancPacsFetchForTests();
