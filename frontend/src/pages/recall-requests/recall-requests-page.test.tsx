@@ -6,18 +6,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import RecallRequestsPage from "./recall-requests-page";
 
-const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn() }));
+const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen, mockSendReception, mockSendDoctor } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn(), mockSendReception: vi.fn(), mockSendDoctor: vi.fn() }));
 const languageState = vi.hoisted(() => ({ value: "en" as "en" | "ar" }));
 
 vi.mock("@/lib/api/complementary-recalls", () => ({
   fetchComplementaryRecalls: mockFetchRecalls,
   acknowledgeComplementaryRecall: mockAcknowledge,
   recordComplementaryRecallContactAttempt: mockRecordContact,
+  sendComplementaryRecallCompletionEmail: mockSendReception,
   withdrawComplementaryRecall: vi.fn(),
 }));
 vi.mock("@/lib/api/doctor-portal-reporting", () => ({
   fetchDoctorComplementaryRecalls: mockFetchDoctorRecalls,
   updateDoctorComplementaryRecallInstructions: mockUpdateRecall,
+  sendDoctorComplementaryRecallCompletionEmail: mockSendDoctor,
   withdrawComplementaryRecallRequest: vi.fn(),
 }));
 vi.mock("@/lib/api-hooks", () => ({ markComplementaryRecallsSeen: mockMarkSeen }));
@@ -64,6 +66,9 @@ const contactedRecall: ComplementaryRecall = { ...recall, receptionSeenAt: "2026
 const secondRecall: ComplementaryRecall = { ...recall, id: 43, originalAppointmentId: 10, patientDisplayName: "Patient B", patientEnglishName: "Patient B", patientMrn: "MRN-43", originalAccession: "V2-000010", patientPhone1: "0934567890", patientPhone2: null, contactAttempts: [{ id: 2, recallRequestId: 43, contactMethod: "whatsapp", contactValue: "0934567890", outcome: "reached_agreed", note: null, followUpAt: null, recordedByUserId: 8, recordedByDisplayName: "Reception Two", createdAt: "2026-09-01T09:30:00.000Z" }] };
 const asSeen = (value: ComplementaryRecall): ComplementaryRecall => ({ ...value, receptionSeenAt: "2026-09-01T08:30:00.000Z" });
 const attentionRecall = (id: number, name: string, fields: Partial<ComplementaryRecall> = {}): ComplementaryRecall => asSeen({ ...recall, id, originalAppointmentId: id + 100, patientDisplayName: name, patientEnglishName: name, dueAt: null, ...fields });
+type CompletionNotification = NonNullable<ComplementaryRecall["completionEmailNotification"]>;
+const completionNotification = (overrides: Partial<CompletionNotification> = {}): CompletionNotification => ({ recipientUserId: 18, recipientDisplayName: "Reporting Doctor", recipientEmail: "reporting@example.test", hasAccepted: false, acceptedAt: null, latestStatus: null, latestCreatedAt: null, latestAcceptedAt: null, sendCount: 0, ...overrides });
+const completedRecall = (notification: CompletionNotification): ComplementaryRecall => ({ ...recall, status: "completed", recallAppointmentId: 19, scheduledAt: "2039-06-15T09:00:00.000Z", completedAt: "2039-06-15T10:00:00.000Z", receptionSeenAt: "2039-06-15T10:00:00.000Z", completionEmailNotification: notification });
 
 function renderPage(mode: "reception" | "doctor") {
   return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><RecallRequestsPage mode={mode} /></QueryClientProvider></MemoryRouter>);
@@ -78,11 +83,16 @@ describe("Recall Requests metadata", () => {
     mockAcknowledge.mockReset();
     mockRecordContact.mockReset();
     mockMarkSeen.mockReset();
+    mockSendReception.mockReset();
+    mockSendDoctor.mockReset();
     mockFetchRecalls.mockResolvedValue([recall]);
     mockFetchDoctorRecalls.mockResolvedValue([recall]);
     mockUpdateRecall.mockResolvedValue(recall);
     mockAcknowledge.mockResolvedValue(acknowledgedRecall);
     mockRecordContact.mockResolvedValue(contactedRecall.contactAttempts[0]);
+    mockMarkSeen.mockImplementation(() => new Promise<void>(() => undefined));
+    mockSendReception.mockResolvedValue({ status: "pending" });
+    mockSendDoctor.mockResolvedValue({ status: "pending" });
   });
 
   it("shows live patient phones, empty contact state, and the reception action", async () => {
@@ -274,5 +284,73 @@ describe("Recall Requests metadata", () => {
     expect(screen.getByText("متابعة مستحقة")).toBeTruthy();
     expect(screen.getAllByText(/^متأخر/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain("Ø");
+  });
+  it("shows an unnotified completed request and sends through the reception endpoint", async () => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ recipientDisplayName: "Doctor A" }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(await screen.findByText("No email sent")).toBeTruthy();
+    expect(screen.getByText("Assigned doctor: Doctor A")).toBeTruthy();
+    expect(screen.getByText("Email: reporting@example.test")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Send notification email now" }));
+    await waitFor(() => expect(mockSendReception).toHaveBeenCalledWith(42, { forceResend: false }));
+  });
+
+  it("shows no usable send action when the assigned doctor has no email address", async () => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ recipientDisplayName: "Doctor A", recipientEmail: null }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(await screen.findByText("No email address configured.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Send notification email/ })).toBeNull();
+  });
+
+  it("maps accepted status and confirms a resend before calling the reception endpoint", async () => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ hasAccepted: true, latestStatus: "accepted", acceptedAt: "2039-06-15T10:30:00.000Z", latestAcceptedAt: "2039-06-15T10:30:00.000Z", latestCreatedAt: "2039-06-15T10:30:00.000Z", sendCount: 1 }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(await screen.findByText("Accepted by mail server")).toBeTruthy();
+    expect(screen.getByText(/Accepted:/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Send notification email again" }));
+    expect(mockSendReception).not.toHaveBeenCalled();
+    expect(await screen.findByText("Send notification email again?")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Send again" }));
+    await waitFor(() => expect(mockSendReception).toHaveBeenCalledWith(42, { forceResend: true }));
+  });
+
+  it.each([["pending", "Email queued"], ["processing", "Sending"], ["retry_scheduled", "Retry scheduled"]] as const)("disables duplicate sends while the current job is %s", async (latestStatus, label) => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ latestStatus }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(await screen.findByText(label)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Send notification email/ })).toHaveProperty("disabled", true);
+  });
+
+  it("allows a failed notification to be sent again without accepted confirmation", async () => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ latestStatus: "failed" }))]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(await screen.findByText("Email failed")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Send notification email again" }));
+    await waitFor(() => expect(mockSendReception).toHaveBeenCalledWith(42, { forceResend: false }));
+    expect(screen.queryByText("Send notification email again?")).toBeNull();
+  });
+
+  it("omits completion-email actions for unassigned and non-completed requests", async () => {
+    mockFetchRecalls.mockResolvedValue([completedRecall(completionNotification({ recipientUserId: null, recipientDisplayName: null, recipientEmail: null })), { ...recall, id: 44, status: "scheduled", receptionSeenAt: "2039-06-15T10:00:00.000Z" }, { ...recall, id: 45, status: "cancelled", receptionSeenAt: "2039-06-15T10:00:00.000Z" }]);
+    renderPage("reception");
+    await userEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(await screen.findByText("No active reporting doctor assigned.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Send notification email/ })).toBeNull();
+    expect(screen.getAllByText("Email notification")).toHaveLength(1);
+  });
+
+  it("uses the doctor endpoint and refreshes status after a successful send", async () => {
+    mockFetchDoctorRecalls.mockResolvedValueOnce([completedRecall(completionNotification())]).mockResolvedValue([completedRecall(completionNotification({ latestStatus: "pending" }))]);
+    renderPage("doctor");
+    await userEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send notification email now" }));
+    await waitFor(() => expect(mockSendDoctor).toHaveBeenCalledWith(42, { forceResend: false }));
+    await waitFor(() => expect(mockFetchDoctorRecalls.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText("Email queued")).toBeTruthy();
   });
 });
