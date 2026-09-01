@@ -84,6 +84,35 @@ describe("workflow timestamp mapping", () => {
     expect(legacy.latestDocumentAt).toBeNull();
   });
 
+  it("maps appointment reporting and reciprocal additional-imaging context", () => {
+    const mapped = mapAppointmentWithDetails({
+      assigned_reporting_doctor_id: 9,
+      assigned_reporting_doctor_name: "Dr Noor",
+      reporting_assignment_status: "assigned",
+      report_status: "draft",
+      report_status_checked_at: "2026-09-01T10:00:00Z",
+      complementary_imaging_relationship: "original_with_recall",
+      complementary_recall_request_id: 12,
+      complementary_recall_status: "scheduled",
+      complementary_reason_code: "missing_sequence_phase",
+      additional_appointment_id: 77,
+      additional_accession: "V2-000077",
+      additional_appointment_date: "2026-09-03",
+      additional_appointment_time: "10:30",
+      additional_appointment_status: "scheduled",
+    });
+    const unrelated = mapAppointmentWithDetails({});
+
+    expect(mapped.assignedReportingDoctorId).toBe(9);
+    expect(mapped.assignedReportingDoctorName).toBe("Dr Noor");
+    expect(mapped.reportingAssignmentStatus).toBe("assigned");
+    expect(mapped.reportStatus).toBe("draft");
+    expect(mapped.complementaryImagingContext).toMatchObject({ relationship: "original_with_recall", recallRequestId: 12, recallStatus: "scheduled", additionalAppointmentId: 77, additionalAccession: "V2-000077" });
+    expect(unrelated.complementaryImagingContext?.relationship).toBeNull();
+    expect(unrelated.assignedReportingDoctorId).toBeNull();
+    expect(unrelated.reportingAssignmentStatus).toBe("unassigned");
+  });
+
   it("maps MRI safety fields without treating missing workflow data as standard acknowledgement", () => {
     const mriAppointment = mapAppointmentWithDetails({
       id: 1,

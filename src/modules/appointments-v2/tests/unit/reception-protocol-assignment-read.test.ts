@@ -33,6 +33,27 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(detailRoute, /original_exam\.name_en as original_exam/);
     assert.match(detailRoute, /original_exam\.name_ar as original_exam_ar/);
     assert.match(detailRoute, /original_exam\.name_en as original_exam_en/);
+    assert.match(detailRoute, /complementary_imaging_relationship/);
+    assert.match(detailRoute, /complementary_recall_request_id/);
+    assert.match(detailRoute, /additional_appointment_id/);
+    assert.match(detailRoute, /additional_accession/);
+    assert.match(detailRoute, /left join lateral \(/);
+    assert.match(detailRoute, /where cr\.original_appointment_id = b\.id/);
+    assert.match(detailRoute, /case when cr\.status in \('pending_scheduling', 'scheduled'\) then 0 else 1 end, cr\.requested_at desc, cr\.id desc/);
+  });
+
+  it("uses Reporting Board assignment and report-status precedence in the single appointment detail read", () => {
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
+    const detailRoute = routes.match(/router\.get\(\s*"\/appointments\/:id"[\s\S]*?\n\);/)?.[0] ?? "";
+
+    assert.match(detailRoute, /doctor_portal\.case_team_assignments reporting_assignment on reporting_assignment\.appointment_id = b\.id and reporting_assignment\.assignment_type = 'reporting' and reporting_assignment\.status = 'active'/);
+    assert.match(detailRoute, /doctor_portal\.doctor_profiles assigned_reporting_doctor on assigned_reporting_doctor\.id = reporting_assignment\.assigned_doctor_id/);
+    assert.match(detailRoute, /assigned_reporting_doctor\.id as assigned_reporting_doctor_id/);
+    assert.match(detailRoute, /assigned_reporting_doctor\.display_name as assigned_reporting_doctor_name/);
+    assert.match(detailRoute, /case when reporting_assignment\.id is null then 'unassigned' else 'assigned' end as reporting_assignment_status/);
+    assert.match(detailRoute, /doctor_portal\.reporting_board_manual_final_overrides manual_final on manual_final\.appointment_id = b\.id and manual_final\.cleared_at is null/);
+    assert.match(detailRoute, /case when manual_final\.id is not null then 'final' else reporting_cache\.report_status end as report_status/);
+    assert.match(detailRoute, /reporting_cache\.last_success_at as report_status_checked_at/);
   });
 
   it("includes complementary linkage fields in the Registration appointment list read", () => {

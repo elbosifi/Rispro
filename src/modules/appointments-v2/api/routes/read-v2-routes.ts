@@ -592,12 +592,30 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          assigned_reporting_doctor.id as assigned_reporting_doctor_id,
+          assigned_reporting_doctor.display_name as assigned_reporting_doctor_name,
+          case when reporting_assignment.id is null then 'unassigned' else 'assigned' end as reporting_assignment_status,
+          case when manual_final.id is not null then 'final' else reporting_cache.report_status end as report_status,
+          reporting_cache.last_success_at as report_status_checked_at,
           (complementary_return.id is not null) as is_additional_imaging,
           complementary_return.original_appointment_id,
           ('V2-' || lpad(complementary_return.original_appointment_id::text, 6, '0')) as original_accession,
           original_exam.name_en as original_exam,
           original_exam.name_ar as original_exam_ar,
           original_exam.name_en as original_exam_en,
+          case
+            when complementary_return.id is not null then 'additional_imaging'
+            when complementary_request.id is not null then 'original_with_recall'
+            else null
+          end as complementary_imaging_relationship,
+          coalesce(complementary_return.id, complementary_request.id) as complementary_recall_request_id,
+          coalesce(complementary_return.status, complementary_request.status) as complementary_recall_status,
+          coalesce(complementary_return.reason_code, complementary_request.reason_code) as complementary_reason_code,
+          complementary_request.recall_appointment_id as additional_appointment_id,
+          ('V2-' || lpad(complementary_request.recall_appointment_id::text, 6, '0')) as additional_accession,
+          complementary_booking.booking_date::text as additional_appointment_date,
+          complementary_booking.booking_time::text as additional_appointment_time,
+          complementary_booking.status as additional_appointment_status,
           ${PROTOCOL_ASSIGNMENT_SELECT},
           (
             select count(*)::int
@@ -615,9 +633,23 @@ router.get(
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
         left join users voided_by_user on voided_by_user.id = b.voided_by_user_id
+        left join doctor_portal.case_team_assignments reporting_assignment on reporting_assignment.appointment_id = b.id and reporting_assignment.assignment_type = 'reporting' and reporting_assignment.status = 'active'
+        left join doctor_portal.doctor_profiles assigned_reporting_doctor on assigned_reporting_doctor.id = reporting_assignment.assigned_doctor_id
+        left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+        left join doctor_portal.reporting_board_sonicdicom_cache reporting_cache on reporting_cache.appointment_id = b.id
         left join appointments_v2.complementary_recall_requests complementary_return on complementary_return.recall_appointment_id = b.id
         left join appointments_v2.bookings original_booking on original_booking.id = complementary_return.original_appointment_id
         left join exam_types original_exam on original_exam.id = original_booking.exam_type_id
+        left join lateral (
+          -- A booking can retain cancelled/completed recall history. Prefer an active request,
+          -- then deterministically use the most recently requested historical request.
+          select cr.id, cr.status, cr.reason_code, cr.recall_appointment_id
+          from appointments_v2.complementary_recall_requests cr
+          where cr.original_appointment_id = b.id
+          order by case when cr.status in ('pending_scheduling', 'scheduled') then 0 else 1 end, cr.requested_at desc, cr.id desc
+          limit 1
+        ) complementary_request on true
+        left join appointments_v2.bookings complementary_booking on complementary_booking.id = complementary_request.recall_appointment_id
         ${PROTOCOL_ASSIGNMENT_JOIN}
         where b.id = $1
         limit 1

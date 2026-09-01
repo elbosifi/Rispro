@@ -148,14 +148,34 @@ function priorityVariant(priority: string | null | undefined): "warning" | "erro
   return "warning";
 }
 
+function reportingStatusBadge(language: "ar" | "en", status: AppointmentWithDetails["reportStatus"]) {
+  const labels = { final: ["التقرير نهائي", "Report final"], draft: ["تقرير مسودة", "Draft report"], no_report: ["لم يصدر تقرير", "Not reported"], study_not_found: ["الدراسة غير موجودة للتقرير", "Report study not found"], unavailable: ["حالة التقرير غير متاحة", "Report status unavailable"] } as const;
+  const variants = { final: "success", draft: "info", no_report: "warning", study_not_found: "warning", unavailable: "neutral" } as const;
+  return status ? { label: chooseLocalized(language, labels[status][0], labels[status][1]), variant: variants[status] } : null;
+}
+
+function additionalImagingBadge(language: "ar" | "en", status: NonNullable<AppointmentWithDetails["complementaryImagingContext"]>["recallStatus"]) {
+  const labels = { pending_scheduling: ["تصوير إضافي · بانتظار الحجز", "Additional imaging · Awaiting booking"], scheduled: ["تصوير إضافي · محجوز", "Additional imaging · Scheduled"], completed: ["تصوير إضافي · مكتمل", "Additional imaging · Completed"], cancelled: ["تصوير إضافي · ملغى", "Additional imaging · Cancelled"] } as const;
+  const variants = { pending_scheduling: "warning", scheduled: "info", completed: "success", cancelled: "neutral" } as const;
+  return status ? { label: chooseLocalized(language, labels[status][0], labels[status][1]), variant: variants[status] } : null;
+}
+
 function AppointmentHeaderBadgeCluster({ appointment, language, compact = false }: { appointment: AppointmentWithDetails; language: "ar" | "en"; compact?: boolean }) {
   const priority = chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn);
   const protocolAssigned = Boolean(appointment.protocolAssignmentSummary);
+  const reportingStatus = reportingStatusBadge(language, appointment.reportStatus);
+  const complementary = appointment.complementaryImagingContext ?? { relationship: null, recallStatus: null };
+  const additionalImaging = complementary.relationship === "original_with_recall"
+    ? additionalImagingBadge(language, complementary.recallStatus)
+    : null;
   return <div data-testid="appointment-header-badge-cluster" className={`flex min-w-0 flex-wrap items-center ${compact ? "gap-1.5" : "gap-2"}`}>
     <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset size={compact ? "sm" : "default"} />
     <Badge size={compact ? "sm" : "default"} variant={appointmentStatusVariant(appointment.status)} className="whitespace-nowrap">{statusLabel(language, appointment.status)}</Badge>
     <Badge size={compact ? "sm" : "default"} variant={priorityVariant(priority)} className="whitespace-nowrap">{priority || chooseLocalized(language, "الأولوية غير محددة", "Priority not assigned")}</Badge>
     <Badge size={compact ? "sm" : "default"} variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.isAdditionalImaging ? chooseLocalized(language, "يُدرج التقرير مع الفحص الأصلي", "Reported with original examination") : appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
+    {appointment.requiresReport ? <Badge size={compact ? "sm" : "default"} variant={appointment.reportingAssignmentStatus === "assigned" ? "info" : "neutral"} className="whitespace-nowrap">{appointment.reportingAssignmentStatus === "assigned" && appointment.assignedReportingDoctorName ? chooseLocalized(language, `الطبيب: ${appointment.assignedReportingDoctorName}`, `Assigned: ${appointment.assignedReportingDoctorName}`) : chooseLocalized(language, "غير معين", "Unassigned")}</Badge> : null}
+    {appointment.requiresReport && reportingStatus ? <Badge size={compact ? "sm" : "default"} variant={reportingStatus.variant} className="whitespace-nowrap">{reportingStatus.label}</Badge> : null}
+    {additionalImaging ? <Badge size={compact ? "sm" : "default"} variant={additionalImaging.variant} className="whitespace-nowrap">{additionalImaging.label}</Badge> : null}
     {appointment.isAdditionalImaging ? <Badge size={compact ? "sm" : "default"} variant="info" className="whitespace-nowrap">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</Badge> : null}
     {isProtocolModality(appointment) ? <Badge size={compact ? "sm" : "default"} variant={protocolAssigned ? "success" : "neutral"} className="whitespace-nowrap">{protocolAssigned ? chooseLocalized(language, "البروتوكول معين", "Protocol assigned") : chooseLocalized(language, "البروتوكول غير معين", "Protocol not assigned")}</Badge> : null}
     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} /> : null}
@@ -815,7 +835,7 @@ export function AppointmentManageModal({
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 
-          {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onAppointmentUpdated={updateDisplayedAppointment} /></div> : null}
+          {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onOpenAppointment={onOpenAppointment} onAppointmentUpdated={updateDisplayedAppointment} /></div> : null}
 
 
           {appointment && activeTab === "documents" ? <div className={mobileDocumentsWorkspace ? "min-h-0" : "h-full min-h-0"}><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" workspaceRailSize="wide" compactMobileWorkspace supplementaryPanelPlacement="before-documents" pdfUtilityToolbarPlacement="top" pdfInitialSizingMode="fit-width" hideSatisfiedProtocolEligibilityStatus supplementaryPanel={<>{protocolPanel}{reportPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["registrations"] })} /></div> : null}

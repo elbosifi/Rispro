@@ -13,6 +13,7 @@ import type {
   IdentifierType
 } from "@/types/api";
 import type { PersistedDictionaryEntry } from "@/lib/name-generation";
+import type { ComplementaryRecallReasonCode } from "@/lib/api/complementary-recalls";
 
 type RawRecord = Record<string, unknown>;
 
@@ -155,6 +156,24 @@ export interface AppointmentWithDetails extends Appointment {
   originalExam?: string | null;
   originalExamAr?: string | null;
   originalExamEn?: string | null;
+  assignedReportingDoctorId?: number | null;
+  assignedReportingDoctorName?: string | null;
+  reportingAssignmentStatus?: "assigned" | "unassigned";
+  reportStatus?: "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | null;
+  reportStatusCheckedAt?: string | null;
+  complementaryImagingContext?: {
+    relationship: "original_with_recall" | "additional_imaging" | null;
+    recallRequestId: number | null;
+    recallStatus: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
+    reasonCode: ComplementaryRecallReasonCode | null;
+    originalAppointmentId: number | null;
+    originalAccession: string | null;
+    additionalAppointmentId: number | null;
+    additionalAccession: string | null;
+    additionalAppointmentDate: string | null;
+    additionalAppointmentTime: string | null;
+    additionalAppointmentStatus: string | null;
+  };
 }
 
 export interface NoShowCandidate {
@@ -442,6 +461,33 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     originalExam: strOrNull(raw, "original_exam") ?? strOrNull(raw, "originalExam"),
     originalExamAr: strOrNull(raw, "original_exam_ar") ?? strOrNull(raw, "originalExamAr"),
     originalExamEn: strOrNull(raw, "original_exam_en") ?? strOrNull(raw, "originalExamEn"),
+    assignedReportingDoctorId: numOrNull(raw, "assigned_reporting_doctor_id") ?? numOrNull(raw, "assignedReportingDoctorId"),
+    assignedReportingDoctorName: strOrNull(raw, "assigned_reporting_doctor_name") ?? strOrNull(raw, "assignedReportingDoctorName"),
+    reportingAssignmentStatus: (strOrNull(raw, "reporting_assignment_status") ?? strOrNull(raw, "reportingAssignmentStatus")) === "assigned" ? "assigned" : "unassigned",
+    reportStatus: (() => {
+      const value = strOrNull(raw, "report_status") ?? strOrNull(raw, "reportStatus");
+      return value === "final" || value === "draft" || value === "no_report" || value === "study_not_found" || value === "unavailable" ? value : null;
+    })(),
+    reportStatusCheckedAt: strOrNull(raw, "report_status_checked_at") ?? strOrNull(raw, "reportStatusCheckedAt"),
+    complementaryImagingContext: {
+      relationship: (() => {
+        const value = strOrNull(raw, "complementary_imaging_relationship") ?? strOrNull(raw, "complementaryImagingRelationship");
+        return value === "original_with_recall" || value === "additional_imaging" ? value : null;
+      })(),
+      recallRequestId: numOrNull(raw, "complementary_recall_request_id") ?? numOrNull(raw, "complementaryRecallRequestId"),
+      recallStatus: (() => {
+        const value = strOrNull(raw, "complementary_recall_status") ?? strOrNull(raw, "complementaryRecallStatus");
+        return value === "pending_scheduling" || value === "scheduled" || value === "completed" || value === "cancelled" ? value : null;
+      })(),
+      reasonCode: (strOrNull(raw, "complementary_reason_code") ?? strOrNull(raw, "complementaryReasonCode")) as ComplementaryRecallReasonCode | null,
+      originalAppointmentId: numOrNull(raw, "original_appointment_id") ?? numOrNull(raw, "originalAppointmentId"),
+      originalAccession: strOrNull(raw, "original_accession") ?? strOrNull(raw, "originalAccession"),
+      additionalAppointmentId: numOrNull(raw, "additional_appointment_id") ?? numOrNull(raw, "additionalAppointmentId"),
+      additionalAccession: strOrNull(raw, "additional_accession") ?? strOrNull(raw, "additionalAccession"),
+      additionalAppointmentDate: strOrNull(raw, "additional_appointment_date") ?? strOrNull(raw, "additionalAppointmentDate"),
+      additionalAppointmentTime: strOrNull(raw, "additional_appointment_time") ?? strOrNull(raw, "additionalAppointmentTime"),
+      additionalAppointmentStatus: strOrNull(raw, "additional_appointment_status") ?? strOrNull(raw, "additionalAppointmentStatus"),
+    },
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

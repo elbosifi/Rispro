@@ -761,6 +761,39 @@ describe("AppointmentManageModal", () => {
     expect(onOpenAppointment).toHaveBeenCalledWith(17);
   });
 
+  it("shows Reporting Board assignment and final/draft status context in the header", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, requiresReport: true, assignedReportingDoctorName: "Dr Noor", reportingAssignmentStatus: "assigned", reportStatus: "final" });
+    renderModal({ initialTab: "documents" });
+    expect(await screen.findByText("Assigned: Dr Noor")).toBeTruthy();
+    expect(screen.getByText("Report final")).toBeTruthy();
+
+    cleanup();
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, requiresReport: true, assignedReportingDoctorName: null, reportingAssignmentStatus: "unassigned", reportStatus: "draft" });
+    renderModal({ initialTab: "documents" });
+    expect(await screen.findByText("Unassigned")).toBeTruthy();
+    expect(screen.getByText("Draft report")).toBeTruthy();
+  });
+
+  it("shows original additional-imaging state and opens its booked complementary appointment from Information", async () => {
+    const onOpenAppointment = vi.fn();
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "scheduled", reasonCode: "missing_sequence_phase", originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 77, additionalAccession: "ACC-77", additionalAppointmentDate: "2026-07-28", additionalAppointmentTime: "10:30", additionalAppointmentStatus: "scheduled" } });
+    renderModal({ initialTab: "details", onOpenAppointment });
+    expect(await screen.findByText("Additional imaging · Scheduled")).toBeTruthy();
+    expect(screen.getByText("ACC-77")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open additional appointment" }));
+    expect(onOpenAppointment).toHaveBeenCalledWith(77);
+  });
+
+  it("renders pending and completed additional-imaging states without unrelated relationship UI", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "pending_scheduling", reasonCode: null, originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: null, additionalAccession: null, additionalAppointmentDate: null, additionalAppointmentTime: null, additionalAppointmentStatus: null } });
+    renderModal();
+    expect(await screen.findByText("Additional imaging · Awaiting booking")).toBeTruthy();
+    cleanup();
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 8, recallStatus: "completed", reasonCode: null, originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 77, additionalAccession: "ACC-77", additionalAppointmentDate: "2026-07-28", additionalAppointmentTime: "10:30", additionalAppointmentStatus: "completed" } });
+    renderModal();
+    expect(await screen.findByText("Additional imaging · Completed")).toBeTruthy();
+  });
+
   it("uses the compact mobile document workspace, collapses an empty protocol panel, and keeps one More action in the footer", async () => {
     vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     renderModal({ initialTab: "documents" });

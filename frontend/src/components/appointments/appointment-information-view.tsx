@@ -21,6 +21,7 @@ interface AppointmentInformationViewProps {
   onOpenPatientProfile: () => void;
   onOpenReschedule?: () => void;
   onOpenStatus: () => void;
+  onOpenAppointment?: (appointmentId: number) => void;
   onAppointmentUpdated: (appointment: AppointmentWithDetails) => void;
 }
 
@@ -96,6 +97,23 @@ function reportAvailabilityLabel(language: "ar" | "en", state: string | null | u
   return label ? text(language, label[0], label[1]) : dash;
 }
 
+function reportingStatusLabel(language: "ar" | "en", status: AppointmentWithDetails["reportStatus"]) {
+  const labels = { final: ["التقرير نهائي", "Final"], draft: ["تقرير مسودة", "Draft report"], no_report: ["لم يصدر تقرير", "Not reported"], study_not_found: ["الدراسة غير موجودة للتقرير", "Report study not found"], unavailable: ["حالة التقرير غير متاحة", "Report status unavailable"] } as const;
+  const label = status ? labels[status] : null;
+  return label ? text(language, label[0], label[1]) : dash;
+}
+
+function recallStatusLabel(language: "ar" | "en", status: NonNullable<AppointmentWithDetails["complementaryImagingContext"]>["recallStatus"]) {
+  const labels = { pending_scheduling: ["بانتظار الحجز", "Awaiting booking"], scheduled: ["محجوز", "Scheduled"], completed: ["مكتمل", "Completed"], cancelled: ["ملغى", "Cancelled"] } as const;
+  const label = status ? labels[status] : null;
+  return label ? text(language, label[0], label[1]) : dash;
+}
+
+function recallReasonLabel(language: "ar" | "en", reason: NonNullable<AppointmentWithDetails["complementaryImagingContext"]>["reasonCode"]) {
+  const labels: Record<NonNullable<typeof reason>, [string, string]> = { missing_sequence_phase: ["تسلسل أو مرحلة مفقودة", "Missing sequence or phase"], incomplete_anatomical_coverage: ["تغطية تشريحية غير مكتملة", "Incomplete anatomical coverage"], motion_nondiagnostic_quality: ["حركة أو جودة غير تشخيصية", "Motion or nondiagnostic quality"], incorrect_protocol: ["بروتوكول غير صحيح", "Incorrect protocol"], incorrect_contrast_phase_timing: ["توقيت مرحلة التباين غير صحيح", "Incorrect contrast phase/timing"], additional_diagnostic_characterization: ["استكمال تشخيصي إضافي", "Additional diagnostic characterization"], technical_equipment_problem: ["مشكلة تقنية في الجهاز", "Technical equipment problem"], patient_related_limitation: ["محدودية متعلقة بالمريض", "Patient-related limitation"], other: ["أخرى", "Other"] };
+  return reason ? text(language, ...labels[reason]) : dash;
+}
+
 function protocolStateLabel(language: "ar" | "en", state: string | null | undefined) {
   const normalized = String(state ?? "").toLowerCase();
   if (["assigned", "active", "completed"].includes(normalized)) return text(language, "معين", "Assigned");
@@ -111,7 +129,7 @@ function elapsedSince(value: string | null | undefined) {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenReschedule, onOpenStatus, readOnly = false }: { appointment: AppointmentWithDetails; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onEdit?: () => void; onOpenReschedule?: () => void; onOpenStatus?: () => void; readOnly?: boolean }) {
+export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenReschedule, onOpenStatus, onOpenAppointment, readOnly = false }: { appointment: AppointmentWithDetails; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onEdit?: () => void; onOpenReschedule?: () => void; onOpenStatus?: () => void; onOpenAppointment?: (appointmentId: number) => void; readOnly?: boolean }) {
   const { language, t } = useLanguage();
   const protocol = appointment.protocolAssignmentSummary;
   const examinationRows: DefinitionRow[] = [
@@ -170,11 +188,31 @@ export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, 
     { label: text(language, "ملاحظات التباين", "Contrast notes"), value: valueOrDash(protocol?.contrastNotes) },
   ];
   const hasCapacity = [appointment.isOverbooked, appointment.overbookingReason, appointment.approvedByName, appointment.specialReasonCode, appointment.specialReasonNote].some(Boolean);
+  const complementary = appointment.complementaryImagingContext ?? { relationship: null, recallStatus: null, reasonCode: null, originalAppointmentId: appointment.originalAppointmentId ?? null, originalAccession: appointment.originalAccession ?? null, additionalAppointmentId: null, additionalAccession: null, additionalAppointmentDate: null, additionalAppointmentTime: null, additionalAppointmentStatus: null };
+  const reportingRows: DefinitionRow[] = [
+    { label: text(language, "الطبيب المعين", "Assigned doctor"), value: appointment.assignedReportingDoctorName || text(language, "غير معين", "Unassigned") },
+    { label: text(language, "حالة التقرير", "Report status"), value: reportingStatusLabel(language, appointment.reportStatus) },
+    ...(appointment.reportStatusCheckedAt ? [{ label: text(language, "وقت فحص الحالة", "Status checked"), value: formatDateTimeLy(appointment.reportStatusCheckedAt), dir: "ltr" as const }] : []),
+  ];
+  const relationshipRows: DefinitionRow[] = complementary.relationship === "original_with_recall" ? [
+    { label: text(language, "حالة الطلب", "Recall status"), value: recallStatusLabel(language, complementary.recallStatus) },
+    { label: text(language, "السبب", "Reason"), value: recallReasonLabel(language, complementary.reasonCode) },
+    ...(complementary.additionalAccession ? [{ label: text(language, "رقم الوصول الإضافي", "Additional accession"), value: <CopyableValue value={complementary.additionalAccession} label={text(language, "رقم الوصول الإضافي", "additional accession")} />, dir: "ltr" as const }] : []),
+    ...(complementary.additionalAppointmentDate ? [{ label: text(language, "موعد التصوير الإضافي", "Additional appointment"), value: `${formatDateLy(complementary.additionalAppointmentDate)}${complementary.additionalAppointmentTime ? ` · ${complementary.additionalAppointmentTime}` : ""}`, dir: "ltr" as const }] : []),
+    ...(complementary.additionalAppointmentStatus ? [{ label: text(language, "حالة الحجز", "Booking status"), value: <StatusBadge language={language} status={complementary.additionalAppointmentStatus} /> }] : []),
+  ] : complementary.relationship === "additional_imaging" ? [
+    { label: text(language, "العلاقة", "Relationship"), value: text(language, "تصوير إضافي/تكميلي للفحص الأصلي", "Additional/complementary imaging for the original examination") },
+    { label: text(language, "رقم الوصول الأصلي", "Original accession"), value: <CopyableValue value={complementary.originalAccession} label={text(language, "رقم الوصول الأصلي", "original accession")} />, dir: "ltr" },
+  ] : [];
 
   return <>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2>{!readOnly && onEdit ? <Button type="button" size="sm" onClick={onEdit}><Edit3 size={15} className="me-1.5" aria-hidden="true" />{t("common.edit")}</Button> : null}</div>
     <div className="space-y-6">
       <DetailGroup title={text(language, "الفحص", "Examination")} rows={examinationRows} prominent />
+      {appointment.requiresReport ? <DetailGroup title={text(language, "التقرير", "Reporting")} rows={reportingRows} /> : null}
+      {relationshipRows.length > 0 ? <DetailGroup title={complementary.relationship === "original_with_recall" ? text(language, "التصوير الإضافي", "Additional imaging") : text(language, "الفحص الأصلي", "Original examination")} rows={relationshipRows} /> : null}
+      {complementary.relationship === "original_with_recall" && complementary.additionalAppointmentId ? <Button type="button" variant="secondary" size="sm" onClick={() => onOpenAppointment?.(complementary.additionalAppointmentId!)}>{text(language, "فتح موعد التصوير الإضافي", "Open additional appointment")}</Button> : null}
+      {complementary.relationship === "additional_imaging" && complementary.originalAppointmentId ? <Button type="button" variant="secondary" size="sm" onClick={() => onOpenAppointment?.(complementary.originalAppointmentId!)}>{text(language, "فتح الموعد الأصلي", "Open original appointment")}</Button> : null}
       <DetailGroup title={text(language, "الجدولة وسير العمل", "Schedule and workflow")} rows={scheduleRows} />
       <DisclosureSection title={text(language, "الأوقات الإضافية لسير العمل", "Additional workflow timestamps")}><DefinitionGrid rows={workflowRows} /></DisclosureSection>
       <section className="space-y-4" aria-labelledby="appointment-clinical-heading"><h3 id="appointment-clinical-heading" className="text-sm font-semibold">{text(language, "المعلومات السريرية", "Clinical information")}</h3><DefinitionGrid rows={[{ label: text(language, "الطبيب الطالب", "Ordering / requesting doctor"), value: dash }]} /><LongTextDisclosure title={text(language, "ملاحظات الموعد", "Appointment notes")} textValue={appointment.notes} /><LongTextDisclosure title={text(language, "تعليمات الجهاز", "Modality instructions")} textValue={chooseLocalized(language, appointment.modalityGeneralInstructionAr, appointment.modalityGeneralInstructionEn)} /><LongTextDisclosure title={text(language, "تعليمات الفحص", "Examination instructions")} textValue={chooseLocalized(language, appointment.examSpecificInstructionAr, appointment.examSpecificInstructionEn)} /></section>
@@ -186,10 +224,10 @@ export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, 
   </>;
 }
 
-function AppointmentDetailsSection({ appointment, lookups, reportStatus, onOpenReschedule, onOpenStatus, onAppointmentUpdated }: { appointment: AppointmentWithDetails; lookups: AppointmentLookups | undefined; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onOpenReschedule?: () => void; onOpenStatus: () => void; onAppointmentUpdated: (appointment: AppointmentWithDetails) => void }) {
+function AppointmentDetailsSection({ appointment, lookups, reportStatus, onOpenReschedule, onOpenStatus, onOpenAppointment, onAppointmentUpdated }: { appointment: AppointmentWithDetails; lookups: AppointmentLookups | undefined; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onOpenReschedule?: () => void; onOpenStatus: () => void; onOpenAppointment?: (appointmentId: number) => void; onAppointmentUpdated: (appointment: AppointmentWithDetails) => void }) {
   const { t } = useLanguage();
   const [mode, setMode] = useState<AppointmentDetailsMode>("view");
-  return <section aria-labelledby="appointment-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-4 sm:p-5">{mode === "edit" ? <><div className="mb-4 flex items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2></div><AppointmentEditor key={appointment.id} appointment={appointment} lookups={lookups} editing onCancel={() => setMode("view")} onUpdated={(updated) => { onAppointmentUpdated(updated); setMode("view"); }} /></> : <AppointmentDetailsReadOnly appointment={appointment} reportStatus={reportStatus} onEdit={() => setMode("edit")} onOpenReschedule={onOpenReschedule} onOpenStatus={onOpenStatus} />}</section>;
+  return <section aria-labelledby="appointment-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-4 sm:p-5">{mode === "edit" ? <><div className="mb-4 flex items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2></div><AppointmentEditor key={appointment.id} appointment={appointment} lookups={lookups} editing onCancel={() => setMode("view")} onUpdated={(updated) => { onAppointmentUpdated(updated); setMode("view"); }} /></> : <AppointmentDetailsReadOnly appointment={appointment} reportStatus={reportStatus} onEdit={() => setMode("edit")} onOpenReschedule={onOpenReschedule} onOpenStatus={onOpenStatus} onOpenAppointment={onOpenAppointment} />}</section>;
 }
 
 function PatientDetailsSection({ appointment }: { appointment: AppointmentWithDetails }) {
@@ -201,5 +239,5 @@ function PatientDetailsSection({ appointment }: { appointment: AppointmentWithDe
 export function AppointmentInformationView(props: AppointmentInformationViewProps) {
   const { t, language } = useLanguage();
   const isRtl = language === "ar";
-  return <div data-testid="appointment-information-view" className="min-h-full min-w-0"><div className="mb-4 flex flex-wrap items-center gap-2"><Button type="button" variant="ghost" size="sm" className="min-h-10 gap-1.5 px-2 text-sm" onClick={props.onBack} aria-label={t("common.back")}>{isRtl ? <ChevronRight data-testid="appointment-information-back-icon" data-direction="right" size={18} aria-hidden="true" /> : <ChevronLeft data-testid="appointment-information-back-icon" data-direction="left" size={18} aria-hidden="true" />}<span>{t("common.back")}</span></Button><h1 className="text-lg font-semibold">{t("registrations.information")}</h1></div><div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(370px,410px)_minmax(0,1fr)]"><PatientDetailsSection appointment={props.appointment} /><AppointmentDetailsSection appointment={props.appointment} lookups={props.lookups} reportStatus={props.reportStatus} onOpenReschedule={props.onOpenReschedule} onOpenStatus={props.onOpenStatus} onAppointmentUpdated={props.onAppointmentUpdated} /></div></div>;
+  return <div data-testid="appointment-information-view" className="min-h-full min-w-0"><div className="mb-4 flex flex-wrap items-center gap-2"><Button type="button" variant="ghost" size="sm" className="min-h-10 gap-1.5 px-2 text-sm" onClick={props.onBack} aria-label={t("common.back")}>{isRtl ? <ChevronRight data-testid="appointment-information-back-icon" data-direction="right" size={18} aria-hidden="true" /> : <ChevronLeft data-testid="appointment-information-back-icon" data-direction="left" size={18} aria-hidden="true" />}<span>{t("common.back")}</span></Button><h1 className="text-lg font-semibold">{t("registrations.information")}</h1></div><div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(370px,410px)_minmax(0,1fr)]"><PatientDetailsSection appointment={props.appointment} /><AppointmentDetailsSection appointment={props.appointment} lookups={props.lookups} reportStatus={props.reportStatus} onOpenReschedule={props.onOpenReschedule} onOpenStatus={props.onOpenStatus} onOpenAppointment={props.onOpenAppointment} onAppointmentUpdated={props.onAppointmentUpdated} /></div></div>;
 }
