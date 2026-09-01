@@ -291,8 +291,8 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
         const inserted = await client.query<{ id: number }>(
           `
-            insert into users (username, full_name, password_hash, role, is_active, must_change_password)
-            values ($1, $2, $3, $4, $5, true)
+            insert into users (username, email, full_name, password_hash, role, is_active, must_change_password)
+            values ($1, case when $1 ~ '^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$' then $1 else null end, $2, $3, $4, $5, true)
             returning id
           `,
           [username, values.full_name, passwordHash, values.core_role as Role, boolValue(values.user_active, true)]

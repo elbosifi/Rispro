@@ -605,6 +605,7 @@ export function mapUser(raw: RawRecord): User {
   return {
     id: num(raw, 'id'),
     username: str(raw, 'username'),
+    email: str(raw, 'email') || null,
     fullName: str(raw, 'full_name') || str(raw, 'fullName'),
     role: fallback(raw.role, "receptionist") as User["role"],
     isActive: bool(raw, 'is_active', bool(raw, 'isActive', true)),

@@ -11,6 +11,7 @@ import { normalizeUsername, requireExactPassword } from "../utils/credentials.js
 export interface UserRow {
   id: number;
   username: string;
+  email: string | null;
   full_name: string;
   role: Role;
   is_active: boolean;
@@ -22,6 +23,7 @@ export interface UserRow {
 
 export interface UserCreatePayload {
   username?: string;
+  email?: string | null;
   fullName?: string;
   password?: string;
   role?: Role | string;
@@ -32,6 +34,7 @@ export interface UserCreatePayload {
 
 export interface UserIdentityPayload {
   username?: string;
+  email?: string | null;
   fullName?: string;
 }
 
@@ -58,7 +61,7 @@ async function auditSuperAdminAttempt(input: {
 
 export async function listUsers(): Promise<UserRow[]> {
   const { rows } = await pool.query(`
-    select id, username, full_name, role, is_active,
+    select id, username, email, full_name, role, is_active,
            coalesce(must_change_password, false) as must_change_password,
            coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
            created_at, updated_at
@@ -70,10 +73,11 @@ export async function listUsers(): Promise<UserRow[]> {
 }
 
 export async function createUser(
-  { username, fullName, password, role, isActive = true, mustChangePassword = false, canRequestSchedulingOverride = false }: UserCreatePayload,
+  { username, email, fullName, password, role, isActive = true, mustChangePassword = false, canRequestSchedulingOverride = false }: UserCreatePayload,
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const canonicalUsername = normalizeUsername(username);
+  const canonicalEmail = normalizeEmail(email);
   if (!canonicalUsername || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
@@ -104,11 +108,11 @@ export async function createUser(
   try {
     const { rows } = await pool.query(
       `
-        insert into users (username, full_name, password_hash, role, is_active, must_change_password, can_request_scheduling_override)
-        values ($1, $2, $3, $4, $5, $6, $7)
-        returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
+        insert into users (username, email, full_name, password_hash, role, is_active, must_change_password, can_request_scheduling_override)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
+        returning id, username, email, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
       `,
-      [canonicalUsername, fullName, passwordHash, role, isActive, mustChangePassword, role === "receptionist" && canRequestSchedulingOverride]
+      [canonicalUsername, canonicalEmail, fullName, passwordHash, role, isActive, mustChangePassword, role === "receptionist" && canRequestSchedulingOverride]
     );
 
     const createdUser = rows[0] as UserRow | undefined;
@@ -155,9 +159,17 @@ export async function createUser(
   }
 }
 
+const EMAIL_LIKE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function normalizeEmail(value: string | null | undefined): string | null {
+  const email = String(value ?? "").trim();
+  if (!email) return null;
+  if (!EMAIL_LIKE.test(email)) throw new HttpError(400, "A valid email is required.");
+  return email;
+}
+
 export async function updateUserIdentity(
   userId: UserId,
-  { username, fullName }: UserIdentityPayload,
+  { username, email, fullName }: UserIdentityPayload,
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
@@ -166,13 +178,14 @@ export async function updateUserIdentity(
   }
 
   const canonicalUsername = normalizeUsername(username);
+  const canonicalEmail = normalizeEmail(email);
   const cleanFullName = String(fullName ?? "").trim();
   if (!canonicalUsername) throw new HttpError(400, "username is required.");
   if (!cleanFullName) throw new HttpError(400, "fullName is required.");
 
   const currentResult = await pool.query<UserRow>(
     `
-      select id, username, full_name, role, is_active,
+      select id, username, email, full_name, role, is_active,
              coalesce(must_change_password, false) as must_change_password,
              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
              created_at, updated_at
@@ -202,14 +215,14 @@ export async function updateUserIdentity(
     const updatedResult = await pool.query<UserRow>(
       `
         update users
-        set username = $2, full_name = $3, updated_at = now()
+        set username = $2, email = $3, full_name = $4, updated_at = now()
         where id = $1
-        returning id, username, full_name, role, is_active,
+        returning id, username, email, full_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                   created_at, updated_at
       `,
-      [cleanUserId, canonicalUsername, cleanFullName]
+      [cleanUserId, canonicalUsername, canonicalEmail, cleanFullName]
     );
     const updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(500, "Failed to update user identity.");
@@ -218,8 +231,8 @@ export async function updateUserIdentity(
       entityType: "user",
       entityId: updatedUser.id,
       actionType: "update_identity",
-      oldValues: { username: previousUser.username, fullName: previousUser.full_name },
-      newValues: { username: updatedUser.username, fullName: updatedUser.full_name },
+      oldValues: { username: previousUser.username, email: previousUser.email, fullName: previousUser.full_name },
+      newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name },
       changedByUserId: actor.userId
     });
 
@@ -322,7 +335,7 @@ export async function deleteUser(
     `
       delete from users
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
+      returning id, username, email, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
     `,
     [cleanUserId]
   );
@@ -373,7 +386,7 @@ export async function updateUserSchedulingOverridePermission(
       set can_request_scheduling_override = case when role = 'receptionist' then $2 else false end,
           updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
+      returning id, username, email, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
     `,
     [cleanUserId, canRequestSchedulingOverride]
   );
@@ -419,7 +432,7 @@ export async function updateUserPassword(
 
   const currentResult = await pool.query(
     `
-      select id, username, full_name, role, is_active,
+      select id, username, email, full_name, role, is_active,
              coalesce(must_change_password, false) as must_change_password,
              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
              created_at, updated_at
@@ -441,7 +454,7 @@ export async function updateUserPassword(
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active,
+      returning id, username, email, full_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
@@ -480,7 +493,7 @@ export async function resetUserTemporaryPassword(
 
   const currentResult = await pool.query(
     `
-      select id, username, full_name, role, is_active,
+      select id, username, email, full_name, role, is_active,
              coalesce(must_change_password, false) as must_change_password,
              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
              created_at, updated_at
@@ -501,7 +514,7 @@ export async function resetUserTemporaryPassword(
       update users
       set password_hash = $2, must_change_password = true, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active,
+      returning id, username, email, full_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
@@ -540,7 +553,7 @@ export async function setUserMustChangePassword(
       update users
       set must_change_password = true, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active,
+      returning id, username, email, full_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
@@ -580,7 +593,7 @@ export async function updateUserActiveState(
 
   const currentResult = await pool.query<UserRow>(
     `
-      select id, username, full_name, role, is_active,
+      select id, username, email, full_name, role, is_active,
              coalesce(must_change_password, false) as must_change_password,
              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
              created_at, updated_at
@@ -637,7 +650,7 @@ export async function updateUserActiveState(
       update users
       set is_active = $2, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active,
+      returning id, username, email, full_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
@@ -681,7 +694,7 @@ export async function updateOwnPassword(
 
   const currentResult = await pool.query<UserRow & { password_hash: string }>(
     `
-      select id, username, full_name, role, password_hash, is_active,
+      select id, username, email, full_name, role, password_hash, is_active,
              coalesce(must_change_password, false) as must_change_password,
              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
              created_at, updated_at
@@ -703,7 +716,7 @@ export async function updateOwnPassword(
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active,
+      returning id, username, email, full_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at

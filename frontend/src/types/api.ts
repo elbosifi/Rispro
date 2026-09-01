@@ -23,6 +23,7 @@ export type QueueStatus = "waiting" | "called" | "in-progress" | "removed";
 export interface User {
   id: number;
   username: string;
+  email?: string | null;
   fullName: string;
   role: Role;
   isActive?: boolean;

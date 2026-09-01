@@ -177,8 +177,8 @@ export async function createDoctorWithUserForAdmin(
       updated_at: string;
     }>(
       `
-        insert into users (username, full_name, password_hash, role, is_active, must_change_password)
-        values ($1, $2, $3, $4, $5, true)
+        insert into users (username, email, full_name, password_hash, role, is_active, must_change_password)
+        values ($1, case when $1 ~ '^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$' then $1 else null end, $2, $3, $4, $5, true)
         returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
       `,
       [username, fullName, passwordHash, input.coreRole, input.userActive]

@@ -143,7 +143,7 @@ export async function fetchUsers(): Promise<{ users: User[] }> {
   };
 }
 
-export async function createUser(payload: { username: string; fullName: string; password: string; role: string }) {
+export async function createUser(payload: { username: string; email?: string; fullName: string; password: string; role: string }) {
   return api<{ user: RawRecord }>("/users", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -171,7 +171,7 @@ export async function updateUserPassword(userId: number, password: string) {
 
 export async function updateUserIdentity(
   userId: number,
-  payload: { username: string; fullName: string }
+  payload: { username: string; email?: string; fullName: string }
 ): Promise<User> {
   const raw = await api<{ user: RawRecord }>(`/users/${userId}/identity`, {
     method: "PUT",

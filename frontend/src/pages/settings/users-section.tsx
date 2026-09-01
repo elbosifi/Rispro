@@ -70,9 +70,11 @@ export default function UsersSection({
   const [createError, setCreateError] = useState<string | null>(null);
   const [manageError, setManageError] = useState<string | null>(null);
   const [identityEditing, setIdentityEditing] = useState(false);
-  const [identityDraft, setIdentityDraft] = useState({ username: "", fullName: "" });
+  const [identityDraft, setIdentityDraft] = useState({ username: "", email: "", fullName: "" });
+  const [createEmailEdited, setCreateEmailEdited] = useState(false);
   const [createForm, setCreateForm] = useState({
     username: "",
+    email: "",
     fullName: "",
     password: "",
     role: "receptionist",
@@ -103,7 +105,7 @@ export default function UsersSection({
     Boolean(search.trim()) || roleFilter !== "all" || statusFilter !== "all";
   const resetCreate = () =>
     setCreateForm({
-      username: "",
+      username: "", email: "",
       fullName: "",
       password: "",
       role: "receptionist",
@@ -118,7 +120,7 @@ export default function UsersSection({
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
-    setIdentityDraft({ username: "", fullName: "" });
+    setIdentityDraft({ username: "", email: "", fullName: "" });
     setManageError(null);
   };
   const openManage = (user: User) => {
@@ -126,16 +128,16 @@ export default function UsersSection({
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
-    setIdentityDraft({ username: user.username, fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
     setManageError(null);
   };
   const startIdentityEditing = (user: User) => {
-    setIdentityDraft({ username: user.username, fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
     setIdentityEditing(true);
     setManageError(null);
   };
   const cancelIdentityEditing = (user: User) => {
-    setIdentityDraft({ username: user.username, fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
     setIdentityEditing(false);
   };
   const invalidateUsers = () =>
@@ -203,9 +205,10 @@ export default function UsersSection({
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
   const identityMutation = useMutation({
-    mutationFn: (payload: { userId: number; username: string; fullName: string }) =>
+    mutationFn: (payload: { userId: number; username: string; email: string; fullName: string }) =>
       updateUserIdentity(payload.userId, {
         username: payload.username,
+        email: payload.email,
         fullName: payload.fullName,
       }),
     onSuccess: () => {
@@ -473,10 +476,14 @@ export default function UsersSection({
               <input
                 value={createForm.username}
                 onChange={(event) =>
-                  setCreateForm({ ...createForm, username: event.target.value })
+                  setCreateForm({ ...createForm, username: event.target.value, email: !createEmailEdited && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : createForm.email })
                 }
                 className="w-full rounded border px-3 py-2 dark:bg-stone-900"
               />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span>Email</span>
+              <input aria-label="Email" value={createForm.email} onChange={(event) => { setCreateEmailEdited(true); setCreateForm({ ...createForm, email: event.target.value }); }} className="w-full rounded border px-3 py-2 dark:bg-stone-900" />
             </label>
             <label className="space-y-1 text-sm">
               <span>{t("settings.fullName")}</span>
@@ -563,6 +570,10 @@ export default function UsersSection({
               <section>
                 <h4 className="font-semibold">{t("settings.users.account")}</h4>
                 <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <dt className="description-center">Email</dt>
+                    <dd>{identityEditing ? <input aria-label="Email" value={identityDraft.email} onChange={(event) => setIdentityDraft({ ...identityDraft, email: event.target.value })} className="w-full rounded border px-3 py-2 dark:bg-stone-900" /> : (selectedUser.email || t("settings.users.notAvailable"))}</dd>
+                  </div>
                   <div>
                     <dt className="description-center">
                       {t("settings.fullName")}
@@ -663,13 +674,14 @@ export default function UsersSection({
                           identityMutation.isPending ||
                           !identityDraft.username.trim() ||
                           !identityDraft.fullName.trim() ||
-                          (identityDraft.username.trim() === selectedUser.username &&
+                          (identityDraft.username.trim() === selectedUser.username && identityDraft.email.trim() === (selectedUser.email ?? "") &&
                             identityDraft.fullName.trim() === selectedUser.fullName)
                         }
                         onClick={() =>
                           identityMutation.mutate({
                             userId: selectedUser.id,
                             username: identityDraft.username,
+                            email: identityDraft.email,
                             fullName: identityDraft.fullName,
                           })
                         }
