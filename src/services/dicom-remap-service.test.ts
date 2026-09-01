@@ -196,6 +196,12 @@ function makeSyntheticEncapsulatedDicomBuffer(transferSyntaxUid: string, payload
   }));
 }
 
+function removeTerminalPixelDelimiter(buffer: Buffer): Buffer {
+  const delimiter = Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0x00, 0x00, 0x00, 0x00]);
+  assert.equal(buffer.subarray(-delimiter.length).equals(delimiter), true, "synthetic encapsulated fixture must end with a pixel delimiter");
+  return Buffer.from(buffer.subarray(0, -delimiter.length));
+}
+
 async function makeStagedFiles(files: Array<{ fileName: string; content?: string; mimeType?: string }>) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-test-"));
   const staged = [];
@@ -506,6 +512,55 @@ test("failed staging cleanup preserves unexpired Orthanc recovery and permits cl
   assert.match(expiredCalls[0]!.sql, /orthanc_recovery_expires_at > now\(\)/i);
   assert.match(expiredCalls[0]!.sql, /not \(orthanc_recovery_status in \('available', 'processing', 'failed'\)/i);
   await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
+});
+
+test("Orthanc recovery repairs only a proven missing JPEG pixel delimiter without changing source bytes", () => {
+  const original = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9]));
+  const missingDelimiter = removeTerminalPixelDelimiter(original);
+  const prepared = __dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(missingDelimiter);
+  assert.equal(prepared.structurallyRepaired, true);
+  assert.equal(prepared.body.length, missingDelimiter.length + 8);
+  assert.equal(prepared.body.subarray(0, missingDelimiter.length).equals(missingDelimiter), true);
+  assert.equal(prepared.body.subarray(-8).equals(Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0, 0, 0, 0])), true);
+  assert.equal(prepared.pixelPayloadSha256, createHash("sha256").update(Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9, 0x00])).digest("hex"));
+  assert.equal(__dicomRemapTestables.inspectMissingPixelSequenceDelimiter(prepared.body).state, "already_terminated");
+  assert.equal(__dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(original).body.equals(original), true);
+});
+
+test("Orthanc recovery delimiter repair rejects non-JPEG, native, truncated, unexpected, EOI-missing, and trailing source shapes", () => {
+  const jpeg = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9]));
+  const missing = removeTerminalPixelDelimiter(jpeg);
+  const cases = [
+    makeSyntheticDicomBuffer(),
+    removeTerminalPixelDelimiter(makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.5", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9]))),
+    Buffer.concat([missing, Buffer.from([0x01])]),
+    Buffer.concat([missing.subarray(0, -1)]),
+    removeTerminalPixelDelimiter(makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd8]))),
+  ];
+  for (const body of cases) {
+    const prepared = __dicomRemapTestables.prepareDicomForOrthancRecoveryUpload(body);
+    assert.equal(prepared.structurallyRepaired, false);
+    assert.equal(prepared.body, body);
+  }
+});
+
+test("Orthanc upload sanitizer preserves only allowlisted safe error fields", () => {
+  const safe = __dicomRemapTestables.sanitizeOrthancErrorResponse({
+    Message: "Bad file format",
+    Details: "Cannot parse an invalid DICOM file (size: 12)",
+    OrthancError: "BadFileFormat",
+    OrthancStatus: 15,
+    HttpStatus: 400,
+    Method: "post",
+    Uri: "/instances",
+    Authorization: "Bearer secret",
+    Nested: { path: "C:\\secret" },
+    Header: "cookie=x",
+  });
+  assert.deepEqual(safe, { Message: "Bad file format", Details: "Cannot parse an invalid DICOM file (size: 12)", OrthancError: "BadFileFormat", OrthancStatus: 15, HttpStatus: 400, Method: "POST", Uri: "/instances" });
+  const truncated = __dicomRemapTestables.sanitizeOrthancErrorResponse({ Details: "x".repeat(999) }).Details;
+  assert.equal(typeof truncated === "string" ? truncated.length : 0, 320);
+  assert.deepEqual(__dicomRemapTestables.sanitizeOrthancErrorResponse({ Details: "Authorization: Bearer secret" }), {});
 });
 
 test("durable staging allows the 5,428-file sequence and the configured 10,000-file boundary", async () => {

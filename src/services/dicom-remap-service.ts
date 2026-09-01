@@ -850,6 +850,44 @@ function sanitizeOrthancResponseSnippet(text: unknown, maxLength = 500): string 
   return String(text || "").trim() ? "[redacted]" : "";
 }
 
+const ORTHANC_SAFE_ERROR_FIELDS = ["Message", "Details", "OrthancError", "OrthancStatus", "HttpStatus", "Method", "Uri"] as const;
+
+function sanitizeOrthancErrorString(value: unknown, maxLength = 320): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized || /authorization|cookie|set-cookie|bearer\s|password|token/i.test(normalized)) return null;
+  // Orthanc error bodies can include local paths. Do not persist such text.
+  if (/[A-Za-z]:[\\/]|(?:^|\s)\/(?:[^\s]*)/.test(normalized)) return null;
+  return normalized.slice(0, maxLength);
+}
+
+function sanitizeOrthancErrorResponse(payload: unknown): Record<string, string | number> {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  const raw = payload as Record<string, unknown>;
+  const safe: Record<string, string | number> = {};
+  for (const field of ORTHANC_SAFE_ERROR_FIELDS) {
+    const value = raw[field];
+    if (["OrthancStatus", "HttpStatus"].includes(field)) {
+      const numeric = Number(value);
+      if (Number.isInteger(numeric) && numeric >= 0 && numeric <= 999) safe[field] = numeric;
+      continue;
+    }
+    if (field === "Method") {
+      const method = typeof value === "string" ? value.trim().toUpperCase() : "";
+      if (/^(GET|POST|PUT|DELETE|PATCH)$/.test(method)) safe[field] = method;
+      continue;
+    }
+    if (field === "Uri") {
+      const uri = typeof value === "string" ? value.trim() : "";
+      if (/^\/[A-Za-z0-9_./-]*$/.test(uri) && !uri.includes("..")) safe[field] = uri.slice(0, 320);
+      continue;
+    }
+    const sanitized = sanitizeOrthancErrorString(value);
+    if (sanitized) safe[field] = sanitized;
+  }
+  return safe;
+}
+
 function formatOrthancUploadFailureMessage(_fileName: string, fileIndex: number, response: OrthancFetchResult): string {
   const shape = describeOrthancPayloadShape(response.json);
   return `Orthanc rejected File ${fileIndex} during DICOM upload (status=${response.status}, shape=${shape}).`;
@@ -910,6 +948,7 @@ async function uploadDicomContentToOrthanc({
         fileIndex,
         orthancStatus: uploadResponse.status,
         orthancResponseShape: describeOrthancPayloadShape(uploadResponse.json),
+        orthancError: sanitizeOrthancErrorResponse(uploadResponse.json),
       }
     );
   }
@@ -1088,6 +1127,127 @@ function readPhysicalPixelData(buffer: Buffer, transferSyntax: string): {
     offset = buffer.indexOf(tag, offset + 1);
   }
   return { actualPixelRepresentation: "absent", pixelValueLengthMode: "absent", fragmentCount: 0, payloadBuffers: [] };
+}
+
+type OrthancRecoveryPreparedDicom = {
+  body: Buffer;
+  structurallyRepaired: boolean;
+  pixelPayloadSha256?: string;
+  pixelPayloadLength?: number;
+  fragmentCount?: number;
+};
+
+type ExplicitLittleEndianElement = { group: number; element: number; vr: string; valueOffset: number; valueLength: number; nextOffset: number };
+
+function readExplicitLittleEndianElement(buffer: Buffer, offset: number): ExplicitLittleEndianElement | null {
+  if (offset + 8 > buffer.length) return null;
+  const group = buffer.readUInt16LE(offset);
+  const element = buffer.readUInt16LE(offset + 2);
+  const vr = buffer.toString("ascii", offset + 4, offset + 6);
+  const longVr = ["OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UN", "UR", "UT"].includes(vr);
+  const headerLength = longVr ? 12 : 8;
+  if (offset + headerLength > buffer.length) return null;
+  const valueLength = longVr ? buffer.readUInt32LE(offset + 8) : buffer.readUInt16LE(offset + 6);
+  if (valueLength === 0xffffffff || offset + headerLength + valueLength > buffer.length) return null;
+  return { group, element, vr, valueOffset: offset + headerLength, valueLength, nextOffset: offset + headerLength + valueLength };
+}
+
+function readDicomRecoveryFileMeta(buffer: Buffer): { transferSyntax: string; datasetOffset: number } | null {
+  if (buffer.length < 144 || buffer.toString("ascii", 128, 132) !== "DICM") return null;
+  let offset = 132;
+  let transferSyntax = "";
+  while (offset < buffer.length) {
+    const element = readExplicitLittleEndianElement(buffer, offset);
+    if (!element || element.group !== 0x0002) break;
+    if (element.element === 0x0010 && element.vr === "UI") transferSyntax = buffer.toString("ascii", element.valueOffset, element.nextOffset).replace(/\0+$/g, "").trim();
+    offset = element.nextOffset;
+  }
+  return transferSyntax ? { transferSyntax, datasetOffset: offset } : null;
+}
+
+function inspectMissingPixelSequenceDelimiter(buffer: Buffer): { state: "not_applicable" | "already_terminated" | "repairable"; transferSyntax?: string; fragmentCount?: number; pixelPayloadSha256?: string; pixelPayloadLength?: number } {
+  const fileMeta = readDicomRecoveryFileMeta(buffer);
+  if (!fileMeta || !fileMeta.transferSyntax.startsWith("1.2.840.10008.1.2.4.")) return { state: "not_applicable" };
+  let offset = fileMeta.datasetOffset;
+  let pixelOffset = -1;
+  while (offset < buffer.length) {
+    if (offset + 8 > buffer.length) return { state: "not_applicable" };
+    const group = buffer.readUInt16LE(offset);
+    const element = buffer.readUInt16LE(offset + 2);
+    const vr = buffer.toString("ascii", offset + 4, offset + 6);
+    const longVr = ["OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UN", "UR", "UT"].includes(vr);
+    const headerLength = longVr ? 12 : 8;
+    if (offset + headerLength > buffer.length) return { state: "not_applicable" };
+    const valueLength = longVr ? buffer.readUInt32LE(offset + 8) : buffer.readUInt16LE(offset + 6);
+    if (group === 0x7fe0 && element === 0x0010) {
+      if (valueLength !== 0xffffffff || !longVr) return { state: "not_applicable" };
+      pixelOffset = offset + headerLength;
+      break;
+    }
+    // A preceding undefined-length value cannot be skipped safely by this deliberately narrow parser.
+    if (valueLength === 0xffffffff || offset + headerLength + valueLength > buffer.length) return { state: "not_applicable" };
+    offset += headerLength + valueLength;
+  }
+  if (pixelOffset < 0 || pixelOffset + 8 > buffer.length) return { state: "not_applicable" };
+  let cursor = pixelOffset;
+  const botGroup = buffer.readUInt16LE(cursor);
+  const botElement = buffer.readUInt16LE(cursor + 2);
+  const botLength = buffer.readUInt32LE(cursor + 4);
+  if (botGroup !== 0xfffe || botElement !== 0xe000 || botLength === 0xffffffff || cursor + 8 + botLength > buffer.length) return { state: "not_applicable" };
+  cursor += 8 + botLength;
+  const payloads: Buffer[] = [];
+  let fragmentCount = 0;
+  while (cursor < buffer.length) {
+    if (cursor + 8 > buffer.length) return { state: "not_applicable" };
+    const group = buffer.readUInt16LE(cursor);
+    const element = buffer.readUInt16LE(cursor + 2);
+    const length = buffer.readUInt32LE(cursor + 4);
+    cursor += 8;
+    if (group !== 0xfffe) return { state: "not_applicable" };
+    if (element === 0xe0dd) {
+      if (length !== 0 || cursor !== buffer.length) return { state: "not_applicable" };
+      const payload = hashDicomPixelPayload(payloads);
+      return { state: "already_terminated", transferSyntax: fileMeta.transferSyntax, fragmentCount, pixelPayloadSha256: payload.sha256, pixelPayloadLength: payload.byteLength };
+    }
+    if (element !== 0xe000 || length === 0xffffffff || cursor + length > buffer.length) return { state: "not_applicable" };
+    payloads.push(buffer.subarray(cursor, cursor + length));
+    fragmentCount += 1;
+    cursor += length;
+  }
+  if (!fragmentCount) return { state: "not_applicable" };
+  const last = payloads[payloads.length - 1]!;
+  const endsWithEoi = last.length >= 2 && last.subarray(last.length - 2).equals(Buffer.from([0xff, 0xd9]));
+  const endsWithPaddedEoi = last.length >= 3 && last.subarray(last.length - 3).equals(Buffer.from([0xff, 0xd9, 0x00]));
+  if (!endsWithEoi && !endsWithPaddedEoi) return { state: "not_applicable" };
+  const payload = hashDicomPixelPayload(payloads);
+  return { state: "repairable", transferSyntax: fileMeta.transferSyntax, fragmentCount, pixelPayloadSha256: payload.sha256, pixelPayloadLength: payload.byteLength };
+}
+
+function prepareDicomForOrthancRecoveryUpload(originalBody: Buffer): OrthancRecoveryPreparedDicom {
+  const inspected = inspectMissingPixelSequenceDelimiter(originalBody);
+  if (inspected.state !== "repairable") return { body: originalBody, structurallyRepaired: false };
+  const delimiter = Buffer.from([0xfe, 0xff, 0xdd, 0xe0, 0x00, 0x00, 0x00, 0x00]);
+  const repairedBody = Buffer.concat([originalBody, delimiter]);
+  const repaired = inspectMissingPixelSequenceDelimiter(repairedBody);
+  if (
+    repairedBody.length !== originalBody.length + delimiter.length ||
+    !repairedBody.subarray(0, originalBody.length).equals(originalBody) ||
+    repaired.state !== "already_terminated" ||
+    repaired.transferSyntax !== inspected.transferSyntax ||
+    repaired.fragmentCount !== inspected.fragmentCount ||
+    repaired.pixelPayloadLength !== inspected.pixelPayloadLength ||
+    repaired.pixelPayloadSha256 !== inspected.pixelPayloadSha256
+  ) {
+    throw new HttpError(409, "DICOM recovery source repair did not preserve the original object.", { code: "DICOM_REMAP_ORTHANC_SOURCE_REPAIR_FAILED" });
+  }
+  // The byte-identical prefix proves every DICOM identity and image-defining attribute is unchanged.
+  return {
+    body: repairedBody,
+    structurallyRepaired: true,
+    pixelPayloadSha256: inspected.pixelPayloadSha256,
+    pixelPayloadLength: inspected.pixelPayloadLength,
+    fragmentCount: inspected.fragmentCount,
+  };
 }
 
 function inspectDicomPixelIntegrity(buffer: Buffer): {
@@ -3297,8 +3457,28 @@ const ORTHANC_RECOVERY_ELIGIBLE_PROCESSING_ERRORS = new Set([
   "DICOM_REMAP_MULTIFRAME_OBJECT_FAILED",
 ]);
 
+// Automatic fallback is intentionally narrower than operator-invoked recovery.
+// Verification and identity outcomes remain manual so an operator reviews them.
+const ORTHANC_AUTO_RECOVERY_PROCESSING_ERRORS = new Set([
+  "DICOM_REMAP_DICOM_REWRITE_FAILED",
+  "DICOM_REMAP_PIXEL_INTEGRITY_FAILED",
+  "DICOM_REMAP_ORTHANC_UPLOAD_FAILED",
+  "DICOM_REMAP_ORTHANC_UPLOAD_RETRY_EXHAUSTED",
+  "DICOM_REMAP_ORTHANC_FILE_REJECTED",
+]);
+
 function isOrthancRecoveryEligibleProcessingError(code: unknown): boolean {
   return ORTHANC_RECOVERY_ELIGIBLE_PROCESSING_ERRORS.has(String(code || ""));
+}
+
+function shouldAutomaticallyAttemptOrthancRecovery(job: DicomRemapJobRow): boolean {
+  return job.status === "failed"
+    && job.orthanc_recovery_status === "available"
+    && Boolean(job.staged_storage_key)
+    && !job.staging_cleanup_completed_at
+    && Date.parse(String(job.orthanc_recovery_expires_at || "")) > Date.now()
+    && Number(job.orthanc_recovery_attempt_count || 0) === 0
+    && ORTHANC_AUTO_RECOVERY_PROCESSING_ERRORS.has(String(job.processing_error_code || ""));
 }
 
 async function readDicomRemapStagingManifestMetadata(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
@@ -4122,6 +4302,7 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
         sourcePixelLength?: unknown;
         outputPixelLength?: unknown;
         failedInvariant?: unknown;
+        orthancError?: unknown;
       }
       : null;
     const numericDiagnostic = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
@@ -4155,6 +4336,7 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       ...(numericDiagnostic(details?.sourcePixelLength) !== undefined ? { sourcePixelLength: numericDiagnostic(details?.sourcePixelLength) } : {}),
       ...(numericDiagnostic(details?.outputPixelLength) !== undefined ? { outputPixelLength: numericDiagnostic(details?.outputPixelLength) } : {}),
       ...(typeof details?.failedInvariant === "string" ? { failedInvariant: details.failedInvariant.slice(0, 128) } : {}),
+      ...(details?.orthancError && typeof details.orthancError === "object" ? { orthancError: sanitizeOrthancErrorResponse(details.orthancError) } : {}),
     };
     const recoveryAvailable = Boolean(job.staged_storage_key && !job.staging_cleanup_completed_at && isOrthancRecoveryEligibleProcessingError(code));
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -4165,6 +4347,9 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_processing_failed", oldValues: { status: "processing" }, newValues: { status: "failed", processingStage: "failed", errorCode: code, orthancRecoveryStatus: recoveryAvailable ? "available" : "none" }, changedByUserId: null });
       if (code === "DICOM_REMAP_PIXEL_INTEGRITY_FAILED") {
         await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_primary_integrity_failed", oldValues: { status: "processing" }, newValues: processingDiagnostics, changedByUserId: null });
+      }
+      if (shouldAutomaticallyAttemptOrthancRecovery(updated.rows[0])) {
+        return (await retryFailedDicomRemapWithOrthanc({ jobId: updated.rows[0].id, currentUserId: updated.rows[0].created_by_user_id, automatic: true })).job;
       }
     }
     throw error;
@@ -5334,6 +5519,7 @@ function sanitizedOrthancRecoveryError(error: unknown): { code: string; details:
     if (typeof value === "number" && Number.isFinite(value)) details[key] = value;
     if (typeof value === "string" && value.length <= 256) details[key] = value;
   }
+  if (raw.orthancError && typeof raw.orthancError === "object") details.orthancError = sanitizeOrthancErrorResponse(raw.orthancError);
   return { code, details };
 }
 
@@ -5417,11 +5603,16 @@ async function findProvenOrthancRecoveryModifiedChildren(
 export async function retryFailedDicomRemapWithOrthanc({
   jobId,
   currentUserId,
+  automatic = false,
 }: {
   jobId: number | string;
   currentUserId: UserId;
+  automatic?: boolean;
 }): Promise<{ job: DicomRemapJobRow }> {
   const initial = await loadOwnedJob(jobId, currentUserId);
+  if (automatic && !shouldAutomaticallyAttemptOrthancRecovery(initial)) {
+    throw new HttpError(409, "This job is not eligible for automatic Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
+  }
   if (initial.orthanc_recovery_status === "completed") {
     if (initial.status === "remapped") {
       return sendExistingDicomRemapJobToDestination({ job: initial, currentUserId, auditActionType: "pacs_send_enqueued" });
@@ -5476,9 +5667,10 @@ export async function retryFailedDicomRemapWithOrthanc({
             updated_at = now()
       where id = $1 and created_by_user_id = $2 and status = 'failed'
         and staged_storage_key is not null and staging_cleanup_completed_at is null and orthanc_recovery_expires_at > now()
+        and ($5::boolean = false or coalesce(orthanc_recovery_attempt_count, 0) = 0)
         and (orthanc_recovery_status in ('available', 'failed') or (orthanc_recovery_status = 'processing' and (orthanc_recovery_lease_expires_at is null or orthanc_recovery_lease_expires_at <= now())))
       returning *`,
-    [initial.id, currentUserId, leaseOwner, leaseSeconds]
+    [initial.id, currentUserId, leaseOwner, leaseSeconds, automatic]
   );
   let job = claimed.rows[0];
   if (!job) {
@@ -5490,6 +5682,13 @@ export async function retryFailedDicomRemapWithOrthanc({
   await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: reclaimed ? "dicom_remap_orthanc_recovery_reclaimed" : "dicom_remap_orthanc_recovery_started", oldValues: { orthancRecoveryStatus: initial.orthanc_recovery_status, recoveryStage: initial.orthanc_recovery_stage }, newValues: { orthancRecoveryStatus: "processing", recoveryStage: job.orthanc_recovery_stage, attemptNumber: job.orthanc_recovery_attempt_count, sourceCheckpointExists: Boolean(job.orthanc_recovery_source_study_id), modifiedCheckpointExists: Boolean(job.modified_orthanc_study_id) }, changedByUserId: currentUserId });
 
   let recoveredForSend: DicomRemapJobRow | null = null;
+  const recoverySourceSummary = {
+    sourceObjectCount: 0,
+    originalAcceptedCount: 0,
+    structurallyRepairedCount: 0,
+    repairFailedCount: 0,
+    repairType: "missing_pixel_sequence_delimitation_item",
+  };
   try {
     job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "validating_staging");
     const staged = await loadDicomRemapStagingManifest(job);
@@ -5517,10 +5716,20 @@ export async function retryFailedDicomRemapWithOrthanc({
     if (!sourceVerified) {
       job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "uploading_source");
       const studyIds = new Set<string>();
+      recoverySourceSummary.sourceObjectCount = planned.validFiles.length;
       for (const [index, file] of planned.validFiles.entries()) {
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "uploading_source");
-        const body = await readFile(path.join(staged.directory, file.relativePath));
-        const uploadedStudyId = await uploadDicomContentToOrthanc({ body, fileName: file.displayName, fileIndex: index + 1 });
+        const originalBody = await readFile(path.join(staged.directory, file.relativePath));
+        let prepared: OrthancRecoveryPreparedDicom;
+        try {
+          prepared = prepareDicomForOrthancRecoveryUpload(originalBody);
+        } catch (error) {
+          recoverySourceSummary.repairFailedCount += 1;
+          throw error;
+        }
+        const uploadedStudyId = await uploadDicomContentToOrthanc({ body: prepared.body, fileName: file.displayName, fileIndex: index + 1 });
+        if (prepared.structurallyRepaired) recoverySourceSummary.structurallyRepairedCount += 1;
+        else recoverySourceSummary.originalAcceptedCount += 1;
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "uploading_source");
         if (!uploadedStudyId) throw new HttpError(502, "Orthanc did not accept a preserved source instance.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED" });
         studyIds.add(uploadedStudyId);
@@ -5534,7 +5743,7 @@ export async function retryFailedDicomRemapWithOrthanc({
           job = persisted.rows[0];
         }
         if (uploadedStudyId !== sourceStudyId) throw orthancVerificationError("Original staged instances produced multiple Orthanc studies.", { verificationReason: "MULTIPLE_MODIFIED_STUDIES", expectedCount: planned.validFiles.length, actualCount: studyIds.size });
-        if (afterOrthancRecoverySourceUploadForTests) await afterOrthancRecoverySourceUploadForTests({ jobId: job.id, fileIndex: index + 1, studyId: uploadedStudyId, body });
+        if (afterOrthancRecoverySourceUploadForTests) await afterOrthancRecoverySourceUploadForTests({ jobId: job.id, fileIndex: index + 1, studyId: uploadedStudyId, body: prepared.body });
       }
       if (!sourceStudyId) throw new HttpError(502, "Orthanc recovery source study was not created.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED" });
       job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "verifying_source");
@@ -5588,7 +5797,7 @@ export async function retryFailedDicomRemapWithOrthanc({
     );
     const recovered = completed.rows[0];
     if (!recovered) throw new HttpError(409, "Orthanc recovery claim was lost.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_CLAIM_LOST" });
-    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: recovered.id, actionType: "dicom_remap_orthanc_recovery_completed", oldValues: { status: "failed", orthancRecoveryStatus: "processing" }, newValues: { status: "remapped", orthancRecoveryStatus: "completed", attemptNumber: recovered.orthanc_recovery_attempt_count, integrityVersion: DICOM_REMAP_INTEGRITY_VERSION }, changedByUserId: currentUserId });
+    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: recovered.id, actionType: "dicom_remap_orthanc_recovery_completed", oldValues: { status: "failed", orthancRecoveryStatus: "processing" }, newValues: { status: "remapped", orthancRecoveryStatus: "completed", attemptNumber: recovered.orthanc_recovery_attempt_count, integrityVersion: DICOM_REMAP_INTEGRITY_VERSION, recoverySourceSummary }, changedByUserId: currentUserId });
     recoveredForSend = recovered;
   } catch (error) {
     const sanitized = sanitizedOrthancRecoveryError(error);
@@ -5596,6 +5805,7 @@ export async function retryFailedDicomRemapWithOrthanc({
       ? job.orthanc_recovery_stage as DicomRemapOrthancRecoveryStage
       : null;
     if (interruptedStage) sanitized.details.interruptedStage = interruptedStage;
+    Object.assign(sanitized.details, recoverySourceSummary);
     const failed = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', orthanc_recovery_status = 'failed', orthanc_recovery_stage = 'failed', orthanc_recovery_error_code = $2, orthanc_recovery_error_details = $3::jsonb, orthanc_recovery_lease_owner = null, orthanc_recovery_lease_expires_at = null, error_message = 'Orthanc recovery failed. Preserved source staging remains available until recovery expiry.', updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' and orthanc_recovery_lease_owner = $4 returning *`,
       [job.id, sanitized.code, JSON.stringify(sanitized.details), leaseOwner]
@@ -5828,6 +6038,8 @@ export const __dicomRemapTestables = {
   rewriteDicomFileForRemap,
   assertRewrittenDicomPixelIntegrity,
   inspectDicomPixelIntegrity,
+  inspectMissingPixelSequenceDelimiter,
+  prepareDicomForOrthancRecoveryUpload,
   parseOrthancResourceId,
   parseOrthancModifiedStudyId,
   parseOrthancSendJobId,
@@ -5859,7 +6071,9 @@ export const __dicomRemapTestables = {
   isOrthancBulkModifyRouteAvailable,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
+  sanitizeOrthancErrorResponse,
   formatOrthancUploadFailureMessage,
+  shouldAutomaticallyAttemptOrthancRecovery,
   readOrBuildDicomRemapUidPlan,
   assertJobStatus,
   setQueryForTests(query: DicomRemapQuery): void {
