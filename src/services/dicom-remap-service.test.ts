@@ -1003,7 +1003,7 @@ test("dicom helper: upload failure message uses a generated label and omits raw 
   assert.doesNotMatch(message, /bad\.dcm/);
   assert.match(message, /File 7/);
   assert.match(message, /HTTP 400/);
-  assert.doesNotMatch(message, /invalid string length/);
+  assert.match(message, /Task failed: invalid string length/);
   assert.doesNotMatch(message, /secret-token/);
 
   assert.equal(
@@ -2971,7 +2971,7 @@ test("createDicomRemapMultipartUploadJob still fails on Orthanc 500 upload error
       files: staged,
       tempDir,
     }),
-    /status=500/
+    /Orthanc rejected File 1 \(HTTP 500 — Bad file format\)\./
   );
 });
 
@@ -2998,7 +2998,7 @@ test("createDicomRemapMultipartUploadJob still fails on Orthanc auth-style uploa
       files: staged,
       tempDir,
     }),
-    /status=401/
+    /Orthanc rejected File 1 \(HTTP 401\)\./
   );
 });
 
