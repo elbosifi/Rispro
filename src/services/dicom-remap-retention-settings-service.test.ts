@@ -16,6 +16,11 @@ test("DICOM remap retention settings default to four days and read stored values
   assert.deepEqual(await readDicomRemapRetentionSettings(), { sentSourceRetentionDays: 7 });
 });
 
+test("DICOM remap retention settings reject invalid persisted values", async () => {
+  __dicomRemapRetentionSettingsTestables.setDependencies({ load: async () => ({ dicom_remap: { sent_source_retention_days: "31" } }) });
+  await assert.rejects(() => readDicomRemapRetentionSettings(), (error: unknown) => error instanceof HttpError && error.statusCode === 400);
+});
+
 test("DICOM remap retention saves through system settings with the acting supervisor", async () => {
   const calls: unknown[][] = [];
   __dicomRemapRetentionSettingsTestables.setDependencies({ save: async (...args) => { calls.push(args); return [] as never; } });

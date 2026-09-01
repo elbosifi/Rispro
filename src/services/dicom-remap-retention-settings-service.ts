@@ -25,11 +25,7 @@ export async function readDicomRemapRetentionSettings(): Promise<DicomRemapReten
   const map = await loadRetentionSettingsMap([DICOM_REMAP_RETENTION_SETTINGS_CATEGORY]);
   const raw = map.dicom_remap?.[DICOM_REMAP_SENT_SOURCE_RETENTION_DAYS_KEY];
   if (raw === undefined || raw === null || String(raw).trim() === "") return { sentSourceRetentionDays: DEFAULT_DICOM_REMAP_SENT_SOURCE_RETENTION_DAYS };
-  try {
-    return { sentSourceRetentionDays: normalizeRetentionDays(raw) };
-  } catch {
-    return { sentSourceRetentionDays: DEFAULT_DICOM_REMAP_SENT_SOURCE_RETENTION_DAYS };
-  }
+  return { sentSourceRetentionDays: normalizeRetentionDays(raw) };
 }
 
 export async function saveDicomRemapRetentionSettings(input: DicomRemapRetentionSettings, userId: UserId): Promise<DicomRemapRetentionSettings> {
