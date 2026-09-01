@@ -26,6 +26,10 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
   let testData: TestData;
   let priorEmailEnabled: boolean;
+  let priorAdditionalImagingRuleEnabled: boolean;
+  let reportingDoctorUserId: number;
+  let reportingDoctorId: number;
+  let reportingDoctorEmail: string;
 
   async function transaction<T>(run: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();
@@ -49,18 +53,26 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     await pool.query("update modalities set name_en = 'Computed tomography' where id = $1", [testData.modalityId]);
     priorEmailEnabled = Boolean((await pool.query<{ enabled: boolean }>("select enabled from email_smtp_configuration where id = 1")).rows[0]?.enabled);
+    priorAdditionalImagingRuleEnabled = Boolean((await pool.query<{ enabled: boolean }>("select enabled from email_notification_rules where event_type = 'additional_imaging_completed'")).rows[0]?.enabled);
     await pool.query("update users set username = $1 where id = $2", [`recall-requester-${testData.userId}@example.test`, testData.userId]);
     await pool.query("insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_assign_protocols) values ($1, $2, 'consultant', true, true)", [testData.userId, "Recall Requester"]);
+    reportingDoctorEmail = `recall-reporting-${testData.userId}@example.test`;
+    reportingDoctorUserId = Number((await pool.query<{ id: number }>("insert into users (username, email, full_name, password_hash, role, is_active) values ($1, $2, $3, $4, 'doctor', true) returning id", [`recall-reporting-${testData.userId}`, reportingDoctorEmail, "Recall Reporting Doctor", "unused-password-hash"])).rows[0]!.id);
+    reportingDoctorId = Number((await pool.query<{ id: number }>("insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_assign_protocols) values ($1, $2, 'consultant', true, true) returning id", [reportingDoctorUserId, "Recall Reporting Doctor"])).rows[0]!.id);
   });
 
   after(async () => {
     if (!testData) return;
     await pool.query("delete from email_outbox where event_type = 'additional_imaging_completed' and recipient_user_id = $1", [testData.userId]);
     await pool.query("update email_smtp_configuration set enabled = $1 where id = 1", [priorEmailEnabled]);
+    await pool.query("update email_notification_rules set enabled = $1 where event_type = 'additional_imaging_completed'", [priorAdditionalImagingRuleEnabled]);
     await pool.query(`delete from appointment_protocol_assignments where appointment_id in (select recall_appointment_id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1 and recall_appointment_id is not null)`, [testData.userId]);
     await pool.query("delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id in (select id from appointments_v2.complementary_recall_requests where requested_by_user_id = $1)", [testData.userId]);
     await pool.query("delete from appointments_v2.complementary_recall_requests where requested_by_user_id = $1", [testData.userId]);
+    await pool.query("delete from doctor_portal.case_team_assignments where assigned_doctor_id = $1", [reportingDoctorId]);
     await pool.query("delete from doctor_portal.doctor_profiles where user_id = $1", [testData.userId]);
+    await pool.query("delete from doctor_portal.doctor_profiles where id = $1", [reportingDoctorId]);
+    await pool.query("delete from users where id = $1", [reportingDoctorUserId]);
     await testDb.cleanup();
   });
 
@@ -72,10 +84,16 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     return { originalId, recall, recallBookingId };
   }
 
-  it("queues an enabled additional-imaging completion email for the requesting radiologist", async () => {
+  async function assignReportingDoctor(appointmentId: number, doctorId = reportingDoctorId) {
+    await pool.query("insert into doctor_portal.case_team_assignments (appointment_id, assigned_doctor_id, modality_id, assignment_type, status) values ($1, $2, $3, 'reporting', 'active')", [appointmentId, doctorId, testData.modalityId]);
+  }
+
+  it("queues an enabled additional-imaging completion email for the assigned reporting doctor", async () => {
     if (!testData) return;
     await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    await pool.query("update email_notification_rules set enabled = true where event_type = 'additional_imaging_completed'");
     const { originalId, recall, recallBookingId } = await scheduledRecall("supplement_original_report");
+    await assignReportingDoctor(originalId);
     await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
     const outbox = await pool.query<{ event_type: string; recipient_user_id: number; recipient_email: string; status: string; related_entity_type: string; related_entity_id: string; idempotency_key: string; subject: string; text_body: string }>("select event_type, recipient_user_id, recipient_email, status, related_entity_type, related_entity_id, idempotency_key, subject, text_body from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)]);
     assert.equal(outbox.rows.length, 1);
@@ -85,8 +103,10 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const originalAccession = `V2-${String(originalId).padStart(6, "0")}`;
     const recallAccession = `V2-${String(recallBookingId).padStart(6, "0")}`;
     assert.equal(email.event_type, "additional_imaging_completed");
-    assert.equal(Number(email.recipient_user_id), testData.userId);
-    assert.equal(email.recipient_email, `recall-requester-${testData.userId}@example.test`);
+    assert.equal(Number(email.recipient_user_id), reportingDoctorUserId);
+    assert.equal(email.recipient_email, reportingDoctorEmail);
+    assert.notEqual(Number(email.recipient_user_id), testData.userId);
+    assert.notEqual(email.recipient_email, `recall-requester-${testData.userId}@example.test`);
     assert.equal(email.status, "pending");
     assert.equal(email.related_entity_type, "complementary_recall_request");
     assert.equal(email.related_entity_id, String(recall.id));
@@ -113,21 +133,24 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal((await pool.query("select id from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)])).rowCount, 0);
   });
 
-  it("does not block completion when the requesting radiologist username is not an email address", async () => {
+  it("does not fall back to the requesting doctor when no reporting assignment exists", async () => {
     if (!testData) return;
     await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    await pool.query("update email_notification_rules set enabled = true where event_type = 'additional_imaging_completed'");
     await pool.query("update users set username = 'recall-not-an-email' where id = $1", [testData.userId]);
     const { recall, recallBookingId } = await scheduledRecall();
     await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
     assert.equal((await getComplementaryRecall(recall.id))?.status, "completed");
     assert.equal((await pool.query("select id from email_outbox where event_type = 'additional_imaging_completed' and related_entity_id = $1", [String(recall.id)])).rowCount, 0);
-    await pool.query("update users set username = $1 where id = $2", [`recall-requester-${testData.userId}@example.test`, testData.userId]);
   });
 
   it("does not duplicate the completion email for repeated completion of the same booking", async () => {
     if (!testData) return;
     await pool.query("update email_smtp_configuration set enabled = true where id = 1");
+    await pool.query("update email_notification_rules set enabled = true where event_type = 'additional_imaging_completed'");
     const { recall, recallBookingId } = await scheduledRecall();
+    const originalAppointmentId = Number((await pool.query<{ original_appointment_id: number }>("select original_appointment_id from appointments_v2.complementary_recall_requests where id = $1", [recall.id])).rows[0]!.original_appointment_id);
+    await assignReportingDoctor(originalAppointmentId);
     await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
     await transaction((client) => completeComplementaryRecallForBooking(client, recallBookingId, testData.userId));
     assert.equal((await pool.query("select id from email_outbox where idempotency_key = $1", [`additional_imaging_completed:${recall.id}:${recallBookingId}`])).rowCount, 1);
@@ -268,11 +291,13 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const createAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_requested' order by id desc limit 1", [recall.id]);
     assert.deepEqual(createAudit.rows[0]?.new_values, { originalAppointmentId: originalId, status: "pending_scheduling", reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report" });
     assert.ok(row?.originalAccession);
-    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBefore.pendingCount + 1, unseenPendingCount: summaryBefore.unseenPendingCount + 1 });
+    assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryBefore.pendingCount + 1);
+    assert.equal((await complementaryRecallReceptionSummary()).unseenPendingCount, summaryBefore.unseenPendingCount + 1);
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore + 1);
     await transaction((client) => markComplementaryRecallsSeen(client, [recall.id], testData.userId));
     assert.equal((await getComplementaryRecall(recall.id))?.status, "pending_scheduling");
-    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBefore.pendingCount + 1, unseenPendingCount: summaryBefore.unseenPendingCount });
+    assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryBefore.pendingCount + 1);
+    assert.equal((await complementaryRecallReceptionSummary()).unseenPendingCount, summaryBefore.unseenPendingCount);
     assert.equal(await complementaryRecallUnseenCount(), unseenBefore);
   });
 
@@ -390,7 +415,8 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(listed?.previousAttemptAppointmentId, returnId);
     assert.equal(listed?.previousAttemptReason, "no-show");
     assert.ok(listed?.previousAttemptAt);
-    assert.deepEqual(await complementaryRecallReceptionSummary(), { pendingCount: summaryBeforeReopen.pendingCount + 1, unseenPendingCount: summaryBeforeReopen.unseenPendingCount + 1 });
+    assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryBeforeReopen.pendingCount + 1);
+    assert.equal((await complementaryRecallReceptionSummary()).unseenPendingCount, summaryBeforeReopen.unseenPendingCount + 1);
     const cancelled = await transaction((client) => withdrawComplementaryRecall(client, recall.id, testData.userId));
     assert.equal(cancelled.status, "cancelled");
     assert.equal(cancelled.recallAppointmentId, null);
@@ -537,7 +563,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(todayRow.isOverdue, false);
     assert.ok(sameDayRow.effectiveDueAt);
     const expectedSameDay = await pool.query<{ target: Date }>("select ((date_trunc('day', requested_at at time zone 'Africa/Tripoli') + interval '1 day' - interval '1 millisecond') at time zone 'Africa/Tripoli') as target from appointments_v2.complementary_recall_requests where id = $1", [sameDay.id]);
-    assert.equal(sameDayRow.effectiveDueAt, expectedSameDay.rows[0]?.target.toISOString());
+    assert.equal(sameDayRow.effectiveDueAt, expectedSameDay.rows[0]?.target.toISOString().replace(".999Z", ".000Z"));
     assert.equal(overdueRow.status, "scheduled");
     assert.equal(overdueRow.isOverdue, true);
     assert.equal(overdueRow.latestFollowUpAt, null);
