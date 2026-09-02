@@ -1094,6 +1094,11 @@ function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBo
 }
 
 function applyMobileQuickTab(cases: ReportingBoardCaseRow[], input: ReportingBoardFilters): ReportingBoardCaseRow[] {
+  if (input.reportStatus === "final") {
+    // Finalized history is an owner-attributed personal view, not an active
+    // assignment queue. Only My Cases has a meaningful finalized equivalent.
+    return input.mobileQuickTab && input.mobileQuickTab !== "my_cases" ? [] : cases;
+  }
   switch (input.mobileQuickTab) {
     case "my_cases":
       return cases.filter((row) => row.assignmentStatus === "assigned" && row.assignedDoctorId === input.assignedDoctorId);
@@ -1263,8 +1268,8 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
   const personalDoctorId = view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null;
-  const finalizedByPersonalDoctor = input.reportStatus === "final" && identity?.profile?.id
-    ? allCases.filter((row) => row.finalizedByDoctorId === identity.profile!.id || row.manualFinalByDoctorId === identity.profile!.id)
+  const finalizedByPersonalDoctor = input.reportStatus === "final" && personalDoctorId
+    ? allCases.filter((row) => row.finalizedByDoctorId === personalDoctorId || row.manualFinalByDoctorId === personalDoctorId)
     : allCases;
   const resultCases = applyMobileQuickTab(finalizedByPersonalDoctor, {
     ...input,

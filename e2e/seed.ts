@@ -99,8 +99,8 @@ try {
   );
   await pool.query(`update system_settings set setting_value = '{"value":{"enabledModalityCodes":["E2E_CT"],"daysBack":30,"defaultRequiresReport":true,"defaultReportStatusFilter":"required_not_final"}}'::jsonb where category = 'doctor_portal_reporting_board' and setting_key = 'config'`);
   await pool.query(
-    `insert into doctor_portal.reporting_board_saved_views (owner_user_id, owner_doctor_id, name, token, filters_json, notification_settings_json, active, link_kind, system_managed, created_by_user_id, updated_by_user_id)
-     values ($1, $2, 'E2E Mobile Reporting', 'e2e-mobile-reporting-token', '{}'::jsonb, '{}'::jsonb, true, 'admin_saved_view', false, $1, $1)`,
+    `insert into doctor_portal.reporting_board_saved_views (owner_user_id, owner_doctor_id, target_doctor_id, name, token, filters_json, notification_settings_json, active, link_kind, system_managed, created_by_user_id, updated_by_user_id)
+     values ($1, $2, $2, 'E2E Mobile Reporting', 'e2e-mobile-reporting-token', '{}'::jsonb, '{}'::jsonb, true, 'doctor_worklist', true, $1, $1)`,
     [doctorUserId, doctorProfileId],
   );
 

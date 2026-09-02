@@ -1135,8 +1135,8 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
     assignedDoctorName: row.assignedDoctorName == null ? null : String(row.assignedDoctorName),
     assignmentOrigin: "rispro",
-    finalizedByDoctorId: null,
-    finalizedByDoctorName: null,
+    finalizedByDoctorId: row.finalizedByDoctorId == null ? null : Number(row.finalizedByDoctorId),
+    finalizedByDoctorName: row.finalizedByDoctorName == null ? null : String(row.finalizedByDoctorName),
     sonicDicomFinalizedByAccount: null,
     sonicDicomLatestDocumentId: null,
     sonicDicomCorrelationMethod: null,
@@ -1204,6 +1204,8 @@ export async function listComparisonReportingBoardRows(
         cr.materials_confirmed_at as "completedAt",
         cca.assigned_at as "currentAssignedAt",
         cr.finalized_at as "reportFinalAt",
+        finalized_doctor.id as "finalizedByDoctorId",
+        finalized_doctor.display_name as "finalizedByDoctorName",
         cca.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName"
       from comparison_requests cr
@@ -1211,6 +1213,7 @@ export async function listComparisonReportingBoardRows(
       left join modalities m on m.id = cr.linked_modality_id
       left join doctor_portal.comparison_case_assignments cca on cca.comparison_request_id = cr.id and cca.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
+      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.user_id = cr.finalized_by
       left join lateral (
         select pi.value
         from patient_identifiers pi

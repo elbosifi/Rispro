@@ -8,6 +8,14 @@ test("public personal reporting desk renders the responsive personal workflow", 
   await expect(page.getByRole("button", { name: /Available/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Urgent/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Overdue/ })).toBeVisible();
+  await page.getByRole("button", { name: "Filters" }).click();
+  await expect(page.getByLabel("Modality").locator("option")).toHaveText(["All modalities", "E2E_CT"]);
+  await expect(page.getByLabel("Category").locator("option")).toHaveText(["All categories", "Oncology", "Non-oncology"]);
+  await expect(page.getByLabel("Priority").locator("option")).toHaveText(["All priorities", "Routine", "Urgent", "STAT"]);
+  const sort = page.getByLabel("Sort");
+  await sort.selectOption("newest_study");
+  await expect(sort).toHaveValue("newest_study");
+  await page.getByRole("button", { name: "Done" }).click();
   await page.getByRole("button", { name: /Available/ }).click();
   await expect(page.getByText("E2E Reporting Patient")).toBeVisible();
   await expect(page.getByText("E2E CT")).toBeVisible();

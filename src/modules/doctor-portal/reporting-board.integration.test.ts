@@ -1439,6 +1439,46 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(assignedOnly.data.cases.map((row) => row.appointmentId), [targetAssigned]);
   });
 
+  it("keeps finalized personal history attributed to the worklist owner across appointment and comparison reports", async () => {
+    guard();
+    const date = addDays(14);
+    const label = uniq("personal_finalized_owner");
+    const manualFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} manual` });
+    const sonicFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} sonic` });
+    const comparisonSourceA = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} comparison a source` });
+    const comparisonSourceB = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} comparison b source` });
+    const comparisonFinalA = await createComparisonRequestForBooking(comparisonSourceA, `${date}T08:00:00.000Z`, `${label} comparison a`);
+    const comparisonFinalB = await createComparisonRequestForBooking(comparisonSourceB, `${date}T08:05:00.000Z`, `${label} comparison b`);
+    const finalizerEmail = `rbit.personal.final.${randomUUID().slice(0, 8)}@nccb.ly`;
+
+    await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'personal history test', $2, $3)`, [manualFinal, targetDoctor.id, targetDoctor.doctorId]);
+    await pool.query(`update users set username = $2 where id = $1`, [targetDoctor.id, finalizerEmail]);
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      { bookingId: sonicFinal, accessionNumber: `V2-${String(sonicFinal).padStart(6, "0")}`, studyInstanceUid: `1.2.840.personal.${sonicFinal}`, requiresReport: true, status: "completed" },
+      { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "personal-final", finalizedByAccount: finalizerEmail, correlationMethod: "study_instance_uid" }
+    );
+    await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonFinalA, targetDoctor.id]);
+    await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonFinalB, otherDoctor.id]);
+
+    const worklist = await getDoctorWorklist(targetDoctor, false);
+    type FinalizedMobileView = { cases: Array<{ appointmentId: number; comparisonRequestId: number | null; finalizedByDoctorId: number | null; manualFinalByDoctorId?: number | null }> };
+    const finalizedPath = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`;
+    const ownerView = await api<FinalizedMobileView>(targetDoctor.cookie, finalizedPath);
+    const supervisorView = await api<FinalizedMobileView>(supervisor.cookie, finalizedPath);
+    assert.equal(ownerView.status, 200, JSON.stringify(ownerView.data));
+    assert.equal(supervisorView.status, 200, JSON.stringify(supervisorView.data));
+    for (const view of [ownerView, supervisorView]) {
+      assert.equal(view.data.cases.some((row) => row.appointmentId === manualFinal), true);
+      assert.equal(view.data.cases.some((row) => row.appointmentId === sonicFinal && row.finalizedByDoctorId === targetDoctor.doctorId), true);
+      assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparisonFinalA && row.finalizedByDoctorId === targetDoctor.doctorId), true);
+      assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparisonFinalB), false);
+    }
+
+    const finalizedAvailable = await api<FinalizedMobileView>(supervisor.cookie, `${finalizedPath}&mobileQuickTab=available`);
+    assert.equal(finalizedAvailable.status, 200, JSON.stringify(finalizedAvailable.data));
+    assert.deepEqual(finalizedAvailable.data.cases, []);
+  });
+
   it("keeps mobile quick-tab counters stable across tabs, search, pagination, and permanent saved-view filters", async () => {
     guard();
     const label = uniq("mobile_quick_tab_counters");
