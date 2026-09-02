@@ -385,7 +385,7 @@ export default function QueueCheckInPage() {
                 </Button>
               </Link>
 
-              <Button variant="ghost" size="sm" onClick={logout} className="rounded-2xl px-3">
+              <Button variant="ghost" size="sm" onClick={() => void logout()} className="rounded-2xl px-3">
                 {t("common.signOut")}
               </Button>
             </div>

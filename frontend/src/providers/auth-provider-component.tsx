@@ -5,6 +5,10 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import type { User } from "@/types/api";
 import { AuthContext } from "./auth-provider";
 
+function safeLogoutTarget(returnTo: string): string {
+  return returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/\\") ? returnTo : "/";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -31,14 +35,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const logoutMutation = useMutation({
-    mutationFn: logoutApi,
+    mutationFn: (_returnTo: string) => logoutApi(),
     meta: {
       suppressGlobalToast: true
     },
-    onSuccess: () => {
+    onSuccess: (_, returnTo) => {
       queryClient.setQueryData(["auth-session"], null);
       queryClient.clear();
-      window.location.href = "/";
+      window.location.href = safeLogoutTarget(returnTo);
     }
   });
 
@@ -81,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = async () => {
-    await logoutMutation.mutateAsync();
+  const logout = async (returnTo = "/") => {
+    await logoutMutation.mutateAsync(returnTo);
   };
 
   const reAuth = async (password: string) => {

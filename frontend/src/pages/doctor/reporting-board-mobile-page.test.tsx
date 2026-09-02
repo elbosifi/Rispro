@@ -16,8 +16,8 @@ describe("Personal Reporting Desk", () => {
 
   it("keeps anonymous notification handling non-mutating and returns sign-in to this token", () => {
     assert.match(page, /Sign in to enable notifications/);
-    assert.match(page, /state: \{ from: `\$\{location\.pathname\}\$\{location\.search\}` \}/);
-    assert.match(page, /enabled: Boolean\(token\) && Boolean\(user\) && pushSupported\(\)/);
+    assert.match(page, /state: \{ from: \{ pathname: location\.pathname, search: location\.search, hash: location\.hash \} \}/);
+    assert.match(page, /enabled: Boolean\(token\) && Boolean\(user\) && browserPushSupported/);
   });
 
   it("reuses the passkey control and keeps personal claim actions gated", () => {

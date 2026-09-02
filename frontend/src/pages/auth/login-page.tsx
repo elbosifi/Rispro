@@ -7,6 +7,31 @@ import { fetchDoctorMe } from "@/lib/api-hooks";
 import { Lock, User, Power, KeyRound } from "lucide-react";
 import { shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
 
+type LoginDestination = string | { pathname: string; search: string; hash: string };
+
+function safeInternalPath(pathname: string): boolean {
+  return pathname.startsWith("/") && !pathname.startsWith("//") && !pathname.startsWith("/\\");
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
+}
+
+function resolveLoginDestination(state: unknown): { pathname: string; to: LoginDestination } {
+  const from = record(state)?.from;
+  if (typeof from === "string") {
+    if (!safeInternalPath(from)) return { pathname: "/", to: "/" };
+    return { pathname: from.split(/[?#]/, 1)[0] || "/", to: from };
+  }
+
+  const locationLike = record(from);
+  const pathname = locationLike?.pathname;
+  if (!locationLike || typeof pathname !== "string" || !safeInternalPath(pathname)) return { pathname: "/", to: "/" };
+  const search = typeof locationLike.search === "string" && (locationLike.search === "" || locationLike.search.startsWith("?")) ? locationLike.search : "";
+  const hash = typeof locationLike.hash === "string" && (locationLike.hash === "" || locationLike.hash.startsWith("#")) ? locationLike.hash : "";
+  return { pathname, to: { pathname, search, hash } };
+}
+
 export function LoginPage() {
   const { language } = useLanguage();
   const { login, loginWithPasskey, isLoading } = useAuth();
@@ -17,7 +42,8 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [logoFailed, setLogoFailed] = useState(false);
 
-  const from = location.state?.from?.pathname || "/";
+  const loginDestination = resolveLoginDestination(location.state);
+  const from = loginDestination.pathname;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -31,7 +57,7 @@ export function LoginPage() {
 
   const completeLogin = async (user: Awaited<ReturnType<typeof login>>) => {
     if (user.mustChangePassword) {
-      navigate(from, { replace: true });
+      navigate(loginDestination.to, { replace: true });
       return;
     }
     const doctorMe = await fetchDoctorMe().catch(() => null);
@@ -39,7 +65,7 @@ export function LoginPage() {
       navigate("/doctor/dashboard", { replace: true });
       return;
     }
-    navigate(from, { replace: true });
+    navigate(loginDestination.to, { replace: true });
   };
 
   const handlePasskeyLogin = async () => {

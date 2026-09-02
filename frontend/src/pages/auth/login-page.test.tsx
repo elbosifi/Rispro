@@ -40,12 +40,12 @@ vi.mock("@/lib/api-hooks", () => ({
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return <div data-testid="location">{location.pathname}{location.search}{location.hash}</div>;
 }
 
-function renderLogin(from = "/") {
+function renderLogin(from: string | { pathname: string; search?: string; hash?: string } = "/") {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: "/login", state: { from: { pathname: from } } }]}>
+    <MemoryRouter initialEntries={[{ pathname: "/login", state: { from: typeof from === "string" ? { pathname: from } : from } }]}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="*" element={<LocationProbe />} />
@@ -68,7 +68,7 @@ describe("LoginPage routing", () => {
   beforeEach(() => {
     testState.login.mockResolvedValue(loggedInUser("doctor"));
     testState.loginWithPasskey.mockResolvedValue(loggedInUser("doctor"));
-    testState.fetchDoctorMe.mockReset();
+    testState.fetchDoctorMe.mockReset().mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -126,6 +126,36 @@ describe("LoginPage routing", () => {
     await submitLogin(container);
 
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/appointments"));
+  });
+
+  it("preserves the exact Personal Reporting Desk path, query, and hash after password login", async () => {
+    const { container } = renderLogin({ pathname: "/reporting/worklist/personal-token", search: "?tab=urgent", hash: "#case-42" });
+
+    await submitLogin(container);
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/reporting/worklist/personal-token?tab=urgent#case-42"));
+  });
+
+  it("preserves the exact Personal Reporting Desk path, query, and hash after passkey login", async () => {
+    renderLogin({ pathname: "/reporting/worklist/personal-token", search: "?tab=overdue", hash: "#case-7" });
+
+    fireEvent.click(screen.getByRole("button", { name: /sign in with passkey/i }));
+
+    await waitFor(() => expect(testState.loginWithPasskey).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/reporting/worklist/personal-token?tab=overdue#case-7"));
+  });
+
+  it("falls back to the default login target for an unsafe string return route", async () => {
+    testState.fetchDoctorMe.mockResolvedValue({
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+      doctorPortalAutoRedirect: true,
+    });
+    const { container } = renderLogin("https://external.example/reporting/worklist/other-token");
+
+    await submitLogin(container);
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/doctor/dashboard"));
   });
 
   it("uses the same redirect behavior after passkey sign-in", async () => {
