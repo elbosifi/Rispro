@@ -866,24 +866,12 @@ export async function getAuthorizedReportingBoardAppointment(
   forbiddenMessage = "You are not allowed to open this Reporting Board case."
 ) {
   const me = await requireRosterDoctor(actor);
-  const canManage =
-    me.moduleCapabilities.includes("doctor_supervisor") ||
-    me.moduleCapabilities.includes("doctor_admin");
-  const filters = await effectiveFilters(
-    canManage
-      ? { appointmentId, reportStatus: "all", limit: 1, offset: 0 }
-      : { appointmentId, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned", reportStatus: "all", limit: 1, offset: 0 }
-  );
-  const settings = await readReportingBoardSettings();
-  const scopedFilters = filters.modalityCode || filters.modalityId
-    ? filters
-    : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const row = rows[0] ?? null;
-  if (!row) {
-    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
-    if (existing.length === 0) throw new HttpError(404, "Case not found.");
-    throw new HttpError(403, forbiddenMessage);
+  let row: ReportingBoardCaseRow;
+  try {
+    row = await requirePersonalReportingBoardAppointment(actor, appointmentId);
+  } catch (error) {
+    if (error instanceof HttpError && error.statusCode === 403) throw new HttpError(403, forbiddenMessage);
+    throw error;
   }
   return { me, row };
 }
@@ -937,22 +925,48 @@ async function requireVisibleReportingBoardAppointment(appointmentId: number) {
   return row;
 }
 
+/** Read-only personal-desk boundary reused by viewers, history, and recall facades. */
+export async function requirePersonalReportingBoardAppointment(actor: Actor, appointmentId: number): Promise<ReportingBoardCaseRow> {
+  const doctor = await requireRosterDoctor(actor);
+  const canManage = doctor.moduleCapabilities.includes("doctor_supervisor") || doctor.moduleCapabilities.includes("doctor_admin");
+  if (canManage) return requireVisibleReportingBoardAppointment(appointmentId);
+  const doctorId = doctor.profile?.id;
+  if (!doctorId) throw new HttpError(403, "An active doctor profile is required.");
+  const scope = await doctorWorklistScope(doctorId, { appointmentId, reportStatus: "all", limit: 1, offset: 0 }, true);
+  const row = scope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
+  if (!row) throw new HttpError(403, "This case is not in your personal reporting scope.");
+  return row;
+}
+
 export async function markReportingBoardCaseManualFinal(
   actor: Actor,
   appointmentId: number,
   reasonInput: string
 ): Promise<{ ok: true; appointmentId: number; status: "manual_final"; override: ReportingBoardManualFinalOverride }> {
-  const manager = await requireRosterManager(actor);
   const reason = String(reasonInput || "").trim();
   if (!reason) throw new HttpError(400, "A reason is required to mark this case final in RISpro.");
   const row = await requireVisibleReportingBoardAppointment(appointmentId);
-  if (row.appointmentStatus !== "completed") {
-    throw new HttpError(409, "Only completed Reporting Board cases can be manually marked final.");
+  let actorDoctorId: number | null = null;
+  try {
+    const manager = await requireRosterManager(actor);
+    actorDoctorId = manager.profile?.id ?? null;
+  } catch {
+    const doctor = await requireRosterDoctor(actor);
+    actorDoctorId = doctor.profile?.id ?? null;
+    if (!doctor.profile?.canFinalizeReports || actorDoctorId !== row.assignedDoctorId) {
+      throw new HttpError(403, "Only the assigned doctor with report-finalization permission may manually finalize this case.");
+    }
+  }
+  if (row.appointmentStatus !== "completed" || !row.requiresReport) {
+    throw new HttpError(409, "Only completed Reporting Board cases can be manually marked final; the case must require a report.");
+  }
+  if (row.reportStatus === "final" || row.manualFinalOverrideId) {
+    throw new HttpError(409, "This Reporting Board case is already final.");
   }
   const override = await markReportingBoardCaseManualFinalRecord({
     appointmentId,
     reason,
-    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+    actor: { userId: actor.userId, doctorId: actorDoctorId },
   });
   return { ok: true, appointmentId, status: "manual_final", override };
 }
@@ -1003,6 +1017,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
     reportStatus: row.reportStatus,
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: row.manualFinalOverrideId ?? null,
+    manualFinalByDoctorId: row.manualFinalByDoctorId ?? null,
     appointmentStatus: row.appointmentStatus,
     assignmentStatus: row.assignmentStatus,
     canAssign: row.canAssign,
@@ -1045,20 +1060,23 @@ function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canCl
 
 function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: number | null) {
   const today = todayIso();
+  const mine = assignedDoctorId ? cases.filter((row) => row.assignedDoctorId === assignedDoctorId) : [];
+  const isUrgent = (row: ReportingBoardCaseRow) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase());
+  const isActive = (row: ReportingBoardCaseRow) => row.requiresReport && row.reportStatus !== "final";
   return {
     total: cases.length,
-    assignedToMe: assignedDoctorId ? cases.filter((row) => row.assignedDoctorId === assignedDoctorId).length : null,
+    assignedToMe: assignedDoctorId ? mine.filter(isActive).length : null,
     unassigned: cases.filter((row) => row.assignmentStatus === "unassigned").length,
-    urgent: cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase())).length,
+    urgent: cases.filter((row) => isActive(row) && isUrgent(row)).length,
     requiredNotFinal: cases.filter((row) => row.requiresReport && row.reportStatus !== "final").length,
-    overdue: cases.filter((row) => row.requiresReport && row.reportStatus !== "final" && row.bookingDate < today).length,
+    overdue: mine.filter((row) => isActive(row) && row.bookingDate < today).length,
   };
 }
 
 function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBoardFilters {
   switch (input.mobileQuickTab) {
-    case "assigned":
-    case "unassigned":
+    case "my_cases":
+    case "available":
       return { ...input, assignedDoctorId: null, assignmentStatus: null, mobileQuickTab: null };
     case "urgent":
       return { ...input, priorityCode: null, urgentOrStat: null, mobileQuickTab: null };
@@ -1070,8 +1088,6 @@ function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBo
         reportStatus: input.reportStatus === "required_not_final" ? null : input.reportStatus,
         mobileQuickTab: null,
       };
-    case "all":
-      return { ...input, mobileQuickTab: null };
     default:
       return input;
   }
@@ -1079,14 +1095,14 @@ function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBo
 
 function applyMobileQuickTab(cases: ReportingBoardCaseRow[], input: ReportingBoardFilters): ReportingBoardCaseRow[] {
   switch (input.mobileQuickTab) {
-    case "assigned":
+    case "my_cases":
       return cases.filter((row) => row.assignmentStatus === "assigned" && row.assignedDoctorId === input.assignedDoctorId);
-    case "unassigned":
+    case "available":
       return cases.filter((row) => row.assignmentStatus === "unassigned");
     case "urgent":
       return cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
     case "overdue":
-      return cases.filter((row) => row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso());
+      return cases.filter((row) => row.assignedDoctorId === input.assignedDoctorId && row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso());
     default:
       return cases;
   }
@@ -1099,7 +1115,7 @@ function mobileResultFilters(
   offset: number
 ): EffectiveReportingBoardFilters {
   const resultFilters: EffectiveReportingBoardFilters = { ...counterFilters, limit, offset, mobileQuickTab: input.mobileQuickTab ?? null };
-  if (input.mobileQuickTab === "assigned" || input.mobileQuickTab === "unassigned") {
+  if (input.mobileQuickTab === "my_cases" || input.mobileQuickTab === "available") {
     resultFilters.assignedDoctorId = input.assignedDoctorId ?? null;
     resultFilters.assignmentStatus = input.assignmentStatus ?? null;
   }
@@ -1147,9 +1163,11 @@ async function doctorWorklistScope(
   const caseSource = requestedSource && allowedSources.includes(requestedSource)
     ? requestedSource
     : allowedSources.length === 1 ? allowedSources[0] : "all";
-  const compatibleReportStatus = input.reportStatus && !["all", "final"].includes(input.reportStatus)
+  // The personal desk always starts with actionable work. Finalized is a
+  // deliberate, actor-aware view below rather than a departmental archive.
+  const compatibleReportStatus = input.reportStatus && input.reportStatus !== "all"
     ? input.reportStatus
-    : settings.defaultReportStatusFilter;
+    : "required_not_final";
   const base = await effectiveFilters({
     ...input,
     dateFrom: narrowedDateFrom,
@@ -1244,7 +1262,14 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   if (fullScopeListingDurationMs > MOBILE_FULL_SCOPE_WARNING_MS) {
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
-  const resultCases = applyMobileQuickTab(allCases, input);
+  const personalDoctorId = view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null;
+  const finalizedByPersonalDoctor = input.reportStatus === "final" && identity?.profile?.id
+    ? allCases.filter((row) => row.finalizedByDoctorId === identity.profile!.id || row.manualFinalByDoctorId === identity.profile!.id)
+    : allCases;
+  const resultCases = applyMobileQuickTab(finalizedByPersonalDoctor, {
+    ...input,
+    assignedDoctorId: input.assignedDoctorId ?? personalDoctorId,
+  });
   const cases = resultCases.slice(requestedOffset, requestedOffset + requestedLimit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const canClaimToSelf = Boolean(

@@ -366,7 +366,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
 
     assert.match(service, /function mobileCounters\(cases: ReportingBoardCaseRow\[], assignedDoctorId\?: number \| null\)/);
-    assert.match(service, /assignedToMe: assignedDoctorId \? cases\.filter\(\(row\) => row\.assignedDoctorId === assignedDoctorId\)\.length : null/);
+    assert.match(service, /const mine = assignedDoctorId \? cases\.filter\(\(row\) => row\.assignedDoctorId === assignedDoctorId\) : \[\]/);
+    assert.match(service, /overdue: mine\.filter/);
     assert.match(service, /view\.linkKind === "doctor_worklist" \? view\.targetDoctorId : identity\?\.profile\?\.id \?\? null/);
     assert.match(service, /Number\(identity\.profile\.id\) === view\.targetDoctorId \|\| canManage/);
   });
@@ -417,7 +418,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(app, /path="\/reporting\/worklist\/:token"/);
     assert.match(app, /path="\/mobile\/reporting-view\/:token" element=\{<LegacyReportingWorklistRedirect/);
     assert.match(app, /location\.search/);
-    assert.match(page, /doctor-worklist-desktop-table/);
+    assert.match(page, /Personal Reporting Desk/);
     assert.doesNotMatch(page, /QRCode|Show QR/);
   });
 
@@ -569,6 +570,37 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const mobileView = service.slice(service.indexOf("export async function getPublicReportingBoardMobileView"), service.indexOf("export async function getPublicReportingBoardMobileCase"));
     assert.doesNotMatch(mobileView, /checkSonicDicomReportStatusesBatch|fetchSonicDicomStudyNotes|studyNoteFetcher/);
     assert.match(mobileView, /mobileCase\(row, Boolean\(identity\)\)/);
+  });
+
+  it("uses the personal reporting scope for OHIF and SonicDICOM case authorization", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    assert.match(service, /getAuthorizedReportingBoardAppointment[\s\S]*?requirePersonalReportingBoardAppointment\(actor, appointmentId\)/);
+  });
+
+  it("allows only an assigned finalization-capable doctor to use the existing manual-final path", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    assert.match(service, /requireRosterDoctor\(actor\)/);
+    assert.match(service, /!doctor\.profile\?\.canFinalizeReports \|\| actorDoctorId !== row\.assignedDoctorId/);
+    assert.match(service, /row\.appointmentStatus !== "completed" \|\| !row\.requiresReport/);
+    assert.match(service, /row\.reportStatus === "final" \|\| row\.manualFinalOverrideId/);
+    assert.match(service, /clearReportingBoardCaseManualFinal[\s\S]*requireRosterManager\(actor\)/);
+  });
+
+  it("adds read-only personal-scope history routes without protocol-assignment or reconciliation access", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    assert.match(service, /export async function requirePersonalReportingBoardAppointment/);
+    assert.match(service, /doctorWorklistScope\(doctorId, \{ appointmentId, reportStatus: "all"/);
+    assert.match(routes, /"\/cases\/:appointmentId\/history"[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?getProtocolingPatientHistory/);
+    assert.match(routes, /"\/cases\/:appointmentId\/history\/historical-candidates"[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?getProtocolingHistoricalPacsCandidates/);
+    assert.match(routes, /canReconcilePatientIdentity: false/);
+  });
+
+  it("uses the existing complementary-recall service through the personal reporting scope", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    assert.match(routes, /"\/cases\/:appointmentId\/complementary-recalls"[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?createComplementaryRecall/);
+    assert.match(routes, /"\/complementary-recalls\/:recallId\/withdraw"[\s\S]*?getComplementaryRecall[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?withdrawComplementaryRecall/);
+    assert.match(routes, /reasonCode:[\s\S]*?qaClassification:[\s\S]*?urgency:[\s\S]*?dueAt:[\s\S]*?reportingDisposition:/);
   });
 
   it("uses exact full-scope resolution before filtered desktop pagination", () => {

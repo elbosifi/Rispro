@@ -1554,10 +1554,26 @@ export async function fetchRegistrationProtocolAssignment(appointmentId: number)
 export async function fetchProtocolingPatientHistory(appointmentId: number): Promise<ProtocolingPatientHistoryResponse> {
   return api<ProtocolingPatientHistoryResponse>(`/doctor/protocoling/appointments/${appointmentId}/history`);
 }
+
+export async function fetchReportingBoardPatientHistory(appointmentId: number): Promise<ProtocolingPatientHistoryResponse> {
+  return api<ProtocolingPatientHistoryResponse>(`/doctor/reporting-board/cases/${appointmentId}/history`);
+}
 export async function requestProtocolingPatientIdentityReconciliation(appointmentId:number,studyInstanceUid:string,accessionNumber:string|null){return api<{job:{id:number;status:string}}>(`/doctor/protocoling/appointments/${appointmentId}/history/patient-identity-reconciliation`,{method:"POST",body:JSON.stringify({studyInstanceUid,accessionNumber})});}
 
 export async function fetchProtocolingHistoricalPacsCandidates(appointmentId: number): Promise<ProtocolingHistoricalPacsCandidatesResponse> {
   return api<ProtocolingHistoricalPacsCandidatesResponse>(`/doctor/protocoling/appointments/${appointmentId}/history/historical-candidates`);
+}
+
+export async function fetchReportingBoardHistoricalPacsCandidates(appointmentId: number): Promise<ProtocolingHistoricalPacsCandidatesResponse> {
+  return api<ProtocolingHistoricalPacsCandidatesResponse>(`/doctor/reporting-board/cases/${appointmentId}/history/historical-candidates`);
+}
+
+export async function createReportingBoardComplementaryRecall(appointmentId: number, payload: ComplementaryRecallRequestPayload): Promise<ComplementaryRecall> {
+  return (await api<{ recall: ComplementaryRecall }>(`/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) })).recall;
+}
+
+export async function withdrawReportingBoardComplementaryRecall(recallId: number): Promise<ComplementaryRecall> {
+  return (await api<{ recall: ComplementaryRecall }>(`/doctor/reporting-board/complementary-recalls/${recallId}/withdraw`, { method: "POST" })).recall;
 }
 
 export async function searchProtocolingHistoricalPacsPatientId(appointmentId: number, patientId: string): Promise<HistoricalPacsCandidate[]> {

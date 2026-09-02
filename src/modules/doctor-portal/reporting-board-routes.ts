@@ -5,6 +5,9 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { launchReportingBoardCaseInOhif } from "../ohif-viewer/service.js";
+import { getProtocolingHistoricalPacsCandidates, getProtocolingPatientHistory } from "./protocoling-repository.js";
+import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
+import { createComplementaryRecall, getComplementaryRecall, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "./reporting-board-types.js";
 import {
   assignReportingBoardCaseToDoctor,
@@ -31,6 +34,7 @@ import {
   clearReportingBoardCaseManualFinal,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
+  requirePersonalReportingBoardAppointment,
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
@@ -436,6 +440,61 @@ router.post(
       expectedAssignedDoctorId: requiredPositiveInteger(body.expectedAssignedDoctorId, "expectedAssignedDoctorId"),
       expectedSonicDicomLatestDocumentId,
     }));
+  })
+);
+
+router.get(
+  "/cases/:appointmentId/history",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
+    await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    const result = await getProtocolingPatientHistory(appointmentId);
+    res.json({ ...result, canReconcilePatientIdentity: false });
+  })
+);
+
+router.get(
+  "/cases/:appointmentId/history/historical-candidates",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
+    await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    res.json(await getProtocolingHistoricalPacsCandidates(appointmentId));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/complementary-recalls",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
+    const row = await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    if (row.appointmentStatus !== "completed") throw new HttpError(409, "Only completed cases can request additional imaging.");
+    const body = asUnknownRecord(req.body);
+    const technologistInstruction = asOptionalString(body.technologistInstruction ?? body.technologist_instruction)?.trim();
+    if (!technologistInstruction) throw new HttpError(400, "Technologist instruction is required.");
+    const recall = await withTransaction((client) => createComplementaryRecall(client, {
+      originalAppointmentId: appointmentId,
+      receptionInstruction: asOptionalString(body.receptionInstruction ?? body.reception_instruction)?.trim() || null,
+      technologistInstruction,
+      reasonCode: body.reasonCode ?? body.reason_code,
+      qaClassification: body.qaClassification ?? body.qa_classification,
+      urgency: body.urgency,
+      dueAt: body.dueAt ?? body.due_at,
+      reportingDisposition: body.reportingDisposition ?? body.reporting_disposition,
+      requestedByUserId: Number(req.user!.sub),
+    }));
+    res.status(201).json({ recall });
+  })
+);
+
+router.post(
+  "/complementary-recalls/:recallId/withdraw",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const recallId = requiredPositiveInteger(req.params.recallId, "recallId");
+    const recall = await getComplementaryRecall(recallId);
+    if (!recall) throw new HttpError(404, "Additional imaging request not found.");
+    await requirePersonalReportingBoardAppointment(actor(req), recall.originalAppointmentId);
+    const updated = await withTransaction((client) => withdrawComplementaryRecall(client, recallId, Number(req.user!.sub)));
+    res.json({ recall: updated });
   })
 );
 

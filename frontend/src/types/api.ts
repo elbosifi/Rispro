@@ -379,7 +379,7 @@ export type ReportingBoardAssignmentMatch = "all" | "matched" | "mismatch" | "fi
 export type ReportingBoardCaseAssignmentMatch = Exclude<ReportingBoardAssignmentMatch, "all"> | "not_applicable";
 export type ReportingBoardCaseSource = "all" | "appointments" | "comparisons";
 export type ReportingBoardReportStatus = "required_not_final" | "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | "all";
-export type ReportingBoardMobileQuickTab = "assigned" | "unassigned" | "urgent" | "overdue" | "all";
+export type ReportingBoardMobileQuickTab = "my_cases" | "available" | "urgent" | "overdue";
 
 export interface ReportingBoardFilters {
   dateFrom?: string | null;
@@ -829,6 +829,7 @@ export interface ReportingBoardMobileCase {
   reportStatus: string;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
+  manualFinalByDoctorId?: number | null;
   appointmentStatus: string;
   assignmentStatus: "assigned" | "unassigned";
   canAssign: boolean;

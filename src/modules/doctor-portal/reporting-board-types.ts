@@ -26,7 +26,9 @@ export type ReportingBoardSortBy =
   | "longest_assigned_not_final"
   | "oldest_completed";
 export type ReportingBoardSortDirection = "asc" | "desc";
-export type ReportingBoardMobileQuickTab = "assigned" | "unassigned" | "urgent" | "overdue" | "all";
+/** Personal Reporting Desk workflow scopes.  These are deliberately distinct
+ * from the assignment filters used by the administrative Reporting Board. */
+export type ReportingBoardMobileQuickTab = "my_cases" | "available" | "urgent" | "overdue";
 
 export interface ReportingBoardFilters {
   dateFrom?: string | null;
@@ -169,6 +171,7 @@ export interface ReportingBoardCaseRow {
   sonicDicomStudyNoteSource?: "sonicdicom" | null;
   manualFinalOverrideId?: number | null;
   manualFinalAt?: string | null;
+  manualFinalByDoctorId?: number | null;
   manualFinalByName?: string | null;
   manualFinalReason?: string | null;
   dueAt: string | null;
