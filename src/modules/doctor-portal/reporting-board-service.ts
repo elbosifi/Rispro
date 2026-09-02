@@ -1459,7 +1459,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const canClaimToSelf = Boolean(
     actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
-    (Number(identity.profile.id) === view.targetDoctorId || canManage)
+    Number(identity.profile.id) === view.targetDoctorId
   );
   const finalizeOwnReports = Boolean(
     actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
@@ -1571,7 +1571,6 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
   const me = await requireRosterDoctor(actor);
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Worklist not found.");
-  const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
   if (view.linkKind !== "doctor_worklist") {
     await requireRosterManager(actor);
     await ensureCaseInSavedViewScope(token, identity);
@@ -1579,8 +1578,8 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
       ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" })
       : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
   }
-  if (!canManage && view.targetDoctorId !== Number(me.profile!.id)) {
-    throw new HttpError(403, "Doctors can claim cases only through their own worklist.");
+  if (Number(me.profile!.id) !== view.targetDoctorId) {
+    throw new HttpError(403, "Cases can be claimed only through your own Personal Reporting Desk.");
   }
   const scope = await doctorWorklistScope(view.targetDoctorId!, {
     appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,

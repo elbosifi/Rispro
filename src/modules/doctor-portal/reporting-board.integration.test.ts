@@ -1436,7 +1436,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       savedView: { linkKind: string; targetDoctorId: number | null };
       currentDoctorId: number | null;
       counters: { assignedToMe: number | null };
-      cases: Array<{ appointmentId: number; assignedDoctorId: number | null }>;
+      cases: Array<{ appointmentId: number; assignedDoctorId: number | null; canAssignToMe: boolean }>;
       allowedActions: { assignToMe: boolean; reassign: boolean; finalizeOwnReports: boolean };
     };
     const path = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&limit=100`;
@@ -1458,9 +1458,18 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       assert.equal(response.data.cases.some((row) => row.appointmentId === targetAssigned), true, viewer.name);
       assert.equal(response.data.cases.some((row) => row.appointmentId === unassigned), true, viewer.name);
       assert.equal(response.data.cases.some((row) => row.appointmentId === viewerAssigned), false, viewer.name);
-      assert.equal(response.data.allowedActions.assignToMe, viewer.name === "target doctor" || viewer.canManage);
+      assert.equal(response.data.allowedActions.assignToMe, viewer.name === "target doctor");
+      assert.equal(response.data.cases.find((row) => row.appointmentId === unassigned)?.canAssignToMe, viewer.name === "target doctor", viewer.name);
       assert.equal(response.data.allowedActions.reassign, viewer.canManage);
       assert.equal(response.data.allowedActions.finalizeOwnReports, viewer.name === "target doctor");
+    }
+
+    for (const manager of [supervisor, admin]) {
+      const ownWorklist = await getDoctorWorklist(manager, false);
+      const ownView = await api<MobileView>(manager.cookie, `/api/reporting/saved-views/public/${ownWorklist.token}/mobile?q=${encodeURIComponent(label)}&limit=100`);
+      assert.equal(ownView.status, 200, JSON.stringify(ownView.data));
+      assert.equal(ownView.data.allowedActions.assignToMe, true);
+      assert.equal(ownView.data.cases.find((row) => row.appointmentId === unassigned)?.canAssignToMe, true);
     }
 
     const noFinalizeWorklist = await getDoctorWorklist(noFinalizeDoctor, false);
@@ -1734,6 +1743,82 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       api(otherDoctor.cookie, `/api/reporting/saved-views/public/${other.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: race } }),
     ]);
     assert.deepEqual(raceResults.map((result) => result.status).sort(), [200, 409]);
+  });
+
+  it("keeps Personal Desk self-claims owner-bound for managers and comparisons", async () => {
+    guard();
+    const date = addDays(18);
+    const previousDate = addDays(-18);
+    const label = uniq("personal_desk_claim_owner");
+    const doctorAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} doctor appointment` });
+    const managerAppointment = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: `${label} manager appointment` });
+    const adminAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} admin appointment` });
+    const ordinaryCrossAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} ordinary cross-owner appointment` });
+    const managerCrossAppointment = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: `${label} manager cross-owner appointment` });
+    const doctorComparisonSource = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: previousDate, patientName: `${label} doctor comparison source` });
+    const managerComparisonSource = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date: previousDate, patientName: `${label} manager comparison source` });
+    const doctorComparison = await createComparisonRequestForBooking(doctorComparisonSource, `${date}T09:00:00.000Z`, `${label} doctor comparison`);
+    const managerComparison = await createComparisonRequestForBooking(managerComparisonSource, `${date}T09:05:00.000Z`, `${label} manager comparison`);
+    [doctorAppointment, managerAppointment, adminAppointment, ordinaryCrossAppointment, managerCrossAppointment].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const doctorWorklist = await getDoctorWorklist(doctor, false);
+    const otherWorklist = await getDoctorWorklist(otherDoctor, false);
+    const managerWorklist = await getDoctorWorklist(supervisor, false);
+    const adminWorklist = await getDoctorWorklist(admin, false);
+
+    const doctorClaim = await api(doctor.cookie, `/api/reporting/saved-views/public/${doctorWorklist.token}/mobile/assign-to-me`, {
+      method: "POST", body: { appointmentId: doctorAppointment },
+    });
+    assert.equal(doctorClaim.status, 200, JSON.stringify(doctorClaim.data));
+
+    const managerClaim = await api(supervisor.cookie, `/api/reporting/saved-views/public/${managerWorklist.token}/mobile/assign-to-me`, {
+      method: "POST", body: { appointmentId: managerAppointment },
+    });
+    assert.equal(managerClaim.status, 200, JSON.stringify(managerClaim.data));
+
+    const adminClaim = await api(admin.cookie, `/api/reporting/saved-views/public/${adminWorklist.token}/mobile/assign-to-me`, {
+      method: "POST", body: { appointmentId: adminAppointment },
+    });
+    assert.equal(adminClaim.status, 200, JSON.stringify(adminClaim.data));
+
+    const ordinaryCrossClaim = await api(doctor.cookie, `/api/reporting/saved-views/public/${otherWorklist.token}/mobile/assign-to-me`, {
+      method: "POST", body: { appointmentId: ordinaryCrossAppointment },
+    });
+    assert.equal(ordinaryCrossClaim.status, 403, JSON.stringify(ordinaryCrossClaim.data));
+
+    for (const manager of [supervisor, admin]) {
+      const managerCrossClaim = await api(manager.cookie, `/api/reporting/saved-views/public/${otherWorklist.token}/mobile/assign-to-me`, {
+        method: "POST", body: { appointmentId: managerCrossAppointment },
+      });
+      assert.equal(managerCrossClaim.status, 403, JSON.stringify(managerCrossClaim.data));
+    }
+    const appointmentAssignment = await pool.query<{ assigned_doctor_id: string }>(
+      `select assigned_doctor_id::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`,
+      [managerCrossAppointment]
+    );
+    assert.deepEqual(appointmentAssignment.rows, []);
+
+    const comparisonClaim = await api(doctor.cookie, `/api/reporting/saved-views/public/${doctorWorklist.token}/mobile/assign-to-me`, {
+      method: "POST", body: { caseType: "comparison", comparisonRequestId: doctorComparison },
+    });
+    assert.equal(comparisonClaim.status, 200, JSON.stringify(comparisonClaim.data));
+
+    for (const manager of [supervisor, admin]) {
+      const managerComparisonClaim = await api(manager.cookie, `/api/reporting/saved-views/public/${otherWorklist.token}/mobile/assign-to-me`, {
+        method: "POST", body: { caseType: "comparison", comparisonRequestId: managerComparison },
+      });
+      assert.equal(managerComparisonClaim.status, 403, JSON.stringify(managerComparisonClaim.data));
+    }
+    const comparisonState = await pool.query<{ status: string; assigned_doctor_id: string | null; active_assignments: string }>(
+      `
+        select cr.status, cr.assigned_doctor_id::text,
+               (select count(*)::text from doctor_portal.comparison_case_assignments cca where cca.comparison_request_id = cr.id and cca.status = 'active') as active_assignments
+        from comparison_requests cr
+        where cr.id = $1
+      `,
+      [managerComparison]
+    );
+    assert.deepEqual(comparisonState.rows[0], { status: "ready_for_reporting", assigned_doctor_id: null, active_assignments: "0" });
   });
 
   it("keeps SonicDICOM-final mobile action flags closed except for manager reassignment", async () => {
