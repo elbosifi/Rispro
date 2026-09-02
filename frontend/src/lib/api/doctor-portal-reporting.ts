@@ -1568,6 +1568,14 @@ export async function fetchReportingBoardHistoricalPacsCandidates(appointmentId:
   return api<ProtocolingHistoricalPacsCandidatesResponse>(`/doctor/reporting-board/cases/${appointmentId}/history/historical-candidates`);
 }
 
+export async function fetchReportingBoardComparisonHistory(comparisonRequestId: number): Promise<ProtocolingPatientHistoryResponse> {
+  return api<ProtocolingPatientHistoryResponse>(`/doctor/reporting-board/comparisons/${comparisonRequestId}/history`);
+}
+
+export async function fetchReportingBoardComparisonHistoricalPacsCandidates(comparisonRequestId: number): Promise<ProtocolingHistoricalPacsCandidatesResponse> {
+  return api<ProtocolingHistoricalPacsCandidatesResponse>(`/doctor/reporting-board/comparisons/${comparisonRequestId}/history/historical-candidates`);
+}
+
 export async function createReportingBoardComplementaryRecall(appointmentId: number, payload: ComplementaryRecallRequestPayload): Promise<ComplementaryRecall> {
   return (await api<{ recall: ComplementaryRecall }>(`/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) })).recall;
 }

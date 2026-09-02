@@ -351,6 +351,13 @@ async function patientIdForBooking(bookingId: number): Promise<number> {
   return Number(result.rows[0].patient_id);
 }
 
+async function linkBookingToPatient(bookingId: number, sourceBookingId: number) {
+  await pool.query(
+    `update appointments_v2.bookings set patient_id = (select patient_id from appointments_v2.bookings where id = $2) where id = $1`,
+    [bookingId, sourceBookingId]
+  );
+}
+
 async function createComparisonRequestForBooking(bookingId: number, createdAt: string, reason: string): Promise<number> {
   const result = await pool.query<{ id: string }>(
     `
@@ -487,6 +494,22 @@ async function assignDirectly(appointmentId: number, doctorId: number, assignedA
     `,
     [appointmentId, doctorId, assignedAt ?? null]
   );
+}
+
+async function assignComparisonDirectly(comparisonRequestId: number, doctorId: number) {
+  await pool.query(`update doctor_portal.comparison_case_assignments set status = 'superseded', updated_at = now() where comparison_request_id = $1 and status = 'active'`, [comparisonRequestId]);
+  await pool.query(
+    `
+      insert into doctor_portal.comparison_case_assignments (
+        comparison_request_id, assigned_doctor_id, modality_id, assigned_by_user_id, assigned_by_doctor_id, reason
+      )
+      select id, $2, linked_modality_id, $3, $4, 'history test assignment'
+      from comparison_requests
+      where id = $1
+    `,
+    [comparisonRequestId, doctorId, admin.id, admin.doctorId]
+  );
+  await pool.query(`update comparison_requests set status = 'assigned', assigned_doctor_id = $2, updated_at = now() where id = $1`, [comparisonRequestId, doctorId]);
 }
 
 async function createDoctorPortalTestApp() {
@@ -1765,6 +1788,73 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         [ownCase]
       );
       assert.ok((audit.rowCount ?? 0) >= 2);
+    });
+  });
+
+  it("authorizes appointment and comparison history through the personal desk and restricts prior-study redirects to that history", async () => {
+    guard();
+    const date = addDays(14);
+    const label = uniq("personal_history");
+    const anchorAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} anchor` });
+    const relatedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} related` });
+    await linkBookingToPatient(relatedAppointmentId, anchorAppointmentId);
+    await assignDirectly(anchorAppointmentId, doctor.doctorId);
+
+    const assignedComparisonId = await createComparisonRequestForBooking(anchorAppointmentId, `${date}T08:00:00.000Z`, `${label} assigned comparison`);
+    await assignComparisonDirectly(assignedComparisonId, doctor.doctorId);
+    const otherComparisonId = await createComparisonRequestForBooking(anchorAppointmentId, `${date}T08:01:00.000Z`, `${label} other comparison`);
+    await assignComparisonDirectly(otherComparisonId, otherDoctor.doctorId);
+    const unassignedComparisonId = await createComparisonRequestForBooking(anchorAppointmentId, `${date}T08:02:00.000Z`, `${label} unassigned comparison`);
+
+    const comparisonHistory = await api<{ currentPatient?: { id: number }; canReconcilePatientIdentity?: boolean }>(
+      doctor.cookie,
+      `/api/doctor/reporting-board/comparisons/${assignedComparisonId}/history`
+    );
+    assert.equal(comparisonHistory.status, 200, JSON.stringify(comparisonHistory.data));
+    assert.equal(comparisonHistory.data.currentPatient?.id, await patientIdForBooking(anchorAppointmentId));
+    assert.equal(comparisonHistory.data.canReconcilePatientIdentity, false);
+
+    const appointmentHistory = await api<{ currentPatient?: { id: number }; canReconcilePatientIdentity?: boolean }>(
+      doctor.cookie,
+      `/api/doctor/reporting-board/cases/${anchorAppointmentId}/history`
+    );
+    assert.equal(appointmentHistory.status, 200, JSON.stringify(appointmentHistory.data));
+    assert.equal(appointmentHistory.data.canReconcilePatientIdentity, false);
+
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/comparisons/${assignedComparisonId}/history`)).status, 403);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/comparisons/${otherComparisonId}/history`)).status, 200);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/comparisons/${unassignedComparisonId}/history`)).status, 200);
+
+    await pool.query(`update doctor_portal.doctor_profiles set can_assign_protocols = false where id = $1`, [doctor.doctorId]);
+    try {
+      assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/comparisons/${assignedComparisonId}/history`)).status, 200);
+    } finally {
+      await pool.query(`update doctor_portal.doctor_profiles set can_assign_protocols = true where id = $1`, [doctor.doctorId]);
+    }
+
+    const relatedAccession = `V2-${String(relatedAppointmentId).padStart(6, "0")}`;
+    await withSonicDicomConfig({
+      sonicDicomReportsEnabled: true,
+      sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
+    }, async () => {
+      const appointmentOpen = await rawApi(
+        doctor.cookie,
+        `/api/doctor/reporting-board/cases/${anchorAppointmentId}/history/open-sonicdicom?accession=${encodeURIComponent(relatedAccession)}`
+      );
+      assert.equal(appointmentOpen.status, 302);
+      assert.match(appointmentOpen.headers.get("location") ?? "", new RegExp(`accessionnumber=${relatedAccession}`));
+
+      const comparisonOpen = await rawApi(
+        doctor.cookie,
+        `/api/doctor/reporting-board/comparisons/${assignedComparisonId}/history/open-sonicdicom?accession=${encodeURIComponent(relatedAccession)}`
+      );
+      assert.equal(comparisonOpen.status, 302);
+
+      const unauthorizedAccession = await rawApi(
+        doctor.cookie,
+        `/api/doctor/reporting-board/cases/${anchorAppointmentId}/history/open-sonicdicom?accession=NOT-IN-HISTORY`
+      );
+      assert.equal(unauthorizedAccession.status, 404);
     });
   });
 

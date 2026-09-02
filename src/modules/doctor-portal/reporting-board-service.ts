@@ -10,7 +10,7 @@ import {
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
-import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
+import { assignComparisonRequest, findComparisonRequestById, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -93,6 +93,7 @@ import {
 } from "./doctor-worklist-repository.js";
 import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import { median, minutesBetween, minutesSince, percentile, withTimelineMetrics } from "./reporting-board-metrics.js";
+import { getProtocolingHistoricalPacsCandidates, getProtocolingHistorySonicDicomRedirect, getProtocolingPatientHistory } from "./protocoling-repository.js";
 
 export interface Actor {
   userId: UserId;
@@ -936,6 +937,95 @@ export async function requirePersonalReportingBoardAppointment(actor: Actor, app
   const row = scope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
   if (!row) throw new HttpError(403, "This case is not in your personal reporting scope.");
   return row;
+}
+
+/** Read-only personal-desk boundary for comparison history and prior-study viewers. */
+export async function requirePersonalReportingBoardComparison(actor: Actor, comparisonRequestId: number): Promise<ReportingBoardCaseRow> {
+  const doctor = await requireRosterDoctor(actor);
+  const canManage = doctor.moduleCapabilities.includes("doctor_supervisor") || doctor.moduleCapabilities.includes("doctor_admin");
+  if (canManage) {
+    const rows = await listComparisonReportingBoardRows({ comparisonRequestId, reportStatus: "all", limit: 1, offset: 0 });
+    if (rows[0]) return rows[0];
+    if (!(await findComparisonRequestById(comparisonRequestId))) throw new HttpError(404, "Comparison request not found.");
+    throw new HttpError(403, "This comparison is not visible on the Reporting Board.");
+  }
+
+  const doctorId = doctor.profile?.id;
+  if (!doctorId) throw new HttpError(403, "An active doctor profile is required.");
+  const scope = await doctorWorklistScope(doctorId, {
+    comparisonRequestId,
+    caseSource: "comparisons",
+    reportStatus: "required_not_final",
+    limit: 1,
+    offset: 0,
+  }, true);
+  const row = scope.cases.find((candidate) => candidate.caseType === "comparison" && candidate.comparisonRequestId === comparisonRequestId);
+  if (row) return row;
+  if (!(await findComparisonRequestById(comparisonRequestId))) throw new HttpError(404, "Comparison request not found.");
+  throw new HttpError(403, "This comparison is not in your personal reporting scope.");
+}
+
+async function resolvePersonalReportingBoardComparisonHistoryAnchor(actor: Actor, comparisonRequestId: number) {
+  const row = await requirePersonalReportingBoardComparison(actor, comparisonRequestId);
+  const request = await findComparisonRequestById(comparisonRequestId);
+  if (!request) throw new HttpError(404, "Comparison request not found.");
+  const booking = await pool.query<{ patient_id: number }>(
+    `select patient_id from appointments_v2.bookings where id = $1 limit 1`,
+    [request.linkedPreviousBookingId],
+  );
+  const linkedPatientId = booking.rows[0]?.patient_id == null ? null : Number(booking.rows[0].patient_id);
+  if (linkedPatientId == null) throw new HttpError(409, "The linked comparison prior study is unavailable.");
+  if (linkedPatientId !== request.patientId) throw new HttpError(409, "The linked comparison prior study belongs to a different patient.");
+  return { row, request, appointmentId: request.linkedPreviousBookingId };
+}
+
+export async function getPersonalReportingBoardComparisonHistory(actor: Actor, comparisonRequestId: number) {
+  const { appointmentId } = await resolvePersonalReportingBoardComparisonHistoryAnchor(actor, comparisonRequestId);
+  return { ...await getProtocolingPatientHistory(appointmentId), canReconcilePatientIdentity: false };
+}
+
+export async function getPersonalReportingBoardComparisonHistoricalPacsCandidates(actor: Actor, comparisonRequestId: number) {
+  const { appointmentId } = await resolvePersonalReportingBoardComparisonHistoryAnchor(actor, comparisonRequestId);
+  return getProtocolingHistoricalPacsCandidates(appointmentId);
+}
+
+type PersonalReportingHistoryAnchor =
+  | { caseType: "appointment"; appointmentId: number }
+  | { caseType: "comparison"; comparisonRequestId: number };
+
+async function getAuthorizedPersonalReportingHistorySources(actor: Actor, anchor: PersonalReportingHistoryAnchor) {
+  const appointmentId = anchor.caseType === "appointment"
+    ? (await requirePersonalReportingBoardAppointment(actor, anchor.appointmentId), anchor.appointmentId)
+    : (await resolvePersonalReportingBoardComparisonHistoryAnchor(actor, anchor.comparisonRequestId)).appointmentId;
+  const currentHistory = await getProtocolingPatientHistory(appointmentId);
+  const historicalCandidates = await getProtocolingHistoricalPacsCandidates(appointmentId).catch(() => null);
+  return { currentHistory, historicalCandidates };
+}
+
+function historyContainsAccession(
+  accession: string,
+  currentHistory: Awaited<ReturnType<typeof getProtocolingPatientHistory>>,
+  historicalCandidates: Awaited<ReturnType<typeof getProtocolingHistoricalPacsCandidates>> | null,
+): boolean {
+  if (currentHistory.items.some((item) => item.accessionNumber?.trim() === accession)) return true;
+  return Boolean(historicalCandidates?.historicalCandidates.some((candidate) =>
+    candidate.studies.some((study) => study.accessionNumber?.trim() === accession)
+  ));
+}
+
+export async function getReportingBoardHistorySonicDicomRedirect(
+  actor: Actor,
+  anchor: PersonalReportingHistoryAnchor,
+  accessionInput: string | null | undefined,
+  requestHostname: string,
+): Promise<{ redirectUrl: string }> {
+  const accession = String(accessionInput ?? "").trim();
+  if (!accession) throw new HttpError(400, "Accession number is required.");
+  const sources = await getAuthorizedPersonalReportingHistorySources(actor, anchor);
+  if (!historyContainsAccession(accession, sources.currentHistory, sources.historicalCandidates)) {
+    throw new HttpError(404, "This accession is not in the authorized patient history.");
+  }
+  return { redirectUrl: await getProtocolingHistorySonicDicomRedirect(accession, requestHostname) };
 }
 
 export async function markReportingBoardCaseManualFinal(

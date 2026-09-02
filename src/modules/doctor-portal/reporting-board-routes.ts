@@ -22,6 +22,7 @@ import {
   getReportingBoardCases,
   getReportingBoardPushConfig,
   getReportingBoardSonicDicomStudyRedirect,
+  getReportingBoardHistorySonicDicomRedirect,
   getScheduledReportingBoardBulkAssignmentJobs,
   getReportingBoardSettings,
   getFullReportingBoardSonicDicomResyncStatusForManager,
@@ -35,6 +36,8 @@ import {
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   requirePersonalReportingBoardAppointment,
+  getPersonalReportingBoardComparisonHistory,
+  getPersonalReportingBoardComparisonHistoricalPacsCandidates,
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
@@ -459,6 +462,46 @@ router.get(
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
     await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
     res.json(await getProtocolingHistoricalPacsCandidates(appointmentId));
+  })
+);
+
+router.get(
+  "/comparisons/:comparisonRequestId/history",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await getPersonalReportingBoardComparisonHistory(actor(req), requiredPositiveInteger(req.params.comparisonRequestId, "comparisonRequestId")));
+  })
+);
+
+router.get(
+  "/comparisons/:comparisonRequestId/history/historical-candidates",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await getPersonalReportingBoardComparisonHistoricalPacsCandidates(actor(req), requiredPositiveInteger(req.params.comparisonRequestId, "comparisonRequestId")));
+  })
+);
+
+router.get(
+  "/cases/:appointmentId/history/open-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const result = await getReportingBoardHistorySonicDicomRedirect(
+      actor(req),
+      { caseType: "appointment", appointmentId: requiredPositiveInteger(req.params.appointmentId, "appointmentId") },
+      asOptionalString(req.query.accession),
+      req.hostname,
+    );
+    res.redirect(302, result.redirectUrl);
+  })
+);
+
+router.get(
+  "/comparisons/:comparisonRequestId/history/open-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const result = await getReportingBoardHistorySonicDicomRedirect(
+      actor(req),
+      { caseType: "comparison", comparisonRequestId: requiredPositiveInteger(req.params.comparisonRequestId, "comparisonRequestId") },
+      asOptionalString(req.query.accession),
+      req.hostname,
+    );
+    res.redirect(302, result.redirectUrl);
   })
 );
 

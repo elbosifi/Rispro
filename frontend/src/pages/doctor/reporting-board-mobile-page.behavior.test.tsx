@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
@@ -16,6 +16,10 @@ const testState = vi.hoisted(() => ({
   sendTest: vi.fn(),
   fetchOhif: vi.fn(),
   fetchRetrieval: vi.fn(),
+  fetchHistory: vi.fn(),
+  fetchHistoricalCandidates: vi.fn(),
+  fetchComparisonHistory: vi.fn(),
+  fetchComparisonCandidates: vi.fn(),
   launchOhif: vi.fn(),
   logout: vi.fn(),
   noop: vi.fn(),
@@ -38,11 +42,13 @@ vi.mock("@/lib/api-hooks", () => ({
   createReportingBoardComplementaryRecall: testState.noop,
   fetchOhifViewerAvailability: testState.fetchOhif,
   fetchOhifRetrievalJob: testState.fetchRetrieval,
-  fetchReportingBoardHistoricalPacsCandidates: testState.noop,
+  fetchReportingBoardComparisonHistoricalPacsCandidates: testState.fetchComparisonCandidates,
+  fetchReportingBoardComparisonHistory: testState.fetchComparisonHistory,
+  fetchReportingBoardHistoricalPacsCandidates: testState.fetchHistoricalCandidates,
   fetchReportingBoardMobilePushConfig: testState.fetchConfig,
   fetchReportingBoardMobilePushStatus: testState.fetchStatus,
   fetchReportingBoardMobileView: testState.fetchView,
-  fetchReportingBoardPatientHistory: testState.noop,
+  fetchReportingBoardPatientHistory: testState.fetchHistory,
   finalizeComparisonRequest: testState.noop,
   launchReportingBoardCaseInOhif: testState.noop,
   markReportingBoardCaseManualFinal: testState.noop,
@@ -148,6 +154,10 @@ describe("Personal Reporting Desk authentication and current-device notification
     testState.fetchConfig.mockResolvedValue({ enabled: false, publicKey: null });
     testState.fetchStatus.mockResolvedValue({ enabled: false, lastSuccessAt: null });
     testState.fetchOhif.mockResolvedValue({ enabled: false });
+    testState.fetchHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchHistoricalCandidates.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchComparisonHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchComparisonCandidates.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
     testState.subscribe.mockResolvedValue({ subscriptionId: 1 });
     testState.unsubscribe.mockResolvedValue({ disabled: true });
     testState.sendTest.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
@@ -364,6 +374,10 @@ describe("Personal Reporting Desk case presentation", () => {
     testState.fetchConfig.mockResolvedValue({ enabled: false, publicKey: null });
     testState.fetchStatus.mockResolvedValue({ enabled: false, lastSuccessAt: null });
     testState.fetchOhif.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
+    testState.fetchHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchHistoricalCandidates.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchComparisonHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    testState.fetchComparisonCandidates.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
     testState.noop.mockResolvedValue(undefined);
   });
 
@@ -398,6 +412,64 @@ describe("Personal Reporting Desk case presentation", () => {
 
     expect(await screen.findByText("CT Chest")).toBeTruthy();
     expect(screen.getByText("Comparison")).toBeTruthy();
+  });
+
+  it("shows Patient History on an authorized appointment card without prefetching it", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Patient History" })).toBeTruthy();
+    expect(testState.fetchHistory).not.toHaveBeenCalled();
+  });
+
+  it("shows Patient History on an authorized comparison card", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ caseType: "comparison", caseKey: "comparison:9", comparisonRequestId: 9 })] });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Patient History" })).toBeTruthy();
+  });
+
+  it("does not expose an active Patient History action to anonymous users", async () => {
+    testState.user = null;
+    testState.fetchView.mockResolvedValue({ ...viewData(), currentDoctorId: null, allowedActions: { ...viewData().allowedActions, authenticated: false, readOnly: true }, cases: [makeCase()] });
+    renderPage();
+
+    await screen.findByText("Patient One");
+    expect(screen.queryByRole("button", { name: "Patient History" })).toBeNull();
+  });
+
+  it("does not expose history to an ordinary doctor viewing another doctor's token", async () => {
+    testState.user = { id: 8, username: "other", fullName: "Dr Other", role: "doctor" };
+    testState.fetchView.mockResolvedValue({ ...viewData(), currentDoctorId: 8, allowedActions: { ...viewData().allowedActions, accessLevel: "doctor", readOnly: true, readOnlyReason: "This worklist does not belong to your doctor profile." }, cases: [makeCase()] });
+    renderPage();
+
+    await screen.findByText("Patient One");
+    expect(screen.queryByRole("button", { name: "Patient History" })).toBeNull();
+  });
+
+  it("opens history from the card without opening Details first", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Patient History" }));
+    expect(await screen.findByText("Current RISpro / PACS studies")).toBeTruthy();
+    expect(screen.queryByText("MRN:")).toBeNull();
+    expect(testState.fetchHistory).toHaveBeenCalledWith(42);
+  });
+
+  it("returns from Details-origin history to the same Details case", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    const details = screen.getByRole("dialog");
+    fireEvent.click(within(details).getByRole("button", { name: "Patient History" }));
+    expect(await screen.findByText("Current RISpro / PACS studies")).toBeTruthy();
+    expect(screen.queryByText("MRN:")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to case" }));
+    expect(await screen.findByText("MRN:")).toBeTruthy();
+    expect(screen.queryByText("Current RISpro / PACS studies")).toBeNull();
   });
 
   it("shows the complete details hierarchy, comparison context, copy actions, and PACS note", async () => {
