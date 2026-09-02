@@ -40,6 +40,12 @@ function setViewport(isMobile: boolean) {
   });
 }
 
+function getDialogContent(): HTMLDivElement {
+  const content = screen.getByRole("dialog").querySelector<HTMLDivElement>("div[tabindex='-1']");
+  if (!content) throw new Error("Expected Dialog content");
+  return content;
+}
+
 function makeCase(overrides: Partial<PersonalReportingHistoryCase> = {}): PersonalReportingHistoryCase {
   return {
     caseType: "appointment",
@@ -111,12 +117,13 @@ function makeCandidate(): HistoricalPacsCandidate {
   };
 }
 
-function renderHistory(caseIdentity = makeCase()) {
-  return render(
+function renderHistory(caseIdentity = makeCase(), onClose = vi.fn()) {
+  const view = render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <PersonalReportingPatientHistory caseIdentity={caseIdentity} authorized onClose={vi.fn()} />
+      <PersonalReportingPatientHistory caseIdentity={caseIdentity} authorized onClose={onClose} />
     </QueryClientProvider>,
   );
+  return { ...view, onClose };
 }
 
 describe("PersonalReportingPatientHistory", () => {
@@ -133,6 +140,65 @@ describe("PersonalReportingPatientHistory", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
+  });
+
+  it("uses a full-height, edge-to-edge mobile History panel contract", async () => {
+    setViewport(true);
+    renderHistory();
+
+    await screen.findByText(/CT Head/);
+    const content = getDialogContent();
+
+    expect(content.className).toContain("!h-[100dvh]");
+    expect(content.className).toContain("!max-h-[100dvh]");
+    expect(content.className).toContain("!m-0");
+    expect(content.className).toContain("!rounded-none");
+    expect(content.className).toContain("!w-full");
+    expect(screen.getByRole("button", { name: "Back to case" }).className).toContain("w-full");
+  });
+
+  it("keeps the scrollable history body distinct from the header and footer", async () => {
+    renderHistory();
+
+    await screen.findByText(/CT Head/);
+    const content = getDialogContent();
+    const [header, body, footer] = Array.from(content.children);
+    if (!header || !body || !footer) throw new Error("Expected History header, body, and footer");
+
+    expect(body.className).toContain("flex-1");
+    expect(body.className).toContain("overflow-y-auto");
+    expect(body).not.toBe(header);
+    expect(body).not.toBe(footer);
+    expect(header.contains(screen.getByRole("heading", { name: "Patient History" }))).toBe(true);
+    expect(footer.contains(screen.getByRole("button", { name: "Back to case" }))).toBe(true);
+  });
+
+  it("keeps both History close actions wired to onClose", async () => {
+    const { onClose } = renderHistory();
+
+    expect(await screen.findByRole("heading", { name: "Patient History" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to case" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains the bounded centered desktop modal contract", async () => {
+    setViewport(false);
+    renderHistory();
+
+    await screen.findByText(/CT Head/);
+    const dialog = screen.getByRole("dialog");
+    const content = getDialogContent();
+
+    expect(dialog.style.alignItems).toBe("center");
+    expect(dialog.style.justifyContent).toBe("center");
+    expect(content.style.maxWidth).toBe("860px");
+    expect(content.className).toContain("sm:!m-4");
+    expect(content.className).toContain("sm:!h-auto");
+    expect(content.className).toContain("sm:!max-h-[calc(100vh-32px)]");
+    expect(content.className).toContain("sm:!rounded-xl");
+    expect(content.className).toContain("sm:!p-6");
   });
 
   it("renders current history before distinct historical candidates, newest first", async () => {

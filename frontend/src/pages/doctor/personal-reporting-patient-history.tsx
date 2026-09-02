@@ -253,12 +253,12 @@ export function PersonalReportingPatientHistory({
       <DialogContent
         maxWidth="860px"
         scrollable={false}
-        className="flex min-h-0 min-w-0 flex-col overflow-hidden sm:max-h-[calc(100vh-32px)]"
+        className="!m-0 !h-[100dvh] !max-h-[100dvh] !w-full !rounded-none !p-0 flex min-h-0 min-w-0 flex-col overflow-hidden sm:!m-4 sm:!h-auto sm:!max-h-[calc(100vh-32px)] sm:!rounded-xl sm:!p-6"
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-0">
           <DialogTitle>Patient History</DialogTitle>
         </DialogHeader>
-        <div className="min-h-0 max-h-[calc(92dvh-140px)] flex-1 space-y-5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 sm:max-h-[calc(100vh-220px)]">
+        <div className="min-h-0 max-h-none flex-1 space-y-5 overflow-x-hidden overflow-y-auto overscroll-contain px-4 sm:max-h-[calc(100vh-220px)] sm:px-0 sm:pr-1">
           {caseIdentity.caseType === "comparison" ? (
             <section className="min-w-0 rounded-lg border border-teal-100 bg-teal-50/50 p-3 text-sm" aria-label="Requested comparison prior">
               <h3 className="font-semibold">Requested comparison prior</h3>
@@ -291,8 +291,8 @@ export function PersonalReportingPatientHistory({
             {candidates.length ? <div className="mt-2 space-y-3">{candidates.map((candidate) => <HistoricalCandidateCard key={`${candidate.historicalPatientId}-${candidate.matchRank}`} caseIdentity={caseIdentity} candidate={candidate} />)}</div> : null}
           </section>
         </div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Back to case</Button>
+        <DialogFooter className="shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-0 sm:pb-0">
+          <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>Back to case</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
