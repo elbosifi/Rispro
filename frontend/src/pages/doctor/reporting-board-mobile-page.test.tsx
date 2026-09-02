@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "vitest";
 
 const page = readFileSync("src/pages/doctor/reporting-board-mobile-page.tsx", "utf8");
+const viewer = readFileSync("src/pages/doctor/personal-reporting-viewer-actions.tsx", "utf8");
 
 describe("Personal Reporting Desk", () => {
   it("uses only the four personal workflow tabs and defaults to My Cases", () => {
@@ -42,9 +43,9 @@ describe("Personal Reporting Desk", () => {
     assert.match(page, /\$\{days\} d \$\{remainingHours\} h/);
     assert.match(page, /<b>Category:<\/b>/);
     assert.doesNotMatch(page, /Clinical Indication/);
-    assert.match(page, /open-sonicdicom\?scope=study/);
-    assert.match(page, /"_blank", "noopener,noreferrer"/);
+    assert.match(viewer, /open-sonicdicom\?scope=study/);
+    assert.match(viewer, /window\.open\("about:blank", "_blank"\)/);
     assert.match(page, /fetchOhifViewerAvailability/);
-    assert.match(page, /launchReportingBoardCaseInOhif/);
+    assert.match(viewer, /launchReportingBoardCaseInOhif/);
   });
 });

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import { ReportingBoardMobilePage } from "./reporting-board-mobile-page";
-import type { ReportingBoardMobileResponse, User } from "@/types/api";
+import type { ReportingBoardMobileCase, ReportingBoardMobileResponse, User } from "@/types/api";
 
 const testState = vi.hoisted(() => ({
   user: null as User | null,
@@ -15,6 +15,8 @@ const testState = vi.hoisted(() => ({
   unsubscribe: vi.fn(),
   sendTest: vi.fn(),
   fetchOhif: vi.fn(),
+  fetchRetrieval: vi.fn(),
+  launchOhif: vi.fn(),
   logout: vi.fn(),
   noop: vi.fn(),
 }));
@@ -35,6 +37,7 @@ vi.mock("@/lib/api-hooks", () => ({
   assignReportingBoardMobileCaseToMe: testState.noop,
   createReportingBoardComplementaryRecall: testState.noop,
   fetchOhifViewerAvailability: testState.fetchOhif,
+  fetchOhifRetrievalJob: testState.fetchRetrieval,
   fetchReportingBoardHistoricalPacsCandidates: testState.noop,
   fetchReportingBoardMobilePushConfig: testState.fetchConfig,
   fetchReportingBoardMobilePushStatus: testState.fetchStatus,
@@ -306,5 +309,159 @@ describe("Personal Reporting Desk authentication and current-device notification
 
     await waitFor(() => expect(testState.sendTest).toHaveBeenCalledWith("token", json));
     expect(await screen.findByText("Test notification sent.")).toBeTruthy();
+  });
+});
+
+function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBoardMobileCase {
+  return {
+    caseType: "appointment",
+    caseKey: "appointment:42",
+    appointmentId: 42,
+    comparisonRequestId: null,
+    patientName: "Patient One",
+    mrn: "MRN-42",
+    accessionNumber: "ACC-42",
+    date: "2026-09-02",
+    time: "09:30",
+    modality: "MR",
+    exam: "MRI Knee",
+    category: "non_oncology",
+    assignedDoctor: "Dr Reader",
+    assignedDoctorId: 7,
+    assignmentOrigin: "rispro",
+    finalizedByDoctorId: null,
+    finalizedByDoctorName: null,
+    sonicDicomFinalizedByAccount: null,
+    assignmentMatch: "not_applicable",
+    priority: "Routine",
+    priorityCode: "routine",
+    reportStatus: "draft",
+    appointmentStatus: "completed",
+    assignmentStatus: "assigned",
+    canAssign: true,
+    exclusionReason: null,
+    completedAt: "2026-09-02T07:00:00.000Z",
+    firstAssignedAt: "2026-09-02T07:15:00.000Z",
+    currentAssignedAt: "2026-09-02T07:15:00.000Z",
+    reportFinalAt: null,
+    completedToAssignedMinutes: 15,
+    currentAssignmentAgeMinutes: 135,
+    completedUnassignedAgeMinutes: null,
+    completedAgeMinutes: 150,
+    overdue: false,
+    canAssignToMe: true,
+    canReassign: false,
+    canUnassign: false,
+    actionDisabledReason: null,
+    ...overrides,
+  };
+}
+
+describe("Personal Reporting Desk case presentation", () => {
+  beforeEach(() => {
+    testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
+    testState.fetchView.mockResolvedValue(viewData());
+    testState.fetchConfig.mockResolvedValue({ enabled: false, publicKey: null });
+    testState.fetchStatus.mockResolvedValue({ enabled: false, lastSuccessAt: null });
+    testState.fetchOhif.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
+    testState.noop.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    testState.user = null;
+  });
+
+  it("shows high-value case information once without clinical indication or duplicate modality", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    expect(await screen.findByText("Patient One")).toBeTruthy();
+    expect(screen.getByText("MRI Knee")).toBeTruthy();
+    expect(screen.getAllByText("MR")).toHaveLength(1);
+    expect(screen.getByText("Routine")).toBeTruthy();
+    expect(screen.getByText("Assigned 2 h 15 min")).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
+    expect(screen.queryByText(/clinical indication/i)).toBeNull();
+    expect(screen.queryByText("MR · MR")).toBeNull();
+  });
+
+  it("shows the Comparison badge on comparison cards", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({
+      caseType: "comparison",
+      caseKey: "comparison:9",
+      comparisonRequestId: 9,
+      exam: "CT Chest",
+      modality: "CT",
+    })] });
+    renderPage();
+
+    expect(await screen.findByText("CT Chest")).toBeTruthy();
+    expect(screen.getByText("Comparison")).toBeTruthy();
+  });
+
+  it("shows the complete details hierarchy, comparison context, copy actions, and PACS note", async () => {
+    const row = makeCase({
+      caseType: "comparison",
+      caseKey: "comparison:9",
+      comparisonRequestId: 9,
+      linkedPreviousStudyDate: "2026-08-01",
+      linkedPreviousAccessionNumber: "PREV-9",
+      comparisonReason: "Assess interval change",
+      comparisonPreparationNote: "Prior study prepared by imaging team.",
+      sonicDicomStudyNote: "SonicDICOM note for this study.",
+    });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [row] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(screen.getByText("MRN-42")).toBeTruthy();
+    expect(screen.getByText("ACC-42")).toBeTruthy();
+    expect(screen.getByText("Category:")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy MRN" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy accession" })).toBeTruthy();
+    expect(screen.getByText("2026-08-01")).toBeTruthy();
+    expect(screen.getByText("PREV-9")).toBeTruthy();
+    expect(screen.getByText("Assess interval change")).toBeTruthy();
+    expect(screen.getByText("Prior study prepared by imaging team.")).toBeTruthy();
+    expect(screen.getByText("SonicDICOM note for this study.")).toBeTruthy();
+  });
+
+  it("omits a null PACS note from details", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ sonicDicomStudyNote: null })] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(screen.queryByText(/SonicDICOM note:/)).toBeNull();
+  });
+
+  it("does not render privileged viewers for an anonymous Personal Desk", async () => {
+    testState.user = null;
+    testState.fetchOhif.mockResolvedValue({ enabled: true, configured: true, openMode: "new_tab" });
+    testState.fetchView.mockResolvedValue({ ...viewData(), allowedActions: { ...viewData().allowedActions, authenticated: false }, cases: [makeCase()] });
+    renderPage();
+
+    expect(await screen.findByText("Patient One")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open in SonicDICOM" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in OHIF" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
+    expect(screen.queryByRole("link", { name: "Open in SonicDICOM" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in OHIF" })).toBeNull();
+  });
+
+  it("keeps existing additional-imaging and finalization conditions while hiding finalization for report-not-required cases", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    const firstRender = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(screen.getByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Finalize report" })).toBeTruthy();
+    firstRender.unmount();
+
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ exclusionReason: "report_not_required" })] });
+    renderPage();
+    await screen.findByText("Patient One");
+    fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
+    expect(screen.queryByRole("button", { name: "Finalize report" })).toBeNull();
   });
 });
