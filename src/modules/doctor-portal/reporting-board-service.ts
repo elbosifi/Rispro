@@ -817,7 +817,7 @@ function normalizeSonicDicomOpenScope(scope?: string | null): SonicDicomOpenScop
 }
 
 export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number, scopeInput: string | null | undefined, requestHostname: string): Promise<{ redirectUrl: string }> {
-  const { me, row } = await getAuthorizedReportingBoardAppointment(
+  const { me, row } = await getAuthorizedReportingBoardAppointmentRead(
     actor,
     appointmentId,
     "You are not allowed to open this Reporting Board case in SonicDICOM."
@@ -867,14 +867,32 @@ export async function getAuthorizedReportingBoardAppointment(
   forbiddenMessage = "You are not allowed to open this Reporting Board case."
 ) {
   const me = await requireRosterDoctor(actor);
+  return getAuthorizedReportingBoardAppointmentWithScope(actor, appointmentId, forbiddenMessage, requirePersonalReportingBoardAppointment).then((row) => ({ me, row }));
+}
+
+export async function getAuthorizedReportingBoardAppointmentRead(
+  actor: Actor,
+  appointmentId: number,
+  forbiddenMessage = "You are not allowed to open this Reporting Board case."
+) {
+  const me = await requireRosterDoctor(actor);
+  return getAuthorizedReportingBoardAppointmentWithScope(actor, appointmentId, forbiddenMessage, requirePersonalReportingBoardAppointmentRead).then((row) => ({ me, row }));
+}
+
+async function getAuthorizedReportingBoardAppointmentWithScope(
+  actor: Actor,
+  appointmentId: number,
+  forbiddenMessage: string,
+  authorize: (actor: Actor, appointmentId: number) => Promise<ReportingBoardCaseRow>,
+): Promise<ReportingBoardCaseRow> {
   let row: ReportingBoardCaseRow;
   try {
-    row = await requirePersonalReportingBoardAppointment(actor, appointmentId);
+    row = await authorize(actor, appointmentId);
   } catch (error) {
     if (error instanceof HttpError && error.statusCode === 403) throw new HttpError(403, forbiddenMessage);
     throw error;
   }
-  return { me, row };
+  return row;
 }
 
 export async function markReportingBoardCaseDiscontinued(actor: Actor, appointmentId: number, reasonInput: string): Promise<{ ok: true; status: string; autoCompletionDisabledMessage?: string }> {
@@ -926,7 +944,7 @@ async function requireVisibleReportingBoardAppointment(appointmentId: number) {
   return row;
 }
 
-/** Read-only personal-desk boundary reused by viewers, history, and recall facades. */
+/** Active personal-desk boundary retained for active-scope writes such as recalls. */
 export async function requirePersonalReportingBoardAppointment(actor: Actor, appointmentId: number): Promise<ReportingBoardCaseRow> {
   const doctor = await requireRosterDoctor(actor);
   const canManage = doctor.moduleCapabilities.includes("doctor_supervisor") || doctor.moduleCapabilities.includes("doctor_admin");
@@ -937,6 +955,24 @@ export async function requirePersonalReportingBoardAppointment(actor: Actor, app
   const row = scope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
   if (!row) throw new HttpError(403, "This case is not in your personal reporting scope.");
   return row;
+}
+
+/** Read-only personal-desk boundary for current and own-finalized appointments. */
+export async function requirePersonalReportingBoardAppointmentRead(actor: Actor, appointmentId: number): Promise<ReportingBoardCaseRow> {
+  const doctor = await requireRosterDoctor(actor);
+  const canManage = doctor.moduleCapabilities.includes("doctor_supervisor") || doctor.moduleCapabilities.includes("doctor_admin");
+  if (canManage) return requireVisibleReportingBoardAppointment(appointmentId);
+  const doctorId = doctor.profile?.id == null ? null : Number(doctor.profile.id);
+  if (!doctorId) throw new HttpError(403, "An active doctor profile is required.");
+
+  const activeScope = await doctorWorklistScope(doctorId, { appointmentId, reportStatus: "all", limit: 1, offset: 0 }, true);
+  const activeRow = activeScope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
+  if (activeRow) return activeRow;
+
+  const finalizedScope = await doctorWorklistScope(doctorId, { appointmentId, reportStatus: "final", limit: 1, offset: 0 }, true);
+  const finalizedRow = finalizedScope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
+  if (finalizedRow) return finalizedRow;
+  throw new HttpError(403, "This case is not in your personal reporting scope.");
 }
 
 /** Read-only personal-desk boundary for comparison history and prior-study viewers. */
@@ -950,17 +986,27 @@ export async function requirePersonalReportingBoardComparison(actor: Actor, comp
     throw new HttpError(403, "This comparison is not visible on the Reporting Board.");
   }
 
-  const doctorId = doctor.profile?.id;
+  const doctorId = doctor.profile?.id == null ? null : Number(doctor.profile.id);
   if (!doctorId) throw new HttpError(403, "An active doctor profile is required.");
-  const scope = await doctorWorklistScope(doctorId, {
+  const activeScope = await doctorWorklistScope(doctorId, {
     comparisonRequestId,
     caseSource: "comparisons",
     reportStatus: "required_not_final",
     limit: 1,
     offset: 0,
   }, true);
-  const row = scope.cases.find((candidate) => candidate.caseType === "comparison" && candidate.comparisonRequestId === comparisonRequestId);
-  if (row) return row;
+  const activeRow = activeScope.cases.find((candidate) => candidate.caseType === "comparison" && candidate.comparisonRequestId === comparisonRequestId);
+  if (activeRow) return activeRow;
+
+  const finalizedScope = await doctorWorklistScope(doctorId, {
+    comparisonRequestId,
+    caseSource: "comparisons",
+    reportStatus: "final",
+    limit: 1,
+    offset: 0,
+  }, true);
+  const finalizedRow = finalizedScope.cases.find((candidate) => candidate.caseType === "comparison" && candidate.comparisonRequestId === comparisonRequestId);
+  if (finalizedRow) return finalizedRow;
   if (!(await findComparisonRequestById(comparisonRequestId))) throw new HttpError(404, "Comparison request not found.");
   throw new HttpError(403, "This comparison is not in your personal reporting scope.");
 }
@@ -995,7 +1041,7 @@ type PersonalReportingHistoryAnchor =
 
 async function getAuthorizedPersonalReportingHistorySources(actor: Actor, anchor: PersonalReportingHistoryAnchor) {
   const appointmentId = anchor.caseType === "appointment"
-    ? (await requirePersonalReportingBoardAppointment(actor, anchor.appointmentId), anchor.appointmentId)
+    ? (await requirePersonalReportingBoardAppointmentRead(actor, anchor.appointmentId), anchor.appointmentId)
     : (await resolvePersonalReportingBoardComparisonHistoryAnchor(actor, anchor.comparisonRequestId)).appointmentId;
   const currentHistory = await getProtocolingPatientHistory(appointmentId);
   const historicalCandidates = await getProtocolingHistoricalPacsCandidates(appointmentId).catch(() => null);
@@ -1149,7 +1195,17 @@ function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canCl
   };
 }
 
-function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: number | null) {
+function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: number | null, finalizedHistory = false) {
+  if (finalizedHistory) {
+    return {
+      total: cases.length,
+      assignedToMe: assignedDoctorId ? cases.length : null,
+      unassigned: 0,
+      urgent: 0,
+      requiredNotFinal: 0,
+      overdue: 0,
+    };
+  }
   const today = todayIso();
   const mine = assignedDoctorId ? cases.filter((row) => row.assignedDoctorId === assignedDoctorId) : [];
   const isUrgent = (row: ReportingBoardCaseRow) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase());
@@ -1292,6 +1348,29 @@ async function doctorWorklistScope(
     };
   }
 
+  if (input.reportStatus === "final") {
+    const finalizedCases = await listUnifiedReportingBoardCases({
+      ...base,
+      assignedDoctorId: null,
+      assignmentStatus: "all",
+      finalizedByDoctorId: null,
+      assignmentMatch: "all",
+      overdue: null,
+      urgentOrStat: null,
+    }, { fullScope: true });
+    const attributedCases = finalizedCases.filter((row) =>
+      row.finalizedByDoctorId === doctorId || row.manualFinalByDoctorId === doctorId
+    );
+    const offset = normalizeOffset(input.offset);
+    const limit = normalizeLimit(input.limit);
+    return {
+      cases: fullScope ? attributedCases : attributedCases.slice(offset, offset + limit),
+      filters: { ...base, limit, offset },
+      effectiveModalityCodes,
+      scopeMessage: null,
+    };
+  }
+
   const requestedAssignmentStatus = input.assignedDoctorId === doctorId ? "assigned" : input.assignmentStatus;
   const includeAssigned = requestedAssignmentStatus !== "unassigned";
   const includeUnassigned = requestedAssignmentStatus !== "assigned";
@@ -1328,6 +1407,14 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const identity = await getMobileIdentity(actor);
+  const finalizedDoctorWorklist = view.linkKind === "doctor_worklist" && Boolean(view.targetDoctorId) && input.reportStatus === "final";
+  if (finalizedDoctorWorklist) {
+    if (!actor) throw new HttpError(401, "Authentication required to view finalized reporting history.");
+    const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
+    if (!identity?.profile?.id || (!canManage && Number(identity.profile.id) !== view.targetDoctorId)) {
+      throw new HttpError(403, "You are not allowed to view this doctor's finalized reporting history.");
+    }
+  }
   const globalSettings = await readReportingBoardSettings();
   const requestedLimit = normalizeLimit(input.limit ?? 100);
   const requestedOffset = normalizeOffset(input.offset);
@@ -1361,7 +1448,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
   const personalDoctorId = view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null;
-  const finalizedByPersonalDoctor = input.reportStatus === "final" && personalDoctorId
+  const finalizedByPersonalDoctor = finalizedDoctorWorklist && personalDoctorId
     ? allCases.filter((row) => row.finalizedByDoctorId === personalDoctorId || row.manualFinalByDoctorId === personalDoctorId)
     : allCases;
   const resultCases = applyMobileQuickTab(finalizedByPersonalDoctor, {
@@ -1400,8 +1487,9 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     filters,
     filterSummary: filterSummary(filters),
     counters: mobileCounters(
-      allCases,
-      view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null
+      finalizedByPersonalDoctor,
+      view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null,
+      finalizedDoctorWorklist
     ),
     totalCount: resultCases.length,
     pagination: {

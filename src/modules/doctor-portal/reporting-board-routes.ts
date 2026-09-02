@@ -20,6 +20,7 @@ import {
   createReportingBoardSavedView,
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
+  getAuthorizedReportingBoardAppointmentRead,
   getReportingBoardPushConfig,
   getReportingBoardSonicDicomStudyRedirect,
   getReportingBoardHistorySonicDicomRedirect,
@@ -36,6 +37,7 @@ import {
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   requirePersonalReportingBoardAppointment,
+  requirePersonalReportingBoardAppointmentRead,
   getPersonalReportingBoardComparisonHistory,
   getPersonalReportingBoardComparisonHistoricalPacsCandidates,
   putReportingBoardSettings,
@@ -265,9 +267,11 @@ router.post(
   "/cases/:appointmentId/viewer-launch",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
+    const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
+    await getAuthorizedReportingBoardAppointmentRead(actor(req), appointmentId, "You are not allowed to open this Reporting Board case in OHIF.");
     res.json(await launchReportingBoardCaseInOhif(
       actor(req),
-      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      appointmentId,
       body.includePriors !== false,
       req.requestId
     ));
@@ -450,7 +454,7 @@ router.get(
   "/cases/:appointmentId/history",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
-    await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    await requirePersonalReportingBoardAppointmentRead(actor(req), appointmentId);
     const result = await getProtocolingPatientHistory(appointmentId);
     res.json({ ...result, canReconcilePatientIdentity: false });
   })
@@ -460,7 +464,7 @@ router.get(
   "/cases/:appointmentId/history/historical-candidates",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
-    await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    await requirePersonalReportingBoardAppointmentRead(actor(req), appointmentId);
     res.json(await getProtocolingHistoricalPacsCandidates(appointmentId));
   })
 );

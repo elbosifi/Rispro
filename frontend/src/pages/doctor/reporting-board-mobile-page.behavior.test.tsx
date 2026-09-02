@@ -456,6 +456,67 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.queryByRole("button", { name: "Patient History" })).toBeNull();
   });
 
+  it("does not offer finalized history to anonymous viewers", async () => {
+    testState.user = null;
+    const view = viewData();
+    testState.fetchView.mockResolvedValue({ ...view, currentDoctorId: null, allowedActions: { ...view.allowedActions, authenticated: false, accessLevel: "public", readOnly: true }, cases: [] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("option", { name: "Finalized by this doctor" })).toBeNull();
+  });
+
+  it("offers finalized history to the worklist owner", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    expect(await screen.findByRole("option", { name: "Finalized by this doctor" })).toBeTruthy();
+  });
+
+  it.each([
+    ["supervisor", "supervisor" as const],
+    ["admin", "admin" as const],
+  ])("offers finalized history to an authorized %s viewing the worklist", async (_label, accessLevel) => {
+    testState.user = { id: 99, username: "manager", fullName: "Dr Manager", role: accessLevel === "admin" ? "super_admin" : "supervisor" };
+    const view = viewData();
+    testState.fetchView.mockResolvedValue({ ...view, currentDoctorId: 99, allowedActions: { ...view.allowedActions, accessLevel, readOnly: false } });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    expect(await screen.findByRole("option", { name: "Finalized by this doctor" })).toBeTruthy();
+  });
+
+  it("does not offer finalized history to another ordinary doctor", async () => {
+    testState.user = { id: 8, username: "other", fullName: "Dr Other", role: "doctor" };
+    const view = viewData();
+    testState.fetchView.mockResolvedValue({ ...view, currentDoctorId: 8, allowedActions: { ...view.allowedActions, accessLevel: "doctor", readOnly: true, readOnlyReason: "This worklist does not belong to your doctor profile." } });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("option", { name: "Finalized by this doctor" })).toBeNull();
+  });
+
+  it("shows finalized history counters in My Cases and disables the other quick tabs", async () => {
+    const view = viewData();
+    testState.fetchView.mockResolvedValue({
+      ...view,
+      counters: { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, requiredNotFinal: 0, overdue: 0 },
+      cases: [makeCase({ reportStatus: "final", canAssignToMe: false })],
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Report state" }), { target: { value: "final" } });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /My Cases 3/ })).toBeTruthy());
+    expect((screen.getByRole("combobox", { name: "Report state" }) as HTMLSelectElement).value).toBe("final");
+    expect((screen.getByRole("button", { name: /Available 0/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Urgent 0/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Overdue 0/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("opens history from the card without opening Details first", async () => {
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
     renderPage();

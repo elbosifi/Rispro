@@ -1570,6 +1570,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const finalizerEmail = `rbit.personal.final.${randomUUID().slice(0, 8)}@nccb.ly`;
 
     await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'personal history test', $2, $3)`, [manualFinal, targetDoctor.id, targetDoctor.doctorId]);
+    await assignDirectly(sonicFinal, otherDoctor.doctorId);
     await pool.query(`update users set username = $2 where id = $1`, [targetDoctor.id, finalizerEmail]);
     await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
       { bookingId: sonicFinal, accessionNumber: `V2-${String(sonicFinal).padStart(6, "0")}`, studyInstanceUid: `1.2.840.personal.${sonicFinal}`, requiresReport: true, status: "completed" },
@@ -1579,13 +1580,21 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonFinalB, otherDoctor.id]);
 
     const worklist = await getDoctorWorklist(targetDoctor, false);
-    type FinalizedMobileView = { cases: Array<{ appointmentId: number; comparisonRequestId: number | null; finalizedByDoctorId: number | null; manualFinalByDoctorId?: number | null }> };
+    type FinalizedMobileView = {
+      counters: { assignedToMe: number | null; unassigned: number; urgent: number; overdue: number; requiredNotFinal: number };
+      cases: Array<{ appointmentId: number; comparisonRequestId: number | null; finalizedByDoctorId: number | null; manualFinalByDoctorId?: number | null }>;
+    };
     const finalizedPath = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`;
+    assert.equal((await api("", finalizedPath)).status, 401);
+    assert.equal((await api(otherDoctor.cookie, finalizedPath)).status, 403);
     const ownerView = await api<FinalizedMobileView>(targetDoctor.cookie, finalizedPath);
     const supervisorView = await api<FinalizedMobileView>(supervisor.cookie, finalizedPath);
+    const adminView = await api<FinalizedMobileView>(admin.cookie, finalizedPath);
     assert.equal(ownerView.status, 200, JSON.stringify(ownerView.data));
     assert.equal(supervisorView.status, 200, JSON.stringify(supervisorView.data));
-    for (const view of [ownerView, supervisorView]) {
+    assert.equal(adminView.status, 200, JSON.stringify(adminView.data));
+    for (const view of [ownerView, supervisorView, adminView]) {
+      assert.deepEqual(view.data.counters, { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
       assert.equal(view.data.cases.some((row) => row.appointmentId === manualFinal), true);
       assert.equal(view.data.cases.some((row) => row.appointmentId === sonicFinal && row.finalizedByDoctorId === targetDoctor.doctorId), true);
       assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparisonFinalA && row.finalizedByDoctorId === targetDoctor.doctorId), true);
@@ -1595,6 +1604,13 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const finalizedAvailable = await api<FinalizedMobileView>(supervisor.cookie, `${finalizedPath}&mobileQuickTab=available`);
     assert.equal(finalizedAvailable.status, 200, JSON.stringify(finalizedAvailable.data));
     assert.deepEqual(finalizedAvailable.data.cases, []);
+    assert.deepEqual(finalizedAvailable.data.counters, { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
+
+    const otherWorklist = await getDoctorWorklist(otherDoctor, false);
+    const otherFinal = await api<FinalizedMobileView>(otherDoctor.cookie, `/api/reporting/saved-views/public/${otherWorklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`);
+    assert.equal(otherFinal.status, 200, JSON.stringify(otherFinal.data));
+    assert.equal(otherFinal.data.cases.some((row) => row.appointmentId === sonicFinal), false);
+    assert.equal(otherFinal.data.cases.some((row) => row.comparisonRequestId === comparisonFinalB), true);
   });
 
   it("keeps mobile quick-tab counters stable across tabs, search, pagination, and permanent saved-view filters", async () => {
@@ -1950,6 +1966,57 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         `/api/doctor/reporting-board/cases/${anchorAppointmentId}/history/open-sonicdicom?accession=NOT-IN-HISTORY`
       );
       assert.equal(unauthorizedAccession.status, 404);
+    });
+  });
+
+  it("authorizes finalized appointment and comparison read paths only to their finalizer", async () => {
+    guard();
+    const date = addDays(15);
+    const label = uniq("finalized_personal_read");
+    const finalizedAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} target appointment` });
+    const otherFinalAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} other appointment` });
+    const targetPriorAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(14), patientName: `${label} target prior` });
+    const otherPriorAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(14), patientName: `${label} other prior` });
+    await linkBookingToPatient(targetPriorAppointment, finalizedAppointment);
+    await linkBookingToPatient(otherPriorAppointment, otherFinalAppointment);
+    const comparisonTarget = await createComparisonRequestForBooking(targetPriorAppointment, `${date}T08:00:00.000Z`, `${label} target comparison`);
+    const comparisonOther = await createComparisonRequestForBooking(otherPriorAppointment, `${date}T08:01:00.000Z`, `${label} other comparison`);
+
+    await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'finalized read authorization test', $2, $3), ($4, 'finalized read authorization test', $5, $6)`, [
+      finalizedAppointment, targetDoctor.id, targetDoctor.doctorId,
+      otherFinalAppointment, otherDoctor.id, otherDoctor.doctorId,
+    ]);
+    await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonTarget, targetDoctor.id]);
+    await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonOther, otherDoctor.id]);
+
+    const targetHistory = await api<{ canReconcilePatientIdentity?: boolean }>(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/history`);
+    assert.equal(targetHistory.status, 200, JSON.stringify(targetHistory.data));
+    assert.equal(targetHistory.data.canReconcilePatientIdentity, false);
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/history`)).status, 403);
+    assert.equal((await api(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/history/historical-candidates`)).status, 200);
+
+    const targetOhif = await api(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/viewer-launch`, { method: "POST", body: { includePriors: false } });
+    assert.notEqual(targetOhif.status, 403, JSON.stringify(targetOhif.data));
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/viewer-launch`, { method: "POST", body: { includePriors: false } })).status, 403);
+
+    const targetComparisonHistory = await api<{ canReconcilePatientIdentity?: boolean }>(targetDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonTarget}/history`);
+    assert.equal(targetComparisonHistory.status, 200, JSON.stringify(targetComparisonHistory.data));
+    assert.equal(targetComparisonHistory.data.canReconcilePatientIdentity, false);
+    assert.equal((await api(targetDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonTarget}/history/historical-candidates`)).status, 200);
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonTarget}/history`)).status, 403);
+    assert.equal((await api(targetDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonOther}/history`)).status, 403);
+
+    await withSonicDicomConfig({
+      sonicDicomReportsEnabled: true,
+      sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
+    }, async () => {
+      const appointmentOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/open-sonicdicom?scope=study`);
+      assert.equal(appointmentOpen.status, 302);
+      assert.equal((await rawApi(otherDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/open-sonicdicom?scope=study`)).status, 403);
+
+      const comparisonOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonTarget}/history/open-sonicdicom?accession=V2-${String(finalizedAppointment).padStart(6, "0")}`);
+      assert.equal(comparisonOpen.status, 302);
+      assert.equal((await rawApi(otherDoctor.cookie, `/api/doctor/reporting-board/comparisons/${comparisonTarget}/history/open-sonicdicom?accession=V2-${String(finalizedAppointment).padStart(6, "0")}`)).status, 403);
     });
   });
 
