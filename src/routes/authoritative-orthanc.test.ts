@@ -9,6 +9,7 @@ test("authoritative Orthanc routes keep settings restricted and modality status 
   assert.match(source, /post\("\/test", requireAnyRole\(\["supervisor", "super_admin"\]\)/);
   assert.match(source, /get\("\/status", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\)/);
   assert.match(source, /use\("\/operations", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\), requirePageAccess\("authoritative\.orthanc"\)\)/);
+  assert.match(source, /get\("\/operations\/dicom-transfer-history"/);
   assert.match(source, /get\("\/operations\/summary"/);
   assert.match(source, /get\("\/operations\/historical-pacs-index\/status"/);
   assert.match(source, /get\("\/operations\/patient-identity-reconciliations",requireAnyRole\(\["supervisor","super_admin"\]\)/);

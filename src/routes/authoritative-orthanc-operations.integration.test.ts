@@ -15,7 +15,7 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
   const [{ pool }, { createApp }, { env }] = await Promise.all([import("../db/pool.js"), import("../app.js"), import("../config/env.js")]);
   const suffix = randomUUID().replace(/-/g, "").slice(0, 10);
   const usernames: string[] = [];
-  const created = { patientId: 0, examTypeId: 0, policySetId: 0, policyVersionId: 0, bookingId: 0, scheduledBookingId: 0, documentIds: [] as number[], exportIds: [] as number[] };
+  const created = { patientId: 0, examTypeId: 0, policySetId: 0, policyVersionId: 0, bookingId: 0, scheduledBookingId: 0, documentIds: [] as number[], exportIds: [] as number[], transferEventIds: [] as string[] };
   const originalAuthoritative = await pool.query("select category, setting_key, setting_value, updated_by_user_id from system_settings where category='authoritative_orthanc'");
   const originalClinicalExport = await pool.query("select category, setting_key, setting_value, updated_by_user_id from system_settings where category='clinical_document_export'");
   const originalVisibility = await pool.query("select setting_value, updated_by_user_id from system_settings where category='users_and_roles' and setting_key='page_visibility_by_role'");
@@ -75,6 +75,37 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
   const address = server.address() as { port: number };
   const request = async (path: string, cookie?: string, method = "GET") => fetch(`http://127.0.0.1:${address.port}/api/integrations/authoritative-orthanc${path}`, { method, headers: cookie ? { Cookie: cookie } : undefined });
   try {
+    const historyStudyUid = `2.25.${Date.now()}${Math.floor(Math.random() * 1_000_000)}`;
+    const historyEvent = await pool.query<{ id: string }>("insert into dicom_transfer_events(direction,status,patient_name,study_instance_uid,source_aet,source_ip,destination_aet,idempotency_key) values('RECEIVED','SUCCESS',$1,$2,$3,$4,$5,$6) returning id::text", [`History-${suffix}`, historyStudyUid, `HISTORY_SOURCE_${suffix}`, "198.51.100.10", `HISTORY_DESTINATION_${suffix}`, `HISTORY_SECRET_${suffix}`]);
+    created.transferEventIds.push(historyEvent.rows[0]!.id);
+    assert.equal((await request("/operations/dicom-transfer-history")).status, 401);
+    assert.equal((await request("/operations/dicom-transfer-history", receptionist)).status, 403);
+    assert.equal((await request("/operations/dicom-transfer-history", doctor)).status, 403);
+    const history = await request(`/operations/dicom-transfer-history?search=History-${suffix}`, modalityStaff);
+    assert.equal(history.status, 200);
+    const historyBody = await history.json() as { items: Array<Record<string, unknown>>; page: number; pageSize: number; total: number; totalPages: number };
+    assert.equal(historyBody.page, 1);
+    assert.equal(historyBody.pageSize, 25);
+    assert.equal(historyBody.total, 1);
+    assert.equal(historyBody.totalPages, 1);
+    assert.equal(historyBody.items.length, 1);
+    assert.equal(historyBody.items[0]!.id, historyEvent.rows[0]!.id);
+    assert.equal(historyBody.items[0]!.direction, "RECEIVED");
+    assert.equal(historyBody.items[0]!.status, "SUCCESS");
+    assert.equal(Object.hasOwn(historyBody.items[0]!, "idempotency_key"), false);
+    for (const query of [
+      "direction=unknown",
+      "status=unknown",
+      "page=0",
+      "page=1.5",
+      "pageSize=30",
+      "from=not-a-timestamp",
+      "to=not-a-timestamp",
+      "from=2026-08-21T00:00:00.000Z&to=2026-08-20T00:00:00.000Z"
+    ]) {
+      assert.equal((await request(`/operations/dicom-transfer-history?${query}`, modalityStaff)).status, 400);
+    }
+
     assert.equal((await request("/operations/summary")).status, 401);
     assert.equal((await request("/operations/summary", receptionist)).status, 403);
     assert.equal((await request("/operations/summary", doctor)).status, 403);
@@ -188,6 +219,7 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     await pool.query("delete from audit_log where changed_by_user_id in (select id from users where username=any($1::text[]))", [usernames]);
     if (created.exportIds.length) await pool.query("delete from clinical_document_exports where id=any($1::bigint[])", [created.exportIds]);
     if (created.documentIds.length) await pool.query("delete from documents where id=any($1::bigint[])", [created.documentIds]);
+    if (created.transferEventIds.length) await pool.query("delete from dicom_transfer_events where id=any($1::bigint[])", [created.transferEventIds]);
     if (created.bookingId || created.scheduledBookingId) await pool.query("delete from appointments_v2.bookings where id=any($1::bigint[])", [[created.bookingId, created.scheduledBookingId].filter(Boolean)]);
     if (created.patientId) await pool.query("delete from patients where id=$1", [created.patientId]);
     await pool.query("delete from users where username=any($1::text[])", [usernames]);
