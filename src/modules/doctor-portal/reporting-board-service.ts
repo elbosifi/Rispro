@@ -132,6 +132,18 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isPersonalDeskOverdue(row: ReportingBoardCaseRow, doctorId: number): boolean {
+  return Boolean(
+    row.caseType === "appointment" &&
+    row.assignmentStatus === "assigned" &&
+    row.assignedDoctorId === doctorId &&
+    row.requiresReport &&
+    row.reportStatus !== "final" &&
+    row.dueAt &&
+    row.dueAt < todayIso()
+  );
+}
+
 function addDays(dateIso: string, days: number): string {
   const date = new Date(`${dateIso}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -1125,8 +1137,10 @@ export async function clearReportingBoardCaseManualFinal(
   return { ok: true, appointmentId, status: "manual_final_cleared", override };
 }
 
-function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
-  const overdue = row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso();
+function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, personalDeskDoctorId: number | null = null) {
+  const overdue = personalDeskDoctorId === null
+    ? row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()
+    : isPersonalDeskOverdue(row, personalDeskDoctorId);
   return {
     caseType: row.caseType,
     caseKey: row.caseKey,
@@ -1195,7 +1209,12 @@ function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canCl
   };
 }
 
-function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: number | null, finalizedHistory = false) {
+function mobileCounters(
+  cases: ReportingBoardCaseRow[],
+  assignedDoctorId?: number | null,
+  finalizedHistory = false,
+  personalDeskDoctorId: number | null = null
+) {
   if (finalizedHistory) {
     return {
       total: cases.length,
@@ -1216,7 +1235,9 @@ function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: numbe
     unassigned: cases.filter((row) => row.assignmentStatus === "unassigned").length,
     urgent: cases.filter((row) => isActive(row) && isUrgent(row)).length,
     requiredNotFinal: cases.filter((row) => row.requiresReport && row.reportStatus !== "final").length,
-    overdue: mine.filter((row) => isActive(row) && row.bookingDate < today).length,
+    overdue: personalDeskDoctorId === null
+      ? mine.filter((row) => isActive(row) && row.bookingDate < today).length
+      : cases.filter((row) => isPersonalDeskOverdue(row, personalDeskDoctorId)).length,
   };
 }
 
@@ -1240,7 +1261,11 @@ function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBo
   }
 }
 
-function applyMobileQuickTab(cases: ReportingBoardCaseRow[], input: ReportingBoardFilters): ReportingBoardCaseRow[] {
+function applyMobileQuickTab(
+  cases: ReportingBoardCaseRow[],
+  input: ReportingBoardFilters,
+  personalDeskDoctorId: number | null = null
+): ReportingBoardCaseRow[] {
   if (input.reportStatus === "final") {
     // Finalized history is an owner-attributed personal view, not an active
     // assignment queue. Only My Cases has a meaningful finalized equivalent.
@@ -1254,7 +1279,9 @@ function applyMobileQuickTab(cases: ReportingBoardCaseRow[], input: ReportingBoa
     case "urgent":
       return cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
     case "overdue":
-      return cases.filter((row) => row.assignedDoctorId === input.assignedDoctorId && row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso());
+      return personalDeskDoctorId === null
+        ? cases.filter((row) => row.assignedDoctorId === input.assignedDoctorId && row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso())
+        : cases.filter((row) => isPersonalDeskOverdue(row, personalDeskDoctorId));
     default:
       return cases;
   }
@@ -1447,14 +1474,16 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   if (fullScopeListingDurationMs > MOBILE_FULL_SCOPE_WARNING_MS) {
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
-  const personalDoctorId = view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null;
+  const personalDeskDoctorId = view.linkKind === "doctor_worklist" ? view.targetDoctorId : null;
+  const personalDoctorId = personalDeskDoctorId ?? identity?.profile?.id ?? null;
   const finalizedByPersonalDoctor = finalizedDoctorWorklist && personalDoctorId
     ? allCases.filter((row) => row.finalizedByDoctorId === personalDoctorId || row.manualFinalByDoctorId === personalDoctorId)
     : allCases;
-  const resultCases = applyMobileQuickTab(finalizedByPersonalDoctor, {
-    ...input,
-    assignedDoctorId: input.assignedDoctorId ?? personalDoctorId,
-  });
+  const resultCases = applyMobileQuickTab(
+    finalizedByPersonalDoctor,
+    { ...input, assignedDoctorId: input.assignedDoctorId ?? personalDoctorId },
+    personalDeskDoctorId
+  );
   const cases = resultCases.slice(requestedOffset, requestedOffset + requestedLimit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const canClaimToSelf = Boolean(
@@ -1489,7 +1518,8 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     counters: mobileCounters(
       finalizedByPersonalDoctor,
       view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null,
-      finalizedDoctorWorklist
+      finalizedDoctorWorklist,
+      personalDeskDoctorId
     ),
     totalCount: resultCases.length,
     pagination: {
@@ -1498,7 +1528,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       hasMore: filters.offset + cases.length < resultCases.length,
       nextOffset: filters.offset + cases.length < resultCases.length ? filters.offset + cases.length : null,
     },
-    cases: cases.map((row) => ({ ...mobileCase(row, Boolean(identity)), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
+    cases: cases.map((row) => ({ ...mobileCase(row, Boolean(identity), personalDeskDoctorId), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
     allowedActions: {
       authenticated: Boolean(actor),
       accessLevel,

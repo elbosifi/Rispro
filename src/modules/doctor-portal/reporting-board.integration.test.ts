@@ -499,6 +499,17 @@ async function assignDirectly(appointmentId: number, doctorId: number, assignedA
   );
 }
 
+async function setExpectedReportingDate(appointmentId: number, expectedReportingDate: string) {
+  await pool.query(
+    `
+      update doctor_portal.case_team_assignments
+      set expected_reporting_date = $2::date
+      where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+    `,
+    [appointmentId, expectedReportingDate]
+  );
+}
+
 async function assignComparisonDirectly(comparisonRequestId: number, doctorId: number) {
   await pool.query(`update doctor_portal.comparison_case_assignments set status = 'superseded', updated_at = now() where comparison_request_id = $1 and status = 'active'`, [comparisonRequestId]);
   await pool.query(
@@ -631,6 +642,39 @@ async function withSonicDicomConfig(config: Record<string, unknown>, work: () =>
           do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
         `,
         [JSON.stringify(original), admin.id]
+      );
+    }
+  }
+}
+
+async function withReportingBoardCutoff(cutoffDate: string, work: () => Promise<void>) {
+  const stored = await pool.query<{ setting_value: unknown }>(
+    `select setting_value from system_settings where category = 'doctor_portal_reporting_board' and setting_key = 'config' limit 1`
+  );
+  await pool.query(
+    `
+      update system_settings
+      set setting_value = jsonb_set(
+        jsonb_set(setting_value, '{value,cutoffMode}', to_jsonb('fixed_date'::text), false),
+        '{value,defaultCutoffDate}',
+        to_jsonb($1::text),
+        false
+      )
+      where category = 'doctor_portal_reporting_board' and setting_key = 'config'
+    `,
+    [cutoffDate]
+  );
+  try {
+    await work();
+  } finally {
+    if (stored.rows[0]) {
+      await pool.query(
+        `
+          update system_settings
+          set setting_value = $1::jsonb
+          where category = 'doctor_portal_reporting_board' and setting_key = 'config'
+        `,
+        [JSON.stringify(stored.rows[0].setting_value)]
       );
     }
   }
@@ -1688,6 +1732,145 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(lockedUrgent.totalCount, 1);
     assert.deepEqual(lockedUrgent.counters, lockedBaseline.counters);
     assert.ok(lockedUrgent.cases.every((row) => row.appointmentId !== excludedMr && row.assignmentStatus === "unassigned"));
+  });
+
+  it("uses active appointment assignment due dates for Personal Desk overdue cases", async () => {
+    guard();
+    await withReportingBoardCutoff(addDays(-14), async () => {
+      const today = addDays(0);
+      const yesterday = addDays(-1);
+      const tomorrow = addDays(1);
+      const label = uniq("personal_overdue_due_date");
+      const oldBookingFutureDue = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(-5),
+        patientName: `${label} old booking future due`,
+      });
+      const recentBookingPastDue = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(1),
+        patientName: `${label} recent booking past due`,
+      });
+      const dueToday = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(1),
+        patientName: `${label} due today`,
+      });
+      const finalizedPastDue = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(1),
+        patientName: `${label} finalized past due`,
+      });
+      const reportNotRequired = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(1),
+        requiresReport: false,
+        patientName: `${label} report not required`,
+      });
+      const unassignedOldBooking = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(-5),
+        patientName: `${label} unassigned old booking`,
+      });
+      const assignedOtherDoctor = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(1),
+        patientName: `${label} assigned other doctor`,
+      });
+      const comparisonSource = await createBooking({
+        modalityId: ctModalityId,
+        examTypeId: ctExamTypeId,
+        date: addDays(-5),
+        patientName: uniq("comparison_source"),
+      });
+      const comparison = await createComparisonRequestForBooking(comparisonSource, `${today}T08:00:00.000Z`, `${label} assigned comparison`);
+
+      [oldBookingFutureDue, recentBookingPastDue, dueToday, finalizedPastDue, unassignedOldBooking, assignedOtherDoctor, comparisonSource]
+        .forEach((id) => statusByAppointmentId.set(id, id === finalizedPastDue ? "final" : "draft"));
+      await statusByAppointmentId.flush();
+      await assignDirectly(oldBookingFutureDue, targetDoctor.doctorId);
+      await assignDirectly(recentBookingPastDue, targetDoctor.doctorId);
+      await assignDirectly(dueToday, targetDoctor.doctorId);
+      await assignDirectly(finalizedPastDue, targetDoctor.doctorId);
+      await assignDirectly(reportNotRequired, targetDoctor.doctorId);
+      await assignDirectly(assignedOtherDoctor, otherDoctor.doctorId);
+      await assignComparisonDirectly(comparison, targetDoctor.doctorId);
+      await setExpectedReportingDate(oldBookingFutureDue, tomorrow);
+      await setExpectedReportingDate(recentBookingPastDue, yesterday);
+      await setExpectedReportingDate(dueToday, today);
+      await setExpectedReportingDate(finalizedPastDue, yesterday);
+      await setExpectedReportingDate(reportNotRequired, yesterday);
+      await setExpectedReportingDate(assignedOtherDoctor, yesterday);
+      await pool.query(
+        `
+          insert into doctor_portal.reporting_board_manual_final_overrides (
+            appointment_id, reason, created_by_user_id, created_by_doctor_id
+          ) values ($1, 'personal overdue finality test', $2, $3)
+        `,
+        [finalizedPastDue, targetDoctor.id, targetDoctor.doctorId]
+      );
+
+      const rowSource = await api<{ cases: Array<{ appointmentId: number; bookingDate: string; dueAt: string | null }> }>(
+        supervisor.cookie,
+        `/api/doctor/reporting-board/cases?dateFrom=${addDays(-5)}&dateTo=${addDays(-5)}&q=${encodeURIComponent(label)}&reportStatus=all&limit=10`
+      );
+      assert.equal(rowSource.status, 200, JSON.stringify(rowSource.data));
+      const sourceRow = rowSource.data.cases.find((row) => row.appointmentId === oldBookingFutureDue);
+      assert.equal(sourceRow?.bookingDate, addDays(-5));
+      assert.equal(sourceRow?.dueAt, tomorrow);
+      const unassignedSource = rowSource.data.cases.find((row) => row.appointmentId === unassignedOldBooking);
+      assert.equal(unassignedSource?.dueAt, null);
+      const comparisonRows = await comparisonRequestService.listComparisonReportingBoardRows({
+        comparisonRequestId: comparison,
+        reportStatus: "all",
+        limit: 1,
+        offset: 0,
+      });
+      assert.equal(comparisonRows[0]?.dueAt, null);
+
+      type PersonalMobileView = {
+        counters: { total: number; assignedToMe: number | null; unassigned: number; urgent: number; requiredNotFinal: number; overdue: number };
+        totalCount: number;
+        cases: Array<{ caseType: string; appointmentId: number; comparisonRequestId: number | null; assignmentStatus: string; overdue: boolean }>;
+      };
+      const worklist = await getDoctorWorklist(targetDoctor, false);
+      const baseline = await reportingBoardService.getPublicReportingBoardMobileView(null, worklist.token, { q: label, limit: 100 }) as PersonalMobileView;
+      assert.deepEqual(baseline.counters, { total: 5, assignedToMe: 4, unassigned: 1, urgent: 0, requiredNotFinal: 5, overdue: 1 });
+      assert.equal(baseline.totalCount, 5);
+      const byAppointment = (appointmentId: number) => baseline.cases.find((row) => row.appointmentId === appointmentId);
+      assert.equal(byAppointment(oldBookingFutureDue)?.overdue, false);
+      assert.equal(byAppointment(recentBookingPastDue)?.overdue, true);
+      assert.equal(byAppointment(dueToday)?.overdue, false);
+      assert.equal(byAppointment(unassignedOldBooking)?.overdue, false);
+      assert.equal(baseline.cases.find((row) => row.comparisonRequestId === comparison)?.overdue, false);
+      assert.equal(baseline.cases.some((row) => row.appointmentId === finalizedPastDue), false);
+      assert.equal(baseline.cases.some((row) => row.appointmentId === reportNotRequired), false);
+      assert.equal(baseline.cases.some((row) => row.appointmentId === assignedOtherDoctor), false);
+
+      const finalized = await api<PersonalMobileView>(
+        targetDoctor.cookie,
+        `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`
+      );
+      assert.equal(finalized.status, 200, JSON.stringify(finalized.data));
+      assert.equal(finalized.data.cases.find((row) => row.appointmentId === finalizedPastDue)?.overdue, false);
+
+      const overdue = await reportingBoardService.getPublicReportingBoardMobileView(null, worklist.token, {
+        q: label,
+        limit: 100,
+        mobileQuickTab: "overdue",
+        overdue: true,
+      }) as PersonalMobileView;
+      assert.equal(overdue.counters.overdue, baseline.counters.overdue);
+      assert.deepEqual(overdue.cases.map((row) => row.appointmentId), [recentBookingPastDue]);
+      assert.ok(overdue.cases.every((row) => row.overdue));
+    });
   });
 
   it("scopes personal doctor worklists and atomically claims appointments and comparisons to self", async () => {

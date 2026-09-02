@@ -41,7 +41,7 @@ export function withTimelineMetrics(row: ReportingBoardCaseRow, nowMs = Date.now
   const completedUnassigned = row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && !row.reportFinalAt;
   return {
     ...row,
-    dueAt: null,
+    dueAt: row.dueAt ?? null,
     completedToAssignedMinutes,
     assignedToFinalMinutes,
     completedToFinalMinutes,
