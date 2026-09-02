@@ -70,6 +70,7 @@ function makeRow(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBo
     priority: "Routine",
     priorityCode: "routine",
     reportStatus: "draft",
+    requiresReport: true,
     appointmentStatus: "completed",
     assignmentStatus: "assigned",
     canAssign: true,

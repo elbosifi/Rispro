@@ -37,6 +37,7 @@ let fetchJson: typeof import("../appointments-v2/tests/integration/helpers.js").
 let canReachDatabase: typeof import("../appointments-v2/tests/integration/helpers.js").canReachDatabase;
 let app: { baseUrl: string; close: () => Promise<void> };
 let reportingBoardService: typeof import("./reporting-board-service.js");
+let comparisonRequestService: typeof import("../../services/comparison-request-service.js");
 let sonicDicomCacheService: typeof import("../../services/reporting-board-sonicdicom-cache-service.js");
 
 let originalReportingBoardSetting: unknown = null;
@@ -659,6 +660,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     originalReportingBoardSetting = stored.rows[0]?.setting_value ?? null;
     reportingBoardService = await import("./reporting-board-service.js");
+    comparisonRequestService = await import("../../services/comparison-request-service.js");
     sonicDicomCacheService = await import("../../services/reporting-board-sonicdicom-cache-service.js");
     reportingBoardService.__setReportingBoardAssignmentBatchCheckerForTest(async (contexts) => new Map(contexts.map((context) => {
       const state = statusByAppointmentId.get(context.bookingId) ?? "draft";
@@ -1432,7 +1434,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       currentDoctorId: number | null;
       counters: { assignedToMe: number | null };
       cases: Array<{ appointmentId: number; assignedDoctorId: number | null }>;
-      allowedActions: { assignToMe: boolean; reassign: boolean };
+      allowedActions: { assignToMe: boolean; reassign: boolean; finalizeOwnReports: boolean };
     };
     const path = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&limit=100`;
     const viewers: Array<{ name: string; cookie: string; currentDoctorId: number | null; canManage: boolean }> = [
@@ -1455,11 +1457,104 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       assert.equal(response.data.cases.some((row) => row.appointmentId === viewerAssigned), false, viewer.name);
       assert.equal(response.data.allowedActions.assignToMe, viewer.name === "target doctor" || viewer.canManage);
       assert.equal(response.data.allowedActions.reassign, viewer.canManage);
+      assert.equal(response.data.allowedActions.finalizeOwnReports, viewer.name === "target doctor");
     }
+
+    const noFinalizeWorklist = await getDoctorWorklist(noFinalizeDoctor, false);
+    const noFinalizeView = await api<MobileView>(noFinalizeDoctor.cookie, `/api/reporting/saved-views/public/${noFinalizeWorklist.token}/mobile?limit=1`);
+    assert.equal(noFinalizeView.status, 200, JSON.stringify(noFinalizeView.data));
+    assert.equal(noFinalizeView.data.allowedActions.finalizeOwnReports, false);
 
     const assignedOnly = await api<MobileView>("", `${path}&assignedDoctorId=${targetDoctor.doctorId}&assignmentStatus=assigned`);
     assert.equal(assignedOnly.status, 200, JSON.stringify(assignedOnly.data));
     assert.deepEqual(assignedOnly.data.cases.map((row) => row.appointmentId), [targetAssigned]);
+  });
+
+  it("forces report-required appointments in the personal desk without changing the administrative board", async () => {
+    guard();
+    const date = addDays(16);
+    const label = uniq("personal_requires_report");
+    const notRequired = await createBooking({
+      modalityId: ctModalityId,
+      examTypeId: ctExamTypeId,
+      priorityId: urgentPriorityId,
+      date,
+      requiresReport: false,
+      patientName: `${label} not required`,
+    });
+    const before = await api<{ settings: Record<string, unknown> }>(admin.cookie, "/api/doctor/reporting-board/settings");
+    assert.equal(before.status, 200, JSON.stringify(before.data));
+    const settings = before.data.settings;
+
+    try {
+      const changed = await api(admin.cookie, "/api/doctor/reporting-board/settings", {
+        method: "PUT",
+        body: { ...settings, defaultRequiresReport: false },
+      });
+      assert.equal(changed.status, 200, JSON.stringify(changed.data));
+
+      const worklist = await getDoctorWorklist(doctor, false);
+      for (const tab of ["my_cases", "available", "urgent"] as const) {
+        const personal = await api<{ cases: Array<{ appointmentId: number }> }>(
+          doctor.cookie,
+          `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&mobileQuickTab=${tab}&limit=100`
+        );
+        assert.equal(personal.status, 200, JSON.stringify(personal.data));
+        assert.equal(personal.data.cases.some((row) => row.appointmentId === notRequired), false, tab);
+      }
+
+      const administrative = await api<{ cases: Array<{ appointmentId: number; requiresReport: boolean }> }>(
+        supervisor.cookie,
+        `/api/doctor/reporting-board/cases?q=${encodeURIComponent(label)}&caseSource=appointments&requiresReport=false&reportStatus=all&limit=100`
+      );
+      assert.equal(administrative.status, 200, JSON.stringify(administrative.data));
+      assert.equal(administrative.data.cases.some((row) => row.appointmentId === notRequired && row.requiresReport === false), true);
+    } finally {
+      const restored = await api(admin.cookie, "/api/doctor/reporting-board/settings", {
+        method: "PUT",
+        body: settings,
+      });
+      assert.equal(restored.status, 200, JSON.stringify(restored.data));
+    }
+  });
+
+  it("keeps existing appointment and comparison finalization authorization rules", async () => {
+    guard();
+    const date = addDays(17);
+    const assigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Final auth assigned" });
+    const unassigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Final auth unassigned" });
+    const assignedOther = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Final auth other" });
+    const assignedNoPermission = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Final auth no permission" });
+    const reportNotRequired = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, requiresReport: false, patientName: "Final auth not required" });
+    [assigned, unassigned, assignedOther, assignedNoPermission].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await statusByAppointmentId.flush();
+    await assignDirectly(assigned, targetDoctor.doctorId);
+    await assignDirectly(assignedOther, otherDoctor.doctorId);
+    await assignDirectly(assignedNoPermission, noFinalizeDoctor.doctorId);
+
+    const success = await api<{ status: string }>(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${assigned}/mark-final`, {
+      method: "POST",
+      body: { reason: "Finalized manually by assigned doctor from Personal Reporting Desk." },
+    });
+    assert.equal(success.status, 200, JSON.stringify(success.data));
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${unassigned}/mark-final`, { method: "POST", body: { reason: "not allowed" } })).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${assignedOther}/mark-final`, { method: "POST", body: { reason: "not allowed" } })).status, 403);
+    assert.equal((await api(noFinalizeDoctor.cookie, `/api/doctor/reporting-board/cases/${assignedNoPermission}/mark-final`, { method: "POST", body: { reason: "not allowed" } })).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${reportNotRequired}/mark-final`, { method: "POST", body: { reason: "not allowed" } })).status, 403);
+    assert.equal((await api(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${assigned}/mark-final`, { method: "POST", body: { reason: "already final" } })).status, 409);
+
+    const comparisonSource = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Comparison final auth source" });
+    const assignedComparison = await createComparisonRequestForBooking(comparisonSource, `${date}T08:00:00.000Z`, "Assigned comparison final auth");
+    await assignComparisonDirectly(assignedComparison, targetDoctor.doctorId);
+    const comparisonFinal = await comparisonRequestService.finalizeComparisonRequest({ userId: targetDoctor.id, appRole: "doctor" }, assignedComparison, "Final comparison report text");
+    assert.equal(comparisonFinal.status, "finalized");
+
+    const unassignedComparisonSource = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Comparison unassigned final auth source" });
+    const unassignedComparison = await createComparisonRequestForBooking(unassignedComparisonSource, `${date}T08:01:00.000Z`, "Unassigned comparison final auth");
+    await assert.rejects(
+      () => comparisonRequestService.finalizeComparisonRequest({ userId: doctor.id, appRole: "doctor" }, unassignedComparison, "Should be rejected"),
+      (error: unknown) => (error as { statusCode?: number }).statusCode === 403
+    );
   });
 
   it("keeps finalized personal history attributed to the worklist owner across appointment and comparison reports", async () => {

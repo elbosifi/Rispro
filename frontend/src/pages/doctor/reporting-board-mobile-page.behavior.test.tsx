@@ -9,6 +9,9 @@ import type { ReportingBoardMobileCase, ReportingBoardMobileResponse, User } fro
 const testState = vi.hoisted(() => ({
   user: null as User | null,
   fetchView: vi.fn(),
+  claim: vi.fn(),
+  finalize: vi.fn(),
+  finalizeComparison: vi.fn(),
   fetchConfig: vi.fn(),
   fetchStatus: vi.fn(),
   subscribe: vi.fn(),
@@ -38,7 +41,7 @@ vi.mock("@/components/doctor/complementary-recall-request-dialog", () => ({
 }));
 
 vi.mock("@/lib/api-hooks", () => ({
-  assignReportingBoardMobileCaseToMe: testState.noop,
+  assignReportingBoardMobileCaseToMe: testState.claim,
   createReportingBoardComplementaryRecall: testState.noop,
   fetchOhifViewerAvailability: testState.fetchOhif,
   fetchOhifRetrievalJob: testState.fetchRetrieval,
@@ -49,9 +52,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardMobilePushStatus: testState.fetchStatus,
   fetchReportingBoardMobileView: testState.fetchView,
   fetchReportingBoardPatientHistory: testState.fetchHistory,
-  finalizeComparisonRequest: testState.noop,
+  finalizeComparisonRequest: testState.finalizeComparison,
   launchReportingBoardCaseInOhif: testState.noop,
-  markReportingBoardCaseManualFinal: testState.noop,
+  markReportingBoardCaseManualFinal: testState.finalize,
   sendReportingBoardMobileTestPush: testState.sendTest,
   subscribeReportingBoardMobilePush: testState.subscribe,
   unsubscribeReportingBoardMobilePush: testState.unsubscribe,
@@ -79,6 +82,7 @@ function viewData(): ReportingBoardMobileResponse {
       reassign: false,
       unassign: false,
       batchReassign: false,
+      finalizeOwnReports: true,
       copyAccession: true,
       copyMrn: true,
     },
@@ -346,6 +350,7 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
     priority: "Routine",
     priorityCode: "routine",
     reportStatus: "draft",
+    requiresReport: true,
     appointmentStatus: "completed",
     assignmentStatus: "assigned",
     canAssign: true,
@@ -371,6 +376,9 @@ describe("Personal Reporting Desk case presentation", () => {
   beforeEach(() => {
     testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.fetchView.mockResolvedValue(viewData());
+    testState.claim.mockResolvedValue({ assignmentId: 1 });
+    testState.finalize.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
+    testState.finalizeComparison.mockResolvedValue({});
     testState.fetchConfig.mockResolvedValue({ enabled: false, publicKey: null });
     testState.fetchStatus.mockResolvedValue({ enabled: false, lastSuccessAt: null });
     testState.fetchOhif.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
@@ -383,6 +391,7 @@ describe("Personal Reporting Desk case presentation", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     testState.user = null;
   });
 
@@ -530,10 +539,98 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.getByRole("button", { name: "Finalize report" })).toBeTruthy();
     firstRender.unmount();
 
-    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ exclusionReason: "report_not_required" })] });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ requiresReport: false, exclusionReason: "report_not_required" })] });
     renderPage();
     await screen.findByText("Patient One");
     fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
     expect(screen.queryByRole("button", { name: "Finalize report" })).toBeNull();
+  });
+
+  async function openCaseDetails(row: ReportingBoardMobileCase, allowedActions: Partial<ReportingBoardMobileResponse["allowedActions"]> = {}) {
+    testState.fetchView.mockResolvedValue({ ...viewData(), allowedActions: { ...viewData().allowedActions, ...allowedActions }, cases: [row] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    return screen.getByRole("dialog");
+  }
+
+  it.each([
+    ["available", makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }), true, {}],
+    ["urgent", makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true, priority: "Urgent", priorityCode: "urgent" }), true, {}],
+    ["other doctor", makeCase({ assignedDoctor: "Dr Other", assignedDoctorId: 8, assignmentStatus: "assigned", canAssignToMe: false }), false, {}],
+    ["no permission", makeCase({ canAssignToMe: false }), false, { finalizeOwnReports: false }],
+    ["report not required", makeCase({ requiresReport: false, exclusionReason: "report_not_required", canAssignToMe: false }), false, {}],
+    ["final", makeCase({ reportStatus: "final", canAssignToMe: false }), false, {}],
+  ] as const)("does not expose appointment self-finalization for %s cases", async (_label, row, canClaim, allowedActions) => {
+    const view = await openCaseDetails(row, allowedActions);
+    expect(screen.queryByRole("button", { name: "Finalize report" })).toBeNull();
+    expect(Boolean(within(view).queryByRole("button", { name: "Claim case" }))).toBe(canClaim);
+  });
+
+  it("shows appointment self-finalization only for the assigned doctor with the server capability", async () => {
+    const view = await openCaseDetails(makeCase());
+    expect(within(view).getByRole("button", { name: "Finalize report" })).toBeTruthy();
+  });
+
+  it.each([
+    ["assigned", makeCase({ caseType: "comparison", caseKey: "comparison:9", appointmentId: 0, comparisonRequestId: 9 }), true],
+    ["unassigned", makeCase({ caseType: "comparison", caseKey: "comparison:10", appointmentId: 0, comparisonRequestId: 10, assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }), false],
+    ["another doctor", makeCase({ caseType: "comparison", caseKey: "comparison:11", appointmentId: 0, comparisonRequestId: 11, assignedDoctor: "Dr Other", assignedDoctorId: 8, assignmentStatus: "assigned", canAssignToMe: false }), false],
+  ] as const)("shows comparison self-finalization only for an assigned current doctor (%s)", async (_label, row, canFinalize) => {
+    const view = await openCaseDetails(row);
+    const action = within(view).queryByRole("button", { name: "Finalize comparison report" });
+    expect(Boolean(action)).toBe(canFinalize);
+  });
+
+  it("invalidates the Personal Desk after a successful claim", async () => {
+    const view = await openCaseDetails(makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }));
+    const initialFetches = testState.fetchView.mock.calls.length;
+
+    fireEvent.click(within(view).getByRole("button", { name: "Claim case" }));
+
+    expect(await screen.findByText("Case claimed. It is now in My Cases.")).toBeTruthy();
+    await waitFor(() => expect(testState.fetchView.mock.calls.length).toBeGreaterThan(initialFetches));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refreshes and closes stale details after a claim conflict", async () => {
+    const error = Object.assign(new Error("Case is no longer eligible to claim."), { status: 409 });
+    testState.claim.mockRejectedValue(error);
+    const view = await openCaseDetails(makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }));
+    const initialFetches = testState.fetchView.mock.calls.length;
+
+    fireEvent.click(within(view).getByRole("button", { name: "Claim case" }));
+
+    expect(await screen.findByText("This case is no longer available to claim. The desk was refreshed.")).toBeTruthy();
+    await waitFor(() => expect(testState.fetchView.mock.calls.length).toBeGreaterThan(initialFetches));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refreshes and closes stale details after appointment finalization fails", async () => {
+    testState.finalize.mockRejectedValue(new Error("No active reporting assignment found."));
+    const view = await openCaseDetails(makeCase());
+    const initialFetches = testState.fetchView.mock.calls.length;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    fireEvent.click(within(view).getByRole("button", { name: "Finalize report" }));
+
+    expect(await screen.findByText("No active reporting assignment found.")).toBeTruthy();
+    await waitFor(() => expect(testState.fetchView.mock.calls.length).toBeGreaterThan(initialFetches));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refreshes and closes stale details after comparison finalization fails", async () => {
+    testState.finalizeComparison.mockRejectedValue(new Error("The comparison assignment changed."));
+    const view = await openCaseDetails(makeCase({ caseType: "comparison", caseKey: "comparison:12", appointmentId: 0, comparisonRequestId: 12 }));
+    fireEvent.click(within(view).getByRole("button", { name: "Finalize comparison report" }));
+    const finalDialog = screen.getAllByRole("dialog").at(-1)!;
+    fireEvent.change(within(finalDialog).getByRole("textbox"), { target: { value: "Final comparison text" } });
+    const initialFetches = testState.fetchView.mock.calls.length;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    fireEvent.click(within(finalDialog).getByRole("button", { name: "Finalize comparison" }));
+
+    expect(await screen.findByText("The comparison assignment changed.")).toBeTruthy();
+    await waitFor(() => expect(testState.fetchView.mock.calls.length).toBeGreaterThan(initialFetches));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

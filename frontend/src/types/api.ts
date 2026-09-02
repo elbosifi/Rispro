@@ -827,6 +827,7 @@ export interface ReportingBoardMobileCase {
   priority: string | null;
   priorityCode: string | null;
   reportStatus: string;
+  requiresReport: boolean;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
   manualFinalByDoctorId?: number | null;
@@ -884,6 +885,7 @@ export interface ReportingBoardMobileResponse {
     reassign: boolean;
     unassign: boolean;
     batchReassign: boolean;
+    finalizeOwnReports: boolean;
     copyAccession: boolean;
     copyMrn: boolean;
   };

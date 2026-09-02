@@ -1028,7 +1028,7 @@ export async function finalizeComparisonRequest(
     const assignedDoctorAllowed =
       actor.appRole === "doctor" &&
       actorProfile?.canFinalizeReports === true &&
-      actorProfile.id === assignedDoctorId;
+      Number(actorProfile.id) === assignedDoctorId;
     if (!supervisorAllowed && !assignedDoctorAllowed) {
       await audit(client, actor, "comparison_finalization_denied", request, { assignedDoctorId }, null, actorProfile);
       throw new HttpError(403, "You are not allowed to finalize this comparison request.");

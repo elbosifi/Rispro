@@ -1039,10 +1039,10 @@ export async function markReportingBoardCaseManualFinal(
   let actorDoctorId: number | null = null;
   try {
     const manager = await requireRosterManager(actor);
-    actorDoctorId = manager.profile?.id ?? null;
+    actorDoctorId = manager.profile?.id == null ? null : Number(manager.profile.id);
   } catch {
     const doctor = await requireRosterDoctor(actor);
-    actorDoctorId = doctor.profile?.id ?? null;
+    actorDoctorId = doctor.profile?.id == null ? null : Number(doctor.profile.id);
     if (!doctor.profile?.canFinalizeReports || actorDoctorId !== row.assignedDoctorId) {
       throw new HttpError(403, "Only the assigned doctor with report-finalization permission may manually finalize this case.");
     }
@@ -1105,6 +1105,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
     priority: row.reportingPriorityName || row.reportingPriorityCode,
     priorityCode: row.reportingPriorityCode,
     reportStatus: row.reportStatus,
+    requiresReport: row.requiresReport,
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: row.manualFinalOverrideId ?? null,
     manualFinalByDoctorId: row.manualFinalByDoctorId ?? null,
@@ -1267,7 +1268,9 @@ async function doctorWorklistScope(
     ...input,
     dateFrom: narrowedDateFrom,
     cutoffDate: permanentCutoff,
-    requiresReport: settings.defaultRequiresReport,
+    // Personal Reporting Desk is a report worklist. Keep this invariant
+    // independent of the configurable administrative board default.
+    requiresReport: true,
     reportStatus: compatibleReportStatus,
     caseSource,
     modalityId: null,
@@ -1371,6 +1374,10 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
     (Number(identity.profile.id) === view.targetDoctorId || canManage)
   );
+  const finalizeOwnReports = Boolean(
+    actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
+    Number(identity.profile.id) === view.targetDoctorId && identity.profile.canFinalizeReports === true
+  );
   const accessLevel = !actor ? "public" : !identity ? "public" : identity.moduleCapabilities.includes("doctor_admin") ? "admin" : identity.moduleCapabilities.includes("doctor_supervisor") ? "supervisor" : "doctor";
 
   await insertDoctorAuditEvent(pool, {
@@ -1389,7 +1396,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     lockedFilters: view.linkKind === "doctor_worklist" ? { systemManaged: true, targetDoctorId: view.targetDoctorId } : view.filters,
     effectiveModalityCodes,
     scopeMessage,
-    currentDoctorId: identity?.profile?.id ?? null,
+    currentDoctorId: identity?.profile?.id == null ? null : Number(identity.profile.id),
     filters,
     filterSummary: filterSummary(filters),
     counters: mobileCounters(
@@ -1413,6 +1420,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       reassign: canManage,
       unassign: canManage,
       batchReassign: false,
+      finalizeOwnReports,
       copyAccession: true,
       copyMrn: true,
     },
