@@ -498,6 +498,20 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.queryByRole("option", { name: "Finalized by this doctor" })).toBeNull();
   });
 
+  it.each([
+    { label: "Priority first", value: "priority_study_date", expected: { sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true } },
+    { label: "Oldest study first", value: "oldest_study", expected: { sortBy: "study_date", sortDirection: "asc", pinUrgentToTop: false } },
+    { label: "Newest study first", value: "newest_study", expected: { sortBy: "study_date", sortDirection: "desc", pinUrgentToTop: false } },
+    { label: "Longest assigned first", value: "longest_assigned", expected: { sortBy: "longest_assigned_not_final", sortDirection: "asc", pinUrgentToTop: false } },
+  ])("sends the exact Personal Desk fetch mapping for $label", async ({ value, expected }) => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Filters" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Sort" }), { target: { value } });
+
+    await waitFor(() => expect(testState.fetchView).toHaveBeenLastCalledWith("token", expect.objectContaining(expected)));
+  });
+
   it("shows finalized history counters in My Cases and disables the other quick tabs", async () => {
     const view = viewData();
     testState.fetchView.mockResolvedValue({

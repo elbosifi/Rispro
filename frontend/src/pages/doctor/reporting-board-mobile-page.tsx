@@ -29,10 +29,10 @@ function keyBytes(value: string): ArrayBuffer { const raw = window.atob(`${value
 type PersonalDeskPushState = "checking" | "unsupported" | "not-configured" | "permission-blocked" | "disabled" | "enabled";
 const normalPersonalDeskFilters: ReportingBoardFilters = { limit: 40, offset: 0, mobileQuickTab: "my_cases", reportStatus: "required_not_final" };
 const personalDeskSortOptions = {
-  priority_study_date: { sortBy: "priority_study_date", sortDirection: "asc" },
-  oldest_study: { sortBy: "study_date", sortDirection: "asc" },
-  newest_study: { sortBy: "study_date", sortDirection: "desc" },
-  longest_assigned: { sortBy: "longest_assigned_not_final", sortDirection: "asc" },
+  priority_study_date: { sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true },
+  oldest_study: { sortBy: "study_date", sortDirection: "asc", pinUrgentToTop: false },
+  newest_study: { sortBy: "study_date", sortDirection: "desc", pinUrgentToTop: false },
+  longest_assigned: { sortBy: "longest_assigned_not_final", sortDirection: "asc", pinUrgentToTop: false },
 } as const;
 function personalDeskSortValue(filters: ReportingBoardFilters): keyof typeof personalDeskSortOptions {
   if (filters.sortBy === "study_date" && filters.sortDirection === "desc") return "newest_study";
