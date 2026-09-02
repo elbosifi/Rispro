@@ -6,7 +6,7 @@ import { recordDiagnosticEvent } from "../../services/system-diagnostics-service
 import { listPacsNodes } from "../../services/pacs-node-service.js";
 import { testPacsConnectionWithNode } from "../../services/pacs-service.js";
 import { resolveOrthancSettings } from "../../services/orthanc-settings-resolver.js";
-import { getAuthorizedReportingBoardAppointment, type Actor } from "../doctor-portal/reporting-board-service.js";
+import { getAuthorizedReportingBoardAppointment, getAuthorizedReportingBoardAppointmentRead, type Actor } from "../doctor-portal/reporting-board-service.js";
 import type { UserId, UnknownRecord } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { createLogger } from "../../observability/logger.js";
@@ -217,7 +217,7 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
   logger.info("viewer_launch_requested", { appointmentId, includePriors });
   try {
     if (!env.ohifEnabled) return { status: "configuration_error", message: failureMessage("configuration_error") };
-    const { row } = await getAuthorizedReportingBoardAppointment(actor, appointmentId, "You are not allowed to open this Reporting Board case in OHIF.");
+    const { row } = await getAuthorizedReportingBoardAppointmentRead(actor, appointmentId, "You are not allowed to open this Reporting Board case in OHIF.");
     if (row.caseType !== "appointment") throw new HttpError(400, "OHIF launch currently supports appointment cases only.");
     const configuration = await readOhifViewerConfiguration();
     if (!configuration.settings.enabled || !configuration.settings.selectedPacsNodeId) {

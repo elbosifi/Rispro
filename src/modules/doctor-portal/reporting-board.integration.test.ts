@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 }
+process.env.OHIF_ENABLED = "true";
 
 const skipEnv = !(process.env.TEST_DATABASE_URL || process.env.DATABASE_URL) ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "RBIT_";
@@ -37,6 +38,7 @@ let fetchJson: typeof import("../appointments-v2/tests/integration/helpers.js").
 let canReachDatabase: typeof import("../appointments-v2/tests/integration/helpers.js").canReachDatabase;
 let app: { baseUrl: string; close: () => Promise<void> };
 let reportingBoardService: typeof import("./reporting-board-service.js");
+let ohifViewerService: typeof import("../ohif-viewer/service.js");
 let comparisonRequestService: typeof import("../../services/comparison-request-service.js");
 let sonicDicomCacheService: typeof import("../../services/reporting-board-sonicdicom-cache-service.js");
 
@@ -660,6 +662,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     originalReportingBoardSetting = stored.rows[0]?.setting_value ?? null;
     reportingBoardService = await import("./reporting-board-service.js");
+    ohifViewerService = await import("../ohif-viewer/service.js");
     comparisonRequestService = await import("../../services/comparison-request-service.js");
     sonicDicomCacheService = await import("../../services/reporting-board-sonicdicom-cache-service.js");
     reportingBoardService.__setReportingBoardAssignmentBatchCheckerForTest(async (contexts) => new Map(contexts.map((context) => {
@@ -1975,10 +1978,17 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const label = uniq("finalized_personal_read");
     const finalizedAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} target appointment` });
     const otherFinalAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} other appointment` });
+    const activeTargetAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} active target appointment` });
+    const activeOtherAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} active other appointment` });
     const targetPriorAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(14), patientName: `${label} target prior` });
     const otherPriorAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(14), patientName: `${label} other prior` });
     await linkBookingToPatient(targetPriorAppointment, finalizedAppointment);
     await linkBookingToPatient(otherPriorAppointment, otherFinalAppointment);
+    await assignDirectly(activeTargetAppointment, targetDoctor.doctorId);
+    await assignDirectly(activeOtherAppointment, otherDoctor.doctorId);
+    statusByAppointmentId.set(activeTargetAppointment, "draft");
+    statusByAppointmentId.set(activeOtherAppointment, "draft");
+    await statusByAppointmentId.flush();
     const comparisonTarget = await createComparisonRequestForBooking(targetPriorAppointment, `${date}T08:00:00.000Z`, `${label} target comparison`);
     const comparisonOther = await createComparisonRequestForBooking(otherPriorAppointment, `${date}T08:01:00.000Z`, `${label} other comparison`);
 
@@ -1988,6 +1998,34 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     ]);
     await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonTarget, targetDoctor.id]);
     await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonOther, otherDoctor.id]);
+
+    const ohifSettings = await pool.query<{ enabled: boolean; selected_pacs_node_id: number | null }>(
+      `select enabled, selected_pacs_node_id from ohif_viewer_settings where singleton_key = true limit 1`
+    );
+    await pool.query(`update ohif_viewer_settings set enabled = false, selected_pacs_node_id = null where singleton_key = true`);
+    try {
+      const targetActor = { userId: targetDoctor.id, appRole: "doctor" as const };
+      const targetFinalLaunch = await ohifViewerService.launchReportingBoardCaseInOhif(targetActor, finalizedAppointment, false);
+      assert.equal(targetFinalLaunch.status, "configuration_error");
+      const targetActiveLaunch = await ohifViewerService.launchReportingBoardCaseInOhif(targetActor, activeTargetAppointment, false);
+      assert.equal(targetActiveLaunch.status, "configuration_error");
+      await assert.rejects(
+        () => ohifViewerService.launchReportingBoardCaseInOhif(targetActor, otherFinalAppointment, false),
+        (error: unknown) => error instanceof Error && "statusCode" in error && (error as { statusCode?: number }).statusCode === 403
+      );
+      await assert.rejects(
+        () => ohifViewerService.launchReportingBoardCaseInOhif(targetActor, activeOtherAppointment, false),
+        (error: unknown) => error instanceof Error && "statusCode" in error && (error as { statusCode?: number }).statusCode === 403
+      );
+    } finally {
+      const originalOhifSettings = ohifSettings.rows[0];
+      if (originalOhifSettings) {
+        await pool.query(
+          `update ohif_viewer_settings set enabled = $1, selected_pacs_node_id = $2 where singleton_key = true`,
+          [originalOhifSettings.enabled, originalOhifSettings.selected_pacs_node_id]
+        );
+      }
+    }
 
     const targetHistory = await api<{ canReconcilePatientIdentity?: boolean }>(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${finalizedAppointment}/history`);
     assert.equal(targetHistory.status, 200, JSON.stringify(targetHistory.data));
