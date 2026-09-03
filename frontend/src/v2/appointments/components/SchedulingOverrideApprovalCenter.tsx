@@ -342,7 +342,7 @@ export function SchedulingOverrideRequestsWorkspace({
       changedBookingTime: "",
     };
     const overrideTypes = effectiveOverrideTypes(request);
-    const approvalNoteRequired = user.role !== "super_admin" && (request.decisionContext?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride));
+    const approvalNoteRequired = user?.role !== "super_admin" && (request.decisionContext?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride));
     if (draft.approvalMode === "changed_date" && !draft.changedBookingDate) {
       setActionError("New booking date is required when approving with a changed date.");
       return;

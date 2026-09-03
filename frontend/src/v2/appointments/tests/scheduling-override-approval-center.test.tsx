@@ -262,7 +262,7 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect(screen.getByText("Supervisor cannot approve total capacity overrides. Superadmin approval is required.")).toBeTruthy();
 
     rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
-    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText("Approval note for request 12"), { target: { value: "Total capacity approved" } });
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -351,7 +351,7 @@ describe("SchedulingOverrideApprovalCenter", () => {
     rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
     expect(screen.getAllByText("Total modality capacity override").some((element) => element.classList.contains("state-chip"))).toBe(true);
     expect(screen.getAllByText("Exam mix override").some((element) => element.classList.contains("state-chip"))).toBe(true);
-    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText("Approval note for request 16"), { target: { value: "Combined high-risk approval" } });
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
   });

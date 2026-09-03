@@ -758,7 +758,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   it("allows superadmin to approve a closed weekday request without an approval note", async () => {
     if (!testData) return;
     await setCapacityLimits(10, 5);
-    const friday = "2042-02-14";
+    const friday = "2042-02-21";
     const patientId = await createPatient();
 
     await withSystemSetting("scheduling_and_capacity", "allow_friday_appointments", { value: "false" }, async () => {
