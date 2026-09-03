@@ -96,12 +96,34 @@ function installApi() {
   });
 }
 function renderPage() { return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><AuthoritativeOrthancOperationsPage/></QueryClientProvider></MemoryRouter>); }
+async function openTransferHistory() { await userEvent.click(screen.getByRole("tab", { name: "Transfer History" })); }
 
 beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); historyResponse = historyFixture(); historyError = false; vi.clearAllMocks(); installApi(); });
 
 describe("AuthoritativeOrthancOperationsPage", () => {
+  it("defaults to Operations and loads transfer history only when selected", async () => {
+    renderPage();
+    const operationsTab = screen.getByRole("tab", { name: "Operations" });
+    const historyTab = screen.getByRole("tab", { name: "Transfer History" });
+    expect(operationsTab.getAttribute("aria-selected")).toBe("true");
+    expect(historyTab.getAttribute("aria-selected")).toBe("false");
+    expect(await screen.findByText("Routing destinations")).toBeTruthy();
+    expect(screen.queryByTestId("dicom-transfer-history-card")).toBeNull();
+    expect(vi.mocked(api).mock.calls.some(([path]) => path.includes("/operations/dicom-transfer-history"))).toBe(false);
+
+    await openTransferHistory();
+    expect(await screen.findByTestId("dicom-transfer-history-card")).toBeTruthy();
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=25"));
+    expect(screen.queryByText("Routing destinations")).toBeNull();
+
+    await userEvent.click(operationsTab);
+    expect(await screen.findByText("Routing destinations")).toBeTruthy();
+    expect(screen.queryByTestId("dicom-transfer-history-card")).toBeNull();
+  });
+
   it("requests default durable history and renders the received stable row", async () => {
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=25"));
     for (const text of ["Received", "Received / stable", "History Patient", "PAT-1042", "HIST-ACC-1042", "History CT chest", "MODALITY_AET", "192.0.2.42", "ORTHANCPG", "1,234", formatDateTimeLy("2026-08-12T08:15:00.000Z")]) expect(within(card).getAllByText(text, { exact: true }).length).toBeGreaterThan(0);
@@ -110,6 +132,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
   it("applies direction and status immediately and resets the history page", async () => {
     historyResponse = { ...historyFixture(), total: 51, totalPages: 3 };
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await userEvent.click(within(card).getByRole("button", { name: "Next" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=2&pageSize=25"));
@@ -123,6 +146,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
 
   it("holds draft text filters until Apply and sends trimmed values", async () => {
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await userEvent.type(within(card).getByLabelText("Search"), "  patient phrase  ");
     await userEvent.type(within(card).getByLabelText("Source"), "  SOURCE-AET  ");
@@ -135,6 +159,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
 
   it("converts Tripoli datetime-local filters before requesting history", async () => {
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     const from = "2026-08-12T10:30";
     const to = "2026-08-12T12:45";
@@ -147,6 +172,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
 
   it("clears history filters while preserving the selected page size", async () => {
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await userEvent.selectOptions(within(card).getByLabelText("History page size"), "50");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=50"));
@@ -172,6 +198,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
   it("uses server pagination and page-size changes without slicing client-side", async () => {
     historyResponse = { ...historyFixture(), total: 51, totalPages: 3 };
     renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await userEvent.click(within(card).getByRole("button", { name: "Next" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=2&pageSize=25"));
@@ -188,12 +215,14 @@ describe("AuthoritativeOrthancOperationsPage", () => {
   it("renders history empty and error states with a retry action", async () => {
     historyResponse = { ...historyFixture(), items: [], total: 0, totalPages: 0 };
     const emptyView = renderPage();
+    await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     expect(within(card).getByText("No DICOM transfers match the current filters.")).toBeTruthy();
     expect(within(card).getByText("Page 1 of 1")).toBeTruthy();
     emptyView.unmount();
     historyError = true;
     renderPage();
+    await openTransferHistory();
     expect(await screen.findByText("History unavailable.")).toBeTruthy();
     const historyCallsBeforeRetry = vi.mocked(api).mock.calls.filter(([path]) => path.includes("dicom-transfer-history")).length;
     await userEvent.click(within(screen.getByTestId("dicom-transfer-history-card")).getByRole("button", { name: "Retry" }));

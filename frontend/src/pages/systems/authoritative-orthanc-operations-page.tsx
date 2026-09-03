@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/auth-provider";
 import { api } from "@/lib/api-client";
 import { formatDateTimeLy, tripoliDateTimeLocalToIso } from "@/lib/date-format";
-import { Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
+import { Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsList, TabsTrigger } from "@/components/shared";
 
 type SectionError = { code: string; message: string } | null;
 type RouteTestState = "not_tested" | "reachable" | "unreachable" | "timeout" | "missing_route" | "configuration_error";
@@ -97,6 +97,7 @@ export default function AuthoritativeOrthancOperationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<"operations" | "history">("operations");
   const [jobFilter, setJobFilter] = useState<"all" | "active" | "failed" | "successful">("all");
   const [lookupType, setLookupType] = useState<"accessionNumber" | "studyInstanceUid">("accessionNumber");
   const [lookupValue, setLookupValue] = useState("");
@@ -137,6 +138,7 @@ export default function AuthoritativeOrthancOperationsPage() {
       if (historyAppliedTo) params.set("to", historyAppliedTo);
       return api<DicomTransferHistoryResponse>(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${params.toString()}`);
     },
+    enabled: activeSection === "history",
     refetchInterval: 30_000,
     retry: false,
   });
@@ -202,8 +204,15 @@ export default function AuthoritativeOrthancOperationsPage() {
       <div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void refresh()} disabled={summary.isFetching}>Refresh</Button>{canOperate ? <Button variant="secondary" disabled={orthancActionsDisabled} onClick={() => mutation.mutate({ path: "/integrations/authoritative-orthanc/operations/routes/test-all" })}>Test all destinations</Button> : null}{isSuperAdmin ? <Button disabled={orthancActionsDisabled} onClick={() => runConfirmed("Synchronize managed routes?", "RISpro will create or update expected rispro_route_* aliases and remove only obsolete RISpro-managed aliases. Unrelated Orthanc modalities are preserved.", "/integrations/authoritative-orthanc/operations/routes/synchronize")}>Synchronize routes</Button> : null}</div>
     </div>
 
+    <Tabs value={activeSection} onValueChange={(value) => setActiveSection(value as "operations" | "history")}>
+      <TabsList role="tablist" aria-label="Authoritative Orthanc sections">
+        <TabsTrigger role="tab" aria-selected={activeSection === "operations"} value="operations">Operations</TabsTrigger>
+        <TabsTrigger role="tab" aria-selected={activeSection === "history"} value="history">Transfer History</TabsTrigger>
+      </TabsList>
+
     {notice ? <p role="status" className="rounded-lg border bg-card px-3 py-2 text-sm text-foreground">{notice}</p> : null}
     {summary.isLoading ? <LoadingState message="Loading Authoritative Orthanc operations…" /> : summary.error ? <Card className="p-5"><ErrorState message={(summary.error as Error).message} onRetry={() => void summary.refetch()} /></Card> : data ? <>
+      {activeSection === "operations" ? <>
       <Card className={`border p-5 ${presentation.className}`}>
         <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><span className="rounded-xl bg-background/80 p-3 text-accent"><Server size={24} /></span><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">Authoritative Orthanc</h2><Badge variant={presentation.variant}>{presentation.label}</Badge></div><p className="mt-1 text-sm font-medium">{data.system?.name || "Orthanc system unavailable"}{data.system?.version ? ` · Orthanc ${data.system.version}` : ""}{data.system?.apiVersion ? ` · API ${data.system.apiVersion}` : ""}</p><p className="mt-2 max-w-4xl text-sm">{data.healthSentence}</p></div></div><div className="text-end text-xs text-muted-foreground">Last refresh<br/><span className="font-medium text-foreground">{formatDate(data.generatedAt)}</span></div></div>
         {data.reasons.length ? <ul className="mt-4 grid gap-2 md:grid-cols-2">{data.reasons.map((reason) => <li key={reason.code} className="flex gap-2 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0"/><span>{reason.message}</span></li>)}</ul> : null}
@@ -249,7 +258,9 @@ export default function AuthoritativeOrthancOperationsPage() {
         {data.routing.autoRouteEnabled && data.routing.selected === 0 ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Auto-routing is enabled but no destinations are selected. Configure destinations in Settings.</div> : null}
         {data.routing.error ? <ErrorState message={data.routing.error.message} onRetry={() => void summary.refetch()} /> : data.routing.routes.length === 0 ? <EmptyState message="No auto-routing destinations are selected." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Destination</TableHead><TableHead>Orthanc alias</TableHead><TableHead>AET</TableHead><TableHead>Host:Port</TableHead><TableHead>Configuration</TableHead><TableHead>Last DICOM test</TableHead><TableHead>Auto-route</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader><TableBody>{data.routing.routes.map((route) => <TableRow key={route.alias}><TableCell className="font-medium">{route.destinationName}</TableCell><TableCell><code>{route.alias}</code></TableCell><TableCell>{route.aet || "—"}</TableCell><TableCell>{route.host ? `${route.host}:${route.port ?? "—"}` : "—"}</TableCell><TableCell>{route.configurationState === "configured" ? <Badge variant="success">Configured</Badge> : route.configurationState === "missing_managed_route" ? <Badge variant="warning">Missing managed route</Badge> : route.configurationState === "invalid_pacs_configuration" ? <Badge variant="error">Invalid PACS configuration</Badge> : <Badge variant="neutral">Not checked</Badge>}{route.configurationError ? <p className="mt-1 max-w-64 text-xs text-red-700 dark:text-red-300">{route.configurationError}</p> : null}</TableCell><TableCell><RouteTestBadge state={route.dicomTest.state}/>{route.dicomTest.testedAt ? <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">{formatDate(route.dicomTest.testedAt)}</p> : null}</TableCell><TableCell><Badge variant={route.autoRouteActive ? "success" : "neutral"}>{route.autoRouteActive ? "Active" : "Inactive"}</Badge></TableCell><TableCell>{canOperate ? <Button variant="secondary" size="sm" disabled={orthancActionsDisabled || route.configurationState !== "configured"} onClick={() => mutation.mutate({ path: `/integrations/authoritative-orthanc/operations/routes/${encodeURIComponent(route.alias)}/test` })}>Test</Button> : "—"}</TableCell></TableRow>)}</TableBody></Table></div>}
       </Card>
+      </> : null}
 
+      {activeSection === "history" ? <>
       <Card className="space-y-4 p-5" data-testid="dicom-transfer-history-card">
         <SectionHeading title="DICOM Transfer History" description="Durable audit of DICOM received by and sent from the Authoritative Orthanc. Received entries are recorded after Orthanc marks the study stable."/>
         <div className="space-y-3">
@@ -284,7 +295,9 @@ export default function AuthoritativeOrthancOperationsPage() {
           </div>
         </> : null}
       </Card>
+      </> : null}
 
+      {activeSection === "operations" ? <>
       <Card className="space-y-4 p-5">
         <SectionHeading title="Outbound transfer jobs" description="Live Authoritative Orthanc send jobs. Failures appear first, followed by active work and recent successful sends."/>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Job filters">{(["all", "active", "failed", "successful"] as const).map((filter) => <Button key={filter} size="sm" variant={jobFilter === filter ? "primary" : "secondary"} onClick={() => setJobFilter(filter)}>{filter[0].toUpperCase() + filter.slice(1)}</Button>)}</div>
@@ -304,7 +317,9 @@ export default function AuthoritativeOrthancOperationsPage() {
       </Card>
 
       {isSuperAdmin ? <div className="flex justify-end"><Button variant="ghost" onClick={() => navigate("/settings?section=authoritative_orthanc")}>Open Authoritative Orthanc Settings</Button></div> : null}
+      </> : null}
     </> : null}
+    </Tabs>
 
     <Dialog open={Boolean(confirmation)} onClose={() => { if (!mutation.isPending && !historicalPacsMutation.isPending) setConfirmation(null); }}><DialogContent maxWidth="520px"><DialogHeader><DialogTitle>{confirmation?.title}</DialogTitle><DialogDescription>{confirmation?.description}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" disabled={mutation.isPending || historicalPacsMutation.isPending} onClick={() => setConfirmation(null)}>Cancel</Button><Button disabled={mutation.isPending || historicalPacsMutation.isPending} onClick={() => confirmation?.run()}>{mutation.isPending || historicalPacsMutation.isPending ? "Working…" : confirmation?.confirmLabel || "Confirm"}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={Boolean(selectedJob)} onClose={() => setSelectedJob(null)}><DialogContent maxWidth="560px"><DialogHeader><DialogTitle>Transfer details</DialogTitle><DialogDescription>Operational transfer context and read-only Orthanc job information.</DialogDescription></DialogHeader>{selectedJob ? <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">Patient</span><p>{selectedJob.transfer?.study?.patientName || "Context unavailable"}</p></div><div><span className="text-xs text-muted-foreground">Patient ID</span><p>{selectedJob.transfer?.study?.patientId || "-"}</p></div><div><span className="text-xs text-muted-foreground">Accession</span><p>{selectedJob.transfer?.study?.accessionNumber || "-"}</p></div><div><span className="text-xs text-muted-foreground">Study / modality</span><p>{selectedJob.transfer?.study?.studyDescription || "-"} {selectedJob.transfer?.study?.modalitiesInStudy.join(", ")}</p></div><div><span className="text-xs text-muted-foreground">Destination</span><p>{selectedJob.transfer?.destinationName || "-"}</p></div><div><span className="text-xs text-muted-foreground">Instances</span><p>{selectedJob.transfer?.instanceCount ?? "-"} {selectedJob.transfer?.failedInstanceCount != null ? `${selectedJob.transfer.failedInstanceCount} failed` : ""}</p></div>{selectedJob.error ? <div className="sm:col-span-2"><span className="text-xs text-muted-foreground">Error</span><p>{selectedJob.error}</p></div> : null}<div className="border-t pt-3 sm:col-span-2"><span className="text-xs font-medium text-muted-foreground">Technical</span></div><div><span className="text-xs text-muted-foreground">Orthanc job ID / type</span><p>{selectedJob.id} / {selectedJob.type}</p></div><div><span className="text-xs text-muted-foreground">Description</span><p>{selectedJob.description}</p></div><div><span className="text-xs text-muted-foreground">Local / remote AET</span><p>{selectedJob.transfer?.localAet || "-"} / {selectedJob.transfer?.remoteAet || "-"}</p></div><div><span className="text-xs text-muted-foreground">Parent resource IDs</span><p>{selectedJob.transfer?.parentResourceIds.join(", ") || "-"}</p></div><div><span className="text-xs text-muted-foreground">Creation / start</span><p>{formatDate(selectedJob.creationTime)} / {formatDate(selectedJob.startTime)}</p></div><div><span className="text-xs text-muted-foreground">Completion / update</span><p>{formatDate(selectedJob.completionTime || selectedJob.updatedAt)}</p></div></div> : null}<DialogFooter><Button variant="secondary" onClick={() => setSelectedJob(null)}>Close</Button></DialogFooter></DialogContent></Dialog>
