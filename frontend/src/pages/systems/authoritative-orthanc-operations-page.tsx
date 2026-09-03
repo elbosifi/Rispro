@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, Database, HardDrive, Search, Server } from "lu
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/auth-provider";
 import { api } from "@/lib/api-client";
+import { formatDateTimeLy, tripoliDateTimeLocalToIso } from "@/lib/date-format";
 import { Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
 
 type SectionError = { code: string; message: string } | null;
@@ -37,6 +38,41 @@ type HistoricalPacsStatus = {
   startedAt: string | null; progressAt: string | null; isStalled: boolean; stalledForSeconds: number | null; lastSuccessAt: string | null; lastFullSyncAt: string | null; lastAttemptAt: string | null;
   lastChangeSequence: number | null; lastError: string | null;
 };
+type DicomTransferHistoryDirection = "all" | "received" | "sent";
+type DicomTransferHistoryStatus = "all" | "active" | "successful" | "failed";
+type DicomTransferHistoryPageSize = 25 | 50 | 100;
+type DicomTransferHistoryItem = {
+  id: string;
+  direction: "RECEIVED" | "SENT";
+  status: "ACTIVE" | "SUCCESS" | "FAILED";
+  patientId: string | null;
+  patientName: string | null;
+  accessionNumber: string | null;
+  studyInstanceUid: string;
+  studyDescription: string | null;
+  sourceAet: string | null;
+  sourceIp: string | null;
+  destinationAet: string | null;
+  instanceCount: number | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  completedAt: string | null;
+  occurredAt: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  orthancJobId: string | null;
+  orthancChangeSequence: number | null;
+  orthancResourceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+type DicomTransferHistoryResponse = {
+  items: DicomTransferHistoryItem[];
+  page: number;
+  pageSize: DicomTransferHistoryPageSize;
+  total: number;
+  totalPages: number;
+};
 type Confirmation = { title: string; description: string; confirmLabel?: string; run: () => void } | null;
 
 const statePresentation = {
@@ -54,6 +90,7 @@ function formatRelativeDate(value: string | null): string { if (!value) return "
 function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) { return <Card variant="compact" className="flex min-w-0 items-center gap-3"><span className="rounded-lg bg-accent/10 p-2 text-accent">{icon}</span><span className="min-w-0"><span className="block text-xs font-medium text-muted-foreground">{label}</span><strong className="block truncate text-xl text-foreground">{value}</strong></span></Card>; }
 function SectionHeading({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="text-sm text-muted-foreground">{description}</p></div>{action}</div>; }
 function RouteTestBadge({ state }: { state: RouteTestState }) { const display = { not_tested: ["Not tested", "neutral"], reachable: ["Reachable", "success"], unreachable: ["Unreachable", "error"], timeout: ["Timeout", "error"], missing_route: ["Missing route", "warning"], configuration_error: ["Configuration error", "warning"] } as const; return <Badge variant={display[state][1]}>{display[state][0]}</Badge>; }
+function isDicomTransferHistoryPageSize(value: number): value is DicomTransferHistoryPageSize { return value === 25 || value === 50 || value === 100; }
 
 export default function AuthoritativeOrthancOperationsPage() {
   const { user } = useAuth();
@@ -66,6 +103,20 @@ export default function AuthoritativeOrthancOperationsPage() {
   const [studyResult, setStudyResult] = useState<StudyResult | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
   const [selectedJob, setSelectedJob] = useState<OperationalJob | null>(null);
+  const [historyDirection, setHistoryDirection] = useState<DicomTransferHistoryDirection>("all");
+  const [historyStatus, setHistoryStatus] = useState<DicomTransferHistoryStatus>("all");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState<DicomTransferHistoryPageSize>(25);
+  const [historyDraftSearch, setHistoryDraftSearch] = useState("");
+  const [historyDraftSource, setHistoryDraftSource] = useState("");
+  const [historyDraftDestination, setHistoryDraftDestination] = useState("");
+  const [historyDraftFrom, setHistoryDraftFrom] = useState("");
+  const [historyDraftTo, setHistoryDraftTo] = useState("");
+  const [historyAppliedSearch, setHistoryAppliedSearch] = useState("");
+  const [historyAppliedSource, setHistoryAppliedSource] = useState("");
+  const [historyAppliedDestination, setHistoryAppliedDestination] = useState("");
+  const [historyAppliedFrom, setHistoryAppliedFrom] = useState("");
+  const [historyAppliedTo, setHistoryAppliedTo] = useState("");
   const canOperate = user?.role === "supervisor" || user?.role === "super_admin";
   const isSuperAdmin = user?.role === "super_admin";
   const summary = useQuery({ queryKey: ["authoritative-orthanc", "operations", "summary"], queryFn: () => api<OperationsSummary>("/integrations/authoritative-orthanc/operations/summary"), refetchInterval: 30_000, retry: false });
@@ -75,7 +126,44 @@ export default function AuthoritativeOrthancOperationsPage() {
     refetchInterval: (query) => query.state.data?.runStatus === "running" ? 2_500 : 30_000,
     retry: false,
   });
-  const refresh = async () => { await Promise.all([summary.refetch(), historicalPacs.refetch()]); setNotice("Operations status refreshed."); };
+  const history = useQuery({
+    queryKey: ["authoritative-orthanc", "operations", "dicom-transfer-history", historyDirection, historyStatus, historyAppliedSearch, historyAppliedSource, historyAppliedDestination, historyAppliedFrom, historyAppliedTo, historyPage, historyPageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({ direction: historyDirection, status: historyStatus, page: String(historyPage), pageSize: String(historyPageSize) });
+      if (historyAppliedSearch) params.set("search", historyAppliedSearch);
+      if (historyAppliedSource) params.set("source", historyAppliedSource);
+      if (historyAppliedDestination) params.set("destination", historyAppliedDestination);
+      if (historyAppliedFrom) params.set("from", historyAppliedFrom);
+      if (historyAppliedTo) params.set("to", historyAppliedTo);
+      return api<DicomTransferHistoryResponse>(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${params.toString()}`);
+    },
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const applyHistoryFilters = () => {
+    setHistoryAppliedSearch(historyDraftSearch.trim());
+    setHistoryAppliedSource(historyDraftSource.trim());
+    setHistoryAppliedDestination(historyDraftDestination.trim());
+    setHistoryAppliedFrom(historyDraftFrom ? tripoliDateTimeLocalToIso(historyDraftFrom.trim()) ?? "" : "");
+    setHistoryAppliedTo(historyDraftTo ? tripoliDateTimeLocalToIso(historyDraftTo.trim()) ?? "" : "");
+    setHistoryPage(1);
+  };
+  const clearHistoryFilters = () => {
+    setHistoryDirection("all");
+    setHistoryStatus("all");
+    setHistoryDraftSearch("");
+    setHistoryDraftSource("");
+    setHistoryDraftDestination("");
+    setHistoryDraftFrom("");
+    setHistoryDraftTo("");
+    setHistoryAppliedSearch("");
+    setHistoryAppliedSource("");
+    setHistoryAppliedDestination("");
+    setHistoryAppliedFrom("");
+    setHistoryAppliedTo("");
+    setHistoryPage(1);
+  };
+  const refresh = async () => { await Promise.all([summary.refetch(), historicalPacs.refetch(), history.refetch()]); setNotice("Operations status refreshed."); };
   const mutation = useMutation({
     mutationFn: async ({ path, method = "POST" }: { path: string; method?: string }) => api<unknown>(path, { method }),
     onSuccess: async () => { setConfirmation(null); setNotice("Action completed."); await queryClient.invalidateQueries({ queryKey: ["authoritative-orthanc", "operations"] }); },
@@ -101,6 +189,12 @@ export default function AuthoritativeOrthancOperationsPage() {
   const presentation = statePresentation[data?.overallState || "offline"];
   const orthancActionsDisabled = !data || data.overallState === "offline" || data.overallState === "disabled" || mutation.isPending;
   const runConfirmed = (title: string, description: string, path: string, confirmLabel?: string) => setConfirmation({ title, description, confirmLabel, run: () => mutation.mutate({ path }) });
+  const historyTotal = history.data?.total ?? 0;
+  const historyTotalPages = history.data?.totalPages ?? 0;
+  const historyStart = historyTotal === 0 ? 0 : (historyPage - 1) * historyPageSize + 1;
+  const historyEnd = Math.min(historyPage * historyPageSize, historyTotal);
+  const historyDisplayPage = historyTotal === 0 ? 1 : historyPage;
+  const historyDisplayTotalPages = historyTotalPages === 0 ? 1 : historyTotalPages;
 
   return <div className="mx-auto max-w-[1500px] space-y-5" data-testid="authoritative-orthanc-operations-page">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -156,8 +250,43 @@ export default function AuthoritativeOrthancOperationsPage() {
         {data.routing.error ? <ErrorState message={data.routing.error.message} onRetry={() => void summary.refetch()} /> : data.routing.routes.length === 0 ? <EmptyState message="No auto-routing destinations are selected." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Destination</TableHead><TableHead>Orthanc alias</TableHead><TableHead>AET</TableHead><TableHead>Host:Port</TableHead><TableHead>Configuration</TableHead><TableHead>Last DICOM test</TableHead><TableHead>Auto-route</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader><TableBody>{data.routing.routes.map((route) => <TableRow key={route.alias}><TableCell className="font-medium">{route.destinationName}</TableCell><TableCell><code>{route.alias}</code></TableCell><TableCell>{route.aet || "—"}</TableCell><TableCell>{route.host ? `${route.host}:${route.port ?? "—"}` : "—"}</TableCell><TableCell>{route.configurationState === "configured" ? <Badge variant="success">Configured</Badge> : route.configurationState === "missing_managed_route" ? <Badge variant="warning">Missing managed route</Badge> : route.configurationState === "invalid_pacs_configuration" ? <Badge variant="error">Invalid PACS configuration</Badge> : <Badge variant="neutral">Not checked</Badge>}{route.configurationError ? <p className="mt-1 max-w-64 text-xs text-red-700 dark:text-red-300">{route.configurationError}</p> : null}</TableCell><TableCell><RouteTestBadge state={route.dicomTest.state}/>{route.dicomTest.testedAt ? <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">{formatDate(route.dicomTest.testedAt)}</p> : null}</TableCell><TableCell><Badge variant={route.autoRouteActive ? "success" : "neutral"}>{route.autoRouteActive ? "Active" : "Inactive"}</Badge></TableCell><TableCell>{canOperate ? <Button variant="secondary" size="sm" disabled={orthancActionsDisabled || route.configurationState !== "configured"} onClick={() => mutation.mutate({ path: `/integrations/authoritative-orthanc/operations/routes/${encodeURIComponent(route.alias)}/test` })}>Test</Button> : "—"}</TableCell></TableRow>)}</TableBody></Table></div>}
       </Card>
 
+      <Card className="space-y-4 p-5" data-testid="dicom-transfer-history-card">
+        <SectionHeading title="DICOM Transfer History" description="Durable audit of DICOM received by and sent from the Authoritative Orthanc. Received entries are recorded after Orthanc marks the study stable."/>
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Direction filters">
+              <span className="text-sm font-medium">Direction</span>
+              {(["all", "received", "sent"] as const).map((direction) => <Button key={direction} type="button" size="sm" variant={historyDirection === direction ? "primary" : "secondary"} aria-pressed={historyDirection === direction} onClick={() => { setHistoryDirection(direction); setHistoryPage(1); }}>{direction === "all" ? "All" : direction[0].toUpperCase() + direction.slice(1)}</Button>)}
+            </div>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Status filters">
+              <span className="text-sm font-medium">Status</span>
+              {(["all", "active", "successful", "failed"] as const).map((status) => <Button key={status} type="button" size="sm" variant={historyStatus === status ? "primary" : "secondary"} aria-pressed={historyStatus === status} onClick={() => { setHistoryStatus(status); setHistoryPage(1); }}>{status === "all" ? "All" : status[0].toUpperCase() + status.slice(1)}</Button>)}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <label className="min-w-0"><span className="mb-1 block text-sm font-medium">Search</span><Input aria-label="Search" placeholder="Patient, ID, accession, or Study UID" value={historyDraftSearch} onChange={(event) => setHistoryDraftSearch(event.target.value)} /></label>
+            <label className="min-w-0"><span className="mb-1 block text-sm font-medium">Source</span><Input aria-label="Source" placeholder="Source AET or IP" value={historyDraftSource} onChange={(event) => setHistoryDraftSource(event.target.value)} /></label>
+            <label className="min-w-0"><span className="mb-1 block text-sm font-medium">Destination</span><Input aria-label="Destination" placeholder="Destination AET" value={historyDraftDestination} onChange={(event) => setHistoryDraftDestination(event.target.value)} /></label>
+            <label className="min-w-0"><span className="mb-1 block text-sm font-medium">From</span><Input aria-label="From" type="datetime-local" value={historyDraftFrom} onChange={(event) => setHistoryDraftFrom(event.target.value)} /></label>
+            <label className="min-w-0"><span className="mb-1 block text-sm font-medium">To</span><Input aria-label="To" type="datetime-local" value={historyDraftTo} onChange={(event) => setHistoryDraftTo(event.target.value)} /></label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={applyHistoryFilters}>Apply filters</Button>
+            <Button type="button" variant="secondary" onClick={clearHistoryFilters}>Clear filters</Button>
+          </div>
+        </div>
+        {history.isLoading ? <LoadingState message="Loading DICOM Transfer History…" /> : history.error ? <ErrorState message={(history.error as Error).message} onRetry={() => void history.refetch()} /> : history.data ? <>
+          {history.data.items.length === 0 ? <EmptyState message="No DICOM transfers match the current filters." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Direction</TableHead><TableHead>Status</TableHead><TableHead>Patient</TableHead><TableHead>Accession</TableHead><TableHead>Study</TableHead><TableHead>Source</TableHead><TableHead>Destination</TableHead><TableHead>Instances</TableHead><TableHead>Time</TableHead></TableRow></TableHeader><TableBody>{history.data.items.map((item) => <TableRow key={item.id}><TableCell><Badge variant={item.direction === "RECEIVED" ? "info" : "accent"}>{item.direction === "RECEIVED" ? "Received" : "Sent"}</Badge></TableCell><TableCell>{item.status === "ACTIVE" ? <Badge variant="info">Active</Badge> : item.status === "FAILED" ? <><Badge variant="error">Failed</Badge>{item.errorMessage ? <p className="mt-1 max-w-48 text-xs text-red-700 dark:text-red-300">{item.errorMessage}</p> : null}</> : <Badge variant="success">{item.direction === "RECEIVED" ? "Received / stable" : "Successful"}</Badge>}</TableCell><TableCell className="min-w-40"><p className="font-medium">{item.patientName || "—"}</p><p className="text-xs text-muted-foreground">{item.patientId || "—"}</p></TableCell><TableCell>{item.accessionNumber || "—"}</TableCell><TableCell className="min-w-48"><p className="font-medium">{item.studyDescription || "Study"}</p><span className="block max-w-64 truncate font-mono text-xs text-muted-foreground" title={item.studyInstanceUid}>{item.studyInstanceUid}</span></TableCell><TableCell className="min-w-40"><p className="font-medium">{item.sourceAet || "—"}</p>{item.sourceIp ? <p className="text-xs text-muted-foreground">{item.sourceIp}</p> : null}</TableCell><TableCell>{item.destinationAet || "—"}</TableCell><TableCell>{item.instanceCount == null ? "—" : formatCount(item.instanceCount)}</TableCell><TableCell className="whitespace-nowrap">{formatDateTimeLy(item.occurredAt)}</TableCell></TableRow>)}</TableBody></Table></div>}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm" data-testid="dicom-transfer-history-pagination">
+            <p className="text-muted-foreground">Showing {historyStart}–{historyEnd} of {historyTotal} transfers</p>
+            <p className="font-medium">Page {historyDisplayPage} of {historyDisplayTotalPages}</p>
+            <div className="flex items-center gap-2"><Button type="button" size="sm" variant="secondary" disabled={historyPage <= 1} onClick={() => setHistoryPage((current) => Math.max(1, current - 1))}>Previous</Button><Button type="button" size="sm" variant="secondary" disabled={historyTotalPages === 0 || historyPage >= historyTotalPages} onClick={() => setHistoryPage((current) => current + 1)}>Next</Button><label className="flex items-center gap-2"><span className="sr-only">History page size</span><select aria-label="History page size" className="input-premium h-[var(--control-height-sm)]" value={historyPageSize} onChange={(event) => { const nextPageSize = Number(event.target.value); if (isDicomTransferHistoryPageSize(nextPageSize)) { setHistoryPageSize(nextPageSize); setHistoryPage(1); } }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label></div>
+          </div>
+        </> : null}
+      </Card>
+
       <Card className="space-y-4 p-5">
-        <SectionHeading title="Recent DICOM transfers" description="Failures appear first, followed by active work and recent successful transfers."/>
+        <SectionHeading title="Outbound transfer jobs" description="Live Authoritative Orthanc send jobs. Failures appear first, followed by active work and recent successful sends."/>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Job filters">{(["all", "active", "failed", "successful"] as const).map((filter) => <Button key={filter} size="sm" variant={jobFilter === filter ? "primary" : "secondary"} onClick={() => setJobFilter(filter)}>{filter[0].toUpperCase() + filter.slice(1)}</Button>)}</div>
         {data.jobs.error ? <ErrorState message={data.jobs.error.message} onRetry={() => void summary.refetch()} /> : filteredJobs.length === 0 ? <EmptyState message="No transfers match this filter." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>State</TableHead><TableHead>Patient</TableHead><TableHead>Accession</TableHead><TableHead>Study</TableHead><TableHead>Destination</TableHead><TableHead>Transfer</TableHead><TableHead>Time</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{filteredJobs.map((job) => { const transfer = job.transfer!; const study = transfer.study; return <TableRow key={job.id}><TableCell><Badge variant={job.state === "Success" ? "success" : job.state === "Failure" ? "error" : job.state === "Running" ? "info" : "warning"}>{job.state}</Badge>{job.error ? <p className="mt-1 text-xs text-red-700 dark:text-red-300">{job.error}</p> : null}</TableCell><TableCell>{study ? <><p className="font-medium">{study.patientName || "—"}</p><p className="text-xs text-muted-foreground">{study.patientId || "—"}</p></> : "Context unavailable"}</TableCell><TableCell>{study?.accessionNumber || "—"}</TableCell><TableCell><p className="font-medium">{study?.studyDescription || "Study details unavailable"}</p><p className="text-xs text-muted-foreground">{study?.modalitiesInStudy.join(", ")}</p></TableCell><TableCell><p className="font-medium">{transfer.destinationName || "—"}</p><p className="text-xs text-muted-foreground">{transfer.remoteAet}</p></TableCell><TableCell><p>{job.progress == null ? "—" : `${job.progress}%`}</p>{transfer.instanceCount != null ? <p className="text-xs text-muted-foreground">{job.state === "Failure" && transfer.failedInstanceCount != null ? `${transfer.failedInstanceCount} failed of ${transfer.instanceCount.toLocaleString()}` : `${transfer.instanceCount.toLocaleString()} instances`}</p> : null}</TableCell><TableCell className="whitespace-nowrap">{formatDate(job.completionTime || job.updatedAt || job.startTime || job.creationTime)}</TableCell><TableCell><div className="flex gap-2">{canOperate && job.retryPermitted ? <Button size="sm" variant="secondary" disabled={orthancActionsDisabled} onClick={() => runConfirmed("Retry failed Orthanc job?", `Retry ${job.type} job ${job.id}. Orthanc will resubmit this failed job.`, `/integrations/authoritative-orthanc/operations/jobs/${encodeURIComponent(job.id)}/retry`)}>Retry</Button> : null}<Button size="sm" variant="secondary" onClick={() => setSelectedJob(job)}>Details</Button></div></TableCell></TableRow>; })}</TableBody></Table></div>}
       </Card>

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Role } from "@/types/api";
 import AuthoritativeOrthancOperationsPage from "./authoritative-orthanc-operations-page";
 import { api } from "@/lib/api-client";
+import { formatDateTimeLy, tripoliDateTimeLocalToIso } from "@/lib/date-format";
 
 vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
 let role: Role = "super_admin";
@@ -42,10 +43,53 @@ let historicalPacsStatus: {
 function historicalPacsFixture() {
   return { indexStatus: "ready" as const, runStatus: "idle" as const, mode: null, indexedStudies: 31192, historicalPatientIds: 18406, orthancStudies: 31192, processed: null, total: null, progressPercent: null, startedAt: null, progressAt: "2026-08-17T00:32:00.000Z", isStalled: false, stalledForSeconds: null, lastSuccessAt: "2026-08-17T00:32:00.000Z", lastFullSyncAt: "2026-08-17T00:31:00.000Z", lastAttemptAt: "2026-08-17T00:32:00.000Z", lastChangeSequence: 284731, lastError: null };
 }
+type HistoryItem = {
+  id: string;
+  direction: "RECEIVED" | "SENT";
+  status: "ACTIVE" | "SUCCESS" | "FAILED";
+  patientId: string | null;
+  patientName: string | null;
+  accessionNumber: string | null;
+  studyInstanceUid: string;
+  studyDescription: string | null;
+  sourceAet: string | null;
+  sourceIp: string | null;
+  destinationAet: string | null;
+  instanceCount: number | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  completedAt: string | null;
+  occurredAt: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  orthancJobId: string | null;
+  orthancChangeSequence: number | null;
+  orthancResourceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+type HistoryResponse = { items: HistoryItem[]; page: number; pageSize: 25 | 50 | 100; total: number; totalPages: number };
+function historyFixture(): HistoryResponse {
+  return {
+    items: [{ id: "history-1", direction: "RECEIVED", status: "SUCCESS", patientId: "PAT-1042", patientName: "History Patient", accessionNumber: "HIST-ACC-1042", studyInstanceUid: "1.2.840.10008.1.2.3.1042", studyDescription: "History CT chest", sourceAet: "MODALITY_AET", sourceIp: "192.0.2.42", destinationAet: "ORTHANCPG", instanceCount: 1234, firstSeenAt: "2026-08-12T08:00:00.000Z", lastSeenAt: "2026-08-12T08:15:00.000Z", completedAt: "2026-08-12T08:15:00.000Z", occurredAt: "2026-08-12T08:15:00.000Z", errorCode: null, errorMessage: null, orthancJobId: null, orthancChangeSequence: 1042, orthancResourceId: "resource-1042", createdAt: "2026-08-12T08:00:00.000Z", updatedAt: "2026-08-12T08:15:00.000Z" }],
+    page: 1,
+    pageSize: 25,
+    total: 1,
+    totalPages: 1,
+  };
+}
+let historyResponse = historyFixture();
+let historyError = false;
 function installApi() {
   vi.mocked(api).mockImplementation(async (path, options) => {
     if (path === "/integrations/authoritative-orthanc/operations/summary") return summary as never;
     if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/status") return historicalPacsStatus as never;
+    if (path.includes("/operations/dicom-transfer-history")) {
+      if (historyError) throw new Error("History unavailable.");
+      const params = new URL(`http://test${path}`).searchParams;
+      const pageSize = Number(params.get("pageSize"));
+      return { ...historyResponse, page: Number(params.get("page")), pageSize, totalPages: historyResponse.total === 0 ? 0 : Math.ceil(historyResponse.total / pageSize) } as never;
+    }
     if (path.includes("/operations/studies/search")) return ({ status: "matched", matchKey: "accession_number", study: { orthancStudyId: "study-1", studyInstanceUid: "1.2.3", accessionNumber: "ACC-1", patientId: "P-1", patientName: "Sample Patient", patientBirthDate: "19900101", patientSex: "F", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 50 } }) as never;
     if (options?.method === "POST") return {} as never;
     throw new Error(`Unexpected API call ${path}`);
@@ -53,9 +97,109 @@ function installApi() {
 }
 function renderPage() { return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><AuthoritativeOrthancOperationsPage/></QueryClientProvider></MemoryRouter>); }
 
-beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); vi.clearAllMocks(); installApi(); });
+beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); historyResponse = historyFixture(); historyError = false; vi.clearAllMocks(); installApi(); });
 
 describe("AuthoritativeOrthancOperationsPage", () => {
+  it("requests default durable history and renders the received stable row", async () => {
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=25"));
+    for (const text of ["Received", "Received / stable", "History Patient", "PAT-1042", "HIST-ACC-1042", "History CT chest", "MODALITY_AET", "192.0.2.42", "ORTHANCPG", "1,234", formatDateTimeLy("2026-08-12T08:15:00.000Z")]) expect(within(card).getAllByText(text, { exact: true }).length).toBeGreaterThan(0);
+  });
+
+  it("applies direction and status immediately and resets the history page", async () => {
+    historyResponse = { ...historyFixture(), total: 51, totalPages: 3 };
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.click(within(card).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=2&pageSize=25"));
+    await userEvent.click(within(card).getByRole("button", { name: /^Received$/ }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=received&status=all&page=1&pageSize=25"));
+    await userEvent.click(within(card).getByRole("button", { name: /^Sent$/ }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=sent&status=all&page=1&pageSize=25"));
+    await userEvent.click(within(card).getByRole("button", { name: /^Failed$/ }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=sent&status=failed&page=1&pageSize=25"));
+  });
+
+  it("holds draft text filters until Apply and sends trimmed values", async () => {
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.type(within(card).getByLabelText("Search"), "  patient phrase  ");
+    await userEvent.type(within(card).getByLabelText("Source"), "  SOURCE-AET  ");
+    await userEvent.type(within(card).getByLabelText("Destination"), "  DEST-AET  ");
+    expect(vi.mocked(api).mock.calls.some(([path]) => path.includes("patient+phrase") || path.includes("SOURCE-AET") || path.includes("DEST-AET"))).toBe(false);
+    await userEvent.click(within(card).getByRole("button", { name: "Apply filters" }));
+    const expected = new URLSearchParams({ direction: "all", status: "all", page: "1", pageSize: "25", search: "patient phrase", source: "SOURCE-AET", destination: "DEST-AET" });
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${expected.toString()}`));
+  });
+
+  it("converts Tripoli datetime-local filters before requesting history", async () => {
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    const from = "2026-08-12T10:30";
+    const to = "2026-08-12T12:45";
+    await userEvent.type(within(card).getByLabelText("From"), from);
+    await userEvent.type(within(card).getByLabelText("To"), to);
+    await userEvent.click(within(card).getByRole("button", { name: "Apply filters" }));
+    const expected = new URLSearchParams({ direction: "all", status: "all", page: "1", pageSize: "25", from: tripoliDateTimeLocalToIso(from)!, to: tripoliDateTimeLocalToIso(to)! });
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${expected.toString()}`));
+  });
+
+  it("clears history filters while preserving the selected page size", async () => {
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.selectOptions(within(card).getByLabelText("History page size"), "50");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=50"));
+    await userEvent.click(within(card).getByRole("button", { name: /^Sent$/ }));
+    await userEvent.type(within(card).getByLabelText("Search"), "history");
+    await userEvent.type(within(card).getByLabelText("Source"), "source");
+    await userEvent.type(within(card).getByLabelText("Destination"), "destination");
+    await userEvent.type(within(card).getByLabelText("From"), "2026-08-12T10:30");
+    await userEvent.type(within(card).getByLabelText("To"), "2026-08-12T12:45");
+    await userEvent.click(within(card).getByRole("button", { name: "Apply filters" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=50"));
+    expect((within(card).getByLabelText("Search") as HTMLInputElement).value).toBe("");
+    const directionFilters = within(card).getByRole("group", { name: "Direction filters" });
+    expect((within(directionFilters).getByRole("button", { name: /^All$/ }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect((within(directionFilters).getByRole("button", { name: /^Sent$/ }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("false");
+    const statusFilters = within(card).getByRole("group", { name: "Status filters" });
+    expect((within(statusFilters).getByRole("button", { name: /^All$/ }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    for (const label of ["Source", "Destination", "From", "To"]) expect((within(card).getByLabelText(label) as HTMLInputElement).value).toBe("");
+    expect((within(card).getByLabelText("History page size") as HTMLSelectElement).value).toBe("50");
+  });
+
+  it("uses server pagination and page-size changes without slicing client-side", async () => {
+    historyResponse = { ...historyFixture(), total: 51, totalPages: 3 };
+    renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.click(within(card).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=2&pageSize=25"));
+    expect(within(card).getByText("Showing 26–50 of 51 transfers")).toBeTruthy();
+    expect(within(card).getByText("Page 2 of 3")).toBeTruthy();
+    await userEvent.click(within(card).getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=25"));
+    expect(within(card).getByText("Showing 1–25 of 51 transfers")).toBeTruthy();
+    await userEvent.selectOptions(within(card).getByLabelText("History page size"), "50");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=50"));
+    expect(within(card).getByText("Page 1 of 2")).toBeTruthy();
+  });
+
+  it("renders history empty and error states with a retry action", async () => {
+    historyResponse = { ...historyFixture(), items: [], total: 0, totalPages: 0 };
+    const emptyView = renderPage();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    expect(within(card).getByText("No DICOM transfers match the current filters.")).toBeTruthy();
+    expect(within(card).getByText("Page 1 of 1")).toBeTruthy();
+    emptyView.unmount();
+    historyError = true;
+    renderPage();
+    expect(await screen.findByText("History unavailable.")).toBeTruthy();
+    const historyCallsBeforeRetry = vi.mocked(api).mock.calls.filter(([path]) => path.includes("dicom-transfer-history")).length;
+    await userEvent.click(within(screen.getByTestId("dicom-transfer-history-card")).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => path.includes("dicom-transfer-history")).length).toBeGreaterThan(historyCallsBeforeRetry));
+  });
+
   it("renders the ready Historical PACS index metrics and triggers Sync now", async () => {
     renderPage();
     expect(await screen.findByTestId("historical-pacs-index-card")).toBeTruthy();
@@ -114,6 +258,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
       if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/recover-and-full-reconcile") throw new Error("A genuinely active Historical PACS synchronization cannot be superseded safely.");
       if (path === "/integrations/authoritative-orthanc/operations/summary") return summary as never;
       if (path === "/integrations/authoritative-orthanc/operations/historical-pacs-index/status") return historicalPacsStatus as never;
+      if (path.includes("/operations/dicom-transfer-history")) return historyResponse as never;
       if (options?.method === "POST") return {} as never;
       throw new Error(`Unexpected API call ${path}`);
     });
@@ -154,10 +299,11 @@ describe("AuthoritativeOrthancOperationsPage", () => {
   it("filters jobs and confirms a failed-job retry", async () => {
     renderPage();
     await screen.findByText("failed-job", { exact: false }).catch(() => undefined);
-    await userEvent.click(screen.getByRole("button", { name: "Successful" }));
+    const outboundCard = screen.getByText("Outbound transfer jobs").closest("div.card-shell") as HTMLElement;
+    await userEvent.click(within(outboundCard).getByRole("button", { name: "Successful" }));
     expect(screen.getByText("CT chest")).toBeTruthy();
     expect(screen.queryByText("REST API")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Failed" }));
+    await userEvent.click(within(outboundCard).getByRole("button", { name: "Failed" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]!);
     expect(screen.getByRole("dialog")).toBeTruthy();
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm" }));
@@ -170,10 +316,10 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     await userEvent.type(screen.getByLabelText("Study lookup value"), "ACC-1");
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
     expect((await screen.findAllByText("Sample Patient")).length).toBeGreaterThan(0);
-    vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "not_found", matchKey: "accession_number", study: null }) as never : summary as never);
+    vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "not_found", matchKey: "accession_number", study: null }) as never : path.includes("dicom-transfer-history") ? historyResponse as never : summary as never);
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
     expect(await screen.findByText("No study matched that identifier.")).toBeTruthy();
-    vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "ambiguous", matchKey: "accession_number", reason: "multiple_studies", study: null }) as never : summary as never);
+    vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "ambiguous", matchKey: "accession_number", reason: "multiple_studies", study: null }) as never : path.includes("dicom-transfer-history") ? historyResponse as never : summary as never);
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
     expect(await screen.findByText(/Multiple or conflicting studies/)).toBeTruthy();
   });
@@ -182,7 +328,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     summary = fixture();
     summary.jobs.items.push({ id: "unknown-context", type: "DicomModalityStore", state: "Success", progress: 100, creationTime: "20260812T100000", startTime: null, completionTime: null, updatedAt: null, description: "REST API", error: null, retryPermitted: false, transfer: { remoteAet: "UNKNOWN", localAet: "RISPRO", destinationName: "UNKNOWN", instanceCount: null, failedInstanceCount: null, parentResourceIds: [], contextStatus: "unavailable", study: null } } as never);
     renderPage();
-    expect(await screen.findByText("Recent DICOM transfers")).toBeTruthy();
+    expect(await screen.findByText("Outbound transfer jobs")).toBeTruthy();
     for (const text of ["Sample Patient", "P-1042", "ACC-1042", "CT chest", "CT", "SonicDICOM", "220 instances", "Connection failed.", "Context unavailable"]) expect(screen.getAllByText(text).length).toBeGreaterThan(0);
     expect(screen.queryByText("Archive")).toBeNull();
     expect(screen.queryByText("DicomModalityStore")).toBeNull();
