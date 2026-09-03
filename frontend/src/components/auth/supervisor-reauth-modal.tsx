@@ -18,7 +18,7 @@ function getErrorMessage(error: unknown): string | null {
   return null;
 }
 
-export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = false }: SupervisorReAuthModalProps) {
+export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = true }: SupervisorReAuthModalProps) {
   const { reAuth, reAuthWithPasskey } = useAuth();
   const { language } = useLanguage();
   const [password, setPassword] = useState("");
