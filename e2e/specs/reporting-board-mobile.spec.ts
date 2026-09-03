@@ -29,7 +29,7 @@ test("public personal reporting desk renders the responsive personal workflow", 
   await page.getByRole("button", { name: "Done" }).click();
   await personalWorkflowTab(page, "Available").click();
   await expect(page.getByText("E2E Reporting Patient")).toBeVisible();
-  await expect(page.getByText("E2E CT")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open case details for E2E Reporting Patient" }).getByText("E2E CT Head", { exact: true })).toBeVisible();
   await expect(page.getByText("Sign in to enable notifications")).toBeVisible();
   await expect(page.getByText("Reassign case", { exact: true })).not.toBeVisible();
 });

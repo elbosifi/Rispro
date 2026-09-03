@@ -18,7 +18,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: "node --env-file=e2e/.env --import tsx src/server.ts",
+      command: "node --env-file=e2e/.env --import tsx e2e/server.ts",
       url: "http://127.0.0.1:3100/api/ready",
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
