@@ -51,11 +51,12 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockCreateComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
   createComplementaryRecallRequest: mockCreateComplementaryRecall,
+  withdrawComplementaryRecallRequest: mockWithdrawComplementaryRecall,
   createProtocolLibraryAnatomyRegion: vi.fn(), createProtocolLibraryCtPhasePreset: vi.fn(), createProtocolLibraryCtPhaseRow: vi.fn(),
   createProtocolLibraryDraftFromActive: vi.fn(), createProtocolLibraryMriSequencePreset: vi.fn(), createProtocolLibraryMriSequenceRow: vi.fn(),
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
@@ -128,6 +129,8 @@ describe("Doctor protocoling request documents", () => {
     mockCreateAssignment.mockReset();
     mockCreateComplementaryRecall.mockReset();
     mockCreateComplementaryRecall.mockResolvedValue({ recall: { id: 1, status: "pending_scheduling" } });
+    mockWithdrawComplementaryRecall.mockReset();
+    mockWithdrawComplementaryRecall.mockResolvedValue({ id: 1, status: "cancelled", recallAppointmentId: null });
     mockRescheduleBooking.mockReset();
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
@@ -168,6 +171,45 @@ describe("Doctor protocoling request documents", () => {
       dueAt: "2026-09-01T08:00:00.000Z",
       reportingDisposition: "supplement_original_report",
     }));
+  });
+
+  it("keeps the shared request entry point closed when an active recall exists", async () => {
+    const activeAppointment = { ...appointment, appointmentStatus: "completed" as const, activeComplementaryRecall: { id: 8, status: "pending_scheduling" as const }, latestComplementaryRecall: { id: 8, status: "pending_scheduling" as const } };
+    mockFetchAppointments.mockResolvedValue([activeAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: activeAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Withdraw request" })).toBeTruthy();
+  });
+
+  it("opens the shared withdrawal confirmation for a pending recall", async () => {
+    const activeAppointment = { ...appointment, appointmentStatus: "completed" as const, activeComplementaryRecall: { id: 8, status: "pending_scheduling" as const }, latestComplementaryRecall: { id: 8, status: "pending_scheduling" as const } };
+    mockFetchAppointments.mockResolvedValue([activeAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: activeAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Withdraw request" }));
+    const dialog = screen.getByRole("heading", { name: "Withdraw additional imaging request" }).closest<HTMLElement>('[role="dialog"]')!;
+    expect(within(dialog).getByText("Current status: Awaiting scheduling")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Withdraw request" }));
+
+    await waitFor(() => expect(mockWithdrawComplementaryRecall).toHaveBeenCalledWith(8));
+  });
+
+  it("preserves the scheduled status badge and does not offer withdrawal", async () => {
+    const activeAppointment = { ...appointment, appointmentStatus: "completed" as const, activeComplementaryRecall: { id: 9, status: "scheduled" as const }, latestComplementaryRecall: { id: 9, status: "scheduled" as const } };
+    mockFetchAppointments.mockResolvedValue([activeAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: activeAppointment, assignmentDetail: null });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    expect((await screen.findAllByText("Additional imaging pending · Scheduled")).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Assign" }));
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw request" })).toBeNull();
   });
 
   it("filters the worklist by appointment status and preserves waiting-first preference", async () => {

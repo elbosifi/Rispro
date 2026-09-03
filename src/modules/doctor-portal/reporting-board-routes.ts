@@ -7,7 +7,7 @@ import type { AuthenticatedUserContext } from "../../types/http.js";
 import { launchReportingBoardCaseInOhif } from "../ohif-viewer/service.js";
 import { getProtocolingHistoricalPacsCandidates, getProtocolingPatientHistory } from "./protocoling-repository.js";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
-import { createComplementaryRecall, getComplementaryRecall, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
+import { createComplementaryRecall, getActiveComplementaryRecallForOriginalAppointment, getComplementaryRecall, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "./reporting-board-types.js";
 import {
   assignReportingBoardCaseToDoctor,
@@ -530,6 +530,17 @@ router.post(
       requestedByUserId: Number(req.user!.sub),
     }));
     res.status(201).json({ recall });
+  })
+);
+
+router.get(
+  "/cases/:appointmentId/complementary-recalls/active",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
+    const requestActor = actor(req);
+    await requirePersonalReportingBoardAppointment(requestActor, appointmentId);
+    const recall = await getActiveComplementaryRecallForOriginalAppointment(appointmentId);
+    res.json({ recall });
   })
 );
 

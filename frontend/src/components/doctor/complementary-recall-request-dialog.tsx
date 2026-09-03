@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { tripoliDateTimeLocalToIso } from "@/lib/date-format";
 import type { ComplementaryRecallRequestPayload } from "@/lib/api/doctor-portal-reporting";
 import type { ComplementaryRecallQaClassification, ComplementaryRecallReasonCode, ComplementaryRecallReportingDisposition, ComplementaryRecallUrgency } from "@/lib/api/complementary-recalls";
@@ -19,6 +19,16 @@ export function ComplementaryRecallRequestDialog({ open, onClose, examLabel, sub
   const [reportingDisposition, setReportingDisposition] = useState<ComplementaryRecallReportingDisposition>("supplement_original_report");
   const [receptionInstruction, setReceptionInstruction] = useState("");
   const [technologistInstruction, setTechnologistInstruction] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setReasonCode("");
+    setQaClassification("");
+    setUrgency("routine");
+    setDueAt("");
+    setReportingDisposition("supplement_original_report");
+    setReceptionInstruction("");
+    setTechnologistInstruction("");
+  }, [examLabel, open]);
   const submit = () => {
     if (!reasonCode || !qaClassification || !technologistInstruction.trim()) return;
     onSubmit({ reasonCode, qaClassification, urgency, dueAt: tripoliDateTimeLocalToIso(dueAt), reportingDisposition, receptionInstruction: receptionInstruction.trim() || null, technologistInstruction: technologistInstruction.trim() });

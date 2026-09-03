@@ -163,6 +163,11 @@ export async function getComplementaryRecall(id: number, client: Queryable = poo
   return result.rows[0] ? map(result.rows[0]) : null;
 }
 
+export async function getActiveComplementaryRecallForOriginalAppointment(originalAppointmentId: number, client: Queryable = pool): Promise<ComplementaryRecall | null> {
+  const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where original_appointment_id = $1 and status in ('pending_scheduling', 'scheduled') limit 1`, [originalAppointmentId]);
+  return result.rows[0] ? map(result.rows[0]) : null;
+}
+
 export async function getComplementaryRecallBookingContext(id: number, client: Queryable = pool): Promise<ComplementaryRecallBookingContext | null> {
   const result = await client.query<RecallRow & { patient_id: number; modality_id: number; exam_type_id: number | null; original_exam: string | null }>(`select r.${SELECT.replaceAll(", ", ", r.")}, b.patient_id, b.modality_id, b.exam_type_id, et.name_en as original_exam from appointments_v2.complementary_recall_requests r join appointments_v2.bookings b on b.id = r.original_appointment_id left join exam_types et on et.id = b.exam_type_id where r.id = $1`, [id]);
   const row = result.rows[0];

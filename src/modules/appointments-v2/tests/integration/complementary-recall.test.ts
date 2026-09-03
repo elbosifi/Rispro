@@ -4,7 +4,7 @@ import { pool } from "../../../../db/pool.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
 import { voidBookingByStaff } from "../../booking/services/void-booking.service.js";
-import { acknowledgeComplementaryRecall, completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall as createComplementaryRecallRecord, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, recordComplementaryRecallContactAttempt, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions as updateComplementaryRecallRecord, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
+import { acknowledgeComplementaryRecall, completeComplementaryRecallForBooking, complementaryRecallReceptionSummary, complementaryRecallUnseenCount, createComplementaryRecall as createComplementaryRecallRecord, getActiveComplementaryRecallForOriginalAppointment, getComplementaryRecall, getComplementaryRecallBookingContext, linkComplementaryRecallBooking, listComplementaryRecalls, markComplementaryRecallsSeen, recordComplementaryRecallContactAttempt, reopenComplementaryRecallForUncompletedBooking, updateComplementaryRecallInstructions as updateComplementaryRecallRecord, withdrawComplementaryRecall } from "../../recall/complementary-recall.service.js";
 import { resolveMwlEligibilityForBooking } from "../../../../services/mwl-eligibility-service.js";
 import { canReachDatabase, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
@@ -258,6 +258,43 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidUrgencyOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, urgency: "invalid" })), { statusCode: 400 });
     const invalidReportingOriginalId = await originalBooking();
     await assert.rejects(() => transaction((client) => createComplementaryRecall(client, { originalAppointmentId: invalidReportingOriginalId, receptionInstruction: null, technologistInstruction: "Repeat", requestedByUserId: testData.userId, reportingDisposition: "invalid" })), { statusCode: 400 });
+  });
+
+  it("reads only the active recall for an original appointment", async () => {
+    if (!testData) return;
+
+    const noRecallOriginalId = await originalBooking();
+    assert.equal(await getActiveComplementaryRecallForOriginalAppointment(noRecallOriginalId), null);
+
+    const pendingOriginalId = await originalBooking();
+    const pending = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: pendingOriginalId, receptionInstruction: null, technologistInstruction: "Pending active recall", requestedByUserId: testData.userId }));
+    assert.equal((await getActiveComplementaryRecallForOriginalAppointment(pendingOriginalId))?.id, pending.id);
+
+    const scheduledOriginalId = await originalBooking();
+    const scheduled = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: scheduledOriginalId, receptionInstruction: null, technologistInstruction: "Scheduled active recall", requestedByUserId: testData.userId }));
+    const scheduledBookingId = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, scheduled, scheduledBookingId, testData.userId));
+    assert.equal((await getActiveComplementaryRecallForOriginalAppointment(scheduledOriginalId))?.id, scheduled.id);
+
+    const completedOriginalId = await originalBooking();
+    const completed = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: completedOriginalId, receptionInstruction: null, technologistInstruction: "Completed historical recall", requestedByUserId: testData.userId }));
+    const completedBookingId = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, completed, completedBookingId, testData.userId));
+    await transaction((client) => completeComplementaryRecallForBooking(client, completedBookingId, testData.userId));
+    assert.equal(await getActiveComplementaryRecallForOriginalAppointment(completedOriginalId), null);
+
+    const cancelledOriginalId = await originalBooking();
+    const cancelled = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: cancelledOriginalId, receptionInstruction: null, technologistInstruction: "Cancelled historical recall", requestedByUserId: testData.userId }));
+    await transaction((client) => withdrawComplementaryRecall(client, cancelled.id, testData.userId));
+    assert.equal(await getActiveComplementaryRecallForOriginalAppointment(cancelledOriginalId), null);
+
+    const mixedOriginalId = await originalBooking();
+    const oldCompleted = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: mixedOriginalId, receptionInstruction: null, technologistInstruction: "Old completed recall", requestedByUserId: testData.userId }));
+    const oldCompletedBookingId = await originalBooking();
+    await transaction((client) => linkComplementaryRecallBooking(client, oldCompleted, oldCompletedBookingId, testData.userId));
+    await transaction((client) => completeComplementaryRecallForBooking(client, oldCompletedBookingId, testData.userId));
+    const current = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: mixedOriginalId, receptionInstruction: null, technologistInstruction: "Current active recall", requestedByUserId: testData.userId }));
+    assert.equal((await getActiveComplementaryRecallForOriginalAppointment(mixedOriginalId))?.id, current.id);
   });
 
   it("joins the reception work queue and keeps unseen independent of scheduled state", async () => {

@@ -581,6 +581,8 @@ async function cleanup() {
   await pool.query(`delete from doctor_portal.doctor_module_audit_events where actor_user_id = any($1::bigint[]) or actor_doctor_id = any($2::bigint[]) or target_id in (select id from doctor_portal.case_team_assignments where appointment_id = any($3::bigint[]))`, [userIds, doctorIds, bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.comparison_case_assignments where comparison_request_id = any($1::bigint[])`, [comparisonRequestIds]).catch(() => undefined);
   await pool.query(`delete from comparison_requests where id = any($1::bigint[])`, [comparisonRequestIds]).catch(() => undefined);
+  await pool.query(`delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id in (select id from appointments_v2.complementary_recall_requests where original_appointment_id = any($1::bigint[]) or recall_appointment_id = any($1::bigint[]))`, [bookingIds]).catch(() => undefined);
+  await pool.query(`delete from appointments_v2.complementary_recall_requests where original_appointment_id = any($1::bigint[]) or recall_appointment_id = any($1::bigint[])`, [bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_workload_units where appointment_id = any($1::bigint[])`, [bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[])`, [bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
@@ -2002,6 +2004,34 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       [managerComparison]
     );
     assert.deepEqual(comparisonState.rows[0], { status: "ready_for_reporting", assigned_doctor_id: null, active_assignments: "0" });
+  });
+
+  it("exposes the active recall through the owner-scoped Personal Desk facade", async () => {
+    guard();
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk active recall" });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    const path = `/api/doctor/reporting-board/cases/${appointmentId}/complementary-recalls/active`;
+    const create = await api<{ recall: { id: number; status: string } }>(doctor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, {
+      method: "POST",
+      body: {
+        reasonCode: "technical_equipment_problem",
+        qaClassification: "technical_repeat",
+        urgency: "routine",
+        dueAt: null,
+        reportingDisposition: "supplement_original_report",
+        receptionInstruction: null,
+        technologistInstruction: "Repeat the affected acquisition.",
+      },
+    });
+    assert.equal(create.status, 201, JSON.stringify(create.data));
+
+    const ownerRead = await api<{ recall: { id: number; status: string } | null }>(doctor.cookie, path);
+    assert.equal(ownerRead.status, 200, JSON.stringify(ownerRead.data));
+    assert.equal(ownerRead.data.recall?.id, create.data.recall.id);
+    assert.equal(ownerRead.data.recall?.status, "pending_scheduling");
+
+    const otherRead = await api(otherDoctor.cookie, path);
+    assert.equal(otherRead.status, 403, JSON.stringify(otherRead.data));
   });
 
   it("keeps SonicDICOM-final mobile action flags closed except for manager reassignment", async () => {

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
@@ -9,6 +10,9 @@ import type { ReportingBoardMobileCase, ReportingBoardMobileResponse, User } fro
 const testState = vi.hoisted(() => ({
   user: null as User | null,
   fetchView: vi.fn(),
+  fetchActiveRecall: vi.fn(),
+  createRecall: vi.fn(),
+  withdrawRecall: vi.fn(),
   claim: vi.fn(),
   finalize: vi.fn(),
   finalizeComparison: vi.fn(),
@@ -36,14 +40,11 @@ vi.mock("@/components/auth/passkey-settings-button", () => ({
   PasskeySettingsButton: () => null,
 }));
 
-vi.mock("@/components/doctor/complementary-recall-request-dialog", () => ({
-  ComplementaryRecallRequestDialog: () => null,
-}));
-
 vi.mock("@/lib/api-hooks", () => ({
   assignReportingBoardMobileCaseToMe: testState.claim,
-  createReportingBoardComplementaryRecall: testState.noop,
+  createReportingBoardComplementaryRecall: testState.createRecall,
   fetchOhifViewerAvailability: testState.fetchOhif,
+  fetchReportingBoardActiveComplementaryRecall: testState.fetchActiveRecall,
   fetchOhifRetrievalJob: testState.fetchRetrieval,
   fetchReportingBoardComparisonHistoricalPacsCandidates: testState.fetchComparisonCandidates,
   fetchReportingBoardComparisonHistory: testState.fetchComparisonHistory,
@@ -58,6 +59,7 @@ vi.mock("@/lib/api-hooks", () => ({
   sendReportingBoardMobileTestPush: testState.sendTest,
   subscribeReportingBoardMobilePush: testState.subscribe,
   unsubscribeReportingBoardMobilePush: testState.unsubscribe,
+  withdrawReportingBoardComplementaryRecall: testState.withdrawRecall,
 }));
 
 function viewData(): ReportingBoardMobileResponse {
@@ -155,6 +157,9 @@ describe("Personal Reporting Desk authentication and current-device notification
   beforeEach(() => {
     testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.fetchView.mockResolvedValue(viewData());
+    testState.fetchActiveRecall.mockResolvedValue(null);
+    testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
+    testState.withdrawRecall.mockResolvedValue({ id: 101, status: "cancelled", recallAppointmentId: null });
     testState.fetchConfig.mockResolvedValue({ enabled: false, publicKey: null });
     testState.fetchStatus.mockResolvedValue({ enabled: false, lastSuccessAt: null });
     testState.fetchOhif.mockResolvedValue({ enabled: false });
@@ -376,6 +381,9 @@ describe("Personal Reporting Desk case presentation", () => {
   beforeEach(() => {
     testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.fetchView.mockResolvedValue(viewData());
+    testState.fetchActiveRecall.mockResolvedValue(null);
+    testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
+    testState.withdrawRecall.mockResolvedValue({ id: 101, status: "cancelled", recallAppointmentId: null });
     testState.claim.mockResolvedValue({ assignmentId: 1 });
     testState.finalize.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
     testState.finalizeComparison.mockResolvedValue({});
@@ -407,6 +415,111 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.getByText("Draft")).toBeTruthy();
     expect(screen.queryByText(/clinical indication/i)).toBeNull();
     expect(screen.queryByText("MR · MR")).toBeNull();
+  });
+
+  it("shows Request additional imaging for an eligible appointment with no active recall", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(testState.fetchActiveRecall).toHaveBeenCalledWith(42);
+  });
+
+  it("does not query or show additional-imaging controls for comparison cases", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ caseType: "comparison", caseKey: "comparison:9", comparisonRequestId: 9 })] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    await screen.findByRole("region", { name: "Comparison context" });
+    expect(screen.queryByRole("region", { name: "Additional imaging" })).toBeNull();
+    expect(testState.fetchActiveRecall).not.toHaveBeenCalled();
+  });
+
+  it("shows Awaiting scheduling and Withdraw request for a pending active recall", async () => {
+    testState.fetchActiveRecall.mockResolvedValue({ id: 12, status: "pending_scheduling", recallAppointmentId: null });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByText("Awaiting scheduling")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Withdraw request" })).toBeTruthy();
+  });
+
+  it("shows Scheduled and does not offer withdrawal for a scheduled active recall", async () => {
+    testState.fetchActiveRecall.mockResolvedValue({ id: 13, status: "scheduled", recallAppointmentId: 77 });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByText("Scheduled")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw request" })).toBeNull();
+  });
+
+  it("creates through the Reporting Board facade and refreshes active recall state", async () => {
+    const user = userEvent.setup();
+    testState.fetchActiveRecall.mockResolvedValueOnce(null).mockResolvedValue({ id: 14, status: "pending_scheduling", recallAppointmentId: null });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    await user.click(await screen.findByRole("button", { name: "Request additional imaging" }));
+    const dialog = screen.getByRole("heading", { name: "Request additional imaging" }).closest<HTMLElement>('[role="dialog"]')!;
+    await user.selectOptions(within(dialog).getByLabelText("Recall reason"), "missing_sequence_phase");
+    await user.selectOptions(within(dialog).getByLabelText("QA classification"), "acquisition_error");
+    await user.type(within(dialog).getByRole("textbox", { name: "Technologist instruction" }), "Repeat the delayed phase");
+    await user.click(within(dialog).getByRole("button", { name: "Request additional imaging" }));
+
+    await waitFor(() => expect(testState.createRecall).toHaveBeenCalledWith(42, {
+      reasonCode: "missing_sequence_phase",
+      qaClassification: "acquisition_error",
+      urgency: "routine",
+      dueAt: null,
+      reportingDisposition: "supplement_original_report",
+      receptionInstruction: null,
+      technologistInstruction: "Repeat the delayed phase",
+    }));
+    expect(await screen.findByText("Additional imaging requested.")).toBeTruthy();
+    expect(await screen.findByText("Awaiting scheduling")).toBeTruthy();
+    expect(testState.fetchActiveRecall.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("withdraws through the Reporting Board facade and refreshes the active state", async () => {
+    const user = userEvent.setup();
+    testState.fetchActiveRecall.mockResolvedValueOnce({ id: 15, status: "pending_scheduling", recallAppointmentId: null }).mockResolvedValue(null);
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    await user.click(await screen.findByRole("button", { name: "Withdraw request" }));
+    const dialog = screen.getByRole("heading", { name: "Withdraw additional imaging request" }).closest<HTMLElement>('[role="dialog"]')!;
+    await user.click(within(dialog).getByRole("button", { name: "Withdraw request" }));
+
+    await waitFor(() => expect(testState.withdrawRecall).toHaveBeenCalledWith(15));
+    expect(await screen.findByText("Additional imaging request withdrawn.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(testState.fetchActiveRecall.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not offer request or withdrawal actions to a manager previewing another doctor's desk", async () => {
+    testState.user = { id: 99, username: "manager", fullName: "Dr Manager", role: "supervisor" };
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw request" })).toBeNull();
+    expect(testState.fetchActiveRecall).not.toHaveBeenCalled();
   });
 
   it("shows the Comparison badge on comparison cards", async () => {
@@ -610,7 +723,7 @@ describe("Personal Reporting Desk case presentation", () => {
     const firstRender = renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
 
-    expect(screen.getByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Request additional imaging" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Finalize report" })).toBeTruthy();
     firstRender.unmount();
 

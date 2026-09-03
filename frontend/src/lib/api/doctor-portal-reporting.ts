@@ -1580,6 +1580,10 @@ export async function createReportingBoardComplementaryRecall(appointmentId: num
   return (await api<{ recall: ComplementaryRecall }>(`/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, { method: "POST", body: JSON.stringify(payload) })).recall;
 }
 
+export async function fetchReportingBoardActiveComplementaryRecall(appointmentId: number): Promise<ComplementaryRecall | null> {
+  return (await api<{ recall: ComplementaryRecall | null }>(`/doctor/reporting-board/cases/${appointmentId}/complementary-recalls/active`)).recall;
+}
+
 export async function withdrawReportingBoardComplementaryRecall(recallId: number): Promise<ComplementaryRecall> {
   return (await api<{ recall: ComplementaryRecall }>(`/doctor/reporting-board/complementary-recalls/${recallId}/withdraw`, { method: "POST" })).recall;
 }
