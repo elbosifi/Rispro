@@ -11,4 +11,5 @@ function tripoliDate(offsetDays = 0): string {
 }
 
 export function e2eTodayInTripoli(): string { return tripoliDate(); }
+export function e2eYesterdayInTripoli(): string { return tripoliDate(-1); }
 export function e2eTomorrowInTripoli(): string { return tripoliDate(1); }

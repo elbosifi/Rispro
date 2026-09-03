@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../src/db/pool.js";
-import { e2eTodayInTripoli, e2eTomorrowInTripoli } from "./helpers/fixtures.js";
+import { e2eTodayInTripoli, e2eTomorrowInTripoli, e2eYesterdayInTripoli } from "./helpers/fixtures.js";
 
 if (process.env.RISPRO_E2E !== "1") throw new Error("RISPRO_E2E=1 is required to seed browser E2E data.");
 
@@ -103,6 +103,56 @@ try {
      values ($1, $2, $2, 'E2E Mobile Reporting', 'e2e-mobile-reporting-token', '{}'::jsonb, '{}'::jsonb, true, 'doctor_worklist', true, $1, $1)`,
     [doctorUserId, doctorProfileId],
   );
+
+  const reportingPriorities = await pool.query<{ id: number; code: string }>(
+    "select id, code from reporting_priorities where code = any($1::text[])",
+    [["routine", "urgent"]],
+  );
+  const reportingPriorityId = (code: "routine" | "urgent") => Number(reportingPriorities.rows.find((priority) => priority.code === code)?.id);
+  const reportingExamTypeId = Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id);
+  const seedPersonalReportingCase = async ({
+    patientName,
+    nationalId,
+    priority = "routine",
+    assigned = false,
+    expectedReportingDate = e2eTodayInTripoli(),
+  }: {
+    patientName: string;
+    nationalId: string;
+    priority?: "routine" | "urgent";
+    assigned?: boolean;
+    expectedReportingDate?: string;
+  }) => {
+    const patient = await pool.query<{ id: number }>(
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+       values ($1::varchar, $1::varchar, $2::varchar, $1::text, 'F', 44, $3::varchar, 'national_id', $2::text) returning id`,
+      [patientName, nationalId, `091${nationalId.slice(-7)}`],
+    );
+    const booking = await pool.query<{ id: number }>(
+      `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, reporting_priority_id, booking_date, case_category, requires_report, status, completed_at, policy_version_id, created_by_user_id, updated_by_user_id)
+       values ($1, $2, $3, $4, $5::date, 'non_oncology', true, 'completed', now(), $6, $7, $7) returning id`,
+      [Number(patient.rows[0].id), modalityId, reportingExamTypeId, reportingPriorityId(priority), e2eTodayInTripoli(), Number(policyVersion.rows[0].id), supervisorId],
+    );
+    const bookingId = Number(booking.rows[0].id);
+    await pool.query(
+      `insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, accession_number_snapshot)
+       values ($1::bigint, 'draft', 'sonicdicom', now(), now(), now() + interval '1 hour', now(), 0, 'V2-' || lpad(($1::bigint)::text, 6, '0'))`,
+      [bookingId],
+    );
+    if (assigned) {
+      await pool.query(
+        `insert into doctor_portal.case_team_assignments (appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, assigned_at, status)
+         values ($1, null, $2, $3, 'reporting', $4::date, now(), 'active')`,
+        [bookingId, doctorProfileId, modalityId, expectedReportingDate],
+      );
+    }
+  };
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Assigned", nationalId: "100000000081", assigned: true });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Available", nationalId: "100000000082" });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Overdue", nationalId: "100000000083", assigned: true, expectedReportingDate: e2eYesterdayInTripoli() });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Urgent", nationalId: "100000000084", priority: "urgent" });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Claim", nationalId: "100000000085" });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Finalize", nationalId: "100000000086", assigned: true });
 
   // A fixed, synthetic full category provides an override-request fixture.
   for (let index = 1; index <= 5; index += 1) {
