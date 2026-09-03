@@ -23,7 +23,7 @@ export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: numbe
 export type OrthancInstanceReceptionMetadata = { orthancInstanceId: string; origin: string | null; remoteAet: string | null; remoteIp: string | null; calledAet: string | null; receptionDate: string | null };
 export type OrthancInboundAuditStudy = { study: OrthancStudyDetails; instanceIds: string[] };
 export type OrthancStudiesIndexPage = { studies: OrthancStudyDetails[]; resourceCount: number };
-export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
+export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "studyInstanceUid" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
 export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
@@ -365,7 +365,8 @@ export class AuthoritativeOrthancClient {
     const dicom = tags(row);
     const orthancStudyId = first(row.ID, row.Id, row.id, row.Study, row.study, seriesStudy ? null : resourceId);
     if (!orthancStudyId) return null;
-    return { orthancStudyId, patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean) };
+    const details = studyDetails(detail, orthancStudyId);
+    return { orthancStudyId, studyInstanceUid: details.studyInstanceUid, patientId: details.patientId, patientName: details.patientName, accessionNumber: details.accessionNumber, studyDate: details.studyDate, studyDescription: details.studyDescription, modalitiesInStudy: details.modalitiesInStudy };
   }
   async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
+import { redactDiagnosticText } from "./system-diagnostics-service.js";
 
 const AUTHORITATIVE_ORTHANC_AET = "ORTHANCPG";
 
@@ -50,6 +51,29 @@ export type RecordInboundDicomReceptionInput = {
 export type RecordInboundDicomReceptionResult = {
   event: DicomTransferEvent;
   deduplicated: boolean;
+};
+
+export type RecordOutboundDicomTransferInput = {
+  orthancJobId?: unknown;
+  patientId?: unknown;
+  patientName?: unknown;
+  accessionNumber?: unknown;
+  studyInstanceUid?: unknown;
+  studyDescription?: unknown;
+  sourceAet?: unknown;
+  destinationAet?: unknown;
+  instanceCount?: unknown;
+  status?: unknown;
+  firstSeenAt?: unknown;
+  lastSeenAt?: unknown;
+  completedAt?: unknown;
+  errorCode?: unknown;
+  errorMessage?: unknown;
+  orthancResourceId?: unknown;
+};
+
+export type RecordOutboundDicomTransferResult = {
+  event: DicomTransferEvent;
 };
 
 export type DicomTransferHistoryDirection = "all" | "received" | "sent";
@@ -381,6 +405,18 @@ function optionalChangeSequence(value: unknown): number | null {
   return parsed;
 }
 
+function outboundStatus(value: unknown): "ACTIVE" | "SUCCESS" | "FAILED" {
+  const normalized = requiredText(value, "status", 16).toUpperCase();
+  if (normalized !== "ACTIVE" && normalized !== "SUCCESS" && normalized !== "FAILED") throw new HttpError(400, "status must be ACTIVE, SUCCESS, or FAILED.");
+  return normalized;
+}
+
+function boundedDiagnosticText(value: unknown): string | null {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) return null;
+  return redactDiagnosticText(normalized).replace(/[\r\n\t]+/g, " ").slice(0, 1_000) || null;
+}
+
 export async function recordInboundDicomReception(input: RecordInboundDicomReceptionInput): Promise<RecordInboundDicomReceptionResult> {
   const patientId = optionalText(input.patientId, "patientId");
   const patientName = optionalText(input.patientName, "patientName");
@@ -414,4 +450,57 @@ export async function recordInboundDicomReception(input: RecordInboundDicomRecep
   const existing = await pool.query<DicomTransferEvent>("select * from dicom_transfer_events where idempotency_key=$1", [idempotencyKey]);
   if (!existing.rows[0]) throw new HttpError(409, "A DICOM reception event could not be recorded safely.");
   return { event: existing.rows[0], deduplicated: true };
+}
+
+export async function recordOutboundDicomTransfer(input: RecordOutboundDicomTransferInput): Promise<RecordOutboundDicomTransferResult> {
+  const orthancJobId = requiredText(input.orthancJobId, "orthancJobId", 128);
+  const patientId = optionalText(input.patientId, "patientId");
+  const patientName = optionalText(input.patientName, "patientName");
+  const accessionNumber = optionalText(input.accessionNumber, "accessionNumber");
+  const studyInstanceUid = requiredText(input.studyInstanceUid, "studyInstanceUid");
+  const studyDescription = optionalText(input.studyDescription, "studyDescription");
+  const sourceAet = optionalText(input.sourceAet, "sourceAet")?.toUpperCase() ?? null;
+  const destinationAet = optionalText(input.destinationAet, "destinationAet")?.toUpperCase() ?? null;
+  const instanceCount = optionalInstanceCount(input.instanceCount);
+  const status = outboundStatus(input.status);
+  const firstSeenAt = optionalTimestamp(input.firstSeenAt, "firstSeenAt") ?? new Date().toISOString();
+  const requestedLastSeenAt = optionalTimestamp(input.lastSeenAt, "lastSeenAt") ?? firstSeenAt;
+  const requestedCompletedAt = optionalTimestamp(input.completedAt, "completedAt");
+  const completedAt = status === "ACTIVE" ? null : requestedCompletedAt ?? requestedLastSeenAt;
+  const lastSeenAt = status === "ACTIVE" ? requestedLastSeenAt : completedAt;
+  const errorCode = status === "FAILED" ? optionalText(input.errorCode, "errorCode", 128) : null;
+  const errorMessage = status === "FAILED" ? boundedDiagnosticText(input.errorMessage) : null;
+  const orthancResourceId = optionalText(input.orthancResourceId, "orthancResourceId", 256);
+  const inserted = await pool.query<DicomTransferEvent>(`
+    insert into dicom_transfer_events (
+      direction,status,patient_id,patient_name,accession_number,study_instance_uid,study_description,
+      source_aet,source_ip,destination_aet,instance_count,first_seen_at,last_seen_at,completed_at,
+      error_code,error_message,orthanc_job_id,orthanc_change_sequence,orthanc_resource_id
+    ) values (
+      'SENT',$1,$2,$3,$4,$5,$6,$7,null,$8,$9,$10,$11,$12,$13,$14,$15,null,$16
+    )
+    on conflict (orthanc_job_id, study_instance_uid)
+      where direction = 'SENT' and orthanc_job_id is not null
+    do update set
+      status = excluded.status,
+      patient_id = coalesce(excluded.patient_id, dicom_transfer_events.patient_id),
+      patient_name = coalesce(excluded.patient_name, dicom_transfer_events.patient_name),
+      accession_number = coalesce(excluded.accession_number, dicom_transfer_events.accession_number),
+      study_description = coalesce(excluded.study_description, dicom_transfer_events.study_description),
+      source_aet = coalesce(excluded.source_aet, dicom_transfer_events.source_aet),
+      source_ip = null,
+      destination_aet = coalesce(excluded.destination_aet, dicom_transfer_events.destination_aet),
+      instance_count = excluded.instance_count,
+      first_seen_at = dicom_transfer_events.first_seen_at,
+      last_seen_at = excluded.last_seen_at,
+      completed_at = excluded.completed_at,
+      error_code = excluded.error_code,
+      error_message = excluded.error_message,
+      orthanc_change_sequence = null,
+      orthanc_resource_id = coalesce(excluded.orthanc_resource_id, dicom_transfer_events.orthanc_resource_id),
+      updated_at = now()
+    returning *
+  `, [status, patientId, patientName, accessionNumber, studyInstanceUid, studyDescription, sourceAet, destinationAet, instanceCount, firstSeenAt, lastSeenAt, completedAt, errorCode, errorMessage, orthancJobId, orthancResourceId]);
+  if (!inserted.rows[0]) throw new HttpError(409, "A DICOM transmission event could not be recorded safely.");
+  return { event: inserted.rows[0] };
 }
