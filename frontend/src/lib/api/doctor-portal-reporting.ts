@@ -10,7 +10,7 @@ import type {
   ReportingBoardBulkAssignmentJob, ReportingBoardBulkReassignSelectedPayload, ReportingBoardBulkUnassignResult,
   ReportingBoardBulkUnassignSelectedPayload, OhifViewerAvailability, OhifViewerLaunchResponse,
   ReportingBoardCasesResponse, ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
-  ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, ReportingBoardSettings,
+  ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, DoctorReportingWorklistEmailQueueResult, ReportingBoardSettings,
   ReportingBoardStatsResponse, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
   RosterXmlImportPreview, RosterXmlImportResult, AppointmentProtocol, ProtocolAuditTimelineEvent, ProtocolAnatomyRegion,
   ProtocolLibraryProtocol, ProtocolLibraryVersion, ProtocolLibraryVersionDetail, ProtocolLibraryCtPhaseRow,
@@ -715,6 +715,12 @@ export async function updateDoctorReportingWorklist(
     body: JSON.stringify(payload),
   });
   return raw.worklist;
+}
+
+export async function emailDoctorReportingWorklistLink(id: number): Promise<DoctorReportingWorklistEmailQueueResult> {
+  return api<DoctorReportingWorklistEmailQueueResult>(`/doctor/reporting-board/doctor-worklists/${id}/email-link`, {
+    method: "POST",
+  });
 }
 
 export async function createReportingBoardSavedView(payload: {

@@ -59,6 +59,7 @@ import {
   updateReportingBoardSavedView,
   updateDoctorReportingWorklist,
 } from "./reporting-board-service.js";
+import { queueDoctorReportingWorklistLinkEmail } from "./doctor-worklist-email-service.js";
 
 const router = Router();
 const REPORTING_BOARD_SORT_BY = new Set([
@@ -333,6 +334,16 @@ router.get(
   "/doctor-worklists",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json({ worklists: await listDoctorReportingWorklists(actor(req)) });
+  })
+);
+
+router.post(
+  "/doctor-worklists/:id/email-link",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.status(202).json(await queueDoctorReportingWorklistLinkEmail(
+      actor(req),
+      requiredPositiveInteger(req.params.id, "id")
+    ));
   })
 );
 

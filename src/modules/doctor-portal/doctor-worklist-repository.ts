@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
 import { pool } from "../../db/pool.js";
 import type { UserId } from "../../types/http.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -29,6 +30,8 @@ const WORKLIST_SELECT = `
     sv.updated_at as "updatedAt",
     dp.display_name as "doctorDisplayName",
     u.username,
+    u.id as "doctorUserId",
+    u.email as "doctorEmail",
     dp.doctor_role as "doctorRole",
     u.is_active as "userActive",
     dp.active as "doctorActive",
@@ -46,6 +49,8 @@ function normalize(row: WorklistBaseRow): WorklistBaseRow {
     ownerUserId: row.ownerUserId === null ? null : Number(row.ownerUserId),
     ownerDoctorId: row.ownerDoctorId === null ? null : Number(row.ownerDoctorId),
     targetDoctorId: row.targetDoctorId === null ? null : Number(row.targetDoctorId),
+    doctorUserId: Number(row.doctorUserId),
+    doctorEmail: row.doctorEmail ?? null,
     filters: row.filters ?? {},
     notificationSettings: row.notificationSettings ?? {},
     accessMode: "public_readonly",
@@ -85,8 +90,8 @@ export async function findDoctorWorklistByDoctorId(doctorId: number): Promise<Wo
   return result.rows[0] ? normalize(result.rows[0]) : null;
 }
 
-export async function findDoctorWorklistById(id: number): Promise<WorklistBaseRow | null> {
-  const result = await pool.query<WorklistBaseRow>(`
+export async function findDoctorWorklistById(id: number, db: Pool | PoolClient = pool): Promise<WorklistBaseRow | null> {
+  const result = await db.query<WorklistBaseRow>(`
     ${WORKLIST_SELECT}
     where sv.link_kind = 'doctor_worklist'
       and sv.system_managed = true

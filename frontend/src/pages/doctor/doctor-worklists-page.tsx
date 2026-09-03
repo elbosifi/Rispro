@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { Copy, ExternalLink, QrCode, RefreshCw } from "lucide-react";
+import { Copy, ExternalLink, Mail, QrCode, RefreshCw } from "lucide-react";
 import {
+  emailDoctorReportingWorklistLink,
   fetchDoctorReportingWorklists,
   fetchMyDoctorReportingWorklist,
   updateDoctorReportingWorklist,
@@ -35,7 +36,19 @@ function WorklistActions({ worklist, management = false }: { worklist: DoctorRep
     mutationFn: (payload: { active?: boolean; expiresAt?: string | null; rotate?: boolean }) => updateDoctorReportingWorklist(worklist.id, payload),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "doctor-worklists"] }),
   });
+  const emailMutation = useMutation({
+    mutationFn: () => emailDoctorReportingWorklistLink(worklist.id),
+  });
   const link = worklistUrl(worklist.token);
+  const doctorEmail = worklist.doctorEmail?.trim() ?? "";
+  const emailActionAvailable = management
+    && Boolean(doctorEmail)
+    && worklist.userActive
+    && worklist.doctorActive
+    && worklist.active
+    && !worklist.revokedAt
+    && !worklist.adminDisabledAt
+    && (!worklist.expiresAt || new Date(worklist.expiresAt).getTime() > Date.now());
   return (
     <div className="flex flex-wrap gap-2">
       <a href={link} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold"><ExternalLink size={14} />Open worklist</a>
@@ -48,7 +61,21 @@ function WorklistActions({ worklist, management = false }: { worklist: DoctorRep
           const value = window.prompt("Expiry date/time (ISO), or leave empty to clear", worklist.expiresAt ?? "");
           if (value !== null) mutation.mutate({ expiresAt: value.trim() || null });
         }} className="h-9 rounded-lg border px-3 text-xs font-semibold">Set/clear expiry</button>
+        <button
+          type="button"
+          disabled={!emailActionAvailable || emailMutation.isPending}
+          title={!emailActionAvailable ? "Email requires an active doctor, user, and worklist with a valid email address." : undefined}
+          onClick={() => {
+            if (!doctorEmail || !window.confirm(`Send this Personal Reporting Desk link to ${doctorEmail}?`)) return;
+            emailMutation.mutate();
+          }}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold disabled:opacity-50"
+        >
+          <Mail size={14} />Email link
+        </button>
       </>}
+      {management && emailMutation.isSuccess && emailMutation.data && <p role="status" className="basis-full text-xs text-emerald-700">Email queued for delivery to {emailMutation.data.recipientEmail}.</p>}
+      {management && emailMutation.isError && <p role="alert" className="basis-full text-xs text-red-700">{safeError(emailMutation.error)}</p>}
       {qr && <QrDialog dataUrl={qr} onClose={() => setQr(null)} />}
     </div>
   );
@@ -103,7 +130,7 @@ export function DoctorWorklistsPage() {
         <table className="min-w-[1180px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Doctor</th><th className="p-3">Role/status</th><th className="p-3">Modalities</th><th className="p-3">Pending</th><th className="p-3">Link</th><th className="p-3">Notifications</th><th className="p-3">Actions</th></tr></thead>
           <tbody>{query.data.map((worklist) => <tr key={worklist.id} className="border-t align-top">
-            <td className="p-3 font-semibold">{worklist.doctorDisplayName}<span className="block text-xs font-normal text-slate-500">{worklist.username}</span></td>
+            <td className="p-3 font-semibold">{worklist.doctorDisplayName}<span className="block text-xs font-normal text-slate-500">{worklist.username}</span><span className="block text-xs font-normal text-slate-500">{worklist.doctorEmail?.trim() || "No email on account"}</span></td>
             <td className="p-3">{worklist.doctorRole.replaceAll("_", " ")}<span className="block text-xs text-slate-500">User {worklist.userActive ? "active" : "inactive"} · Profile {worklist.doctorActive ? "active" : "inactive"}</span></td>
             <td className="p-3">{worklist.effectiveModalityCodes.join(" / ") || "None"}</td>
             <td className="p-3">{worklist.assignedPendingCount} assigned · {worklist.eligibleUnassignedCount} available</td>

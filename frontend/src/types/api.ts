@@ -471,6 +471,8 @@ export interface ReportingBoardSavedView {
 export interface DoctorReportingWorklistSummary extends ReportingBoardSavedView {
   doctorDisplayName: string;
   username: string;
+  doctorUserId: number;
+  doctorEmail: string | null;
   doctorRole: string;
   userActive: boolean;
   doctorActive: boolean;
@@ -479,6 +481,13 @@ export interface DoctorReportingWorklistSummary extends ReportingBoardSavedView 
   eligibleUnassignedCount: number;
   subscriptionCount: number;
   scopeMessage: string | null;
+}
+
+export interface DoctorReportingWorklistEmailQueueResult {
+  queued: true;
+  outboxId: number;
+  status: string;
+  recipientEmail: string;
 }
 
 export interface ReportingBoardCaseRow {
