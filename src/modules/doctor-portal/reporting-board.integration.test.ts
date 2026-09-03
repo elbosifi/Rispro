@@ -1700,27 +1700,23 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(baseline.pagination.nextOffset, 1);
 
     const tabCases = async (filters: Record<string, unknown>) => reportingBoardService.getPublicReportingBoardMobileView(null, worklist.token, { q: label, limit: 10, ...filters }) as Promise<MobileView>;
-    const assigned = await tabCases({ mobileQuickTab: "assigned", assignedDoctorId: targetDoctor.doctorId, assignmentStatus: "assigned" });
-    assert.equal(assigned.totalCount, 2);
-    assert.deepEqual(assigned.cases.map((row) => row.appointmentId).sort((left, right) => left - right), [assignedUrgentOverdue, assignedRoutine].sort((left, right) => left - right));
-    assert.ok(assigned.cases.every((row) => row.assignmentStatus === "assigned"));
-    assert.deepEqual(assigned.counters, baseline.counters);
-    const unassigned = await tabCases({ mobileQuickTab: "unassigned", assignmentStatus: "unassigned" });
-    assert.equal(unassigned.totalCount, 3);
-    assert.ok(unassigned.cases.every((row) => row.assignmentStatus === "unassigned"));
-    assert.deepEqual(unassigned.counters, baseline.counters);
-    const urgent = await tabCases({ mobileQuickTab: "urgent", urgentOrStat: true });
+    const myCases = await tabCases({ mobileQuickTab: "my_cases" });
+    assert.equal(myCases.totalCount, 2);
+    assert.deepEqual(myCases.cases.map((row) => row.appointmentId).sort((left, right) => left - right), [assignedUrgentOverdue, assignedRoutine].sort((left, right) => left - right));
+    assert.ok(myCases.cases.every((row) => row.assignmentStatus === "assigned"));
+    assert.deepEqual(myCases.counters, baseline.counters);
+    const available = await tabCases({ mobileQuickTab: "available" });
+    assert.equal(available.totalCount, 3);
+    assert.ok(available.cases.every((row) => row.assignmentStatus === "unassigned"));
+    assert.deepEqual(available.counters, baseline.counters);
+    const urgent = await tabCases({ mobileQuickTab: "urgent" });
     assert.equal(urgent.totalCount, 3);
     assert.ok(urgent.cases.every((row) => ["urgent", "stat"].includes(String(row.priorityCode))));
     assert.deepEqual(urgent.counters, baseline.counters);
-    const overdue = await tabCases({ mobileQuickTab: "overdue", overdue: true, reportStatus: "required_not_final" });
+    const overdue = await tabCases({ mobileQuickTab: "overdue" });
     assert.equal(overdue.totalCount, 1);
     assert.ok(overdue.cases.every((row) => row.overdue));
     assert.deepEqual(overdue.counters, baseline.counters);
-    const all = await tabCases({ mobileQuickTab: "all" });
-    assert.equal(all.totalCount, 5);
-    assert.deepEqual(all.counters, baseline.counters);
-
     const permanentlyUnassignedCt = await createSavedView(admin, false, {
       q: label,
       modalityCode: "CT",
@@ -1730,7 +1726,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     });
     const lockedBaseline = await reportingBoardService.getPublicReportingBoardMobileView(null, permanentlyUnassignedCt.token, { limit: 10 }) as MobileView;
     assert.deepEqual(lockedBaseline.counters, { total: 2, assignedToMe: null, unassigned: 2, urgent: 1, requiredNotFinal: 2, overdue: 0 });
-    const lockedUrgent = await reportingBoardService.getPublicReportingBoardMobileView(null, permanentlyUnassignedCt.token, { limit: 10, mobileQuickTab: "urgent", urgentOrStat: true }) as MobileView;
+    const lockedUrgent = await reportingBoardService.getPublicReportingBoardMobileView(null, permanentlyUnassignedCt.token, { limit: 10, mobileQuickTab: "urgent" }) as MobileView;
     assert.equal(lockedUrgent.totalCount, 1);
     assert.deepEqual(lockedUrgent.counters, lockedBaseline.counters);
     assert.ok(lockedUrgent.cases.every((row) => row.appointmentId !== excludedMr && row.assignmentStatus === "unassigned"));
@@ -2093,7 +2089,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         daysBack: 14,
         enabledModalityCodes: ["CT", "MR"],
         defaultRequiresReport: true,
-        defaultReportStatusFilter: "all",
+        defaultReportStatusFilter: "required_not_final",
       },
     });
     assert.equal(allStatuses.status, 200, JSON.stringify(allStatuses.data));
@@ -2106,8 +2102,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       );
       assert.equal(ownView.status, 200, JSON.stringify(ownView.data));
       const ownCases = new Map(ownView.data.cases.map((row) => [row.appointmentId, row]));
-      assert.equal(ownCases.get(finalUnassigned)?.canAssignToMe, false);
-      assert.equal(ownCases.get(finalUnassigned)?.actionDisabledReason, "Report is final; self-claim is closed.");
+      assert.equal(ownCases.has(finalUnassigned), false);
       assert.equal(ownCases.get(draftUnassigned)?.canAssignToMe, true);
 
       const managerView = await createSavedView(admin, false, { q: label, reportStatus: "all" });
@@ -2117,6 +2112,10 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       );
       assert.equal(managed.status, 200, JSON.stringify(managed.data));
       const managedCases = new Map(managed.data.cases.map((row) => [row.appointmentId, row]));
+      assert.deepEqual(managedCases.get(finalUnassigned) && {
+        canUnassign: managedCases.get(finalUnassigned)!.canUnassign,
+        canReassign: managedCases.get(finalUnassigned)!.canReassign,
+      }, { canUnassign: false, canReassign: true });
       assert.deepEqual(managedCases.get(finalAssigned) && {
         canUnassign: managedCases.get(finalAssigned)!.canUnassign,
         canReassign: managedCases.get(finalAssigned)!.canReassign,
