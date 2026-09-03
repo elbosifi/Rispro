@@ -95,6 +95,37 @@ test("records outbound DICOM sends idempotently through all Orthanc status trans
     await recordOutboundDicomTransfer(outbound({ studyInstanceUid: secondStudyUid }));
     assert.equal((await pool.query("select 1 from dicom_transfer_events where direction='SENT' and orthanc_job_id=$1", [jobId])).rowCount, 2);
 
+    const fallbackJobId = `${jobId}-fallback`;
+    const outboundFor = (targetJobId: string, overrides: Record<string, unknown> = {}) => ({ ...outbound(overrides), orthancJobId: targetJobId });
+    const successFallback = "2026-09-03T10:03:00.000Z";
+    const laterObservation = "2026-09-03T10:04:00.000Z";
+    const earlierRealCompletion = "2026-09-03T10:02:30.000Z";
+    const firstFallback = await recordOutboundDicomTransfer(outboundFor(fallbackJobId, { status: "SUCCESS", lastSeenAt: successFallback, completedAt: null }));
+    assert.equal(eventIso(firstFallback.event.completed_at), successFallback);
+    const repeatedFallback = await recordOutboundDicomTransfer(outboundFor(fallbackJobId, { status: "SUCCESS", lastSeenAt: laterObservation, completedAt: null }));
+    assert.equal(repeatedFallback.event.id, firstFallback.event.id);
+    assert.equal(eventIso(repeatedFallback.event.completed_at), successFallback);
+    assert.equal(eventIso(repeatedFallback.event.last_seen_at), successFallback);
+    const improvedSuccess = await recordOutboundDicomTransfer(outboundFor(fallbackJobId, { status: "SUCCESS", lastSeenAt: earlierRealCompletion, completedAt: earlierRealCompletion }));
+    assert.equal(eventIso(improvedSuccess.event.completed_at), earlierRealCompletion);
+    assert.equal(eventIso(improvedSuccess.event.last_seen_at), earlierRealCompletion);
+
+    const failedFallbackJobId = `${jobId}-failed-fallback`;
+    const failedFallbackTime = "2026-09-03T10:05:00.000Z";
+    const failedLaterObservation = "2026-09-03T10:07:00.000Z";
+    const failedFirst = await recordOutboundDicomTransfer(outboundFor(failedFallbackJobId, { status: "FAILED", lastSeenAt: failedFallbackTime, completedAt: null, errorCode: 19, errorMessage: "temporary failure" }));
+    const failedRepeat = await recordOutboundDicomTransfer(outboundFor(failedFallbackJobId, { status: "FAILED", lastSeenAt: failedLaterObservation, completedAt: null, errorCode: 20, errorMessage: "later observation" }));
+    assert.equal(failedRepeat.event.id, failedFirst.event.id);
+    assert.equal(eventIso(failedRepeat.event.completed_at), failedFallbackTime);
+    assert.equal(eventIso(failedRepeat.event.last_seen_at), failedFallbackTime);
+    const failedActive = await recordOutboundDicomTransfer(outboundFor(failedFallbackJobId, { status: "ACTIVE", lastSeenAt: failedLaterObservation, completedAt: null }));
+    assert.equal(failedActive.event.completed_at, null);
+    assert.equal(failedActive.event.error_code, null);
+    assert.equal(failedActive.event.error_message, null);
+    const activeSuccessTime = "2026-09-03T10:06:00.000Z";
+    const activeSuccess = await recordOutboundDicomTransfer(outboundFor(failedFallbackJobId, { status: "SUCCESS", lastSeenAt: activeSuccessTime, completedAt: activeSuccessTime }));
+    assert.equal(eventIso(activeSuccess.event.completed_at), activeSuccessTime);
+
     const received = await recordInboundDicomReception({
       patientId: "RECEIVED-PATIENT",
       patientName: "Received Patient",
@@ -122,7 +153,12 @@ test("records outbound DICOM sends idempotently through all Orthanc status trans
       orthancResourceId: receivedResourceId,
     })).deduplicated, true);
   } finally {
-    await pool.query("delete from dicom_transfer_events where orthanc_job_id=$1 or orthanc_resource_id=$2", [jobId, receivedResourceId]);
+    await pool.query("delete from dicom_transfer_events where orthanc_job_id like $1 or orthanc_resource_id=$2", [`${jobId}%`, receivedResourceId]);
     await pool.end();
   }
 });
+
+function eventIso(value: unknown): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
+}

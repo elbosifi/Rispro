@@ -27,6 +27,12 @@ type OutboundJob = {
 };
 
 type ResolvedStudy = OrthancTransferredStudySummary & { studyInstanceUid: string };
+type StudyResolution = {
+  candidateResourceCount: number;
+  resolvedResourceCount: number;
+  complete: boolean;
+  studies: ResolvedStudy[];
+};
 
 export interface AuthoritativeOrthancOutboundAuditClient {
   listJobs(): Promise<unknown>;
@@ -192,24 +198,26 @@ function mergeStudy(current: ResolvedStudy, next: OrthancTransferredStudySummary
   };
 }
 
-async function resolveStudies(job: OutboundJob, client: AuthoritativeOrthancOutboundAuditClient): Promise<ResolvedStudy[]> {
+async function resolveStudies(job: OutboundJob, client: AuthoritativeOrthancOutboundAuditClient): Promise<StudyResolution> {
   const ids = fallbackResourceIds(job.content);
   if (!ids.length) {
     warning("authoritative_orthanc_outbound_audit_job_skipped", { jobId: job.id, reason: "missing_parent_resource" });
-    return [];
+    return { candidateResourceCount: 0, resolvedResourceCount: 0, complete: false, studies: [] };
   }
-  const summaries = await mapBounded(ids, STUDY_RESOLUTION_CONCURRENCY, async (resourceId) => {
+  const resolutions = await mapBounded(ids, STUDY_RESOLUTION_CONCURRENCY, async (resourceId) => {
     try {
       const summary = await client.getStudySummaryForTransferredResource(resourceId);
       if (!summary) warning("authoritative_orthanc_outbound_audit_study_missing", { jobId: job.id, resourceId });
-      return summary;
+      return { resourceId, summary };
     } catch (error) {
       warning("authoritative_orthanc_outbound_audit_study_resolution_failed", { jobId: job.id, resourceId, error: safeError(error instanceof Error ? error.message : error) });
-      return null;
+      return { resourceId, summary: null };
     }
   });
   const studies = new Map<string, ResolvedStudy>();
-  for (const summary of summaries) {
+  let resolvedResourceCount = 0;
+  for (const resolution of resolutions) {
+    const summary = resolution.summary;
     if (!summary) continue;
     const studyInstanceUid = text(summary.studyInstanceUid);
     const orthancStudyId = text(summary.orthancStudyId);
@@ -217,12 +225,21 @@ async function resolveStudies(job: OutboundJob, client: AuthoritativeOrthancOutb
       warning("authoritative_orthanc_outbound_audit_study_skipped", { jobId: job.id, reason: "missing_study_identity" });
       continue;
     }
+    resolvedResourceCount += 1;
     const resolved: ResolvedStudy = { ...summary, orthancStudyId, studyInstanceUid };
     const existing = studies.get(studyInstanceUid);
     studies.set(studyInstanceUid, existing ? mergeStudy(existing, resolved) : resolved);
   }
+  const complete = resolvedResourceCount === ids.length;
+  if (ids.length > 1 && !complete) {
+    warning("authoritative_orthanc_outbound_audit_study_resolution_incomplete", {
+      jobId: job.id,
+      candidateResourceCount: ids.length,
+      resolvedResourceCount,
+    });
+  }
   if (!studies.size) warning("authoritative_orthanc_outbound_audit_job_skipped", { jobId: job.id, reason: "study_context_unavailable" });
-  return [...studies.values()];
+  return { candidateResourceCount: ids.length, resolvedResourceCount, complete, studies: [...studies.values()] };
 }
 
 async function listJobs(client: AuthoritativeOrthancOutboundAuditClient): Promise<Array<{ value: unknown; fallbackId?: string }>> {
@@ -234,12 +251,21 @@ async function listJobs(client: AuthoritativeOrthancOutboundAuditClient): Promis
 }
 
 async function processJob(job: OutboundJob, client: AuthoritativeOrthancOutboundAuditClient, observedAt: string): Promise<number> {
-  const studies = await resolveStudies(job, client);
+  const resolution = await resolveStudies(job, client);
+  const studies = resolution.studies;
   if (!studies.length) return 0;
   const firstSeenAt = new Date(job.creationTime).toISOString();
-  const completedAt = job.status === "ACTIVE" ? null : job.completionTime == null ? observedAt : new Date(job.completionTime).toISOString();
+  let completedAt: string | null = null;
+  if (job.status !== "ACTIVE") {
+    if (job.completionTime == null) {
+      warning("authoritative_orthanc_outbound_audit_completion_time_fallback", { jobId: job.id.slice(0, 128), status: job.status });
+      completedAt = observedAt;
+    } else {
+      completedAt = new Date(job.completionTime).toISOString();
+    }
+  }
   const lastSeenAt = job.status === "ACTIVE" ? observedAt : completedAt;
-  const instanceCount = studies.length === 1 ? job.instanceCount : null;
+  const instanceCount = resolution.complete && studies.length === 1 ? job.instanceCount : null;
   let recorded = 0;
   for (const study of studies) {
     await recordOutboundDicomTransfer({

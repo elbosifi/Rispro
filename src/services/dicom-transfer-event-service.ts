@@ -492,8 +492,16 @@ export async function recordOutboundDicomTransfer(input: RecordOutboundDicomTran
       destination_aet = coalesce(excluded.destination_aet, dicom_transfer_events.destination_aet),
       instance_count = excluded.instance_count,
       first_seen_at = dicom_transfer_events.first_seen_at,
-      last_seen_at = excluded.last_seen_at,
-      completed_at = excluded.completed_at,
+      last_seen_at = case
+        when excluded.status in ('SUCCESS', 'FAILED') and dicom_transfer_events.status = excluded.status
+          then least(coalesce(dicom_transfer_events.completed_at, excluded.completed_at), excluded.completed_at)
+        else excluded.last_seen_at
+      end,
+      completed_at = case
+        when excluded.status in ('SUCCESS', 'FAILED') and dicom_transfer_events.status = excluded.status
+          then least(coalesce(dicom_transfer_events.completed_at, excluded.completed_at), excluded.completed_at)
+        else excluded.completed_at
+      end,
       error_code = excluded.error_code,
       error_message = excluded.error_message,
       orthanc_change_sequence = null,

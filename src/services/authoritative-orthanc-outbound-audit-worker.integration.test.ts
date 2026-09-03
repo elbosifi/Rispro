@@ -193,6 +193,19 @@ test("Authoritative Orthanc outbound audit is durable, baseline-safe, and idempo
       assert.deepEqual(rows.rows, [{ study_instance_uid: studyUid, instance_count: null }, { study_instance_uid: secondStudyUid, instance_count: null }]);
     });
 
+    await t.test("partial study resolution keeps the safely resolved row count null and retries to a full count", async () => {
+      const job = makeJob("partial", { content: { ParentResources: [`${prefix}-resource-1`, `${prefix}-resource-missing`] } });
+      const partialResult = await worker.runAuthoritativeOrthancOutboundAuditCycle(makeClient([job], { [`${prefix}-resource-1`]: study() }));
+      assert.equal(partialResult.recorded, 1);
+      assert.equal((await event(`${prefix}-partial`))!.instance_count, null);
+
+      const retry = makeJob("partial", { content: { ParentResources: [`${prefix}-resource-1`, `${prefix}-resource-2`] } });
+      const retryResult = await worker.runAuthoritativeOrthancOutboundAuditCycle(makeClient([retry], { [`${prefix}-resource-1`]: study(), [`${prefix}-resource-2`]: study(undefined, `${prefix}-study-alias`) }));
+      assert.equal(retryResult.recorded, 1);
+      assert.equal((await pool.query("select 1 from dicom_transfer_events where orthanc_job_id=$1", [`${prefix}-partial`])).rowCount, 1);
+      assert.equal((await event(`${prefix}-partial`))!.instance_count, 903);
+    });
+
     await t.test("unresolved resources do not abort an unrelated valid job and Resources is a fallback", async () => {
       const fallback = makeJob("fallback", { content: { ParentResources: [], Resources: [{ ID: `${prefix}-resource-1`, Type: "Study" }] } });
       const result = await worker.runAuthoritativeOrthancOutboundAuditCycle(makeClient([
