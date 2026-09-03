@@ -19,7 +19,7 @@ const clinicalIncident = { ...equipmentIncident, id: 8, incidentNumber: "INC-000
 const patient = { id: 22, arabicFullName: "مريض عربي", englishFullName: "English Patient", mrn: "MRN-22" };
 function renderPage(role = "supervisor", language = "en") {
   localStorage.setItem("rispro-language", language);
-  return render(<LanguageProvider><AuthContext.Provider value={{ user: { id: 1, username: role, fullName: role, role: role as never }, isLoading: false, login: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), reAuth: vi.fn(), changePassword: vi.fn() }}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><IncidentsPage /></QueryClientProvider></AuthContext.Provider></LanguageProvider>);
+  return render(<LanguageProvider><AuthContext.Provider value={{ user: { id: 1, username: role, fullName: role, role: role as never }, isLoading: false, login: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), reAuth: vi.fn(), reAuthWithPasskey: vi.fn(), changePassword: vi.fn() }}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><IncidentsPage /></QueryClientProvider></AuthContext.Provider></LanguageProvider>);
 }
 async function openCreate() { await userEvent.click(await screen.findByRole("button", { name: "New Incident" })); }
 async function chooseClinical() { await userEvent.click(screen.getByRole("radio", { name: "Clinical / Workflow Incident" })); }

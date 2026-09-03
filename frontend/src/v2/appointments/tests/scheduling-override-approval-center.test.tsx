@@ -21,8 +21,11 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
-  SupervisorReAuthModal: ({ onSuccess }: { onSuccess: () => void }) => (
-    <button type="button" onClick={onSuccess}>Mock re-auth</button>
+  SupervisorReAuthModal: ({ onSuccess, allowPasskey }: { onSuccess: () => void; allowPasskey?: boolean }) => (
+    <>
+      {allowPasskey ? <button type="button" onClick={onSuccess}>Use Passkey</button> : null}
+      <button type="button" onClick={onSuccess}>Mock re-auth</button>
+    </>
   ),
 }));
 
@@ -262,6 +265,50 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Approval note for request 12"), { target: { value: "Total capacity approved" } });
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("lets superadmin approve a high-risk request without a note and resume through passkey re-auth", async () => {
+    mockRequests = [request({
+      id: 17,
+      overrideType: "total_capacity_override",
+      decisionContext: {
+        violatedRuleLabel: "Total MRI capacity exceeded",
+        violatedRuleType: "total_capacity_override",
+        currentCapacity: 10,
+        totalCapacity: 10,
+        remainingCapacity: 0,
+        afterApprovalCapacity: 11,
+        overbookAmount: 1,
+        modalityCapacityBreakdown: null,
+        categoryBreakdown: null,
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: 10,
+        sameDayAppointmentSummary: [],
+        patientPreviousNoShowCount: 0,
+        patientPreviousCancelledCount: 0,
+        patientFutureAppointmentCount: 0,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: 4,
+        approvalNoteRequired: true,
+        approvalConsequenceText: "This approval will overbook MRI by 1 case.",
+      },
+    })];
+    renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("super_admin")} variant="page" />);
+
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(screen.getByRole("button", { name: "Use Passkey" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
+
+    expect(mockApprove).toHaveBeenCalledWith({
+      id: 17,
+      approverReason: null,
+      approvalMode: "as_requested",
+      changedBookingDate: null,
+      changedBookingTime: null,
+    });
   });
 
   it("shows combined total and exam-mix requests to both roles but only makes them actionable for superadmins", async () => {

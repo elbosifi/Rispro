@@ -1,13 +1,15 @@
 import express, { type Request, type Response, type Router } from "express";
 import { createRateLimiter } from "../middleware/rate-limit.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireSupervisor } from "../middleware/auth.js";
 import {
+  buildSupervisorReauthToken,
   buildSessionToken,
   clearPasskeyChallengeCookie,
   clearSupervisorReauthCookie,
   readPasskeyChallengeCookie,
   writePasskeyChallengeCookie,
-  writeSessionCookie
+  writeSessionCookie,
+  writeSupervisorReauthCookie
 } from "../services/auth-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { requirePasskeyConfiguration } from "../services/passkey-settings-service.js";
@@ -42,7 +44,7 @@ function currentUser(request: PasskeyRequest): PasskeyUser {
   };
 }
 
-function readChallenge(request: PasskeyRequest, type: "registration" | "authentication", userId?: PasskeyUser["id"]): string {
+function readChallenge(request: PasskeyRequest, type: "registration" | "authentication" | "reauthentication", userId?: PasskeyUser["id"]): string {
   const challenge = readPasskeyChallengeCookie(request);
   if (!challenge || challenge.type !== type || (userId != null && Number(challenge.userId) !== Number(userId))) {
     throw new HttpError(400, "Passkey challenge is missing or invalid.");
@@ -135,6 +137,65 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
         changedByUserId: user.id
       });
       res.json(loginResponse(user));
+    })
+  );
+
+  router.post(
+    "/re-auth/options",
+    requireAuth,
+    requireSupervisor,
+    asyncRoute(async (req: Request, res: Response) => {
+      const user = currentUser(req as PasskeyRequest);
+      const configuration = await requirePasskeyConfiguration();
+      const options = await authenticationOptions(configuration, webauthn);
+      writePasskeyChallengeCookie(res, { type: "reauthentication", challenge: options.challenge, userId: user.id });
+      res.json(options);
+    })
+  );
+
+  router.post(
+    "/re-auth/verify",
+    requireAuth,
+    requireSupervisor,
+    asyncRoute(async (req: Request, res: Response) => {
+      const request = req as PasskeyRequest;
+      const current = currentUser(request);
+      const challenge = readChallenge(request, "reauthentication", current.id);
+      const configuration = await requirePasskeyConfiguration();
+      const verified = await verifyPasskeyLogin(request.body?.response, challenge, configuration, webauthn);
+      if (Number(verified.id) !== Number(request.user.sub)) {
+        throw new HttpError(403, "Passkey does not belong to the current user.");
+      }
+      if (verified.role !== "supervisor" && verified.role !== "super_admin") {
+        throw new HttpError(403, "Supervisor access required.");
+      }
+
+      writeSupervisorReauthCookie(res, buildSupervisorReauthToken({
+        id: verified.id,
+        username: verified.username,
+        role: verified.role
+      }));
+      clearPasskeyChallengeCookie(res);
+      await logAuditEntry({
+        entityType: "auth",
+        entityId: verified.id,
+        actionType: "passkey_supervisor_reauth",
+        oldValues: null,
+        newValues: { username: verified.username, role: verified.role },
+        changedByUserId: verified.id
+      });
+
+      res.json({
+        ok: true,
+        user: {
+          id: verified.id,
+          username: verified.username,
+          fullName: verified.fullName,
+          role: verified.role,
+          mustChangePassword: verified.mustChangePassword,
+          recentSupervisorReauth: true
+        }
+      });
     })
   );
 

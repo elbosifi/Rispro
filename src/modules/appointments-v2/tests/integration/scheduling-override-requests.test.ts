@@ -408,6 +408,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const { pool } = await import("../../../../db/pool.js");
     const result = await pool.query(
       `select status,
+              approver_reason,
               failure_code,
               failure_message,
               requested_booking_date::text,
@@ -421,6 +422,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     );
     return result.rows[0] as {
       status: string;
+      approver_reason: string | null;
       failure_code: string | null;
       failure_message: string | null;
       requested_booking_date: string;
@@ -753,6 +755,43 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     });
   });
 
+  it("allows superadmin to approve a closed weekday request without an approval note", async () => {
+    if (!testData) return;
+    await setCapacityLimits(10, 5);
+    const friday = "2042-02-14";
+    const patientId = await createPatient();
+
+    await withSystemSetting("scheduling_and_capacity", "allow_friday_appointments", { value: "false" }, async () => {
+      const requested = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {
+        method: "POST",
+        body: {
+          requestType: "create_booking",
+          requesterReason: "Friday booking needs superadmin approval",
+          requestPayload: {
+            patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: friday,
+            bookingTime: null,
+            caseCategory: "non_oncology",
+            policySetKey: testData.policySetKey,
+          },
+          createdFromContext: "integration_test_superadmin_closed_weekday",
+        },
+      });
+      assert.equal(requested.status, 201);
+      const requestId = Number((requested.data as any).request.id);
+
+      const approved = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+        method: "POST",
+        body: { approverReason: null },
+      });
+      assert.equal(approved.status, 200, JSON.stringify(approved.data));
+      assert.equal((approved.data as any).request.status, "approved");
+      assert.equal((await getRequestFromDb(requestId)).approver_reason, null);
+    });
+  });
+
   it("rejects without approver reason and lets a receptionist see only their own requests", async () => {
     if (!testData) return;
     await setCapacityLimits();
@@ -902,7 +941,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(stored.status, "pending");
   });
 
-  it("requires an approval note for changed-date approval into total capacity", async () => {
+  it("allows superadmin changed-date approval into total capacity without an approval note", async () => {
     if (!testData) return;
     const requestedDate = "2042-03-03";
     const changedDate = "2042-03-04";
@@ -918,10 +957,11 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       },
     });
 
-    assert.equal(approval.status, 400);
-    assert.equal(await countBookings(changedDate, patientId), beforeChangedDateCount);
+    assert.equal(approval.status, 200, JSON.stringify(approval.data));
+    assert.equal(await countBookings(changedDate, patientId), beforeChangedDateCount + 1);
     const stored = await getRequestFromDb(requestId);
-    assert.equal(stored.status, "pending");
+    assert.equal(stored.status, "approved");
+    assert.equal(stored.approver_reason, null);
   });
 
   it("allows superadmin changed-date approval when the changed date requires total capacity override", async () => {
@@ -953,6 +993,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(stored.requested_booking_time, null);
     assert.equal(stored.request_payload_json.createPayload.bookingDate, requestedDate);
     assert.equal(stored.request_payload_json.createPayload.bookingTime, null);
+    assert.equal(stored.approver_reason, "Superadmin total capacity changed-date approval");
     const snapshot = stored.approval_decision_snapshot_json as any;
     assert.equal(snapshot.approvalMode, "changed_date");
     assert.equal(snapshot.changedDateApproval.originalBookingDate, requestedDate);
@@ -1152,19 +1193,13 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(supervisorApproval.status, 403);
     assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount);
 
-    const missingNoteApproval = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${Number((total.data as any).request.id)}/approve`, {
-      method: "POST",
-      body: { approverReason: "" },
-    });
-    assert.equal(missingNoteApproval.status, 400);
-    assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount);
-
     const superAdminApproval = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${Number((total.data as any).request.id)}/approve`, {
       method: "POST",
-      body: { approverReason: "Total capacity approved" },
+      body: { approverReason: null },
     });
     assert.equal(superAdminApproval.status, 200);
     assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount + 1);
+    assert.equal((await getRequestFromDb(Number((total.data as any).request.id))).approver_reason, null);
 
     const supervisorRequestedTotal = await requestCategoryOverride(date, 0, supervisorCookie);
     assert.equal(supervisorRequestedTotal.status, 201);

@@ -122,3 +122,12 @@ export async function verifyPasskeyLogin(response: unknown): Promise<User> {
   const result = await api<{ user: RawRecord }>("/auth/passkeys/login/verify", { method: "POST", body: JSON.stringify({ response }) });
   return mapUser(result.user);
 }
+
+export async function getPasskeyReauthOptions(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/auth/passkeys/re-auth/options", { method: "POST" });
+}
+
+export async function verifyPasskeyReauth(response: unknown): Promise<User> {
+  const result = await api<{ user: RawRecord }>("/auth/passkeys/re-auth/verify", { method: "POST", body: JSON.stringify({ response }) });
+  return mapUser(result.user);
+}

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { changeOwnPassword, fetchCurrentSession, getPasskeyLoginOptions, login as loginApi, logout as logoutApi, reAuthSupervisor, verifyPasskeyLogin } from "@/lib/api-hooks";
+import { changeOwnPassword, fetchCurrentSession, getPasskeyLoginOptions, getPasskeyReauthOptions, login as loginApi, logout as logoutApi, reAuthSupervisor, verifyPasskeyLogin, verifyPasskeyReauth } from "@/lib/api-hooks";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { User } from "@/types/api";
 import { AuthContext } from "./auth-provider";
@@ -93,6 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await reAuthMutation.mutateAsync(password);
   };
 
+  const reAuthWithPasskey = async () => {
+    const options = await getPasskeyReauthOptions();
+    const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+    const userData = await verifyPasskeyReauth(response);
+    queryClient.setQueryData(["auth-session"], (current: User | null | undefined) => ({
+      ...(current ?? {}),
+      ...userData,
+      recentSupervisorReauth: true,
+    }));
+  };
+
   const changePassword = async (currentPassword: string, newPassword: string) => {
     await changePasswordMutation.mutateAsync({ currentPassword, newPassword });
   };
@@ -106,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithPasskey,
         logout,
         reAuth,
+        reAuthWithPasskey,
         changePassword
       }}
     >

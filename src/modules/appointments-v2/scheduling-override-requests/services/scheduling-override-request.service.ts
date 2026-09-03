@@ -204,6 +204,14 @@ function approvalNoteRequiredFor(overrideTypes: readonly SchedulingOverrideType[
   return normalizeSchedulingOverrideTypes(overrideTypes).some((type) => HIGH_RISK_APPROVAL_NOTE_TYPES.has(type));
 }
 
+function approvalNoteRequiredForApprover(
+  role: Role,
+  approvalMode: SchedulingOverrideApprovalMode,
+  overrideTypes: readonly SchedulingOverrideType[]
+): boolean {
+  return role !== "super_admin" && (approvalMode === "changed_date" || approvalNoteRequiredFor(overrideTypes));
+}
+
 function buildApprovalConsequenceText(
   request: SchedulingOverrideRequestRow,
   context: Pick<SchedulingOverrideDecisionContext, "totalCapacity" | "afterApprovalCapacity" | "overbookAmount">
@@ -871,7 +879,7 @@ export async function approveSchedulingOverrideRequest(
     if (!canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes)) {
       throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
     }
-    if ((approvalMode === "changed_date" || approvalNoteRequiredFor(request.overrideTypes)) && !approverReason?.trim()) {
+    if (approvalNoteRequiredForApprover(role, approvalMode, request.overrideTypes) && !approverReason?.trim()) {
       throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
     }
 
@@ -902,7 +910,7 @@ export async function approveSchedulingOverrideRequest(
       if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
-      if (approvalNoteRequiredFor(requiredOverrideTypes) && !approverReason?.trim()) {
+      if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
       }
       if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {
@@ -953,7 +961,7 @@ export async function approveSchedulingOverrideRequest(
       if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
-      if (approvalNoteRequiredFor(requiredOverrideTypes) && !approverReason?.trim()) {
+      if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
       }
       if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {

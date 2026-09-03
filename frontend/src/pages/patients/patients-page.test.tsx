@@ -48,6 +48,7 @@ function renderPatientsPage() {
     loginWithPasskey: vi.fn(),
     logout: vi.fn(),
     reAuth: vi.fn(),
+    reAuthWithPasskey: vi.fn(),
     changePassword: vi.fn(),
   };
 

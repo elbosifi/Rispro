@@ -32,7 +32,7 @@ interface CookieRequest {
 }
 
 export interface PasskeyChallengeSession {
-  type: "registration" | "authentication";
+  type: "registration" | "authentication" | "reauthentication";
   challenge: string;
   userId?: UserId;
 }
@@ -82,7 +82,7 @@ export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "f
   );
 }
 
-export function buildSupervisorReauthToken(user: AuthUserRow): string {
+export function buildSupervisorReauthToken(user: Pick<AuthUserRow, "id" | "username" | "role">): string {
   return jwt.sign(
     {
       sub: user.id,
@@ -173,7 +173,7 @@ export function readPasskeyChallengeCookie(req: CookieRequest): PasskeyChallenge
     const payload = jwt.verify(token, env.jwtSecret) as Record<string, unknown>;
     if (
       payload.purpose !== "passkey-challenge" ||
-      (payload.type !== "registration" && payload.type !== "authentication") ||
+      (payload.type !== "registration" && payload.type !== "authentication" && payload.type !== "reauthentication") ||
       typeof payload.challenge !== "string"
     ) {
       return null;

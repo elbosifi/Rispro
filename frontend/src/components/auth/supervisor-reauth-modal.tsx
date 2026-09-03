@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 interface SupervisorReAuthModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  allowPasskey?: boolean;
 }
 
 function getErrorMessage(error: unknown): string | null {
@@ -17,8 +18,8 @@ function getErrorMessage(error: unknown): string | null {
   return null;
 }
 
-export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthModalProps) {
-  const { reAuth } = useAuth();
+export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = false }: SupervisorReAuthModalProps) {
+  const { reAuth, reAuthWithPasskey } = useAuth();
   const { language } = useLanguage();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +55,19 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
     }
   };
 
+  const handlePasskey = async () => {
+    setError(null);
+    setIsPending(true);
+    try {
+      await reAuthWithPasskey();
+      onSuccess();
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t(language, "reauth.failed"));
+    } finally {
+      setIsPending(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -66,6 +80,20 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
         <p className="text-sm text-stone-500 dark:text-stone-400">
           {t(language, "reauth.description")}
         </p>
+
+        {allowPasskey ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void handlePasskey()}
+              disabled={isPending}
+              className="w-full py-2 px-4 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-50 text-stone-700 dark:text-stone-300 font-medium rounded-lg transition-colors text-sm"
+            >
+              Use Passkey
+            </button>
+            <p className="text-center text-xs text-stone-500 dark:text-stone-400">or use your password</p>
+          </>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <input

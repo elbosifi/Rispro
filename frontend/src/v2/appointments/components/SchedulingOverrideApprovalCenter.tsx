@@ -306,7 +306,7 @@ export function SchedulingOverrideRequestsWorkspace({
     changedBookingTime: string;
   }>>({});
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingReauthAction, setPendingReauthAction] = useState<null | (() => void)>(null);
+  const [pendingReauthAction, setPendingReauthAction] = useState<null | { action: () => void; allowPasskey: boolean }>(null);
 
   const requests = useMemo(() => listQuery.data?.requests ?? [], [listQuery.data?.requests]);
 
@@ -342,7 +342,7 @@ export function SchedulingOverrideRequestsWorkspace({
       changedBookingTime: "",
     };
     const overrideTypes = effectiveOverrideTypes(request);
-    const approvalNoteRequired = request.decisionContext?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride);
+    const approvalNoteRequired = user.role !== "super_admin" && (request.decisionContext?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride));
     if (draft.approvalMode === "changed_date" && !draft.changedBookingDate) {
       setActionError("New booking date is required when approving with a changed date.");
       return;
@@ -351,7 +351,7 @@ export function SchedulingOverrideRequestsWorkspace({
       setActionError("Approval note is required for this override type.");
       return;
     }
-    setPendingReauthAction(() => () => void approveAfterReauth(request));
+    setPendingReauthAction({ action: () => void approveAfterReauth(request), allowPasskey: true });
   }
 
   async function rejectAfterReauth(request: SchedulingOverrideRequestDto) {
@@ -373,7 +373,7 @@ export function SchedulingOverrideRequestsWorkspace({
       setActionError(t(language, "overrideRequests.rejectionReasonRequired"));
       return;
     }
-    setPendingReauthAction(() => () => void rejectAfterReauth(request));
+    setPendingReauthAction({ action: () => void rejectAfterReauth(request), allowPasskey: false });
   }
 
   async function cancel(request: SchedulingOverrideRequestDto) {
@@ -448,11 +448,12 @@ export function SchedulingOverrideRequestsWorkspace({
       </div>
       {pendingReauthAction ? (
         <SupervisorReAuthModal
+          allowPasskey={pendingReauthAction.allowPasskey}
           onClose={() => setPendingReauthAction(null)}
           onSuccess={() => {
             const action = pendingReauthAction;
             setPendingReauthAction(null);
-            action?.();
+            action?.action();
           }}
         />
       ) : null}
@@ -510,7 +511,7 @@ function RequestCard({
   const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && overrideTypes.includes("total_capacity_override");
   const context = request.decisionContext ?? null;
   const changedDateMode = approvalDraft.approvalMode === "changed_date";
-  const approvalNoteRequired = (context?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride)) || changedDateMode;
+  const approvalNoteRequired = user.role !== "super_admin" && ((context?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride)) || changedDateMode);
   const approveDisabled = busy || (changedDateMode && !approvalDraft.changedBookingDate) || (approvalNoteRequired && !approveReason.trim());
   const changedDateApproval = getChangedDateApproval(request);
   const requesterMeta = [

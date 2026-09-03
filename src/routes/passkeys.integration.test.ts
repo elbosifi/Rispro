@@ -63,15 +63,18 @@ test("passkey routes require auth for registration options, store registrations,
 
   const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
   const activeUsername = `passkey_active_${suffix}`;
+  const foreignUsername = `passkey_foreign_${suffix}`;
+  const receptionistUsername = `passkey_receptionist_${suffix}`;
   const disabledUsername = `passkey_disabled_${suffix}`;
   const registeredCredential = `registered-credential-${suffix}`;
+  const foreignCredential = `foreign-credential-${suffix}`;
   const disabledCredential = `disabled-credential-${suffix}`;
   const createdUsers: number[] = [];
-  const makeUser = async (username: string, active: boolean) => {
+  const makeUser = async (username: string, active: boolean, role: "supervisor" | "super_admin" | "receptionist" = "supervisor") => {
     const result = await pool.query<{ id: string }>(
       `insert into users (username, full_name, password_hash, role, is_active)
-       values ($1, $2, $3, 'supervisor', $4) returning id::text as id`,
-      [username, `Passkey ${username}`, "unused", active]
+       values ($1, $2, $3, $4, $5) returning id::text as id`,
+      [username, `Passkey ${username}`, "unused", role, active]
     );
     const id = Number(result.rows[0].id);
     createdUsers.push(id);
@@ -79,6 +82,8 @@ test("passkey routes require auth for registration options, store registrations,
   };
 
   const active = await makeUser(activeUsername, true);
+  const foreign = await makeUser(foreignUsername, true);
+  const receptionist = await makeUser(receptionistUsername, true, "receptionist");
   const disabled = await makeUser(disabledUsername, false);
   const previousConfiguration = await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: string | null }>(
     "select setting_key, setting_value, updated_by_user_id::text as updated_by_user_id from system_settings where category = 'passkey'"
@@ -91,8 +96,8 @@ test("passkey routes require auth for registration options, store registrations,
   );
   await pool.query(
     `insert into user_passkeys (user_id, credential_id, public_key, counter, transports)
-     values ($1, $2, $3, 0, '[]'::jsonb)`,
-    [disabled.id, disabledCredential, Buffer.from([1, 2, 3])]
+     values ($1, $2, $3, 0, '[]'::jsonb), ($4, $5, $6, 0, '[]'::jsonb)`,
+    [disabled.id, disabledCredential, Buffer.from([1, 2, 3]), foreign.id, foreignCredential, Buffer.from([7, 8, 9])]
   );
 
   const fakeWebAuthn = {
@@ -117,6 +122,8 @@ test("passkey routes require auth for registration options, store registrations,
   } as unknown as import("../services/passkey-service.js").PasskeyWebAuthn;
   const server = await startServer(createPasskeyRouter(fakeWebAuthn));
   const authCookie = `${env.cookieName}=${jwt.sign({ sub: active.id, role: "supervisor", username: active.username, fullName: "Passkey Active" }, process.env.JWT_SECRET as string)}`;
+  const receptionistCookie = `${env.cookieName}=${jwt.sign({ sub: receptionist.id, role: "receptionist", username: receptionist.username, fullName: "Passkey Receptionist" }, process.env.JWT_SECRET as string)}`;
+  const disabledCookie = `${env.cookieName}=${jwt.sign({ sub: disabled.id, role: "supervisor", username: disabled.username, fullName: "Passkey Disabled" }, process.env.JWT_SECRET as string)}`;
 
   try {
     const unauthenticated = await request<{ error: { message: string } }>(server.baseUrl, "/register/options");
@@ -148,6 +155,51 @@ test("passkey routes require auth for registration options, store registrations,
     assert.equal(login.data.user.username, active.username);
     const loginCookie = login.cookies.find((value) => value.startsWith(`${env.cookieName}=`));
     assert.ok(loginCookie, "successful passkey verification creates the normal RISpro session cookie");
+
+    const reauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: authCookie });
+    assert.equal(reauthOptions.status, 200);
+    assert.equal(reauthOptions.data.challenge, "authentication-challenge");
+    const reauth = await request<{ ok: boolean; user: { id: number; recentSupervisorReauth: boolean } }>(server.baseUrl, "/re-auth/verify", {
+      cookie: `${authCookie}; ${cookieHeader(reauthOptions.cookies)}`,
+      body: { response: { id: registeredCredential } }
+    });
+    assert.equal(reauth.status, 200);
+    assert.equal(reauth.data.ok, true);
+    assert.equal(Number(reauth.data.user.id), active.id);
+    assert.equal(reauth.data.user.recentSupervisorReauth, true);
+    assert.ok(reauth.cookies.some((value) => value.startsWith(`${env.reauthCookieName}=`)), "passkey re-auth creates the existing supervisor re-auth cookie");
+    assert.equal(reauth.cookies.some((value) => value.startsWith(`${env.cookieName}=`)), false, "passkey re-auth does not replace the normal session");
+    const reauthAudit = await pool.query<{ action_type: string }>(
+      `select action_type from audit_log where action_type = 'passkey_supervisor_reauth' and changed_by_user_id = $1 order by id desc limit 1`,
+      [active.id]
+    );
+    assert.equal(reauthAudit.rows[0]?.action_type, "passkey_supervisor_reauth");
+
+    const missingReauthChallenge = await request<{ error: { message: string } }>(server.baseUrl, "/re-auth/verify", {
+      cookie: authCookie,
+      body: { response: { id: registeredCredential } }
+    });
+    assert.equal(missingReauthChallenge.status, 400);
+    assert.match(missingReauthChallenge.data.error.message, /challenge/i);
+
+    const foreignReauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: authCookie });
+    const foreignReauth = await request<{ error: { message: string } }>(server.baseUrl, "/re-auth/verify", {
+      cookie: `${authCookie}; ${cookieHeader(foreignReauthOptions.cookies)}`,
+      body: { response: { id: foreignCredential } }
+    });
+    assert.equal(foreignReauth.status, 403, "a different user's passkey cannot re-authenticate the current session");
+    assert.equal(foreignReauth.cookies.some((value) => value.startsWith(`${env.reauthCookieName}=`)), false, "foreign passkey verification does not create a re-auth cookie");
+
+    const receptionistReauthOptions = await request<{ error: { message: string } }>(server.baseUrl, "/re-auth/options", { cookie: receptionistCookie });
+    assert.equal(receptionistReauthOptions.status, 403, "receptionists cannot request supervisor passkey re-authentication");
+
+    const disabledReauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: disabledCookie });
+    assert.equal(disabledReauthOptions.status, 200);
+    const disabledReauth = await request<{ error: { message: string } }>(server.baseUrl, "/re-auth/verify", {
+      cookie: `${disabledCookie}; ${cookieHeader(disabledReauthOptions.cookies)}`,
+      body: { response: { id: disabledCredential } }
+    });
+    assert.equal(disabledReauth.status, 401, "disabled users cannot complete passkey supervisor re-authentication");
 
     const invalidChallenge = await request<{ error: { message: string } }>(server.baseUrl, "/login/verify", {
       body: { response: { id: registeredCredential } }

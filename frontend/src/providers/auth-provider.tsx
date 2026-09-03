@@ -8,6 +8,7 @@ export interface AuthContextValue {
   loginWithPasskey: () => Promise<User>;
   logout: (returnTo?: string) => Promise<void>;
   reAuth: (password: string) => Promise<void>;
+  reAuthWithPasskey: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
