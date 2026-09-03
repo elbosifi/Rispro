@@ -28,7 +28,7 @@ import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
-import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
+import { SupervisorOverrideModal, type SupervisorOverrideConfirmation } from "./SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "./SchedulingOverrideRequestModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { Alert, AlertDescription, Badge, Button, Card, Input } from "@/components/shared";
@@ -739,7 +739,7 @@ export function CreateAppointmentTab({
     }
   }
 
-  async function handleOverrideConfirm(payload: { supervisorUsername: string; supervisorPassword: string; overrideReason: string }) {
+  async function handleOverrideConfirm(payload: SupervisorOverrideConfirmation) {
     setOverrideLoading(true);
     setOverrideError(null);
 
@@ -754,13 +754,22 @@ export function CreateAppointmentTab({
         return;
       }
 
-      await createWithDecision(pendingDecision, {
-        supervisorUsername: payload.supervisorUsername,
-        supervisorPassword: payload.supervisorPassword,
-        reason: payload.overrideReason,
-        overrideTypes: inferSupportedOverrideTypesFromDecision(pendingDecision, effectiveCapacityResolutionMode),
-        overrideType: inferSupportedOverrideTypesFromDecision(pendingDecision, effectiveCapacityResolutionMode)[0],
-      });
+      const overrideTypes = inferSupportedOverrideTypesFromDecision(pendingDecision, effectiveCapacityResolutionMode);
+      await createWithDecision(pendingDecision, payload.authorizationMode === "current_user_reauth"
+        ? {
+            authorizationMode: "current_user_reauth",
+            reason: payload.overrideReason,
+            overrideTypes,
+            overrideType: overrideTypes[0],
+          }
+        : {
+            authorizationMode: "supervisor_credentials",
+            supervisorUsername: payload.supervisorUsername,
+            supervisorPassword: payload.supervisorPassword,
+            reason: payload.overrideReason,
+            overrideTypes,
+            overrideType: overrideTypes[0],
+          });
 
       setShowOverrideModal(false);
       setPendingDecision(null);
@@ -1419,6 +1428,7 @@ export function CreateAppointmentTab({
         loading={overrideLoading}
         authError={overrideError}
         overrideTypes={inferSupportedOverrideTypesFromDecision(pendingDecision, effectiveCapacityResolutionMode)}
+        mode={isSupervisor || isSuperAdmin ? "current_user" : "delegated_supervisor"}
       />
 
       <SchedulingOverrideRequestModal

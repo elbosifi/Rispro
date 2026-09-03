@@ -15,6 +15,7 @@ import {
   createTestApp,
   fetchJson,
   createTestAuthCookie,
+  createTestSupervisorReauthCookie,
   type TestData,
 } from "./helpers.js";
 
@@ -91,6 +92,8 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createTestApp>>;
   let supervisorAuthCookie: string;
+  let supervisorReauthCookie: string;
+  let superAdminReauthCookie: string;
   let receptionistAuthCookie: string;
   let restoreWeekendAppointmentSettings: (() => Promise<void>) | undefined;
 
@@ -104,6 +107,8 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     restoreWeekendAppointmentSettings = await enableWeekendAppointmentsForSuite(testData.userId);
     app = await createTestApp();
     supervisorAuthCookie = createTestAuthCookie(testData.userId, "supervisor");
+    supervisorReauthCookie = `${supervisorAuthCookie}; ${createTestSupervisorReauthCookie(testData.userId, "supervisor")}`;
+    superAdminReauthCookie = `${createTestAuthCookie(testData.userId, "super_admin")}; ${createTestSupervisorReauthCookie(testData.userId, "super_admin")}`;
     receptionistAuthCookie = createTestAuthCookie(testData.userId, "receptionist");
   });
 
@@ -315,6 +320,226 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     d.setUTCDate(d.getUTCDate() + dayOffset);
     return d.toISOString().slice(0, 10);
   }
+
+  it("authorizes current-user supervisor overrides from recent re-auth and ignores spoofed approver fields", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(1, 1);
+    await setSpecialQuota(0);
+    const firstPatient = await createPatient();
+    const secondPatient = await createPatient();
+
+    assert.equal((await createBooking({
+      patientId: firstPatient,
+      bookingDate: date,
+      caseCategory: "non_oncology",
+    })).status, 201);
+
+    const result = await fetchWithCookie(supervisorReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: secondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "category_override",
+        override: {
+          authorizationMode: "current_user_reauth",
+          reason: "Current supervisor approval",
+          overrideType: "category_override",
+          approverUserId: 999999,
+          approverRole: "super_admin",
+        },
+      },
+    });
+    assert.equal(result.status, 201);
+
+    const bookingId = Number((result.data as any).booking.id);
+    const audit = await (await db()).query<{ requesting_user_id: number; supervisor_user_id: number; decision_snapshot: Record<string, unknown> }>(
+      `select requesting_user_id, supervisor_user_id, decision_snapshot
+       from appointments_v2.override_audit_events
+       where booking_id = $1
+       order by id desc
+       limit 1`,
+      [bookingId]
+    );
+    assert.equal(Number(audit.rows[0]?.requesting_user_id), testData.userId);
+    assert.equal(Number(audit.rows[0]?.supervisor_user_id), testData.userId);
+    assert.equal("deferredApprovalRequestId" in (audit.rows[0]?.decision_snapshot ?? {}), false);
+  });
+
+  it("requires recent re-authentication and a supervisor session for current-user overrides", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(1, 1);
+    await setSpecialQuota(0);
+    const firstPatient = await createPatient();
+    const secondPatient = await createPatient();
+    assert.equal((await createBooking({ patientId: firstPatient, bookingDate: date, caseCategory: "non_oncology" })).status, 201);
+
+    const missingReauth = await fetchWithCookie(supervisorAuthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: secondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        override: { authorizationMode: "current_user_reauth", reason: "Missing re-auth", overrideType: "category_override" },
+      },
+    });
+    assert.equal(missingReauth.status, 403);
+
+    const receptionistWithSupervisorCookie = `${receptionistAuthCookie}; ${createTestSupervisorReauthCookie(testData.userId, "supervisor")}`;
+    const receptionistAttempt = await fetchWithCookie(receptionistWithSupervisorCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: secondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        override: { authorizationMode: "current_user_reauth", reason: "Receptionist must not approve", overrideType: "category_override" },
+      },
+    });
+    assert.equal(receptionistAttempt.status, 403);
+  });
+
+  it("keeps live override authority and required-type validation for current-user approvals", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(1);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(0);
+    const firstPatient = await createPatient();
+    const secondPatient = await createPatient();
+    assert.equal((await createBooking({ patientId: firstPatient, bookingDate: date, caseCategory: "non_oncology" })).status, 201);
+
+    const supervisorTotalAttempt = await fetchWithCookie(supervisorReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: secondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "total_capacity_override",
+        override: { authorizationMode: "current_user_reauth", reason: "Supervisor cannot overbook total capacity", overrideType: "total_capacity_override" },
+      },
+    });
+    assert.equal(supervisorTotalAttempt.status, 403);
+
+    const superAdminResult = await fetchWithCookie(superAdminReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: secondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "total_capacity_override",
+        override: { authorizationMode: "current_user_reauth", reason: "Super admin total capacity approval", overrideType: "total_capacity_override" },
+      },
+    });
+    assert.equal(superAdminResult.status, 201);
+
+    const mismatchDate = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(1, 1);
+    const mismatchFirstPatient = await createPatient();
+    const mismatchSecondPatient = await createPatient();
+    assert.equal((await createBooking({ patientId: mismatchFirstPatient, bookingDate: mismatchDate, caseCategory: "non_oncology" })).status, 201);
+    const mismatch = await fetchWithCookie(supervisorReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: mismatchSecondPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: mismatchDate,
+        caseCategory: "non_oncology",
+        override: { authorizationMode: "current_user_reauth", reason: "Wrong requested type", overrideType: "modality_block_override" },
+      },
+    });
+    assert.equal(mismatch.status, 409);
+  });
+
+  it("supports current-user reschedule overrides and rejects the same request without recent re-auth", async () => {
+    guard();
+    const sourceDate = uniqueDate();
+    const targetDate = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(1, 1);
+    await setSpecialQuota(0);
+    const movingPatient = await createPatient();
+    const targetPatient = await createPatient();
+    const moving = await createBooking({ patientId: movingPatient, bookingDate: sourceDate, caseCategory: "non_oncology" });
+    assert.equal(moving.status, 201);
+    assert.equal((await createBooking({ patientId: targetPatient, bookingDate: targetDate, caseCategory: "non_oncology" })).status, 201);
+    const bookingId = Number((moving.data as any).booking.id);
+
+    const result = await fetchWithCookie(supervisorReauthCookie, `/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        bookingDate: targetDate,
+        capacityResolutionMode: "category_override",
+        override: { authorizationMode: "current_user_reauth", reason: "Current supervisor reschedule", overrideType: "category_override" },
+      },
+    });
+    assert.equal(result.status, 200);
+    assert.equal((result.data as any).wasOverride, true);
+
+    const withoutReauth = await fetchWithCookie(supervisorAuthCookie, `/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        bookingDate: sourceDate,
+        override: { authorizationMode: "current_user_reauth", reason: "No recent re-auth", overrideType: "category_override" },
+      },
+    });
+    assert.equal(withoutReauth.status, 403);
+  });
+
+  it("keeps current-user no-show authorization reason mandatory", async () => {
+    guard();
+    await setModalityCapacity(10);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(0);
+    const patientId = await createPatient();
+    await (await db()).query(
+      `update patients set category = 'oncology', no_show_count = 1, no_show_booking_blocked = true where id = $1`,
+      [patientId]
+    );
+
+    const missingReason = await fetchWithCookie(superAdminReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: uniqueDate(),
+        caseCategory: "oncology",
+        override: { authorizationMode: "current_user_reauth", reason: "", overrideType: "category_override" },
+      },
+    });
+    assert.equal(missingReason.status, 403);
+    assert.match(JSON.stringify(missingReason.data), /No-show booking authorization reason is required/);
+
+    const authorizedNoShow = await fetchWithCookie(superAdminReauthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: uniqueDate(),
+        caseCategory: "oncology",
+        override: { authorizationMode: "current_user_reauth", reason: "No-show restriction approved" },
+      },
+    });
+    assert.equal(authorizedNoShow.status, 201);
+    assert.equal((authorizedNoShow.data as any).wasOverride, false);
+  });
 
   it("category full + total has room -> category_override succeeds without consuming special quota", async () => {
     guard();

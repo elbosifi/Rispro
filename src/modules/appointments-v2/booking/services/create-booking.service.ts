@@ -42,7 +42,7 @@ import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { normalizeSchedulingOverrideTypes, resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideRoleAuthority, validateFinalOverrideTypesConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
-import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
+import type { AuthorizedOverrideContext } from "../models/approved-override-context.js";
 import {
   NO_SHOW_BOOKING_BLOCKED_MESSAGE,
   authorizeNoShowBookingRestriction,
@@ -74,7 +74,7 @@ export async function createBooking(
   userId: number,
   userRole: Role | undefined,
   policySetKey: string = "default",
-  approvedOverrideContext?: ApprovedOverrideContext,
+  approvedOverrideContext?: AuthorizedOverrideContext,
   identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
   let result: CreateBookingResult;
@@ -123,7 +123,7 @@ export async function createBookingInternal(
   userId: number,
   userRole: Role | undefined,
   policySetKey: string,
-  approvedOverrideContext?: ApprovedOverrideContext,
+  approvedOverrideContext?: AuthorizedOverrideContext,
   identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
   if (payload.complementaryRecallRequestId != null && String(payload.studyInstanceUid ?? "").trim()) {
@@ -158,7 +158,15 @@ export async function createBookingInternal(
   }
   let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
   if (await isNoShowBookingBlocked(client, payload.patientId)) {
-    if (payload.override) {
+    if (approvedOverrideContext?.source === "recent_reauth") {
+      const reason = approvedOverrideContext.reason.trim();
+      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+      noShowAuthorization = {
+        userId: approvedOverrideContext.approverUserId,
+        reason,
+        role: approvedOverrideContext.approverRole,
+      };
+    } else if (payload.override && payload.override.authorizationMode !== "current_user_reauth") {
       const supervisor = await authenticateSupervisor(
         client,
         payload.override.supervisorUsername,
@@ -435,12 +443,16 @@ export async function createBookingInternal(
 
   validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole);
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || approvedOverrideContext) {
-    // Override required — validate supervisor credentials or backend-approved deferred context.
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
+    // Override required — validate supervisor credentials or an authorized backend context.
     if (approvedOverrideContext) {
+      if (!approvedOverrideContext.reason.trim()) {
+        throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
+      }
+      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole);
       supervisorUserId = approvedOverrideContext.approverUserId;
       wasOverride = true;
-    } else if (!payload.override) {
+    } else if (!payload.override || payload.override.authorizationMode === "current_user_reauth") {
       throw new SchedulingError(
         403,
         "Override is required for this booking. Please provide supervisor credentials.",
@@ -556,7 +568,14 @@ export async function createBookingInternal(
       overrideReason: approvedOverrideContext?.reason ?? payload.override?.reason ?? null,
       overrideType,
       decisionSnapshot: approvedOverrideContext
-        ? { ...decision, capacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId, approvedOverrideTypes: requiredOverrideTypes }
+        ? {
+            ...decision,
+            capacityResolutionMode,
+            approvedOverrideTypes: requiredOverrideTypes,
+            ...(approvedOverrideContext.source === "deferred_approval"
+              ? { deferredApprovalRequestId: approvedOverrideContext.requestId }
+              : {}),
+          }
         : { ...decision, capacityResolutionMode },
       outcome: "approved_and_booked",
     });

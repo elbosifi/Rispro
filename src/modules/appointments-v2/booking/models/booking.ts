@@ -2,7 +2,7 @@
  * Appointments V2 — Booking model.
  */
 
-import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
+import type { BookingOverride, BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
 import type { MriPrimaryScreeningInput } from "../repositories/mri-primary-screening.repo.js";
 
 export interface Booking {
@@ -64,11 +64,5 @@ export interface CreateBookingPayload {
   } | null;
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: MriPrimaryScreeningInput | null;
-  override?: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    reason: string;
-    overrideTypes?: SchedulingOverrideType[];
-    overrideType?: SchedulingOverrideType;
-  };
+  override?: BookingOverride;
 }

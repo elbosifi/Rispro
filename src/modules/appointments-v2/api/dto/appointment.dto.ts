@@ -2,7 +2,7 @@
  * Appointments V2 — Appointment DTOs.
  */
 
-import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
+import type { BookingOverride, BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface CreateAppointmentDto {
   complementaryRecallRequestId?: number | null;
@@ -38,13 +38,7 @@ export interface CreateAppointmentDto {
   } | null;
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;
-  override?: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    reason: string;
-    overrideTypes?: SchedulingOverrideType[];
-    overrideType?: SchedulingOverrideType;
-  };
+  override?: BookingOverride;
 }
 
 export interface UpdateAppointmentDto {
@@ -63,13 +57,7 @@ export interface UpdateAppointmentDto {
   rescheduleReason?: string | null;
   policySetKey?: string;
   noShowAuthorizationReason?: string | null;
-  override?: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    reason: string;
-    overrideTypes?: SchedulingOverrideType[];
-    overrideType?: SchedulingOverrideType;
-  };
+  override?: BookingOverride;
 }
 
 export interface AppointmentResponseDto {

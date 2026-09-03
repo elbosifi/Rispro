@@ -45,7 +45,7 @@ import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { normalizeSchedulingOverrideTypes, resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority, validateFinalOverrideRoleAuthority, validateFinalOverrideTypesConsistency } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
-import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
+import type { AuthorizedOverrideContext } from "../models/approved-override-context.js";
 import {
   NO_SHOW_BOOKING_BLOCKED_MESSAGE,
   authorizeNoShowBookingRestriction,
@@ -149,7 +149,7 @@ export async function rescheduleBooking(
   requiresReport?: boolean,
   studyInstanceUid?: string | null,
   policySetKey: string = "default",
-  approvedOverrideContext?: ApprovedOverrideContext,
+  approvedOverrideContext?: AuthorizedOverrideContext,
   doctorProtocolReportUpdateAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
@@ -216,7 +216,7 @@ export async function rescheduleBookingInternal(
   requiresReport: boolean | undefined,
   studyInstanceUid: string | null | undefined,
   policySetKey: string,
-  approvedOverrideContext?: ApprovedOverrideContext,
+  approvedOverrideContext?: AuthorizedOverrideContext,
   doctorProtocolReportUpdateAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
@@ -245,7 +245,15 @@ export async function rescheduleBookingInternal(
   if (!isDoctorProtocolReportOnlyUpdate) {
     await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
     if (await isNoShowBookingBlocked(client, booking.patientId)) {
-      if (override) {
+      if (approvedOverrideContext?.source === "recent_reauth") {
+        const reason = approvedOverrideContext.reason.trim();
+        if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+        noShowAuthorization = {
+          userId: approvedOverrideContext.approverUserId,
+          reason,
+          role: approvedOverrideContext.approverRole,
+        };
+      } else if (override && override.authorizationMode !== "current_user_reauth") {
         const supervisor = await authenticateSupervisor(
           client,
           override.supervisorUsername,
@@ -618,11 +626,15 @@ export async function rescheduleBookingInternal(
 
   validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole);
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth || approvedOverrideContext) {
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
     if (approvedOverrideContext) {
+      if (!approvedOverrideContext.reason.trim()) {
+        throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
+      }
+      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole);
       supervisorUserId = approvedOverrideContext.approverUserId;
       wasOverride = true;
-    } else if (!override) {
+    } else if (!override || override.authorizationMode === "current_user_reauth") {
       if (examTypeChangeRequiresSupervisorAuth && !decision.requiresSupervisorOverride && requiredOverrideTypes.length === 0) {
         throw new SchedulingError(
           403,
@@ -734,7 +746,14 @@ export async function rescheduleBookingInternal(
       overrideReason: approvedOverrideContext?.reason ?? override?.reason ?? null,
       overrideType,
       decisionSnapshot: approvedOverrideContext
-        ? { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId, approvedOverrideTypes: requiredOverrideTypes }
+        ? {
+            ...decision,
+            capacityResolutionMode: effectiveCapacityResolutionMode,
+            approvedOverrideTypes: requiredOverrideTypes,
+            ...(approvedOverrideContext.source === "deferred_approval"
+              ? { deferredApprovalRequestId: approvedOverrideContext.requestId }
+              : {}),
+          }
         : { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
       outcome: "approved_and_booked",
     });

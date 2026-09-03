@@ -1,13 +1,20 @@
 import type { Role } from "../../../../types/domain.js";
 import type { SchedulingOverrideType } from "../../shared/types/common.js";
 
-export interface ApprovedOverrideContext {
+interface AuthorizedOverrideContextBase {
   requesterUserId: number;
   approverUserId: number;
   approverRole: Role;
   overrideTypes: SchedulingOverrideType[];
   overrideType?: SchedulingOverrideType;
   reason: string;
-  source: "deferred_approval";
-  requestId: number;
 }
+
+export type AuthorizedOverrideContext =
+  | (AuthorizedOverrideContextBase & {
+      source: "deferred_approval";
+      requestId: number;
+    })
+  | (AuthorizedOverrideContextBase & {
+      source: "recent_reauth";
+    });

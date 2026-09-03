@@ -30,6 +30,22 @@ export type SchedulingOverrideType =
   | "modality_block_override"
   | "total_capacity_override";
 
+export type BookingOverride =
+  | {
+      authorizationMode: "current_user_reauth";
+      reason: string;
+      overrideTypes?: SchedulingOverrideType[];
+      overrideType?: SchedulingOverrideType;
+    }
+  | {
+      authorizationMode?: "supervisor_credentials";
+      supervisorUsername: string;
+      supervisorPassword: string;
+      reason: string;
+      overrideTypes?: SchedulingOverrideType[];
+      overrideType?: SchedulingOverrideType;
+    };
+
 export type DecisionStatus = "available" | "restricted" | "blocked";
 
 export type PolicyStatus = "draft" | "published" | "archived";

@@ -234,7 +234,7 @@ export default function WorklistMonitorPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-semibold">Supervisor re-authentication required</p>
-              <p className="text-xs text-amber-700">Re-enter your supervisor password to load MWL status and controls.</p>
+              <p className="text-xs text-amber-700">Confirm your identity with your passkey or password to load MWL status and controls.</p>
             </div>
             <button type="button" className="btn-secondary text-xs" onClick={() => setShowReauth(true)}>Re-authenticate</button>
           </div>

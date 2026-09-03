@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { requireAuth } from "../../../../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAuth } from "../../../../middleware/auth.js";
 import { requireActionPin } from "../../../../middleware/action-pin.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
@@ -17,7 +17,9 @@ import { getBookingDetails } from "../../booking/services/get-booking-details.se
 import { listBookingsService } from "../../booking/services/list-bookings.service.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
-import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import type { BookingOverride, CapacityResolutionMode } from "../../shared/types/common.js";
+import type { AuthorizedOverrideContext } from "../../booking/models/approved-override-context.js";
+import type { Role } from "../../../../types/domain.js";
 import { listEligibleIntendedReportingDoctors } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import {
   enqueueStaffPatientWebPushMessage,
@@ -38,6 +40,37 @@ interface AuthenticatedRequest extends Request {
 
 function isRoleRestrictedCapacityResolutionMode(mode: CapacityResolutionMode): boolean {
   return mode === "category_override" || mode === "total_capacity_override";
+}
+
+function buildCurrentUserOverrideContext(
+  req: AuthenticatedRequest,
+  override: BookingOverride | undefined,
+): AuthorizedOverrideContext | undefined {
+  if (override?.authorizationMode !== "current_user_reauth") return undefined;
+
+  const approverUserId = Number(req.user?.sub ?? 0);
+  const approverRole = req.user?.role;
+  if (
+    (approverRole !== "supervisor" && approverRole !== "super_admin") ||
+    !hasRecentSupervisorReauth(req)
+  ) {
+    throw new HttpError(403, "Recent supervisor re-authentication is required.");
+  }
+
+  const overrideTypes = override.overrideTypes?.length
+    ? override.overrideTypes
+    : override.overrideType
+      ? [override.overrideType]
+      : [];
+  return {
+    source: "recent_reauth",
+    requesterUserId: approverUserId,
+    approverUserId,
+    approverRole: approverRole as Role,
+    reason: String(override.reason ?? "").trim(),
+    overrideTypes,
+    overrideType: override.overrideType,
+  };
 }
 
 /**
@@ -129,7 +162,7 @@ router.get(
  * Body: CreateAppointmentDto
  * - patientId, modalityId, bookingDate, caseCategory (required)
  * - examTypeId, reportingPriorityId, bookingTime, notes (optional)
- * - override: { supervisorUsername, supervisorPassword, reason } (if override needed)
+ * - override: current-user re-auth or delegated supervisor credentials (if override needed)
  */
 router.post(
   "/",
@@ -146,6 +179,7 @@ router.post(
 
     const userId = Number(req.user?.sub ?? 0);
     const userRole = req.user?.role;
+    const approvedOverrideContext = buildCurrentUserOverrideContext(req, body.override);
     if (body.complementaryRecallRequestId != null) {
       if (!userRole || !canRoleAccessPage("recall.requests", userRole, await readPageVisibilityMatrix())) {
         throw new HttpError(403, "This role cannot access recall requests.");
@@ -191,12 +225,12 @@ router.post(
         patientIdentitySelectionSource: body.patientIdentitySelectionSource === "url_preselect" ? "url_preselect" : "search",
         modalitySafetyAcknowledged: body.modalitySafetyAcknowledged === true,
         mriPrimaryScreening: body.mriPrimaryScreening ?? null,
-        override: body.override,
+        override: approvedOverrideContext ? undefined : body.override,
       },
       userId,
       userRole,
       body.policySetKey ?? "default",
-      undefined,
+      approvedOverrideContext,
       { requirePatientIdentityVerification: true, selectionSource: body.patientIdentitySelectionSource === "url_preselect" ? "url_preselect" : "search" }
     );
 
@@ -213,7 +247,7 @@ router.post(
  * Reschedule an existing appointment.
  *
  * Body: UpdateAppointmentDto (at least bookingDate or bookingTime must be provided)
- * - override: { supervisorUsername, supervisorPassword, reason } (if override needed)
+ * - override: current-user re-auth or delegated supervisor credentials (if override needed)
  */
 router.put(
   "/:id",
@@ -229,6 +263,7 @@ router.put(
 
     const userId = Number(req.user?.sub ?? 0);
     const userRole = req.user?.role;
+    const approvedOverrideContext = buildCurrentUserOverrideContext(req, body.override);
     const capacityResolutionMode: CapacityResolutionMode | undefined =
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : undefined);
@@ -255,7 +290,7 @@ router.put(
       body.notes ?? null,
       userId,
       userRole,
-      body.override,
+      approvedOverrideContext ? undefined : body.override,
       capacityResolutionMode,
       body.specialReasonCode ?? null,
       body.specialReasonNote ?? null,
@@ -263,7 +298,8 @@ router.put(
       body.noShowAuthorizationReason ?? null,
       body.requiresReport,
       body.studyInstanceUid ?? undefined,
-      body.policySetKey ?? "default"
+      body.policySetKey ?? "default",
+      approvedOverrideContext
     );
 
     res.json({

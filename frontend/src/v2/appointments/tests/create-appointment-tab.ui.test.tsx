@@ -9,6 +9,19 @@ import type { BookingResponse, CreateBookingRequest, CreateSchedulingOverrideReq
 import type { ModalityDto } from "../types";
 import type { DoctorModuleCapability } from "@/types/api";
 
+const mockSupervisorReauth = vi.hoisted(() => ({ shouldFail: false }));
+
+vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
+  SupervisorReAuthModal: ({ onSuccess, onClose }: { onSuccess: () => void; onClose: () => void }) => (
+    <div data-testid="supervisor-reauth-modal">
+      <h3>Supervisor Re-Authentication</h3>
+      <button type="button" onClick={() => { if (!mockSupervisorReauth.shouldFail) onSuccess(); }}>Use Passkey</button>
+      <button type="button" onClick={() => { if (!mockSupervisorReauth.shouldFail) onSuccess(); }}>Verify</button>
+      <button type="button" onClick={onClose}>Cancel</button>
+    </div>
+  ),
+}));
+
 type MockNoShowAppointment = {
   id: number;
   appointmentDate: string;
@@ -502,7 +515,7 @@ function setup(
     { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
     { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
   ],
-  currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor",
+  currentUserRole: "receptionist" | "supervisor" | "super_admin" | "doctor" = "supervisor",
   doctorModuleCapabilities: DoctorModuleCapability[] = [],
   evaluateDecision?: SchedulingDecisionDto,
   examTypeOptions: Array<{ id: number; name: string; nameEn: string; nameAr: string; code: string; modalityId: number; isActive: boolean }> = []
@@ -610,6 +623,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockCreateSchedulingOverrideRequest.mockReset();
     mockCreateSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
+    mockSupervisorReauth.shouldFail = false;
     mockReceptionOverrideRequestsEnabled.current = true;
     mockAvailabilityLoading.current = false;
     mockRawItemsByExamType.current = null;
@@ -939,10 +953,11 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: /إنشاء موعد|Create Appointment/ }));
 
       await screen.findByText("مطلوب تجاوز من المشرف");
-      fireEvent.change(screen.getByPlaceholderText("اسم مستخدم المشرف"), { target: { value: "sup" } });
-      fireEvent.change(screen.getByPlaceholderText("كلمة المرور"), { target: { value: "pass" } });
       fireEvent.change(screen.getByPlaceholderText("سبب التجاوز"), { target: { value: "approved" } });
-      await userEvent.click(screen.getByRole("button", { name: /اعتماد والحجز|Approve & Book/ }));
+      expect(screen.queryByPlaceholderText("اسم مستخدم المشرف")).toBeNull();
+      expect(screen.queryByPlaceholderText("كلمة المرور")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: /متابعة|Continue/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
 
       await screen.findByText("تم إنشاء الموعد بنجاح");
       const successHeading = screen.getByText("تم إنشاء الموعد بنجاح");
@@ -993,7 +1008,7 @@ describe("CreateAppointmentTab UI interactions", () => {
   });
 
   it("opens override modal and submits override payload", async () => {
-    const { onCreateAppointment } = setup();
+    const { onCreateAppointment } = setup(true, [], undefined, "doctor");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
@@ -1016,8 +1031,12 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     const callArg = onCreateAppointment.mock.calls[0][0];
     expect(callArg.override).toBeTruthy();
-    expect(callArg.override!.supervisorUsername).toBe("sup");
-    expect(callArg.override!.reason).toBe("urgent");
+    expect(callArg.override).toMatchObject({
+      authorizationMode: "supervisor_credentials",
+      supervisorUsername: "sup",
+      supervisorPassword: "pass",
+      reason: "urgent",
+    });
   });
 
   it("opens the supervisor override for a soft exam restriction and submits its type", async () => {
@@ -1046,14 +1065,55 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
       expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
-      fireEvent.change(screen.getByPlaceholderText("Supervisor Username"), { target: { value: "sup" } });
-      fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
       fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "approved" } });
-      await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+      expect(screen.queryByPlaceholderText("Supervisor Username")).toBeNull();
+      expect(screen.queryByPlaceholderText("Password")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByText("Supervisor Re-Authentication")).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
       await waitFor(() => expect(onCreateAppointment).toHaveBeenCalled());
-      expect(onCreateAppointment.mock.calls[0][0].override?.overrideType).toBe("exam_restriction_override");
+      expect(onCreateAppointment.mock.calls[0][0].override).toMatchObject({
+        authorizationMode: "current_user_reauth",
+        reason: "approved",
+        overrideType: "exam_restriction_override",
+      });
+      expect(onCreateAppointment.mock.calls[0][0].override).not.toHaveProperty("supervisorUsername");
+      expect(onCreateAppointment.mock.calls[0][0].override).not.toHaveProperty("supervisorPassword");
     } finally {
       mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("does not create when current-user re-authentication fails", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = [softExamRestrictionRow];
+    mockSupervisorReauth.shouldFail = true;
+    try {
+      const { onCreateAppointment } = setup(true, [], undefined, "supervisor", [], {
+        isAllowed: true,
+        requiresSupervisorOverride: true,
+        displayStatus: "restricted",
+        suggestedBookingMode: "override",
+        consumedCapacityMode: "override",
+        remainingStandardCapacity: 1,
+        remainingSpecialQuota: null,
+        matchedRuleIds: [901],
+        reasons: [{ code: "exam_type_not_allowed_for_rule", severity: "warning", message: "Exam restriction" }],
+        policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+        decisionTrace: { evaluatedAt: "", input: {} },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-07 restricted/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+      fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "Rejected re-auth" } });
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+    } finally {
+      mockRowsRef.current = previousRows;
+      mockSupervisorReauth.shouldFail = false;
     }
   });
 
@@ -1277,15 +1337,16 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
       expect(screen.getByText("Total modality capacity override")).toBeTruthy();
       expect(screen.getByText("Exam mix override")).toBeTruthy();
-      fireEvent.change(screen.getByPlaceholderText("Supervisor Username"), { target: { value: "superadmin" } });
-      fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "test_password" } });
       fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "Combined approval" } });
-      await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+      expect(screen.queryByPlaceholderText("Supervisor Username")).toBeNull();
+      expect(screen.queryByPlaceholderText("Password")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
 
       await waitFor(() => expect(onCreateAppointment).toHaveBeenCalledTimes(1));
       expect(onCreateAppointment.mock.calls[0][0]).toMatchObject({
         capacityResolutionMode: "total_capacity_override",
-        override: { overrideTypes: ["total_capacity_override", "exam_mix_override"] },
+        override: { authorizationMode: "current_user_reauth", overrideTypes: ["total_capacity_override", "exam_mix_override"] },
       });
     } finally {
       mockRowsRef.current = previousRows;
@@ -1404,10 +1465,11 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
     expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
 
-    fireEvent.change(await screen.findByPlaceholderText("Supervisor Username"), { target: { value: "sup" } });
-    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
     fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "approved" } });
-    await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
+    expect(screen.queryByPlaceholderText("Supervisor Username")).toBeNull();
+    expect(screen.queryByPlaceholderText("Password")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await userEvent.click(screen.getByRole("button", { name: "Use Passkey" }));
 
     await waitFor(() => {
       expect(onCreateAppointment).toHaveBeenCalled();

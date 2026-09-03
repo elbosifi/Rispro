@@ -9,6 +9,7 @@ import {
   createTestApp,
   fetchJson,
   createTestAuthCookie,
+  createTestSupervisorReauthCookie,
   type TestData,
 } from "./helpers.js";
 
@@ -84,6 +85,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createTestApp>>;
   let authCookie: string;
+  let supervisorReauthCookie: string;
   let secondExamTypeId = 0;
   let restoreWeekendAppointmentSettings: (() => Promise<void>) | undefined;
 
@@ -94,6 +96,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     restoreWeekendAppointmentSettings = await enableWeekendAppointmentsForSuite(testData.userId);
     app = await createTestApp();
     authCookie = createTestAuthCookie(testData.userId, "supervisor");
+    supervisorReauthCookie = `${authCookie}; ${createTestSupervisorReauthCookie(testData.userId, "supervisor")}`;
 
     const { pool } = await import("../../../../db/pool.js");
     const exam2 = await pool.query<{ id: number }>(
@@ -315,6 +318,35 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       });
       assert.equal(supervisorRequiredAttempt.status, 403);
       assert.ok(String((supervisorRequiredAttempt.data as any).error ?? "").includes("Supervisor override is required"));
+
+      const reauthPatient = await createPatient();
+      const reauthBooking = await receptionistFetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: reauthPatient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2042-01-14",
+          caseCategory: "non_oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(reauthBooking.status, 201);
+      const currentUserReauthChange = await fetchJson(app.baseUrl, `/api/v2/appointments/${Number((reauthBooking.data as any).booking.id)}`, {
+        cookie: supervisorReauthCookie,
+        method: "PUT",
+        body: {
+          bookingDate: "2042-01-14",
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+          override: {
+            authorizationMode: "current_user_reauth",
+            reason: "Current supervisor exam type change",
+          },
+        },
+      });
+      assert.equal(currentUserReauthChange.status, 200);
+      assert.equal((currentUserReauthChange.data as any).wasOverride, true);
 
       const approvedAttempt = await fetch(`/api/v2/appointments/${bookingId}`, {
         method: "PUT",

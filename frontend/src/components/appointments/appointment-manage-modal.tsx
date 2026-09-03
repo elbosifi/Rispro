@@ -39,7 +39,7 @@ import type {
 import { CANCELLABLE_STATUSES, RESCHEDULABLE_STATUSES } from "@/v2/appointments/types";
 import { AvailabilityPanel } from "@/v2/appointments/components/AvailabilityPanel";
 import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSection";
-import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
+import { SupervisorOverrideModal, type SupervisorOverrideConfirmation } from "@/v2/appointments/components/SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/SchedulingOverrideRequestModal";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
 import { inferSupportedOverrideTypesFromExamRuleMetadata as inferSupportedOverrideTypesFromExamRuleMetadataRaw, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
@@ -536,7 +536,7 @@ export function AppointmentManageModal({
     void submitReschedulePayload(appointment, payload);
   };
 
-  const handleRescheduleOverrideConfirm = async (overridePayload: { supervisorUsername: string; supervisorPassword: string; overrideReason: string }) => {
+  const handleRescheduleOverrideConfirm = async (overridePayload: SupervisorOverrideConfirmation) => {
     if (!appointment || !pendingReschedulePayload) return;
     if (!overridePayload.overrideReason.trim()) {
       setRescheduleOverrideError(t("appointments.create.overrideReasonRequired"));
@@ -547,13 +547,21 @@ export function AppointmentManageModal({
     try {
       await submitReschedulePayload(appointment, {
         ...pendingReschedulePayload,
-        override: {
-          supervisorUsername: overridePayload.supervisorUsername,
-          supervisorPassword: overridePayload.supervisorPassword,
-          reason: overridePayload.overrideReason.trim(),
-          overrideTypes: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode }),
-          overrideType: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })[0],
-        },
+        override: overridePayload.authorizationMode === "current_user_reauth"
+          ? {
+              authorizationMode: "current_user_reauth",
+              reason: overridePayload.overrideReason.trim(),
+              overrideTypes: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode }),
+              overrideType: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })[0],
+            }
+          : {
+              authorizationMode: "supervisor_credentials",
+              supervisorUsername: overridePayload.supervisorUsername,
+              supervisorPassword: overridePayload.supervisorPassword,
+              reason: overridePayload.overrideReason.trim(),
+              overrideTypes: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode }),
+              overrideType: inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })[0],
+            },
       });
       setRescheduleOverrideOpen(false);
       setPendingReschedulePayload(null);
@@ -902,7 +910,7 @@ export function AppointmentManageModal({
 
       {selectedPatientId ? <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} /> : null}
 
-      <SupervisorOverrideModal open={rescheduleOverrideOpen} onClose={() => { setRescheduleOverrideOpen(false); setRescheduleOverrideError(null); setPendingReschedulePayload(null); }} onConfirm={handleRescheduleOverrideConfirm} loading={rescheduleOverrideLoading || rescheduleMutation.isPending} authError={rescheduleOverrideError} overrideTypes={inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })} />
+      <SupervisorOverrideModal open={rescheduleOverrideOpen} onClose={() => { setRescheduleOverrideOpen(false); setRescheduleOverrideError(null); setPendingReschedulePayload(null); }} onConfirm={handleRescheduleOverrideConfirm} loading={rescheduleOverrideLoading || rescheduleMutation.isPending} authError={rescheduleOverrideError} overrideTypes={inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })} mode={user?.role === "supervisor" || user?.role === "super_admin" ? "current_user" : "delegated_supervisor"} />
       <SchedulingOverrideRequestModal open={rescheduleRequestOpen} requestType="reschedule_booking" overrideTypes={rescheduleRequestOverrideTypes} patientLabel={appointment?.englishFullName || appointment?.arabicFullName || `Patient #${appointment?.patientId ?? ""}`} modalityLabel={appointment?.modalityNameEn || appointment?.modalityNameAr || `Modality #${appointment?.modalityId ?? ""}`} examTypeLabel={appointment?.examNameEn || appointment?.examNameAr || `Exam #${appointment?.examTypeId ?? ""}`} requestedDate={rescheduleDate} requestedTime={null} decision={selectedRescheduleAvailabilityItem?.decision ?? null} loading={createRescheduleOverrideRequest.isPending} error={rescheduleRequestError} onClose={() => { setRescheduleRequestOpen(false); setRescheduleRequestError(null); }} onSubmit={submitRescheduleOverrideRequest} />
     </>
   );

@@ -8,6 +8,21 @@ export type CaseCategory = "oncology" | "non_oncology";
 export type CapacityResolutionMode = "standard" | "category_override" | "total_capacity_override" | "special_quota_extra";
 export type SchedulingOverrideRequestType = "create_booking" | "reschedule_booking";
 export type SchedulingOverrideType = "closed_weekday_override" | "category_override" | "exam_mix_override" | "exam_restriction_override" | "modality_block_override" | "total_capacity_override";
+export type BookingOverride =
+  | {
+      authorizationMode: "current_user_reauth";
+      reason: string;
+      overrideTypes?: SchedulingOverrideType[];
+      overrideType?: SchedulingOverrideType;
+    }
+  | {
+      authorizationMode?: "supervisor_credentials";
+      supervisorUsername: string;
+      supervisorPassword: string;
+      reason: string;
+      overrideTypes?: SchedulingOverrideType[];
+      overrideType?: SchedulingOverrideType;
+    };
 export type SchedulingOverrideRequestStatus = "pending" | "approved" | "rejected" | "cancelled" | "failed" | "expired";
 export type DecisionStatus = "available" | "restricted" | "blocked";
 export type BookingStatus =
@@ -195,13 +210,7 @@ export interface CreateBookingRequest {
   patientIdentitySelectionSource?: "search" | "url_preselect";
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;
-  override?: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    reason: string;
-    overrideTypes?: SchedulingOverrideType[];
-    overrideType?: SchedulingOverrideType;
-  };
+  override?: BookingOverride;
 }
 
 export interface IntendedReportingDoctorOption {
@@ -281,13 +290,7 @@ export interface RescheduleBookingRequest {
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
   rescheduleReason?: string | null;
-  override?: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    reason: string;
-    overrideTypes?: SchedulingOverrideType[];
-    overrideType?: SchedulingOverrideType;
-  };
+  override?: BookingOverride;
 }
 
 export interface RescheduleBookingResponse {
