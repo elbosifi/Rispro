@@ -969,6 +969,19 @@ export async function requirePersonalReportingBoardAppointment(actor: Actor, app
   return row;
 }
 
+/** Active additional-imaging boundary: only the current doctor's assigned appointment. */
+export async function requireOwnAssignedPersonalReportingBoardAppointment(actor: Actor, appointmentId: number): Promise<ReportingBoardCaseRow> {
+  const doctor = await requireRosterDoctor(actor);
+  const doctorId = doctor.profile?.id == null ? null : Number(doctor.profile.id);
+  if (!doctorId) throw new HttpError(403, "An active doctor profile is required.");
+  const scope = await doctorWorklistScope(doctorId, { appointmentId, reportStatus: "all", limit: 1, offset: 0 }, true);
+  const row = scope.cases.find((candidate) => candidate.caseType === "appointment" && candidate.appointmentId === appointmentId);
+  if (!row || row.assignmentStatus !== "assigned" || row.assignedDoctorId !== doctorId) {
+    throw new HttpError(403, "Additional imaging is limited to appointments assigned to you.");
+  }
+  return row;
+}
+
 /** Read-only personal-desk boundary for current and own-finalized appointments. */
 export async function requirePersonalReportingBoardAppointmentRead(actor: Actor, appointmentId: number): Promise<ReportingBoardCaseRow> {
   const doctor = await requireRosterDoctor(actor);

@@ -81,10 +81,11 @@ export function ReportingBoardMobilePage() {
   const [drawerOpen, setDrawerOpen] = useState(false); const [accountOpen, setAccountOpen] = useState(false); const [selected, setSelected] = useState<ReportingBoardMobileCase | null>(null); const [historyOpen, setHistoryOpen] = useState(false); const [historyReturn, setHistoryReturn] = useState<"card" | "details">("card"); const [recallOpen, setRecallOpen] = useState(false); const [withdrawRecallOpen, setWithdrawRecallOpen] = useState(false); const [comparisonFinalOpen, setComparisonFinalOpen] = useState(false); const [comparisonFinalText, setComparisonFinalText] = useState(""); const [search, setSearch] = useState(""); const [message, setMessage] = useState<string | null>(null);
   const viewQuery = useQuery({ queryKey: ["personal-reporting-desk", token, filters], queryFn: () => fetchReportingBoardMobileView(token, filters), enabled: Boolean(token) });
   const data = viewQuery.data;
-  const ownDesk = Boolean(user && user.id === data?.currentDoctorId && data.savedView.targetDoctorId === data.currentDoctorId);
+  const ownDesk = Boolean(user && data?.currentDoctorId != null && data.savedView.linkKind === "doctor_worklist" && data.savedView.targetDoctorId === data.currentDoctorId && data.allowedActions.authenticated);
+  const selectedOwnAssignedAppointment = Boolean(ownDesk && selected?.caseType === "appointment" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data?.currentDoctorId);
   const selectedAppointmentId = selected?.caseType === "appointment" ? selected.appointmentId : null;
   const activeRecallQueryKey = ["personal-reporting-desk", token, "complementary-recall", selectedAppointmentId] as const;
-  const activeRecallQuery = useQuery({ queryKey: activeRecallQueryKey, queryFn: () => fetchReportingBoardActiveComplementaryRecall(selectedAppointmentId!), enabled: Boolean(token) && Boolean(user) && ownDesk && selectedAppointmentId != null });
+  const activeRecallQuery = useQuery({ queryKey: activeRecallQueryKey, queryFn: () => fetchReportingBoardActiveComplementaryRecall(selectedAppointmentId!), enabled: Boolean(token) && Boolean(user) && selectedOwnAssignedAppointment });
   const browserPushSupported = pushSupported();
   const pushConfig = useQuery({ queryKey: ["personal-reporting-desk", token, "push-config"], queryFn: () => fetchReportingBoardMobilePushConfig(token), enabled: Boolean(token) && Boolean(user) && browserPushSupported });
   const currentPushSubscription = useQuery({ queryKey: ["personal-reporting-desk", token, "push-subscription"], queryFn: async () => { const registration = await navigator.serviceWorker.getRegistration("/rispro-push-sw.js"); return (await registration?.pushManager.getSubscription()) ?? null; }, enabled: Boolean(token) && Boolean(user) && browserPushSupported && Boolean(pushConfig.data?.enabled) && Boolean(pushConfig.data?.publicKey) && Notification.permission !== "denied" });
@@ -131,8 +132,8 @@ export function ReportingBoardMobilePage() {
   const appointmentFinal = canFinalizeOwnReports && selected?.caseType === "appointment" && selected.appointmentStatus === "completed" && selected.requiresReport && selected.reportStatus !== "final" && selected.exclusionReason !== "report_not_required" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data.currentDoctorId;
   const comparisonFinal = canFinalizeOwnReports && selected?.caseType === "comparison" && selected.reportStatus !== "final" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data.currentDoctorId;
   const activeRecall = activeRecallQuery.data ?? null;
-  const additionalImagingEligible = ownDesk && selected?.caseType === "appointment" && selected.appointmentStatus === "completed";
-  const showAdditionalImagingSection = ownDesk && selected?.caseType === "appointment" && (additionalImagingEligible || activeRecall != null || activeRecallQuery.isPending || activeRecallQuery.isError);
+  const additionalImagingEligible = selectedOwnAssignedAppointment && selected?.appointmentStatus === "completed";
+  const showAdditionalImagingSection = selectedOwnAssignedAppointment && (additionalImagingEligible || activeRecall != null || activeRecallQuery.isPending || activeRecallQuery.isError);
   const openHistoryFromCard = (row: ReportingBoardMobileCase) => { setSelected(row); setHistoryReturn("card"); setHistoryOpen(true); };
   const openHistoryFromDetails = () => { setHistoryReturn("details"); setHistoryOpen(true); };
   const closeHistory = () => { setHistoryOpen(false); if (historyReturn === "card") setSelected(null); };

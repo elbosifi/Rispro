@@ -2006,12 +2006,9 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(comparisonState.rows[0], { status: "ready_for_reporting", assigned_doctor_id: null, active_assignments: "0" });
   });
 
-  it("exposes the active recall through the owner-scoped Personal Desk facade", async () => {
+  it("restricts Personal Desk additional imaging to the assigned doctor's profile", async () => {
     guard();
-    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk active recall" });
-    await assignDirectly(appointmentId, doctor.doctorId);
-    const path = `/api/doctor/reporting-board/cases/${appointmentId}/complementary-recalls/active`;
-    const create = await api<{ recall: { id: number; status: string } }>(doctor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, {
+    const createRequest = (cookie: string, appointmentId: number) => api<{ recall: { id: number; status: string } }>(cookie, `/api/doctor/reporting-board/cases/${appointmentId}/complementary-recalls`, {
       method: "POST",
       body: {
         reasonCode: "technical_equipment_problem",
@@ -2023,15 +2020,54 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         technologistInstruction: "Repeat the affected acquisition.",
       },
     });
-    assert.equal(create.status, 201, JSON.stringify(create.data));
 
-    const ownerRead = await api<{ recall: { id: number; status: string } | null }>(doctor.cookie, path);
-    assert.equal(ownerRead.status, 200, JSON.stringify(ownerRead.data));
-    assert.equal(ownerRead.data.recall?.id, create.data.recall.id);
-    assert.equal(ownerRead.data.recall?.status, "pending_scheduling");
+    const ownAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk assigned recall" });
+    await assignDirectly(ownAppointmentId, doctor.doctorId);
+    const ownActivePath = `/api/doctor/reporting-board/cases/${ownAppointmentId}/complementary-recalls/active`;
+    const ownBeforeCreate = await api<{ recall: unknown | null }>(doctor.cookie, ownActivePath);
+    assert.equal(ownBeforeCreate.status, 200, JSON.stringify(ownBeforeCreate.data));
+    assert.equal(ownBeforeCreate.data.recall, null);
+    const ownCreate = await createRequest(doctor.cookie, ownAppointmentId);
+    assert.equal(ownCreate.status, 201, JSON.stringify(ownCreate.data));
+    const ownAfterCreate = await api<{ recall: { id: number; status: string } | null }>(doctor.cookie, ownActivePath);
+    assert.equal(ownAfterCreate.status, 200, JSON.stringify(ownAfterCreate.data));
+    assert.equal(ownAfterCreate.data.recall?.id, ownCreate.data.recall.id);
+    assert.equal(ownAfterCreate.data.recall?.status, "pending_scheduling");
+    const ownWithdraw = await api(doctor.cookie, `/api/doctor/reporting-board/complementary-recalls/${ownCreate.data.recall.id}/withdraw`, { method: "POST" });
+    assert.equal(ownWithdraw.status, 200, JSON.stringify(ownWithdraw.data));
 
-    const otherRead = await api(otherDoctor.cookie, path);
-    assert.equal(otherRead.status, 403, JSON.stringify(otherRead.data));
+    const unassignedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk unassigned recall" });
+    const unassignedActive = await api(doctor.cookie, `/api/doctor/reporting-board/cases/${unassignedAppointmentId}/complementary-recalls/active`);
+    assert.equal(unassignedActive.status, 403, JSON.stringify(unassignedActive.data));
+    const unassignedCreate = await createRequest(doctor.cookie, unassignedAppointmentId);
+    assert.equal(unassignedCreate.status, 403, JSON.stringify(unassignedCreate.data));
+
+    const otherAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk other doctor recall" });
+    await assignDirectly(otherAppointmentId, otherDoctor.doctorId);
+    const otherCreate = await createRequest(otherDoctor.cookie, otherAppointmentId);
+    assert.equal(otherCreate.status, 201, JSON.stringify(otherCreate.data));
+    const otherActivePath = `/api/doctor/reporting-board/cases/${otherAppointmentId}/complementary-recalls/active`;
+    assert.equal((await api(doctor.cookie, otherActivePath)).status, 403);
+    assert.equal((await createRequest(doctor.cookie, otherAppointmentId)).status, 403);
+    for (const manager of [supervisor, admin]) {
+      assert.equal((await api(manager.cookie, otherActivePath)).status, 403);
+      const managerCreate = await createRequest(manager.cookie, otherAppointmentId);
+      assert.equal(managerCreate.status, 403, JSON.stringify(managerCreate.data));
+      const managerWithdraw = await api(manager.cookie, `/api/doctor/reporting-board/complementary-recalls/${otherCreate.data.recall.id}/withdraw`, { method: "POST" });
+      assert.equal(managerWithdraw.status, 403, JSON.stringify(managerWithdraw.data));
+    }
+    const otherWithdraw = await api(otherDoctor.cookie, `/api/doctor/reporting-board/complementary-recalls/${otherCreate.data.recall.id}/withdraw`, { method: "POST" });
+    assert.equal(otherWithdraw.status, 200, JSON.stringify(otherWithdraw.data));
+
+    for (const manager of [supervisor, admin]) {
+      const managerAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: `Personal Desk ${manager.id} recall` });
+      await assignDirectly(managerAppointmentId, manager.doctorId);
+      const managerCreate = await createRequest(manager.cookie, managerAppointmentId);
+      assert.equal(managerCreate.status, 201, JSON.stringify(managerCreate.data));
+      const managerActive = await api<{ recall: { id: number; status: string } | null }>(manager.cookie, `/api/doctor/reporting-board/cases/${managerAppointmentId}/complementary-recalls/active`);
+      assert.equal(managerActive.status, 200, JSON.stringify(managerActive.data));
+      assert.equal(managerActive.data.recall?.id, managerCreate.data.recall.id);
+    }
   });
 
   it("keeps SonicDICOM-final mobile action flags closed except for manager reassignment", async () => {

@@ -36,6 +36,7 @@ import {
   clearReportingBoardCaseManualFinal,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
+  requireOwnAssignedPersonalReportingBoardAppointment,
   requirePersonalReportingBoardAppointment,
   requirePersonalReportingBoardAppointmentRead,
   getPersonalReportingBoardComparisonHistory,
@@ -513,7 +514,7 @@ router.post(
   "/cases/:appointmentId/complementary-recalls",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
-    const row = await requirePersonalReportingBoardAppointment(actor(req), appointmentId);
+    const row = await requireOwnAssignedPersonalReportingBoardAppointment(actor(req), appointmentId);
     if (row.appointmentStatus !== "completed") throw new HttpError(409, "Only completed cases can request additional imaging.");
     const body = asUnknownRecord(req.body);
     const technologistInstruction = asOptionalString(body.technologistInstruction ?? body.technologist_instruction)?.trim();
@@ -538,7 +539,7 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
     const requestActor = actor(req);
-    await requirePersonalReportingBoardAppointment(requestActor, appointmentId);
+    await requireOwnAssignedPersonalReportingBoardAppointment(requestActor, appointmentId);
     const recall = await getActiveComplementaryRecallForOriginalAppointment(appointmentId);
     res.json({ recall });
   })
@@ -550,7 +551,7 @@ router.post(
     const recallId = requiredPositiveInteger(req.params.recallId, "recallId");
     const recall = await getComplementaryRecall(recallId);
     if (!recall) throw new HttpError(404, "Additional imaging request not found.");
-    await requirePersonalReportingBoardAppointment(actor(req), recall.originalAppointmentId);
+    await requireOwnAssignedPersonalReportingBoardAppointment(actor(req), recall.originalAppointmentId);
     const updated = await withTransaction((client) => withdrawComplementaryRecall(client, recallId, Number(req.user!.sub)));
     res.json({ recall: updated });
   })

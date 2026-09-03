@@ -379,7 +379,7 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
 
 describe("Personal Reporting Desk case presentation", () => {
   beforeEach(() => {
-    testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
+    testState.user = { id: 501, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.fetchView.mockResolvedValue(viewData());
     testState.fetchActiveRecall.mockResolvedValue(null);
     testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
@@ -426,6 +426,18 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(await screen.findByRole("button", { name: "Request additional imaging" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Request additional imaging" })).toBeTruthy();
     expect(testState.fetchActiveRecall).toHaveBeenCalledWith(42);
+  });
+
+  it("does not query or show additional-imaging controls for an unassigned appointment", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned" })] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw request" })).toBeNull();
+    expect(testState.fetchActiveRecall).not.toHaveBeenCalled();
   });
 
   it("does not query or show additional-imaging controls for comparison cases", async () => {
@@ -510,7 +522,7 @@ describe("Personal Reporting Desk case presentation", () => {
 
   it("does not offer request or withdrawal actions to a manager previewing another doctor's desk", async () => {
     testState.user = { id: 99, username: "manager", fullName: "Dr Manager", role: "supervisor" };
-    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    testState.fetchView.mockResolvedValue({ ...viewData(), currentDoctorId: 99, cases: [makeCase()] });
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
