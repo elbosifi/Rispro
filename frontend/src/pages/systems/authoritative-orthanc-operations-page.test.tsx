@@ -69,6 +69,19 @@ type HistoryItem = {
   updatedAt: string;
 };
 type HistoryResponse = { items: HistoryItem[]; page: number; pageSize: 25 | 50 | 100; total: number; totalPages: number };
+type StudyHistoryItem = {
+  studyInstanceUid: string;
+  patientId: string | null;
+  patientName: string | null;
+  accessionNumber: string | null;
+  studyDescription: string | null;
+  received: { count: number; successful: number; active: number; failed: number; sources: string[]; latestAt: string | null };
+  sent: { count: number; successful: number; active: number; failed: number; destinations: string[]; latestAt: string | null };
+  eventCount: number;
+  firstActivityAt: string;
+  lastActivityAt: string;
+};
+type StudyHistoryResponse = { items: StudyHistoryItem[]; page: number; pageSize: 25 | 50 | 100; total: number; totalPages: number };
 function historyFixture(): HistoryResponse {
   return {
     items: [{ id: "history-1", direction: "RECEIVED", status: "SUCCESS", patientId: "PAT-1042", patientName: "History Patient", accessionNumber: "HIST-ACC-1042", studyInstanceUid: "1.2.840.10008.1.2.3.1042", studyDescription: "History CT chest", sourceAet: "MODALITY_AET", sourceIp: "192.0.2.42", destinationAet: "ORTHANCPG", instanceCount: 1234, firstSeenAt: "2026-08-12T08:00:00.000Z", lastSeenAt: "2026-08-12T08:15:00.000Z", completedAt: "2026-08-12T08:15:00.000Z", occurredAt: "2026-08-12T08:15:00.000Z", errorCode: null, errorMessage: null, orthancJobId: null, orthancChangeSequence: 1042, orthancResourceId: "resource-1042", createdAt: "2026-08-12T08:00:00.000Z", updatedAt: "2026-08-12T08:15:00.000Z" }],
@@ -78,7 +91,17 @@ function historyFixture(): HistoryResponse {
     totalPages: 1,
   };
 }
+function studyHistoryFixture(): StudyHistoryResponse {
+  return {
+    items: [{ studyInstanceUid: "1.2.840.10008.1.2.3.104200000000000000000000000000", patientId: "STUDY-PAT-1042", patientName: "Study Patient", accessionNumber: "STUDY-ACC-1042", studyDescription: "Study MRI brain", received: { count: 3, successful: 2, active: 0, failed: 1, sources: ["BROKER", "CT99"], latestAt: "2026-08-12T08:15:00.000Z" }, sent: { count: 2, successful: 1, active: 0, failed: 1, destinations: ["OSIRIXR", "PACS1"], latestAt: "2026-08-12T09:15:00.000Z" }, eventCount: 5, firstActivityAt: "2026-08-12T08:00:00.000Z", lastActivityAt: "2026-08-12T09:15:00.000Z" }],
+    page: 1,
+    pageSize: 25,
+    total: 51,
+    totalPages: 3,
+  };
+}
 let historyResponse = historyFixture();
+let studyHistoryResponse = studyHistoryFixture();
 let historyError = false;
 function installApi() {
   vi.mocked(api).mockImplementation(async (path, options) => {
@@ -88,6 +111,7 @@ function installApi() {
       if (historyError) throw new Error("History unavailable.");
       const params = new URL(`http://test${path}`).searchParams;
       const pageSize = Number(params.get("pageSize"));
+      if (params.get("view") === "studies") return { ...studyHistoryResponse, page: Number(params.get("page")), pageSize, totalPages: studyHistoryResponse.total === 0 ? 0 : Math.ceil(studyHistoryResponse.total / pageSize) } as never;
       return { ...historyResponse, page: Number(params.get("page")), pageSize, totalPages: historyResponse.total === 0 ? 0 : Math.ceil(historyResponse.total / pageSize) } as never;
     }
     if (path.includes("/operations/studies/search")) return ({ status: "matched", matchKey: "accession_number", study: { orthancStudyId: "study-1", studyInstanceUid: "1.2.3", accessionNumber: "ACC-1", patientId: "P-1", patientName: "Sample Patient", patientBirthDate: "19900101", patientSex: "F", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 50 } }) as never;
@@ -98,7 +122,7 @@ function installApi() {
 function renderPage() { return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><AuthoritativeOrthancOperationsPage/></QueryClientProvider></MemoryRouter>); }
 async function openTransferHistory() { await userEvent.click(screen.getByRole("tab", { name: "Transfer History" })); }
 
-beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); historyResponse = historyFixture(); historyError = false; vi.clearAllMocks(); installApi(); });
+beforeEach(() => { role = "super_admin"; summary = fixture(); historicalPacsStatus = historicalPacsFixture(); historyResponse = historyFixture(); studyHistoryResponse = studyHistoryFixture(); historyError = false; vi.clearAllMocks(); installApi(); });
 
 describe("AuthoritativeOrthancOperationsPage", () => {
   it("defaults to Operations and loads transfer history only when selected", async () => {
@@ -126,6 +150,10 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     await openTransferHistory();
     const card = await screen.findByTestId("dicom-transfer-history-card");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=25"));
+    const historyViews = within(card).getByRole("group", { name: "History views" });
+    expect((within(historyViews).getByRole("button", { name: "Transfers" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect((within(historyViews).getByRole("button", { name: "Studies" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("false");
+    for (const heading of ["Direction", "Status", "Patient", "Accession", "Study", "Source", "Destination", "Instances", "Time"]) expect(within(card).getByRole("columnheader", { name: heading })).toBeTruthy();
     for (const text of ["Received", "Received / stable", "History Patient", "PAT-1042", "HIST-ACC-1042", "History CT chest", "MODALITY_AET", "192.0.2.42", "ORTHANCPG", "1,234", formatDateTimeLy("2026-08-12T08:15:00.000Z")]) expect(within(card).getAllByText(text, { exact: true }).length).toBeGreaterThan(0);
   });
 
@@ -210,6 +238,69 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     await userEvent.selectOptions(within(card).getByLabelText("History page size"), "50");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/integrations/authoritative-orthanc/operations/dicom-transfer-history?direction=all&status=all&page=1&pageSize=50"));
     expect(within(card).getByText("Page 1 of 2")).toBeTruthy();
+  });
+
+  it("switches server-grouped views while preserving filters and resetting the page", async () => {
+    historyResponse = { ...historyFixture(), total: 51, totalPages: 3 };
+    renderPage();
+    await openTransferHistory();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.type(within(card).getByLabelText("Search"), "kept search");
+    await userEvent.type(within(card).getByLabelText("Source"), "BROKER");
+    await userEvent.type(within(card).getByLabelText("Destination"), "PACS1");
+    await userEvent.click(within(card).getByRole("button", { name: "Apply filters" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${new URLSearchParams({ direction: "all", status: "all", page: "2", pageSize: "25", search: "kept search", source: "BROKER", destination: "PACS1" }).toString()}`));
+    await userEvent.click(within(card).getByRole("button", { name: "Studies" }));
+    const expectedStudies = new URLSearchParams({ direction: "all", status: "all", page: "1", pageSize: "25", search: "kept search", source: "BROKER", destination: "PACS1", view: "studies" });
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${expectedStudies.toString()}`));
+    expect((within(card).getByLabelText("Search") as HTMLInputElement).value).toBe("kept search");
+    expect((within(card).getByLabelText("Source") as HTMLInputElement).value).toBe("BROKER");
+    expect((within(card).getByLabelText("Destination") as HTMLInputElement).value).toBe("PACS1");
+    for (const heading of ["Patient", "Accession", "Study", "Received", "Sent", "Events", "Last activity"]) expect(within(card).getByRole("columnheader", { name: heading })).toBeTruthy();
+    expect(within(card).getByText("Showing 1\u201325 of 51 studies")).toBeTruthy();
+    await userEvent.click(within(card).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${new URLSearchParams({ direction: "all", status: "all", page: "2", pageSize: "25", search: "kept search", source: "BROKER", destination: "PACS1", view: "studies" }).toString()}`));
+    await userEvent.selectOptions(within(card).getByLabelText("History page size"), "50");
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${new URLSearchParams({ direction: "all", status: "all", page: "1", pageSize: "50", search: "kept search", source: "BROKER", destination: "PACS1", view: "studies" }).toString()}`));
+    expect(within(card).getByText("Page 1 of 2")).toBeTruthy();
+    await userEvent.click(within(card).getByRole("button", { name: "Transfers" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${new URLSearchParams({ direction: "all", status: "all", page: "1", pageSize: "50", search: "kept search", source: "BROKER", destination: "PACS1" }).toString()}`));
+    expect(within(card).getByRole("columnheader", { name: "Direction" })).toBeTruthy();
+    expect(within(card).getByText("History Patient")).toBeTruthy();
+    expect((within(card).getByLabelText("Search") as HTMLInputElement).value).toBe("kept search");
+  });
+
+  it("renders grouped study metadata, status summaries, destinations, counts, and Tripoli time", async () => {
+    renderPage();
+    await openTransferHistory();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.click(within(card).getByRole("button", { name: "Studies" }));
+    const studyRow = (await within(card).findByText("Study Patient")).closest("tr")!;
+    for (const text of ["Study Patient", "STUDY-PAT-1042", "STUDY-ACC-1042", "Study MRI brain", "3 received", "BROKER · CT99", "1 failed", "1 successful · 1 failed", "OSIRIXR · PACS1", "5", formatDateTimeLy("2026-08-12T09:15:00.000Z")]) expect(within(studyRow).getAllByText(text, { exact: true }).length).toBeGreaterThan(0);
+    const uid = "1.2.840.10008.1.2.3.104200000000000000000000000000";
+    expect(studyRow.querySelector(`[title="${uid}"]`)).toBeTruthy();
+    expect(within(studyRow).getByText("1 successful · 1 failed").className).toContain("text-red-700");
+  });
+
+  it("renders an em dash for studies with no sent events and the exact studies empty state", async () => {
+    studyHistoryResponse = { ...studyHistoryFixture(), items: [{ ...studyHistoryFixture().items[0]!, sent: { count: 0, successful: 0, active: 0, failed: 0, destinations: [], latestAt: null } }], total: 1, totalPages: 1 };
+    const populatedView = renderPage();
+    await openTransferHistory();
+    const card = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.click(within(card).getByRole("button", { name: "Studies" }));
+    const studyRow = (await within(card).findByText("Study Patient")).closest("tr")!;
+    expect(studyRow.querySelectorAll("td")[4]?.textContent).toContain("—");
+    expect(within(card).getByText("Showing 1–1 of 1 studies")).toBeTruthy();
+    expect(within(card).getByText("Page 1 of 1")).toBeTruthy();
+    populatedView.unmount();
+    studyHistoryResponse = { ...studyHistoryFixture(), items: [], total: 0, totalPages: 0 };
+    const view = renderPage();
+    await openTransferHistory();
+    const emptyCard = await screen.findByTestId("dicom-transfer-history-card");
+    await userEvent.click(within(emptyCard).getByRole("button", { name: "Studies" }));
+    expect(await within(emptyCard).findByText("No studies match the current transfer filters.")).toBeTruthy();
+    view.unmount();
   });
 
   it("renders history empty and error states with a retry action", async () => {

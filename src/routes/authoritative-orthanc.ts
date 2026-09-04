@@ -41,7 +41,8 @@ authoritativeOrthancRouter.get("/operations/dicom-transfer-history", asyncRoute(
     from: query.from,
     to: query.to,
     page: query.page,
-    pageSize: query.pageSize
+    pageSize: query.pageSize,
+    view: query.view
   }));
 }));
 authoritativeOrthancRouter.get("/operations/patient-identity-reconciliations",requireAnyRole(["supervisor","super_admin"]),asyncRoute(async(req:Request,res:Response)=>{res.json(await listPatientIdentityReconciliationJobs({search:String(req.query.search||""),limit:Number(req.query.limit||25),offset:Number(req.query.offset||0)}));}));

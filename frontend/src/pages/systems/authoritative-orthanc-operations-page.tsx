@@ -73,6 +73,27 @@ type DicomTransferHistoryResponse = {
   total: number;
   totalPages: number;
 };
+type HistoryView = "transfers" | "studies";
+type DicomTransferStudyHistoryItem = {
+  studyInstanceUid: string;
+  patientId: string | null;
+  patientName: string | null;
+  accessionNumber: string | null;
+  studyDescription: string | null;
+  received: { count: number; successful: number; active: number; failed: number; sources: string[]; latestAt: string | null };
+  sent: { count: number; successful: number; active: number; failed: number; destinations: string[]; latestAt: string | null };
+  eventCount: number;
+  firstActivityAt: string;
+  lastActivityAt: string;
+};
+type DicomTransferStudyHistoryResponse = {
+  items: DicomTransferStudyHistoryItem[];
+  page: number;
+  pageSize: DicomTransferHistoryPageSize;
+  total: number;
+  totalPages: number;
+};
+type HistoryResponse = DicomTransferHistoryResponse | DicomTransferStudyHistoryResponse;
 type Confirmation = { title: string; description: string; confirmLabel?: string; run: () => void } | null;
 
 const statePresentation = {
@@ -86,6 +107,13 @@ function formatDate(value: string | null): string { if (!value) return "—"; co
 function formatDicomDate(value: string | null): string { if (!value) return "—"; return /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : value; }
 function formatStorage(bytes: number | null, mb: number | null): string { const value = bytes ?? (mb == null ? null : mb * 1024 * 1024); if (value == null) return "Unavailable"; const units = ["B", "KB", "MB", "GB", "TB"]; let scaled = value; let index = 0; while (scaled >= 1024 && index < units.length - 1) { scaled /= 1024; index += 1; } return `${scaled >= 10 || index === 0 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[index]}`; }
 function formatCount(value: number): string { return value.toLocaleString("en-US"); }
+function studySentStatusSummary(sent: DicomTransferStudyHistoryItem["sent"]): string {
+  return [
+    sent.successful > 0 ? `${formatCount(sent.successful)} successful` : null,
+    sent.active > 0 ? `${formatCount(sent.active)} active` : null,
+    sent.failed > 0 ? `${formatCount(sent.failed)} failed` : null
+  ].filter((part): part is string => part !== null).join(" · ");
+}
 function formatRelativeDate(value: string | null): string { if (!value) return "—"; const time = new Date(value).getTime(); if (!Number.isFinite(time)) return formatDate(value); const seconds = Math.round((time - Date.now()) / 1000); const magnitude = Math.abs(seconds); const [amount, unit] = magnitude < 60 ? [seconds, "second"] : magnitude < 3600 ? [Math.round(seconds / 60), "minute"] : magnitude < 86400 ? [Math.round(seconds / 3600), "hour"] : [Math.round(seconds / 86400), "day"]; return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(amount, unit as Intl.RelativeTimeFormatUnit); }
 function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) { return <Card variant="compact" className="flex min-w-0 items-center gap-3"><span className="rounded-lg bg-accent/10 p-2 text-accent">{icon}</span><span className="min-w-0"><span className="block text-xs font-medium text-muted-foreground">{label}</span><strong className="block truncate text-xl text-foreground">{value}</strong></span></Card>; }
 function SectionHeading({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="text-sm text-muted-foreground">{description}</p></div>{action}</div>; }
@@ -104,6 +132,7 @@ export default function AuthoritativeOrthancOperationsPage() {
   const [studyResult, setStudyResult] = useState<StudyResult | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
   const [selectedJob, setSelectedJob] = useState<OperationalJob | null>(null);
+  const [historyView, setHistoryView] = useState<HistoryView>("transfers");
   const [historyDirection, setHistoryDirection] = useState<DicomTransferHistoryDirection>("all");
   const [historyStatus, setHistoryStatus] = useState<DicomTransferHistoryStatus>("all");
   const [historyPage, setHistoryPage] = useState(1);
@@ -128,7 +157,7 @@ export default function AuthoritativeOrthancOperationsPage() {
     retry: false,
   });
   const history = useQuery({
-    queryKey: ["authoritative-orthanc", "operations", "dicom-transfer-history", historyDirection, historyStatus, historyAppliedSearch, historyAppliedSource, historyAppliedDestination, historyAppliedFrom, historyAppliedTo, historyPage, historyPageSize],
+    queryKey: ["authoritative-orthanc", "operations", "dicom-transfer-history", historyView, historyDirection, historyStatus, historyAppliedSearch, historyAppliedSource, historyAppliedDestination, historyAppliedFrom, historyAppliedTo, historyPage, historyPageSize],
     queryFn: () => {
       const params = new URLSearchParams({ direction: historyDirection, status: historyStatus, page: String(historyPage), pageSize: String(historyPageSize) });
       if (historyAppliedSearch) params.set("search", historyAppliedSearch);
@@ -136,7 +165,8 @@ export default function AuthoritativeOrthancOperationsPage() {
       if (historyAppliedDestination) params.set("destination", historyAppliedDestination);
       if (historyAppliedFrom) params.set("from", historyAppliedFrom);
       if (historyAppliedTo) params.set("to", historyAppliedTo);
-      return api<DicomTransferHistoryResponse>(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${params.toString()}`);
+      if (historyView === "studies") params.set("view", historyView);
+      return api<HistoryResponse>(`/integrations/authoritative-orthanc/operations/dicom-transfer-history?${params.toString()}`);
     },
     enabled: activeSection === "history",
     refetchInterval: 30_000,
@@ -263,6 +293,9 @@ export default function AuthoritativeOrthancOperationsPage() {
       {activeSection === "history" ? <>
       <Card className="space-y-4 p-5" data-testid="dicom-transfer-history-card">
         <SectionHeading title="DICOM Transfer History" description="Durable audit of DICOM received by and sent from the Authoritative Orthanc. Received entries are recorded after Orthanc marks the study stable."/>
+        <div className="flex w-fit gap-1 rounded-lg border border-border bg-muted/20 p-1" role="group" aria-label="History views">
+          {(["transfers", "studies"] as const).map((view) => <Button key={view} type="button" size="sm" variant={historyView === view ? "secondary" : "ghost"} className="h-8 px-2.5 text-xs" aria-pressed={historyView === view} onClick={() => { setHistoryView(view); setHistoryPage(1); }}>{view[0].toUpperCase() + view.slice(1)}</Button>)}
+        </div>
         <div className="space-y-3">
           <div className="flex flex-wrap gap-4">
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Direction filters">
@@ -287,9 +320,9 @@ export default function AuthoritativeOrthancOperationsPage() {
           </div>
         </div>
         {history.isLoading ? <LoadingState message="Loading DICOM Transfer History…" /> : history.error ? <ErrorState message={(history.error as Error).message} onRetry={() => void history.refetch()} /> : history.data ? <>
-          {history.data.items.length === 0 ? <EmptyState message="No DICOM transfers match the current filters." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Direction</TableHead><TableHead>Status</TableHead><TableHead>Patient</TableHead><TableHead>Accession</TableHead><TableHead>Study</TableHead><TableHead>Source</TableHead><TableHead>Destination</TableHead><TableHead>Instances</TableHead><TableHead>Time</TableHead></TableRow></TableHeader><TableBody>{history.data.items.map((item) => <TableRow key={item.id}><TableCell><Badge variant={item.direction === "RECEIVED" ? "info" : "accent"}>{item.direction === "RECEIVED" ? "Received" : "Sent"}</Badge></TableCell><TableCell>{item.status === "ACTIVE" ? <Badge variant="info">Active</Badge> : item.status === "FAILED" ? <><Badge variant="error">Failed</Badge>{item.errorMessage ? <p className="mt-1 max-w-48 text-xs text-red-700 dark:text-red-300">{item.errorMessage}</p> : null}</> : <Badge variant="success">{item.direction === "RECEIVED" ? "Received / stable" : "Successful"}</Badge>}</TableCell><TableCell className="min-w-40"><p className="font-medium">{item.patientName || "—"}</p><p className="text-xs text-muted-foreground">{item.patientId || "—"}</p></TableCell><TableCell>{item.accessionNumber || "—"}</TableCell><TableCell className="min-w-48"><p className="font-medium">{item.studyDescription || "Study"}</p><span className="block max-w-64 truncate font-mono text-xs text-muted-foreground" title={item.studyInstanceUid}>{item.studyInstanceUid}</span></TableCell><TableCell className="min-w-40"><p className="font-medium">{item.sourceAet || "—"}</p>{item.sourceIp ? <p className="text-xs text-muted-foreground">{item.sourceIp}</p> : null}</TableCell><TableCell>{item.destinationAet || "—"}</TableCell><TableCell>{item.instanceCount == null ? "—" : formatCount(item.instanceCount)}</TableCell><TableCell className="whitespace-nowrap">{formatDateTimeLy(item.occurredAt)}</TableCell></TableRow>)}</TableBody></Table></div>}
+          {history.data.items.length === 0 ? <EmptyState message={historyView === "studies" ? "No studies match the current transfer filters." : "No DICOM transfers match the current filters."} /> : historyView === "transfers" ? <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Direction</TableHead><TableHead>Status</TableHead><TableHead>Patient</TableHead><TableHead>Accession</TableHead><TableHead>Study</TableHead><TableHead>Source</TableHead><TableHead>Destination</TableHead><TableHead>Instances</TableHead><TableHead>Time</TableHead></TableRow></TableHeader><TableBody>{(history.data as DicomTransferHistoryResponse).items.map((item) => <TableRow key={item.id}><TableCell><Badge variant={item.direction === "RECEIVED" ? "info" : "accent"}>{item.direction === "RECEIVED" ? "Received" : "Sent"}</Badge></TableCell><TableCell>{item.status === "ACTIVE" ? <Badge variant="info">Active</Badge> : item.status === "FAILED" ? <><Badge variant="error">Failed</Badge>{item.errorMessage ? <p className="mt-1 max-w-48 text-xs text-red-700 dark:text-red-300">{item.errorMessage}</p> : null}</> : <Badge variant="success">{item.direction === "RECEIVED" ? "Received / stable" : "Successful"}</Badge>}</TableCell><TableCell className="min-w-40"><p className="font-medium">{item.patientName || "—"}</p><p className="text-xs text-muted-foreground">{item.patientId || "—"}</p></TableCell><TableCell>{item.accessionNumber || "—"}</TableCell><TableCell className="min-w-48"><p className="font-medium">{item.studyDescription || "Study"}</p><span className="block max-w-64 truncate font-mono text-xs text-muted-foreground" title={item.studyInstanceUid}>{item.studyInstanceUid}</span></TableCell><TableCell className="min-w-40"><p className="font-medium">{item.sourceAet || "—"}</p>{item.sourceIp ? <p className="text-xs text-muted-foreground">{item.sourceIp}</p> : null}</TableCell><TableCell>{item.destinationAet || "—"}</TableCell><TableCell>{item.instanceCount == null ? "—" : formatCount(item.instanceCount)}</TableCell><TableCell className="whitespace-nowrap">{formatDateTimeLy(item.occurredAt)}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Patient</TableHead><TableHead>Accession</TableHead><TableHead>Study</TableHead><TableHead>Received</TableHead><TableHead>Sent</TableHead><TableHead>Events</TableHead><TableHead>Last activity</TableHead></TableRow></TableHeader><TableBody>{(history.data as DicomTransferStudyHistoryResponse).items.map((item) => <TableRow key={item.studyInstanceUid}><TableCell className="min-w-40"><p className="font-medium">{item.patientName || "Unknown patient"}</p><p className="text-xs text-muted-foreground">{item.patientId || "—"}</p></TableCell><TableCell>{item.accessionNumber || "—"}</TableCell><TableCell className="min-w-48"><p className="font-medium">{item.studyDescription || "Study"}</p><span className="block max-w-64 truncate font-mono text-xs text-muted-foreground" title={item.studyInstanceUid}>{item.studyInstanceUid}</span></TableCell><TableCell className="min-w-40">{item.received.count === 0 ? "—" : <><p>{formatCount(item.received.count)} received</p><p className="text-xs text-muted-foreground">{item.received.sources.join(" · ") || "—"}</p>{item.received.failed > 0 ? <Badge className="mt-1" size="sm" variant="error">{formatCount(item.received.failed)} failed</Badge> : null}{item.received.active > 0 ? <Badge className="ms-1 mt-1" size="sm" variant="warning">{formatCount(item.received.active)} active</Badge> : null}</>}</TableCell><TableCell className="min-w-40">{item.sent.count === 0 ? "—" : <><p className={item.sent.failed > 0 ? "text-red-700 dark:text-red-300" : item.sent.active > 0 ? "text-amber-700 dark:text-amber-300" : "text-foreground"}>{studySentStatusSummary(item.sent)}</p><p className="text-xs text-muted-foreground">{item.sent.destinations.join(" · ") || "—"}</p></>}</TableCell><TableCell>{formatCount(item.eventCount)}</TableCell><TableCell className="whitespace-nowrap">{formatDateTimeLy(item.lastActivityAt)}</TableCell></TableRow>)}</TableBody></Table></div>}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm" data-testid="dicom-transfer-history-pagination">
-            <p className="text-muted-foreground">Showing {historyStart}–{historyEnd} of {historyTotal} transfers</p>
+            <p className="text-muted-foreground">Showing {historyStart}–{historyEnd} of {historyTotal} {historyView}</p>
             <p className="font-medium">Page {historyDisplayPage} of {historyDisplayTotalPages}</p>
             <div className="flex items-center gap-2"><Button type="button" size="sm" variant="secondary" disabled={historyPage <= 1} onClick={() => setHistoryPage((current) => Math.max(1, current - 1))}>Previous</Button><Button type="button" size="sm" variant="secondary" disabled={historyTotalPages === 0 || historyPage >= historyTotalPages} onClick={() => setHistoryPage((current) => current + 1)}>Next</Button><label className="flex items-center gap-2"><span className="sr-only">History page size</span><select aria-label="History page size" className="input-premium h-[var(--control-height-sm)]" value={historyPageSize} onChange={(event) => { const nextPageSize = Number(event.target.value); if (isDicomTransferHistoryPageSize(nextPageSize)) { setHistoryPageSize(nextPageSize); setHistoryPage(1); } }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label></div>
           </div>

@@ -121,6 +121,61 @@ test("lists durable DICOM transfer history with filters, pagination, and a safe 
     assert.equal(defaultPage.items[0]!.direction, "RECEIVED");
     assert.equal(defaultPage.items[0]!.status, "SUCCESS");
 
+    const explicitTransfers = await listDicomTransferHistory({ source: bulkSource, view: "transfers" });
+    assert.deepEqual(explicitTransfers, defaultPage);
+    const bulkStudies = await listDicomTransferHistory({ source: bulkSource, view: "studies" });
+    assert.equal(bulkStudies.total, 103);
+    assert.equal(bulkStudies.totalPages, 5);
+    assert.equal(bulkStudies.items.length, 25);
+    assert.equal(new Set(bulkStudies.items.map((item) => item.studyInstanceUid)).size, 25);
+    assert.equal(bulkStudies.items[0]!.studyInstanceUid, (await listDicomTransferHistory({ source: bulkSource, pageSize: 25 })).items[0]!.studyInstanceUid);
+
+    const groupedStudyUid = studyUid("grouped-study");
+    const separateStudyUid = studyUid("separate-study");
+    const groupedSource = `GROUP_SOURCE_${token}`;
+    await insertEvent({ direction: "RECEIVED", status: "SUCCESS", patientId: "GROUP-PATIENT-OLD", patientName: "Old Group Patient", accessionNumber: "GROUP-OLD-ACC", studyInstanceUid: groupedStudyUid, studyDescription: "Old group description", sourceAet: "BROKER", firstSeenAt: "2026-09-01T00:00:00.000Z", completedAt: "2026-09-01T00:00:00.000Z" });
+    await insertEvent({ direction: "RECEIVED", status: "FAILED", patientName: "Group Patient", studyInstanceUid: groupedStudyUid, studyDescription: "Group CT", sourceAet: groupedSource, firstSeenAt: "2026-09-01T01:00:00.000Z", completedAt: "2026-09-01T01:00:00.000Z", errorCode: "group_received_failed", errorMessage: "group received failure" });
+    await insertEvent({ direction: "RECEIVED", status: "ACTIVE", studyInstanceUid: groupedStudyUid, sourceAet: "CT99", firstSeenAt: "2026-09-01T02:00:00.000Z", lastSeenAt: "2026-09-01T02:00:00.000Z", completedAt: null });
+    await insertEvent({ direction: "SENT", status: "SUCCESS", studyInstanceUid: groupedStudyUid, destinationAet: "OSIRIXR", firstSeenAt: "2026-09-01T03:00:00.000Z", completedAt: "2026-09-01T03:00:00.000Z" });
+    await insertEvent({ direction: "SENT", status: "ACTIVE", studyInstanceUid: groupedStudyUid, destinationAet: "PACS2", firstSeenAt: "2026-09-01T04:00:00.000Z", lastSeenAt: "2026-09-01T04:00:00.000Z", completedAt: null });
+    await insertEvent({ direction: "SENT", status: "FAILED", studyInstanceUid: groupedStudyUid, destinationAet: "PACS1", firstSeenAt: "2026-09-01T05:00:00.000Z", completedAt: "2026-09-01T05:00:00.000Z", errorCode: "group_sent_failed", errorMessage: "group sent failure" });
+    await insertEvent({ direction: "RECEIVED", status: "SUCCESS", studyInstanceUid: separateStudyUid, sourceAet: groupedSource, firstSeenAt: "2026-09-01T06:00:00.000Z", completedAt: "2026-09-01T06:00:00.000Z" });
+
+    const groupedResult = await listDicomTransferHistory({ view: "studies", search: groupedStudyUid });
+    assert.equal(groupedResult.total, 1);
+    assert.equal(groupedResult.items.length, 1);
+    const grouped = groupedResult.items[0]!;
+    assert.equal(grouped.studyInstanceUid, groupedStudyUid);
+    assert.equal(grouped.patientId, "GROUP-PATIENT-OLD");
+    assert.equal(grouped.patientName, "Group Patient");
+    assert.equal(grouped.accessionNumber, "GROUP-OLD-ACC");
+    assert.equal(grouped.studyDescription, "Group CT");
+    assert.deepEqual(grouped.received, { count: 3, successful: 1, active: 1, failed: 1, sources: ["BROKER", "CT99", groupedSource], latestAt: "2026-09-01T02:00:00.000Z" });
+    assert.deepEqual(grouped.sent, { count: 3, successful: 1, active: 1, failed: 1, destinations: ["OSIRIXR", "PACS1", "PACS2"], latestAt: "2026-09-01T05:00:00.000Z" });
+    assert.equal(grouped.eventCount, 6);
+    assert.equal(grouped.firstActivityAt, "2026-09-01T00:00:00.000Z");
+    assert.equal(grouped.lastActivityAt, "2026-09-01T05:00:00.000Z");
+
+    const distinctStudies = await listDicomTransferHistory({ view: "studies", source: groupedSource });
+    assert.equal(distinctStudies.total, 2);
+    assert.deepEqual(new Set(distinctStudies.items.map((item) => item.studyInstanceUid)), new Set([groupedStudyUid, separateStudyUid]));
+    const sentOnly = await listDicomTransferHistory({ view: "studies", search: groupedStudyUid, direction: "sent" });
+    assert.equal(sentOnly.total, 1);
+    assert.equal(sentOnly.items[0]!.eventCount, 3);
+    assert.equal(sentOnly.items[0]!.received.count, 0);
+    assert.equal(sentOnly.items[0]!.sent.count, 3);
+    assert.equal(sentOnly.items[0]!.sent.failed, 1);
+    const successfulOnly = await listDicomTransferHistory({ view: "studies", search: groupedStudyUid, status: "successful" });
+    assert.equal(successfulOnly.total, 1);
+    assert.equal(successfulOnly.items[0]!.eventCount, 2);
+    assert.equal(successfulOnly.items[0]!.received.count, 1);
+    assert.equal(successfulOnly.items[0]!.sent.count, 1);
+    assert.equal((await listDicomTransferHistory({ view: "studies", source: "CT99" })).items[0]!.eventCount, 1);
+    assert.equal((await listDicomTransferHistory({ view: "studies", destination: "PACS1" })).items[0]!.eventCount, 1);
+    const groupedTimeRange = await listDicomTransferHistory({ view: "studies", search: groupedStudyUid, from: "2026-09-01T01:00:00.000Z", to: "2026-09-01T04:00:00.000Z" });
+    assert.equal(groupedTimeRange.items[0]!.eventCount, 4);
+    assert.equal(groupedTimeRange.items[0]!.firstActivityAt, "2026-09-01T01:00:00.000Z");
+    assert.equal(groupedTimeRange.items[0]!.lastActivityAt, "2026-09-01T04:00:00.000Z");
     const secondPage = await listDicomTransferHistory({ source: bulkSource, page: "2", pageSize: "25" });
     assert.equal(secondPage.page, 2);
     assert.equal(secondPage.pageSize, 25);
@@ -195,6 +250,10 @@ test("lists durable DICOM transfer history with filters, pagination, and a safe 
     const backslashSearch = await listDicomTransferHistory({ source: searchSource, search: `\\_ marker ${token}` });
     assert.equal(backslashSearch.total, 1);
     assert.equal(backslashSearch.items[0]!.patientName, backslashName);
+    const percentStudies = await listDicomTransferHistory({ view: "studies", source: searchSource, search: `100% marker ${token}` });
+    assert.equal(percentStudies.total, 1);
+    const backslashStudies = await listDicomTransferHistory({ view: "studies", source: searchSource, search: `\\_ marker ${token}` });
+    assert.equal(backslashStudies.total, 1);
     assert.equal(Object.hasOwn(percentSearch.items[0]!, "idempotency_key"), false);
     assert.equal(JSON.stringify(percentSearch.items[0]!).includes("SECRET_IDEMPOTENCY"), false);
     assert.equal(typeof percentSearch.items[0]!.id, "string");
@@ -248,6 +307,7 @@ test("lists durable DICOM transfer history with filters, pagination, and a safe 
     await assertBad({ search: "x".repeat(201) });
     await assertBad({ source: "x".repeat(129) });
     await assertBad({ destination: "x".repeat(129) });
+    await assertBad({ view: "invalid" });
   } finally {
     if (createdIds.length) await pool.query("delete from dicom_transfer_events where id=any($1::bigint[])", [createdIds]);
   }

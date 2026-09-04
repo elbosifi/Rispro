@@ -93,9 +93,21 @@ test("Authoritative Orthanc Operations enforces the role matrix over HTTP", asyn
     assert.equal(historyBody.items[0]!.direction, "RECEIVED");
     assert.equal(historyBody.items[0]!.status, "SUCCESS");
     assert.equal(Object.hasOwn(historyBody.items[0]!, "idempotency_key"), false);
+    const studyHistory = await request(`/operations/dicom-transfer-history?search=History-${suffix}&view=studies`, modalityStaff);
+    assert.equal(studyHistory.status, 200);
+    const studyHistoryBody = await studyHistory.json() as { items: Array<Record<string, unknown> & { studyInstanceUid: string; received: { count: number } }>; page: number; pageSize: number; total: number; totalPages: number };
+    assert.equal(studyHistoryBody.page, 1);
+    assert.equal(studyHistoryBody.pageSize, 25);
+    assert.equal(studyHistoryBody.total, 1);
+    assert.equal(studyHistoryBody.totalPages, 1);
+    assert.equal(studyHistoryBody.items.length, 1);
+    assert.equal(studyHistoryBody.items[0]!.studyInstanceUid, historyStudyUid);
+    assert.equal(studyHistoryBody.items[0]!.received.count, 1);
+    assert.equal(Object.hasOwn(studyHistoryBody.items[0]!, "idempotency_key"), false);
     for (const query of [
       "direction=unknown",
       "status=unknown",
+      "view=invalid",
       "page=0",
       "page=1.5",
       "pageSize=30",

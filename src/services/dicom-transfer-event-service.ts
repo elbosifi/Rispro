@@ -79,6 +79,7 @@ export type RecordOutboundDicomTransferResult = {
 export type DicomTransferHistoryDirection = "all" | "received" | "sent";
 export type DicomTransferHistoryStatus = "all" | "active" | "successful" | "failed";
 export type DicomTransferHistoryPageSize = 25 | 50 | 100;
+export type DicomTransferHistoryView = "transfers" | "studies";
 
 export type ListDicomTransferHistoryInput = {
   direction?: unknown;
@@ -90,6 +91,7 @@ export type ListDicomTransferHistoryInput = {
   to?: unknown;
   page?: unknown;
   pageSize?: unknown;
+  view?: unknown;
 };
 
 export type DicomTransferHistoryItem = {
@@ -126,6 +128,41 @@ export type DicomTransferHistoryResponse = {
   totalPages: number;
 };
 
+export type DicomTransferStudyHistoryItem = {
+  studyInstanceUid: string;
+  patientId: string | null;
+  patientName: string | null;
+  accessionNumber: string | null;
+  studyDescription: string | null;
+  received: {
+    count: number;
+    successful: number;
+    active: number;
+    failed: number;
+    sources: string[];
+    latestAt: string | null;
+  };
+  sent: {
+    count: number;
+    successful: number;
+    active: number;
+    failed: number;
+    destinations: string[];
+    latestAt: string | null;
+  };
+  eventCount: number;
+  firstActivityAt: string;
+  lastActivityAt: string;
+};
+
+export type DicomTransferStudyHistoryResponse = {
+  items: DicomTransferStudyHistoryItem[];
+  page: number;
+  pageSize: DicomTransferHistoryPageSize;
+  total: number;
+  totalPages: number;
+};
+
 type DicomTransferHistoryDbRow = {
   id: string | number | bigint;
   direction: "RECEIVED" | "SENT";
@@ -150,6 +187,29 @@ type DicomTransferHistoryDbRow = {
   created_at: string | Date;
   updated_at: string | Date;
   occurred_at: string | Date;
+};
+
+type DicomTransferStudyHistoryDbRow = {
+  study_instance_uid: string;
+  patient_id: string | null;
+  patient_name: string | null;
+  accession_number: string | null;
+  study_description: string | null;
+  received_count: string | number | bigint;
+  received_successful: string | number | bigint;
+  received_active: string | number | bigint;
+  received_failed: string | number | bigint;
+  received_sources: string[];
+  received_latest_at: string | Date | null;
+  sent_count: string | number | bigint;
+  sent_successful: string | number | bigint;
+  sent_active: string | number | bigint;
+  sent_failed: string | number | bigint;
+  sent_destinations: string[];
+  sent_latest_at: string | Date | null;
+  event_count: string | number | bigint;
+  first_activity_at: string | Date;
+  last_activity_at: string | Date;
 };
 
 const DICOM_TRANSFER_HISTORY_PAGE_SIZES = [25, 50, 100] as const;
@@ -181,6 +241,12 @@ function normalizeHistoryStatus(value: unknown): DicomTransferHistoryStatus {
   const normalized = queryScalarText(value, "status") ?? "all";
   if (!DICOM_TRANSFER_HISTORY_STATUSES.includes(normalized as DicomTransferHistoryStatus)) throw new HttpError(400, "status must be all, active, successful, or failed.");
   return normalized as DicomTransferHistoryStatus;
+}
+
+function normalizeHistoryView(value: unknown): DicomTransferHistoryView {
+  const normalized = queryScalarText(value, "view") ?? "transfers";
+  if (normalized !== "transfers" && normalized !== "studies") throw new HttpError(400, "view must be transfers or studies.");
+  return normalized;
 }
 
 function normalizeHistoryInteger(value: unknown, field: string, defaultValue: number): number {
@@ -301,9 +367,49 @@ function dicomTransferHistoryRowToApi(row: DicomTransferHistoryDbRow): DicomTran
   };
 }
 
-export async function listDicomTransferHistory(input: ListDicomTransferHistoryInput = {}): Promise<DicomTransferHistoryResponse> {
+function historyCountToNumber(value: string | number | bigint): number {
+  return Number(value);
+}
+
+function dicomTransferStudyHistoryRowToApi(row: DicomTransferStudyHistoryDbRow): DicomTransferStudyHistoryItem {
+  return {
+    studyInstanceUid: row.study_instance_uid,
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    accessionNumber: row.accession_number,
+    studyDescription: row.study_description,
+    received: {
+      count: historyCountToNumber(row.received_count),
+      successful: historyCountToNumber(row.received_successful),
+      active: historyCountToNumber(row.received_active),
+      failed: historyCountToNumber(row.received_failed),
+      sources: row.received_sources,
+      latestAt: historyNullableTimestampToIso(row.received_latest_at)
+    },
+    sent: {
+      count: historyCountToNumber(row.sent_count),
+      successful: historyCountToNumber(row.sent_successful),
+      active: historyCountToNumber(row.sent_active),
+      failed: historyCountToNumber(row.sent_failed),
+      destinations: row.sent_destinations,
+      latestAt: historyNullableTimestampToIso(row.sent_latest_at)
+    },
+    eventCount: historyCountToNumber(row.event_count),
+    firstActivityAt: historyTimestampToIso(row.first_activity_at),
+    lastActivityAt: historyTimestampToIso(row.last_activity_at)
+  };
+}
+
+type ListDicomTransferHistoryTransfersInput = Omit<ListDicomTransferHistoryInput, "view"> & { view?: "transfers" };
+type ListDicomTransferHistoryStudiesInput = Omit<ListDicomTransferHistoryInput, "view"> & { view: "studies" };
+
+export function listDicomTransferHistory(input?: ListDicomTransferHistoryTransfersInput): Promise<DicomTransferHistoryResponse>;
+export function listDicomTransferHistory(input: ListDicomTransferHistoryStudiesInput): Promise<DicomTransferStudyHistoryResponse>;
+export function listDicomTransferHistory(input: ListDicomTransferHistoryInput): Promise<DicomTransferHistoryResponse | DicomTransferStudyHistoryResponse>;
+export async function listDicomTransferHistory(input: ListDicomTransferHistoryInput = {}): Promise<DicomTransferHistoryResponse | DicomTransferStudyHistoryResponse> {
   const direction = normalizeHistoryDirection(input.direction);
   const status = normalizeHistoryStatus(input.status);
+  const view = normalizeHistoryView(input.view);
   const search = normalizeHistoryTextFilter(input.search, "search", 200);
   const source = normalizeHistoryTextFilter(input.source, "source", 128);
   const destination = normalizeHistoryTextFilter(input.destination, "destination", 128);
@@ -323,6 +429,59 @@ export async function listDicomTransferHistory(input: ListDicomTransferHistoryIn
     from: fromTimestamp?.iso ?? null,
     to: toTimestamp?.iso ?? null
   });
+
+  if (view === "studies") {
+    const countResult = await pool.query<{ total: string }>(`select count(distinct study_instance_uid)::text as total from dicom_transfer_events ${whereClause}`, params);
+    const total = Number(countResult.rows[0]?.total ?? "0");
+    const pageParams = [...params, pageSize, offset];
+    const pageResult = await pool.query<DicomTransferStudyHistoryDbRow>(
+      `with filtered as (
+         select id, direction, status, patient_id, patient_name, accession_number, study_instance_uid, study_description,
+           source_aet, destination_aet, ${DICOM_TRANSFER_HISTORY_OCCURRED_AT_SQL} as occurred_at
+         from dicom_transfer_events
+         ${whereClause}
+       ), grouped as (
+         select study_instance_uid,
+           (array_agg(patient_id order by occurred_at desc, id desc) filter (where patient_id is not null))[1] as patient_id,
+           (array_agg(patient_name order by occurred_at desc, id desc) filter (where patient_name is not null))[1] as patient_name,
+           (array_agg(accession_number order by occurred_at desc, id desc) filter (where accession_number is not null))[1] as accession_number,
+           (array_agg(study_description order by occurred_at desc, id desc) filter (where study_description is not null))[1] as study_description,
+           count(*) filter (where direction = 'RECEIVED')::text as received_count,
+           count(*) filter (where direction = 'RECEIVED' and status = 'SUCCESS')::text as received_successful,
+           count(*) filter (where direction = 'RECEIVED' and status = 'ACTIVE')::text as received_active,
+           count(*) filter (where direction = 'RECEIVED' and status = 'FAILED')::text as received_failed,
+           coalesce(array_agg(distinct source_aet order by source_aet) filter (where direction = 'RECEIVED' and source_aet is not null), array[]::text[]) as received_sources,
+           max(occurred_at) filter (where direction = 'RECEIVED') as received_latest_at,
+           count(*) filter (where direction = 'SENT')::text as sent_count,
+           count(*) filter (where direction = 'SENT' and status = 'SUCCESS')::text as sent_successful,
+           count(*) filter (where direction = 'SENT' and status = 'ACTIVE')::text as sent_active,
+           count(*) filter (where direction = 'SENT' and status = 'FAILED')::text as sent_failed,
+           coalesce(array_agg(distinct destination_aet order by destination_aet) filter (where direction = 'SENT' and destination_aet is not null), array[]::text[]) as sent_destinations,
+           max(occurred_at) filter (where direction = 'SENT') as sent_latest_at,
+           count(*)::text as event_count,
+           min(occurred_at) as first_activity_at,
+           max(occurred_at) as last_activity_at
+         from filtered
+         group by study_instance_uid
+       )
+       select study_instance_uid, patient_id, patient_name, accession_number, study_description,
+         received_count, received_successful, received_active, received_failed, received_sources, received_latest_at,
+         sent_count, sent_successful, sent_active, sent_failed, sent_destinations, sent_latest_at,
+         event_count, first_activity_at, last_activity_at
+       from grouped
+       order by last_activity_at desc, study_instance_uid desc
+       limit $${pageParams.length - 1} offset $${pageParams.length}`,
+      pageParams
+    );
+    return {
+      items: pageResult.rows.map(dicomTransferStudyHistoryRowToApi),
+      page,
+      pageSize,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / pageSize)
+    };
+  }
+
   const countResult = await pool.query<{ total: string }>(`select count(*)::text as total from dicom_transfer_events ${whereClause}`, params);
   const total = Number(countResult.rows[0]?.total ?? "0");
   const pageParams = [...params, pageSize, offset];
