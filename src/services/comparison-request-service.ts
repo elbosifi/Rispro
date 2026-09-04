@@ -1101,6 +1101,12 @@ function comparisonReportingWhere(filters: ReportingBoardFilters, values: unknow
 function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoardCaseRow {
   const status = String(row.status || "");
   const finalizedAt = optionalIso(row.reportFinalAt);
+  const sonicStatus = String(row.sonicReportStatus ?? "");
+  const sonicCheckedAt = optionalIso(row.sonicLastSuccessAt);
+  const hasSonicObservation = !finalizedAt && sonicCheckedAt !== null &&
+    ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(sonicStatus);
+  const effectiveStatus = finalizedAt ? "final" : hasSonicObservation ? sonicStatus as ReportingBoardCaseRow["reportStatus"] : "no_report";
+  const effectiveFinalAt = finalizedAt ?? (hasSonicObservation && sonicStatus === "final" ? optionalIso(row.sonicReportFinalAt) : null);
   return {
     caseType: "comparison",
     caseKey: `comparison:${Number(row.comparisonRequestId)}`,
@@ -1137,17 +1143,17 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     assignmentOrigin: "rispro",
     finalizedByDoctorId: row.finalizedByDoctorId == null ? null : Number(row.finalizedByDoctorId),
     finalizedByDoctorName: row.finalizedByDoctorName == null ? null : String(row.finalizedByDoctorName),
-    sonicDicomFinalizedByAccount: null,
-    sonicDicomLatestDocumentId: null,
-    sonicDicomCorrelationMethod: null,
+    sonicDicomFinalizedByAccount: hasSonicObservation ? row.sonicAccount == null ? null : String(row.sonicAccount) : null,
+    sonicDicomLatestDocumentId: hasSonicObservation ? row.sonicDocumentId == null ? null : String(row.sonicDocumentId) : null,
+    sonicDicomCorrelationMethod: hasSonicObservation && (row.sonicCorrelationMethod === "study_instance_uid" || row.sonicCorrelationMethod === "accession_fallback") ? row.sonicCorrelationMethod : null,
     assignmentMatch: "not_applicable",
     assignmentStatus: row.assignedDoctorId == null ? "unassigned" : "assigned",
     completedAt: optionalIso(row.completedAt),
     currentAssignedAt: optionalIso(row.currentAssignedAt),
     firstAssignedAt: optionalIso(row.currentAssignedAt),
-    reportFinalAt: finalizedAt,
-    reportStatusCheckedAt: new Date().toISOString(),
-    reportStatusSource: "rispro",
+    reportFinalAt: effectiveFinalAt,
+    reportStatusCheckedAt: hasSonicObservation ? sonicCheckedAt : new Date().toISOString(),
+    reportStatusSource: finalizedAt ? "rispro" : hasSonicObservation ? "sonicdicom" : "rispro",
     sonicDicomStudyNote: null,
     sonicDicomStudyNoteCheckedAt: null,
     sonicDicomStudyNoteSource: null,
@@ -1157,9 +1163,9 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     completedToFinalMinutes: null,
     currentAssignmentAgeMinutes: null,
     completedUnassignedAgeMinutes: null,
-    reportStatus: finalizedAt ? "final" : "no_report",
-    canAssign: status !== "finalized",
-    exclusionReason: status === "finalized" ? "report_final" : null,
+    reportStatus: effectiveStatus,
+    canAssign: status !== "finalized" && effectiveStatus !== "final",
+    exclusionReason: status === "finalized" || effectiveStatus === "final" ? "report_final" : null,
   };
 }
 
@@ -1207,11 +1213,18 @@ export async function listComparisonReportingBoardRows(
         finalized_doctor.id as "finalizedByDoctorId",
         finalized_doctor.display_name as "finalizedByDoctorName",
         cca.assigned_doctor_id as "assignedDoctorId",
-        assigned_doctor.display_name as "assignedDoctorName"
+        assigned_doctor.display_name as "assignedDoctorName",
+        comparison_cache.report_status as "sonicReportStatus",
+        comparison_cache.report_final_at as "sonicReportFinalAt",
+        comparison_cache.sonicdicom_document_id as "sonicDocumentId",
+        comparison_cache.sonicdicom_account as "sonicAccount",
+        comparison_cache.correlation_method as "sonicCorrelationMethod",
+        comparison_cache.last_success_at as "sonicLastSuccessAt"
       from comparison_requests cr
       join patients p on p.id = cr.patient_id
       left join modalities m on m.id = cr.linked_modality_id
       left join doctor_portal.comparison_case_assignments cca on cca.comparison_request_id = cr.id and cca.status = 'active'
+      left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.user_id = cr.finalized_by
       left join lateral (

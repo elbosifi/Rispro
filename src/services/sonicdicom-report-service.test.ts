@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
-import { __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest } from "./sonicdicom-report-service.js";
+import { __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
   ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
@@ -89,5 +89,52 @@ describe("SonicDICOM SQL document status mapping", () => {
     const source = readFileSync(new URL("./sonicdicom-report-service.ts", import.meta.url), "utf8");
     assert.match(source, /order by d\.UpdatedAt desc, d\.Id desc/);
     assert.doesNotMatch(source, /where d\.Status\s*=\s*6[\s\S]{0,120}order by d\.UpdatedAt desc/i);
+  });
+});
+
+describe("SonicDICOM comparison document correlation", () => {
+  const history = (documents: Array<{ documentId: string; account: string; statusCode?: number; updatedAt: string }>) => ({
+    foundStudy: true,
+    foundReport: true,
+    reportNo: 9284,
+    correlationMethod: "study_instance_uid" as const,
+    documents: documents.map((document) => ({ ...document, reportNo: 9284, statusCode: document.statusCode ?? 1 })),
+  });
+
+  it("keeps the known primary document out of a different doctor's comparison correlation", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
+      { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "B");
+  });
+
+  it("handles a same-doctor comparison by requiring a distinct post-assignment document", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.a@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "B", account: "doctor.a@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
+      { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "B");
+  });
+
+  it("does not guess that an unassigned doctor's draft is a comparison document", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([{ documentId: "C", account: "doctor.c@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" }]));
+    assert.equal(selected.document, null);
+  });
+
+  it("keeps a durable DocumentId correlation even when another matching document is newer", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" },
+      { documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "B");
   });
 });

@@ -4,6 +4,7 @@ import { pool } from "../db/pool.js";
 import {
   enqueueReportingBoardSonicDicomCacheRows,
   refreshReportingBoardSonicDicomCacheCandidates,
+  selectDueComparisonSonicDicomCacheCandidates,
   selectDueReportingBoardSonicDicomCacheCandidates,
 } from "./reporting-board-sonicdicom-cache-service.js";
 
@@ -30,7 +31,8 @@ export async function runReportingBoardSonicDicomCacheTick(options: { batchSize?
       // Seed only a bounded default scope; due selection remains indexed.
       await enqueueReportingBoardSonicDicomCacheRowsFromDefaultScope(client, Math.max(1, Math.min(options.batchSize ?? DEFAULT_BATCH_SIZE, 200)));
       const candidates = await selectDueReportingBoardSonicDicomCacheCandidates(options.batchSize ?? DEFAULT_BATCH_SIZE, client);
-      const result = await refreshReportingBoardSonicDicomCacheCandidates(candidates);
+      const comparisonCandidates = await selectDueComparisonSonicDicomCacheCandidates(options.batchSize ?? DEFAULT_BATCH_SIZE, client);
+      const result = await refreshReportingBoardSonicDicomCacheCandidates(candidates, comparisonCandidates);
       return { lockAcquired: true, ...result, durationMs: Date.now() - started };
     } finally { await client.query("select pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => null); }
   } finally { client.release(); running = false; }

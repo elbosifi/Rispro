@@ -86,6 +86,36 @@ interface SqlReadinessRow {
   UpdatedAt?: Date | string | null;
 }
 
+/** Metadata-only document history for a single resolved SonicDICOM report. */
+export interface SonicDicomDocumentHistoryLookupContext {
+  lookupKey: string;
+  accessionNumber: string;
+  studyInstanceUid: string | null;
+}
+
+export interface SonicDicomReportDocument {
+  reportNo: number;
+  documentId: string;
+  account: string | null;
+  statusCode: number | null;
+  updatedAt: string | null;
+}
+
+export interface SonicDicomDocumentHistoryResult {
+  foundStudy: boolean;
+  foundReport: boolean;
+  reportNo: number | null;
+  correlationMethod: "study_instance_uid" | "accession_fallback" | null;
+  documents: SonicDicomReportDocument[];
+}
+
+export interface SonicDicomComparisonDocumentSelection {
+  storedDocumentId: string | null;
+  primaryDocumentId: string | null;
+  assignedDoctorUsername: string | null;
+  assignedAt: string;
+}
+
 interface SqlReadiness {
   foundStudy: boolean;
   foundReport: boolean;
@@ -93,6 +123,10 @@ interface SqlReadiness {
   documentUpdatedAt: string | null;
   latestDocumentId: string | null;
   finalizedByAccount: string | null;
+}
+
+interface SqlDocumentHistoryRow extends SqlReadinessRow {
+  ReportNo?: number | string | null;
 }
 
 interface SqlRequest {
@@ -113,6 +147,30 @@ type SqlModule = {
 
 const statusCache = new Map<number, CacheEntry>();
 const studyNoteCache = new Map<string, StudyNoteCacheEntry>();
+
+function normalizedSonicAccount(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/** Account and assignment time constrain a new correlation; a stored DocumentId is immutable. */
+export function selectSonicDicomComparisonDocument(
+  candidate: SonicDicomComparisonDocumentSelection,
+  history: SonicDicomDocumentHistoryResult
+): { document: SonicDicomReportDocument | null; multipleCandidates: boolean } {
+  if (candidate.storedDocumentId) {
+    return { document: history.documents.find((document) => document.documentId === candidate.storedDocumentId) ?? null, multipleCandidates: false };
+  }
+  const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorUsername);
+  const assignedAt = Date.parse(candidate.assignedAt);
+  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: null, multipleCandidates: false };
+  const matches = history.documents.filter((document) => {
+    const updatedAt = Date.parse(document.updatedAt ?? "");
+    return document.documentId !== candidate.primaryDocumentId &&
+      normalizedSonicAccount(document.account) === assignedAccount &&
+      Number.isFinite(updatedAt) && updatedAt >= assignedAt;
+  });
+  return { document: matches[0] ?? null, multipleCandidates: matches.length > 1 };
+}
 
 function validateDatabaseName(name: string, fallback: string): string {
   const trimmed = String(name || "").trim() || fallback;
@@ -364,6 +422,108 @@ async function querySqlReportReadinessBatch(
   ]));
 }
 
+async function querySqlDocumentHistoryBatch(
+  pool: SqlConnectionPool,
+  sql: SqlModule,
+  dicomDb: string,
+  reportDb: string,
+  identifiers: string[],
+  method: "study_instance_uid" | "accession_fallback"
+): Promise<Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">>> {
+  const uniqueIdentifiers = [...new Set(identifiers.map((value) => value.trim()).filter(Boolean))];
+  if (!uniqueIdentifiers.length) return new Map();
+  const request = pool.request();
+  const parameterPrefix = method === "study_instance_uid" ? "studyInstanceUid" : "accession";
+  const valueRows = uniqueIdentifiers.map((identifier, index) => {
+    request.input(`${parameterPrefix}${index}`, sql.NVarChar(128), identifier);
+    return `(@${parameterPrefix}${index})`;
+  });
+  const inputColumn = method === "study_instance_uid" ? "StudyInstanceUID" : "AccessionNumber";
+  const studyPredicate = method === "study_instance_uid"
+    ? "s.StudyInstanceUID = input.StudyInstanceUID"
+    : "s.AccessionNumber = input.AccessionNumber";
+  const studyOrder = method === "study_instance_uid" ? "s.StudyInstanceUID" : "s.StudyDate desc, s.StudyTime desc";
+  const rows = (await request.query<SqlDocumentHistoryRow>(`
+    with InputIdentifiers(${inputColumn}) as (select * from (values ${valueRows.join(", ")}) v(${inputColumn}))
+    select input.${inputColumn},
+      case when study.StudyInstanceUID is null then 0 else 1 end as FoundStudy,
+      case when report.ReportNo is null then 0 else 1 end as FoundReport,
+      report.ReportNo, document.Id, document.Account, document.Status, document.UpdatedAt
+    from InputIdentifiers input
+    outer apply (select top 1 s.StudyInstanceUID from [${dicomDb}].[dbo].[Studies] s where ${studyPredicate} order by ${studyOrder}) study
+    outer apply (select top 1 r.No as ReportNo from [${reportDb}].[dbo].[Reports] r where r.StudyInstanceUID = study.StudyInstanceUID order by r.No desc) report
+    outer apply (select d.Id, d.Account, d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo) document
+    order by document.UpdatedAt desc, document.Id desc
+  `)).recordset ?? [];
+  const histories = new Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">>();
+  for (const identifier of uniqueIdentifiers) histories.set(identifier, { foundStudy: false, foundReport: false, reportNo: null, documents: [] });
+  for (const row of rows) {
+    const key = String(method === "study_instance_uid" ? row.StudyInstanceUID ?? "" : row.AccessionNumber ?? "").trim();
+    if (!key) continue;
+    const history = histories.get(key) ?? { foundStudy: false, foundReport: false, reportNo: null, documents: [] };
+    history.foundStudy ||= Number(row.FoundStudy || 0) === 1;
+    history.foundReport ||= Number(row.FoundReport || 0) === 1;
+    const reportNo = Number(row.ReportNo);
+    if (Number.isFinite(reportNo)) history.reportNo = Math.trunc(reportNo);
+    if (row.Id != null) {
+      const numericStatus = Number(row.Status);
+      history.documents.push({
+        reportNo: history.reportNo ?? Math.trunc(reportNo),
+        documentId: String(row.Id).trim(),
+        account: String(row.Account ?? "").trim() || null,
+        statusCode: row.Status == null || !Number.isFinite(numericStatus) ? null : Math.trunc(numericStatus),
+        updatedAt: row.UpdatedAt instanceof Date ? row.UpdatedAt.toISOString() : row.UpdatedAt ? String(row.UpdatedAt) : null,
+      });
+    }
+    histories.set(key, history);
+  }
+  for (const history of histories.values()) {
+    history.documents.sort((left, right) => {
+      const byUpdatedAt = String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
+      return byUpdatedAt || right.documentId.localeCompare(left.documentId);
+    });
+  }
+  return histories;
+}
+
+/**
+ * Resolves all metadata-only Documents rows for the same latest Reports.No
+ * used by readiness. This is deliberately separate from the normal readiness
+ * API so non-comparison callers retain their existing single-document path.
+ */
+export async function fetchSonicDicomDocumentHistoriesBatch(
+  contexts: SonicDicomDocumentHistoryLookupContext[]
+): Promise<Map<string, SonicDicomDocumentHistoryResult>> {
+  const unique = [...new Map(contexts.map((context) => [context.lookupKey, context])).values()].slice(0, 200);
+  const result = new Map<string, SonicDicomDocumentHistoryResult>();
+  if (!unique.length) return result;
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled || settings.sonicDicomReadinessMode !== "sql_server") {
+    throw new HttpError(503, "SonicDICOM SQL readiness is unavailable.");
+  }
+  const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+  const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
+  await withSqlConnection(settings, async ({ sql, pool }) => {
+    const byUid = await querySqlDocumentHistoryBatch(pool, sql, dicomDb, reportDb,
+      unique.map((context) => String(context.studyInstanceUid ?? "").trim()), "study_instance_uid");
+    const fallbackContexts = unique.filter((context) => {
+      const uid = String(context.studyInstanceUid ?? "").trim();
+      return !uid || !byUid.get(uid)?.foundStudy;
+    });
+    const byAccession = await querySqlDocumentHistoryBatch(pool, sql, dicomDb, reportDb,
+      fallbackContexts.map((context) => String(context.accessionNumber ?? "").trim()), "accession_fallback");
+    for (const context of unique) {
+      const uid = String(context.studyInstanceUid ?? "").trim();
+      const byUidResult = uid ? byUid.get(uid) : null;
+      const selected = byUidResult?.foundStudy ? byUidResult : byAccession.get(String(context.accessionNumber ?? "").trim());
+      result.set(context.lookupKey, selected
+        ? { ...selected, correlationMethod: byUidResult?.foundStudy ? "study_instance_uid" : "accession_fallback" }
+        : { foundStudy: false, foundReport: false, reportNo: null, correlationMethod: null, documents: [] });
+    }
+  });
+  return result;
+}
+
 function sqlReadinessFromRow(row: SqlReadinessRow): SqlReadiness {
   const numericStatus = Number(row.Status);
   return {
@@ -400,7 +560,7 @@ async function queryReportStatusByReportNo(
   };
 }
 
-function mapStatusCode(
+export function mapSonicDicomDocumentStatus(
   settings: SonicDicomReportSettings,
   statusCode: number | null,
   documentUpdatedAt: string | null = null,
@@ -422,7 +582,7 @@ function mapStatusCode(
   return { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null, finalizedByAccount: null, ...common };
 }
 
-export const __mapSonicDicomSqlStatusCodeForTest = mapStatusCode;
+export const __mapSonicDicomSqlStatusCodeForTest = mapSonicDicomDocumentStatus;
 
 export async function __resolveSonicDicomCorrelationForTest(
   settings: SonicDicomReportSettings,
@@ -510,7 +670,7 @@ function readinessResult(
     result: { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null, latestDocumentId: readiness.latestDocumentId, finalizedByAccount: null, correlationMethod },
     diagnostic: "No matching document status row was found in report.dbo.Documents.",
   };
-  const mapped = mapStatusCode(settings, readiness.statusCode, readiness.documentUpdatedAt, readiness.latestDocumentId, readiness.finalizedByAccount, correlationMethod);
+  const mapped = mapSonicDicomDocumentStatus(settings, readiness.statusCode, readiness.documentUpdatedAt, readiness.latestDocumentId, readiness.finalizedByAccount, correlationMethod);
   return {
     foundStudy: true, foundReport: true, statusCode: readiness.statusCode, result: mapped,
     diagnostic: mapped.state === "unavailable" ? "Document status code is unknown for current SQL mapping and was treated as unavailable." : "SQL readiness lookup completed.",
@@ -842,7 +1002,7 @@ export async function testSonicDicomSqlReadiness(input: {
         queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
       );
       const mapped: ReportStatusResult = statusLookup.foundRow
-        ? mapStatusCode(settings, statusLookup.statusCode, statusLookup.documentUpdatedAt)
+        ? mapSonicDicomDocumentStatus(settings, statusLookup.statusCode, statusLookup.documentUpdatedAt)
         : { state: "no_report", canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null };
       return {
         foundStudy: false,
