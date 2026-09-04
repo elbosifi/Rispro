@@ -21,9 +21,9 @@ const pending = { ...archiveFailure, id: 20, filename: "queued.pdf", status: "pe
 const processing = { ...pending, id: 21, filename: "processing.pdf", status: "processing", processing_stage: "recognition" };
 const unassignedFailure = { ...pending, id: 22, filename: "V2-003838.pdf", status: "failed", failure_category: "recognition" };
 
-function renderPage(modality?: { id: number; code: string; name: string; onBack: () => void }) {
+function renderPage(modality?: { id: number; code: string; name: string; onBack: () => void }, initialEntry = "/request-scans") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/request-scans"]}><Routes><Route path="/request-scans" element={<RequestScansPage modality={modality} />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/request-scans" element={<RequestScansPage modality={modality} />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
 function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
@@ -70,6 +70,15 @@ beforeEach(() => vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:reque
 afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
+  it("restores a failed attention tab from the URL while preserving modality scope", async () => {
+    const fetchMock = mock([archiveFailure]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() }, "/request-scans?tab=failed");
+
+    const failedTab = await screen.findByRole("tab", { name: /Needs attention/ });
+    expect(failedTab.getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/request-scans?status=failed&workflowSource=modality&modalityId=7")).toBe(true));
+  });
+
   it("shows the scoped Start now action for a queued job", async () => {
     const fetchMock = mock([pending]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });

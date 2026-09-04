@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
   Activity,
   AlertCircle,
@@ -160,6 +161,12 @@ type RequestScanStatus = {
 type RequestScanTab = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type WorkerTrigger = { status: "accepted" | "already_running" | "disabled" };
 type StageState = "completed" | "processing" | "pending" | "attention" | "failed";
+
+function requestScanTabFromUrl(value: string | null, canManageDismissed: boolean): RequestScanTab {
+  if (value === "dismissed") return canManageDismissed ? "dismissed" : "active";
+  if (value === "active" || value === "processed" || value === "duplicate" || value === "failed" || value === "all") return value;
+  return "active";
+}
 
 const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
 const requestScanFileUrl = (jobId: number) => `/api/request-scans/${jobId}/file`;
@@ -529,11 +536,13 @@ function RequestScanRow({ language, job, userRole, showClinicalExport, canRetryC
 export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void; orthancState?: "connected" | "disabled" | "unavailable" } }) {
   const { language, isArabic } = useLanguage();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const scopeQuery = modality ? `workflowSource=modality&modalityId=${modality.id}` : "";
   const scopeKey = modality ? `modality:${modality.id}` : "reception";
   const scopedUrl = (value: string) => scopeQuery ? `${value}${value.includes("?") ? "&" : "?"}${scopeQuery}` : value;
   const request = <T,>(value: string, options?: RequestInit) => requestBase<T>(scopedUrl(value), options);
-  const [tab, setTab] = useState<RequestScanTab>("active");
+  const canManageDismissed = user?.role === "supervisor" || user?.role === "super_admin";
+  const tab = requestScanTabFromUrl(searchParams.get("tab"), canManageDismissed);
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
   const [preview, setPreview] = useState<Job | null>(null);
@@ -620,7 +629,6 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const archiveCandidates = [...visible, ...(archiveJobs.data?.jobs ?? [])].filter(archivePending).filter((job, index, jobsForFilter) => jobsForFilter.findIndex((candidate) => candidate.id === job.id) === index);
   const selectedArchive = archiveCandidates.filter((job) => selected.includes(job.id));
   const selectableArchive = visible.filter(archivePending);
-  const canManageDismissed = user?.role === "supervisor" || user?.role === "super_admin";
   const selectableDismiss = visible.filter((job) => job.status === "failed" && !job.dismissed_at);
   const selectableRows = [...new Map([...selectableArchive, ...(canManageDismissed ? selectableDismiss : [])].map((job) => [job.id, job])).values()];
   const selectedDismiss = selectableDismiss.filter((job) => selected.includes(job.id));
@@ -628,7 +636,13 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const selectedAppointmentAllowed = Boolean(selectedAppointment && (!modality || selectedAppointment.modality_id == null || normalizeAppointmentId(selectedAppointment.modality_id) === normalizeAppointmentId(modality.id)));
   const canDismissFromAssignment = user?.role === "supervisor" || user?.role === "super_admin";
   const health = status.data?.archiveDestination;
-  const setFilter = (nextTab: RequestScanTab) => { setTab(nextTab); setCategory(""); setSelected([]); };
+  const setFilter = (nextTab: RequestScanTab) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextTab === "active") next.delete("tab"); else next.set("tab", nextTab);
+    setSearchParams(next, { replace: true });
+    setCategory("");
+    setSelected([]);
+  };
   const setAssignTarget = (job: Job) => { setAssign(job); setQuery(extractFilenameAccession(job.filename) || ""); setAppointmentId(""); setAssignmentConfirmed(false); setAssignmentError(null); };
   const handleAction = (job: Job, kind: RequestScanActionKind) => {
     if (kind === "start-now") startNow.mutate(job.id);
@@ -657,7 +671,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
       {modality ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><div><h1 className="text-xl font-semibold">{chooseLocalized(language, `${modality.code} إدخال المستندات`, `${modality.code} Document Ingestion`)}</h1><p className="text-sm text-muted-foreground">{modality.name}</p>{modality.orthancState ? <p className="mt-1 text-xs text-muted-foreground" data-testid="authoritative-orthanc-status">{chooseLocalized(language, "Orthanc: " + (modality.orthancState === "connected" ? "متصل" : modality.orthancState === "disabled" ? "معطل" : "غير متاح"), `Orthanc: ${modality.orthancState === "connected" ? "Connected" : modality.orthancState === "disabled" ? "Disabled" : "Unavailable"}`)}</p> : null}</div><Button type="button" variant="secondary" onClick={modality.onBack}>{chooseLocalized(language, "العودة إلى قائمة عمل الأجهزة", "Back to Modality Worklist")}</Button></div> : null}
        <RequestScansOperationalHeader language={language} status={status.data} refreshedAt={Math.max(status.dataUpdatedAt, jobs.dataUpdatedAt)} folderLabel={modality ? t(language, "requestScans.scanModalityFolderNow", { modality: modality.code }) : undefined} onFilter={setFilter} onScanNow={() => scanNow.mutate()} scanning={scanNow.isPending} />
       {notice ? <Alert className="border-slate-200 bg-white"><AlertDescription>{notice}</AlertDescription></Alert> : null}
-      {health?.affectedCount ? <ArchiveIncidentBanner language={language} health={health} canRetry={Boolean(status.data?.canRetryArchives)} onTest={() => testConnection.mutate()} onRetry={() => { const candidates = archiveCandidates.length ? archiveCandidates : visible.filter(archivePending); if (candidates.length) { setSelected(candidates.map((job) => job.id)); setBulkConfirm(true); } else { setTab("failed"); setCategory("smb_storage"); setSelected([]); } }} onDetails={() => setArchiveDetailsOpen(true)} testing={testConnection.isPending} /> : null}
+      {health?.affectedCount ? <ArchiveIncidentBanner language={language} health={health} canRetry={Boolean(status.data?.canRetryArchives)} onTest={() => testConnection.mutate()} onRetry={() => { const candidates = archiveCandidates.length ? archiveCandidates : visible.filter(archivePending); if (candidates.length) { setSelected(candidates.map((job) => job.id)); setBulkConfirm(true); } else { setFilter("failed"); setCategory("smb_storage"); setSelected([]); } }} onDetails={() => setArchiveDetailsOpen(true)} testing={testConnection.isPending} /> : null}
       {status.isError ? <ErrorState message={t(language, "requestScans.statusError", { message: localizeError(language, status.error) })} /> : null}
       <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
          <RequestScanFilters language={language} tab={tab} category={category} attentionCount={status.data?.failed} dismissedCount={status.data?.dismissed} canManageDismissed={Boolean(canManageDismissed)} onTabChange={setFilter} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setSelected([]); }} />

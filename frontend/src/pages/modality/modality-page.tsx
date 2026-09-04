@@ -37,7 +37,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/shared";
-import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityPreviousStudies, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityPreviousStudiesResponse } from "@/lib/api-hooks";
+import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityPreviousStudies, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchRequestScanStatus, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityPreviousStudiesResponse } from "@/lib/api-hooks";
 import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t, type TranslationKey } from "@/lib/i18n";
@@ -551,6 +551,19 @@ export default function ModalityPage() {
     queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5,
   });
+  const modalities = lookups?.modalities ?? [];
+  const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
+  const activeModalityId = currentModality?.isActive ? currentModality.id : null;
+
+  const { data: requestScanStatus } = useQuery({
+    queryKey: ["request-scans", "status", "modality", activeModalityId],
+    queryFn: () => fetchRequestScanStatus("modality", activeModalityId as number),
+    enabled: activeModalityId != null,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
 
   const {
     data: appointments = [],
@@ -811,13 +824,16 @@ export default function ModalityPage() {
         });
   };
 
-  const modalities = lookups?.modalities ?? [];
   const headerTitle = t(language, "modality.title");
-  const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
   const isIrModality = currentModality?.code?.trim().toUpperCase() === "IR" || currentModality?.nameEn?.trim().toLowerCase() === "interventional radiology";
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
     : "";
+  const requestScanFailedCount = requestScanStatus?.failed ?? 0;
+  const scanDocumentsLabel = chooseLocalized(language, "مسح المستندات", "Scan Documents");
+  const scanDocumentsAriaLabel = requestScanFailedCount > 0
+    ? `${scanDocumentsLabel}, ${requestScanFailedCount} ${chooseLocalized(language, "بحاجة إلى انتباه", "require attention")}`
+    : undefined;
   const hasResettableView = boardFilter !== "operational" || documentFilter !== "all" || date !== todayIsoDateLy() || scope !== "day";
   const lastRefreshedText = dataUpdatedAt > 0
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
@@ -889,9 +905,10 @@ export default function ModalityPage() {
                 <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
                 <span>{isFetching ? chooseLocalized(language, "جار التحديث", "Refreshing") : t(language, "modality.refresh")}</span>
               </Button>
-              <Button type="button" variant="secondary" size="sm" disabled={!currentModality?.isActive} onClick={() => currentModality && navigate(`/modality/document-ingestion?modalityId=${currentModality.id}`)} className="rounded-xl px-3">
-                <ScanLine size={16} />
-                <span>{chooseLocalized(language, "مسح المستندات", "Scan Documents")}</span>
+              <Button type="button" variant="secondary" size="sm" disabled={!currentModality?.isActive} aria-label={scanDocumentsAriaLabel} onClick={() => currentModality && navigate(`/modality/document-ingestion?modalityId=${currentModality.id}${requestScanFailedCount > 0 ? "&tab=failed" : ""}`)} className="rounded-xl px-3">
+                <ScanLine size={16} aria-hidden="true" />
+                <span>{scanDocumentsLabel}</span>
+                {requestScanFailedCount > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-hidden="true">{requestScanFailedCount}</span> : null}
               </Button>
             </div>
           </div>

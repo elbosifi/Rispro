@@ -14,6 +14,7 @@ const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
 const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
+const fetchRequestScanStatusMock = vi.fn();
 const fetchModalityPreviousStudiesMock = vi.fn();
 const recordModalityHistoricalPacsAttestationMock = vi.fn();
 const pushToastMock = vi.fn();
@@ -43,6 +44,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchModalityWorklist: (...args: unknown[]) => fetchModalityWorklistMock(...args),
   fetchModalityProtocolAssignment: (...args: unknown[]) => fetchModalityProtocolAssignmentMock(...args),
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
+  fetchRequestScanStatus: (...args: unknown[]) => fetchRequestScanStatusMock(...args),
   fetchModalityPreviousStudies: (...args: unknown[]) => fetchModalityPreviousStudiesMock(...args),
   recordModalityHistoricalPacsAttestation: (...args: unknown[]) => recordModalityHistoricalPacsAttestationMock(...args),
   listAppointmentDocuments: (...args: unknown[]) => listAppointmentDocumentsMock(...args),
@@ -236,7 +238,7 @@ function renderPage(
   rows: AppointmentWithDetails[],
   initialEntry = "/modality",
   cdDestinations: Array<{ key: string; name: string }> = [],
-  options: { role?: string; scanner?: Record<string, unknown> | null; modalities?: Array<{ id: number; nameAr: string; nameEn: string; code: string; isActive: boolean }> } = {},
+  options: { role?: string; scanner?: Record<string, unknown> | null; modalities?: Array<{ id: number; nameAr: string; nameEn: string; code: string; isActive: boolean }>; requestScanFailures?: Record<number, number> } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -253,6 +255,7 @@ function renderPage(
   });
   fetchModalityWorklistMock.mockResolvedValue(rows);
   fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
+  fetchRequestScanStatusMock.mockImplementation(async (_workflowSource: string, selectedModalityId: number) => ({ failed: options.requestScanFailures?.[selectedModalityId] ?? 0 }));
   listAppointmentDocumentsMock.mockResolvedValue([]);
   fetchRequestDocumentProtocolPolicyMock.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
   uploadAppointmentDocumentMock.mockResolvedValue({ id: 90, patientId: 10, appointmentId: null, v2BookingId: rows[0]?.id ?? 1, documentType: "clinical_document", originalFilename: "clinical.pdf", storedPath: "", mimeType: "application/pdf", fileSize: 8, storageLocationType: "local_fallback", source: "manual_upload", createdAt: "2026-06-18T08:30:00.000Z" });
@@ -316,6 +319,51 @@ describe("ModalityPage modality board", () => {
   it("disables document ingestion until a modality is selected", async () => {
     renderPage([]);
     expect((await screen.findByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchRequestScanStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("does not show a Scan Documents attention badge when there are no failed scans", async () => {
+    const user = userEvent.setup();
+    renderPage([], "/modality", [], { requestScanFailures: { 1: 0 } });
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+    await waitFor(() => expect(fetchRequestScanStatusMock).toHaveBeenCalledWith("modality", 1));
+
+    const button = screen.getByRole("button", { name: "Scan Documents" });
+    expect(button.querySelector("span.rounded-full.bg-red-600")).toBeNull();
+  });
+
+  it("shows the scoped failed scan count in the Scan Documents button", async () => {
+    const user = userEvent.setup();
+    renderPage([], "/modality", [], { requestScanFailures: { 1: 3 } });
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+
+    const button = await screen.findByRole("button", { name: "Scan Documents, 3 require attention" });
+    expect(button.querySelector("span.rounded-full.bg-red-600")?.textContent).toBe("3");
+    expect(button.getAttribute("aria-label")).toBe("Scan Documents, 3 require attention");
+    await user.click(button);
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality/document-ingestion?modalityId=1&tab=failed"));
+  });
+
+  it("requests Request Scan status for the selected modality and refreshes the scope when it changes", async () => {
+    const user = userEvent.setup();
+    renderPage([], "/modality", [], {
+      modalities: [
+        { id: 1, nameAr: "CT", nameEn: "CT", code: "CT", isActive: true },
+        { id: 2, nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true },
+      ],
+      requestScanFailures: { 1: 3, 2: 0 },
+    });
+    await screen.findByRole("option", { name: "CT" });
+    const modalitySelect = screen.getByRole("combobox");
+    await user.selectOptions(modalitySelect, "1");
+    await waitFor(() => expect(fetchRequestScanStatusMock).toHaveBeenCalledWith("modality", 1));
+    expect(await screen.findByRole("button", { name: "Scan Documents, 3 require attention" })).toBeTruthy();
+
+    await user.selectOptions(modalitySelect, "2");
+    await waitFor(() => expect(fetchRequestScanStatusMock).toHaveBeenCalledWith("modality", 2));
+    expect(screen.getByRole("button", { name: "Scan Documents" }).querySelector("span.rounded-full.bg-red-600")).toBeNull();
   });
 
   it("identifies additional imaging with its original study reference", async () => {
