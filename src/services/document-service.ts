@@ -54,7 +54,7 @@ export interface DocumentRow {
   file_size: number;
   content_sha256?: string | null;
   storage_location_type: "network" | "local_fallback";
-  source: "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation";
+  source: "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation" | "complementary_recall_system";
   scan_session_id?: number | null;
   page_count?: number | null;
   scanner_name?: string | null;
@@ -241,12 +241,13 @@ function isTruthyFlag(raw: string): boolean {
   return ["true", "1", "yes", "enabled", "on"].includes(String(raw || "").trim().toLowerCase());
 }
 
-function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation" {
+function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation" | "complementary_recall_system" {
   const normalized = String(source || "").trim();
   if (normalized === "naps2_webscan") return "naps2_webscan";
   if (normalized === "scanner_app") return "scanner_app";
   if (normalized === "request_scan_automation") return "request_scan_automation";
   if (normalized === "modality_scan_automation") return "modality_scan_automation";
+  if (normalized === "complementary_recall_system") return "complementary_recall_system";
   return "manual_upload";
 }
 
@@ -632,7 +633,7 @@ export async function uploadDocument(
   const appVersion = String(payload.appVersion || "").trim() || null;
   const idempotencyKey = String(payload.idempotencyKey || "").trim() || null;
   const requestScanJobId = normalizePositiveInteger(payload.requestScanJobId, "requestScanJobId", { required: false });
-  if (idempotencyKey && !/^request-scan:(?:v2-booking:\d+:appointment-request|job:\d+:(?:appointment-request|clinical-document))$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
+    if (idempotencyKey && !/^(?:request-scan:(?:v2-booking:\d+:appointment-request|job:\d+:(?:appointment-request|clinical-document))|complementary-recall-request-document:\d+:\d+)$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
   if (fileSize === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }

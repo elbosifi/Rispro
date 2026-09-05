@@ -149,6 +149,7 @@ export interface ReportingBoardCaseRow {
   appointmentStatus: string;
   activeComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
+  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | null;
   requiresReport: boolean;
   reportingPriorityId: number | null;
   reportingPriorityCode: string | null;

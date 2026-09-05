@@ -54,7 +54,7 @@ import { logAuditEntry } from "../../../../services/audit-service.js";
 import { resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
 import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
-import { linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
+import { generateComplementaryRecallRequestDocument, linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -91,6 +91,11 @@ export async function createBooking(
   }
 
   scheduleBookingWorklistSync(result.booking.id);
+  if (payload.complementaryRecallRequestId != null) {
+    await generateComplementaryRecallRequestDocument(Number(payload.complementaryRecallRequestId), result.booking.id).catch((error) => {
+      console.warn(JSON.stringify({ type: "complementary_recall_request_document_generation_failed", recallRequestId: payload.complementaryRecallRequestId, recallAppointmentId: result.booking.id, error: error instanceof Error ? error.message : String(error) }));
+    });
+  }
   return result;
 }
 
@@ -135,7 +140,15 @@ export async function createBookingInternal(
       patientId: payload.patientId,
       modalityId: payload.modalityId,
       examTypeId: payload.examTypeId ?? null,
+      requiresReport: payload.requiresReport,
     });
+  if (recall) {
+    const separate = recall.reportingDisposition === "separate_report";
+    const modalityId = separate ? recall.requestedModalityId : null;
+    const examTypeId = separate ? recall.requestedExamTypeId : null;
+    if (separate && (!modalityId || !examTypeId)) throw new HttpError(409, "Separate-report additional imaging is missing its doctor-authorized examination.");
+    payload = { ...payload, modalityId: modalityId ?? payload.modalityId, examTypeId: examTypeId ?? payload.examTypeId, requiresReport: separate };
+  }
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
@@ -189,6 +202,7 @@ export async function createBookingInternal(
   if (
     caseCategory === "non_oncology" &&
     payload.requiresReport === true &&
+    !recall &&
     userRole !== "super_admin" &&
     userRole !== "supervisor"
   ) {

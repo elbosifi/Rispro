@@ -27,7 +27,7 @@ import {
   cancelPendingReportingAssignmentIntent,
   type ReportingAssignmentActivationNotification,
 } from "../modules/doctor-portal/reporting-assignment-intents-service.js";
-import { createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
+import { createAdditionalImagingNotification, createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
 
 const ELIGIBLE_BOOKING_STATUSES = ["scheduled", "arrived", "waiting"] as const;
 const DEFAULT_WORKER_INTERVAL_MS = 60_000;
@@ -749,6 +749,11 @@ async function completeBookingIfStillEligible({
 
     await client.query("commit");
     await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
+    const recalls = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1", [bookingId]);
+    await Promise.all(recalls.rows.map((recall) =>
+      createAdditionalImagingNotification({ recallRequestId: Number(recall.id), recallAppointmentId: bookingId, eventType: "additional_imaging_completed" })
+        .catch((error) => console.warn(JSON.stringify({ type: "additional_imaging_notification_failed", bookingId, eventType: "additional_imaging_completed", error: error instanceof Error ? error.message : String(error) })))
+    ));
     await queueClinicalDocumentExportForCompletedAppointment(bookingId).catch((error) => {
       console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));
     });

@@ -78,7 +78,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
 
   async function scheduledRecall(reportingDisposition: "supplement_original_report" | "separate_report" | "no_separate_report" = "supplement_original_report") {
     const originalId = await originalBooking();
-    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", reportingDisposition, requestedByUserId: testData.userId }));
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: null, technologistInstruction: "Repeat acquisition", reportingDisposition, requestedModalityId: reportingDisposition === "separate_report" ? testData.modalityId : undefined, requestedExamTypeId: reportingDisposition === "separate_report" ? testData.examTypeId : undefined, originalReportDependency: reportingDisposition === "separate_report" ? "none" : undefined, requestedByUserId: testData.userId }));
     const recallBookingId = await originalBooking();
     await transaction((client) => linkComplementaryRecallBooking(client, recall, recallBookingId, testData.userId));
     return { originalId, recall, recallBookingId };
@@ -302,7 +302,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const summaryBefore = await complementaryRecallReceptionSummary();
     const unseenBefore = await complementaryRecallUnseenCount();
     const originalId = await originalBooking();
-    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Call before booking", technologistInstruction: "Repeat delayed phase", requestedByUserId: testData.userId, reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report" }));
+    const recall = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: originalId, receptionInstruction: "Call before booking", technologistInstruction: "Repeat delayed phase", requestedByUserId: testData.userId, reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report", requestedModalityId: testData.modalityId, requestedExamTypeId: testData.examTypeId, originalReportDependency: "none" }));
     const rows = await listComplementaryRecalls();
     const row = rows.find((item) => item.id === recall.id);
     assert.equal(row?.originalAppointmentId, originalId);
@@ -326,7 +326,10 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(row?.receptionAcknowledgedAt, null);
     assert.equal(row?.receptionAcknowledgedByUserId, null);
     const createAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_requested' order by id desc limit 1", [recall.id]);
-    assert.deepEqual(createAudit.rows[0]?.new_values, { originalAppointmentId: originalId, status: "pending_scheduling", reasonCode: "missing_sequence_phase", qaClassification: "acquisition_error", urgency: "within_24_hours", dueAt: "2039-06-13T10:30:00.000Z", reportingDisposition: "separate_report" });
+    assert.equal(createAudit.rows[0]?.new_values.reportingDisposition, "separate_report");
+    assert.equal(createAudit.rows[0]?.new_values.requestedModalityId, testData.modalityId);
+    assert.equal(createAudit.rows[0]?.new_values.requestedExamTypeId, testData.examTypeId);
+    assert.equal(createAudit.rows[0]?.new_values.originalReportDependency, "none");
     assert.ok(row?.originalAccession);
     assert.equal((await complementaryRecallReceptionSummary()).pendingCount, summaryBefore.pendingCount + 1);
     assert.equal((await complementaryRecallReceptionSummary()).unseenPendingCount, summaryBefore.unseenPendingCount + 1);

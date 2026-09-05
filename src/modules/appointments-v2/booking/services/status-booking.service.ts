@@ -12,7 +12,7 @@ import {
   cancelPendingReportingAssignmentIntent,
   type ReportingAssignmentActivationNotification,
 } from "../../../doctor-portal/reporting-assignment-intents-service.js";
-import { createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
+import { createAdditionalImagingNotification, createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
 import { queueClinicalDocumentExportForCompletedAppointment } from "../../../../services/clinical-document-export-service.js";
 import { acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import {
@@ -36,6 +36,14 @@ const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
 ]);
 const REASON_REQUIRED_STATUSES = new Set<BookingStatus>(["no-show", "discontinued"]);
 const DEDICATED_CANCELLATION_MESSAGE = "Appointment cancellation must use the dedicated cancellation workflow.";
+
+async function notifyComplementaryRecallBookingEvent(bookingId: number, eventType: "additional_imaging_patient_arrived" | "additional_imaging_completed"): Promise<void> {
+  const rows = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1", [bookingId]);
+  await Promise.all(rows.rows.map((row) =>
+    createAdditionalImagingNotification({ recallRequestId: Number(row.id), recallAppointmentId: bookingId, eventType })
+      .catch((error) => console.warn(JSON.stringify({ type: "additional_imaging_notification_failed", bookingId, eventType, error: error instanceof Error ? error.message : String(error) })))
+  ));
+}
 
 async function createAssignedToMeNotificationsForReportingIntent(
   notification: ReportingAssignmentActivationNotification | null
@@ -557,6 +565,8 @@ export async function updateBookingStatusManual(
 
     await client.query("commit");
     await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
+    if (targetStatus === "arrived") await notifyComplementaryRecallBookingEvent(bookingId, "additional_imaging_patient_arrived");
+    if (targetStatus === "completed") await notifyComplementaryRecallBookingEvent(bookingId, "additional_imaging_completed");
     if (targetStatus === "completed") {
       await queueClinicalDocumentExportForCompletedAppointment(bookingId, userId).catch((error) => {
         console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));

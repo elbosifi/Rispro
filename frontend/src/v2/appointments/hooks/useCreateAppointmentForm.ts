@@ -71,9 +71,9 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
   const [form, setForm] = useState<CreateAppointmentFormModel>(DEFAULT_FORM);
 
   const actions = useMemo(() => ({
-    initializeComplementaryRecall(patient: SelectedPatient, modalityId: number, examTypeId: number) {
+    initializeComplementaryRecall(patient: SelectedPatient, modalityId: number, examTypeId: number, requiresReport = false) {
       const defaultCategory = patient.category === "oncology" ? "oncology" : "non_oncology";
-      setForm((prev) => ({ ...prev, patientId: patient.id, patient: { ...patient, patientIdentitySelectionSource: "url_preselect" }, modalityId, examTypeId, caseCategory: defaultCategory, requiresReport: defaultCategory === "oncology" ? reportDefaults.oncology : reportDefaults.nonOncology, reportRequiredManuallyOverridden: false, appointmentDate: "", notes: "", capacityResolutionMode: "standard", specialReasonCode: "", specialReasonConfirmed: false, specialReasonNote: "", intendedReportingDoctorId: null, intendedReportingDoctorReason: "", overrideRequired: false, overrideReason: "" }));
+      setForm((prev) => ({ ...prev, patientId: patient.id, patient: { ...patient, patientIdentitySelectionSource: "url_preselect" }, modalityId, examTypeId, caseCategory: defaultCategory, requiresReport, reportRequiredManuallyOverridden: false, appointmentDate: "", notes: "", capacityResolutionMode: "standard", specialReasonCode: "", specialReasonConfirmed: false, specialReasonNote: "", intendedReportingDoctorId: null, intendedReportingDoctorReason: "", overrideRequired: false, overrideReason: "" }));
     },
     setPatient(patient: SelectedPatient | null) {
       const defaultCategory =

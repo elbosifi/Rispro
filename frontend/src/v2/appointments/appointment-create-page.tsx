@@ -106,7 +106,7 @@ export function AppointmentCreatePage() {
         currentUserRole={user?.role}
         doctorModuleCapabilities={doctorMeQuery.data?.moduleCapabilities ?? []}
         initialSelectedPatient={initialSelectedPatient}
-        complementaryRecallContext={recallContextQuery.data ? { id: recallContextQuery.data.id, modalityId: recallContextQuery.data.modalityId, examTypeId: recallContextQuery.data.examTypeId, originalAccession: recallContextQuery.data.originalAccession, originalExam: recallContextQuery.data.originalExam, receptionInstruction: recallContextQuery.data.receptionInstruction } : null}
+        complementaryRecallContext={recallContextQuery.data ? { id: recallContextQuery.data.id, modalityId: recallContextQuery.data.modalityId, examTypeId: recallContextQuery.data.examTypeId, requiresReport: recallContextQuery.data.requiresReport, originalAccession: recallContextQuery.data.originalAccession, originalExam: recallContextQuery.data.originalExam, receptionInstruction: recallContextQuery.data.receptionInstruction } : null}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />

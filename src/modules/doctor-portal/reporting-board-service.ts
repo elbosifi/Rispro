@@ -92,6 +92,7 @@ import {
 import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import { median, minutesBetween, minutesSince, percentile, withTimelineMetrics } from "./reporting-board-metrics.js";
 import { getProtocolingHistoricalPacsCandidates, getProtocolingHistorySonicDicomRedirect, getProtocolingPatientHistory } from "./protocoling-repository.js";
+import { resolveComplementaryRecallReportFinality } from "../appointments-v2/recall/complementary-recall.service.js";
 
 export interface Actor {
   userId: UserId;
@@ -132,6 +133,7 @@ function isPersonalDeskOverdue(row: ReportingBoardCaseRow, doctorId: number): bo
     row.assignedDoctorId === doctorId &&
     row.requiresReport &&
     row.reportStatus !== "final" &&
+    !row.workflowHold &&
     row.dueAt &&
     row.dueAt < todayIso()
   );
@@ -1168,6 +1170,12 @@ export async function markReportingBoardCaseManualFinal(
     reason,
     actor: { userId: actor.userId, doctorId: actorDoctorId },
   });
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await resolveComplementaryRecallReportFinality(client, appointmentId, Number(actor.userId));
+    await client.query("commit");
+  } catch (error) { await client.query("rollback").catch(() => undefined); throw error; } finally { client.release(); }
   return { ok: true, appointmentId, status: "manual_final", override };
 }
 
@@ -1222,6 +1230,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     requiresReport: row.requiresReport,
     activeComplementaryRecallStatus: row.caseType === "appointment" ? row.activeComplementaryRecallStatus ?? null : null,
     latestComplementaryRecallStatus: row.caseType === "appointment" ? row.latestComplementaryRecallStatus ?? null : null,
+    workflowHold: row.caseType === "appointment" ? row.workflowHold ?? null : null,
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: row.manualFinalOverrideId ?? null,
     manualFinalByDoctorId: row.manualFinalByDoctorId ?? null,

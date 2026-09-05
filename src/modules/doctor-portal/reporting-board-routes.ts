@@ -547,6 +547,11 @@ router.post(
       urgency: body.urgency,
       dueAt: body.dueAt ?? body.due_at,
       reportingDisposition: body.reportingDisposition ?? body.reporting_disposition,
+      requestedModalityId: body.requestedModalityId ?? body.requested_modality_id,
+      requestedExamTypeId: body.requestedExamTypeId ?? body.requested_exam_type_id,
+      originalReportDependency: body.originalReportDependency ?? body.original_report_dependency,
+      notifyOnArrival: body.notifyOnArrival ?? body.notify_on_arrival,
+      notifyOnImagingCompleted: body.notifyOnImagingCompleted ?? body.notify_on_imaging_completed,
       requestedByUserId: Number(req.user!.sub),
     }));
     res.status(201).json({ recall });

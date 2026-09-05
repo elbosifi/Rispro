@@ -50,7 +50,7 @@ interface CreateAppointmentTabProps {
   currentUserRole?: Role;
   doctorModuleCapabilities?: DoctorModuleCapability[];
   initialSelectedPatient?: SelectedPatient | null;
-  complementaryRecallContext?: { id: number; modalityId: number; examTypeId: number; originalAccession: string; originalExam: string | null; receptionInstruction: string | null } | null;
+  complementaryRecallContext?: { id: number; modalityId: number; examTypeId: number; requiresReport: boolean; originalAccession: string; originalExam: string | null; receptionInstruction: string | null } | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
     patientId: number;
@@ -255,7 +255,7 @@ export function CreateAppointmentTab({
     if (initialPatientAppliedRef.current) return;
     if (!initialSelectedPatient) return;
     if (form.patientId != null) return;
-    if (complementaryRecallContext) actions.initializeComplementaryRecall(initialSelectedPatient, complementaryRecallContext.modalityId, complementaryRecallContext.examTypeId);
+    if (complementaryRecallContext) actions.initializeComplementaryRecall(initialSelectedPatient, complementaryRecallContext.modalityId, complementaryRecallContext.examTypeId, complementaryRecallContext.requiresReport);
     else actions.setPatient(initialSelectedPatient);
     initialPatientAppliedRef.current = true;
   }, [actions, complementaryRecallContext, form.patientId, initialSelectedPatient]);
@@ -912,7 +912,7 @@ export function CreateAppointmentTab({
               }}
               locked={Boolean(complementaryRecallContext)}
             />
-            {complementaryRecallContext ? <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">Complementary recall</span><p className="mt-1 text-muted-foreground">{complementaryRecallContext.originalAccession} · {complementaryRecallContext.originalExam ?? "Original exam"}</p>{complementaryRecallContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{complementaryRecallContext.receptionInstruction}</p> : null}</div> : null}
+            {complementaryRecallContext ? <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">Complementary recall</span><p className="mt-1 text-muted-foreground">{complementaryRecallContext.originalAccession} · {complementaryRecallContext.originalExam ?? "Original exam"}</p><p className="mt-1 text-muted-foreground">Doctor-authorized examination and reporting requirement are locked for this booking.</p>{complementaryRecallContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{complementaryRecallContext.receptionInstruction}</p> : null}</div> : null}
 
             {form.patientId != null && (patientNoShows.length > 0 || patientNoShowSummary?.bookingRestricted) && (
               <div className="mt-4 sm:mt-5 space-y-3">
@@ -1201,7 +1201,7 @@ export function CreateAppointmentTab({
                   aria-label={t(language, "appointments.create.reportRequired")}
                   checked={form.requiresReport}
                   onChange={(e) => actions.setRequiresReport(e.target.checked)}
-                  disabled={isSelectedPatientNonOncology && !form.requiresReport && !canEnableNonOncologyReport}
+                  disabled={Boolean(complementaryRecallContext) || (isSelectedPatientNonOncology && !form.requiresReport && !canEnableNonOncologyReport)}
                   className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-sm sm:text-base text-foreground">

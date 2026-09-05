@@ -1093,6 +1093,13 @@ export async function listReportingBoardCaseCandidates(
         b.status as "appointmentStatus",
         active_recall.status as "activeComplementaryRecallStatus",
         latest_recall.status as "latestComplementaryRecallStatus",
+        case
+          when manual_final.id is not null or cache.report_status = 'final' then null
+          when active_recall.id is not null and active_recall.reporting_disposition = 'supplement_original_report' then 'waiting_for_additional_imaging'
+          when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
+          when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
+          else null
+        end as "workflowHold",
         b.requires_report as "requiresReport",
         b.reporting_priority_id as "reportingPriorityId",
         rp.code as "reportingPriorityCode",
@@ -1156,7 +1163,7 @@ export async function listReportingBoardCaseCandidates(
         limit 1
       ) primary_identifier on true
       left join lateral (
-        select recall.status
+        select recall.id, recall.status, recall.reporting_disposition, recall.original_report_dependency
         from appointments_v2.complementary_recall_requests recall
         where recall.original_appointment_id = b.id
           and recall.status in ('pending_scheduling', 'scheduled')
@@ -1205,6 +1212,7 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     linkedPreviousBookingId: nullableNumber(row.linkedPreviousBookingId),
     activeComplementaryRecallStatus: row.activeComplementaryRecallStatus ?? null,
     latestComplementaryRecallStatus: row.latestComplementaryRecallStatus ?? null,
+    workflowHold: row.workflowHold ?? null,
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
@@ -2578,6 +2586,34 @@ export async function createAssignedToMeNotifications(input: {
     }
   }
   await Promise.all(pushNotifications.map((notification) => sendSavedViewPushNotifications(notification)));
+  return created;
+}
+
+/** Additional-imaging events share the Reporting Board feed and its saved-view Web Push delivery. */
+export async function createAdditionalImagingNotification(input: { recallRequestId: number; recallAppointmentId: number; eventType: "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized" }): Promise<number> {
+  const context = await pool.query<{ recipientUserId: number; recipientDoctorId: number; recipientName: string | null; notifyOnArrival: boolean; notifyOnImagingCompleted: boolean; dependency: string | null; disposition: string | null }>(`
+    select dp.user_id as "recipientUserId", dp.id as "recipientDoctorId", coalesce(nullif(trim(u.full_name),''),u.username) as "recipientName", r.notify_on_arrival as "notifyOnArrival", r.notify_on_imaging_completed as "notifyOnImagingCompleted", r.original_report_dependency as dependency, r.reporting_disposition as disposition
+    from appointments_v2.complementary_recall_requests r
+    join doctor_portal.case_team_assignments cta on cta.appointment_id=r.original_appointment_id and cta.assignment_type='reporting' and cta.status='active'
+    join doctor_portal.doctor_profiles dp on dp.id=cta.assigned_doctor_id and dp.active=true
+    join users u on u.id=dp.user_id and u.is_active=true
+    where r.id=$1 and r.recall_appointment_id=$2
+  `, [input.recallRequestId, input.recallAppointmentId]);
+  const recipient = context.rows[0];
+  if (!recipient) return 0;
+  const mandatory = input.eventType === "additional_imaging_completed" && (recipient.disposition === "supplement_original_report" || recipient.dependency === "imaging_completed");
+  if (input.eventType === "additional_imaging_patient_arrived" && !recipient.notifyOnArrival) return 0;
+  if (input.eventType === "additional_imaging_completed" && !recipient.notifyOnImagingCompleted && !mandatory) return 0;
+  const title = input.eventType === "additional_imaging_patient_arrived" ? "Additional imaging patient arrived" : input.eventType === "additional_imaging_report_finalized" ? "Additional imaging report finalized" : "Additional imaging completed";
+  const body = input.eventType === "additional_imaging_report_finalized" ? "The linked additional-imaging report is final; the original report dependency is resolved." : input.eventType === "additional_imaging_patient_arrived" ? "The patient has arrived for the requested additional imaging." : "The requested additional imaging is complete.";
+  const targets = await pool.query<NotificationTargetRow>(`select rbsv.id as "savedViewId", rbsv.token, dp.user_id as "recipientUserId", dp.id as "recipientDoctorId" from doctor_portal.reporting_board_saved_views rbsv join doctor_portal.doctor_profiles dp on dp.id=coalesce(rbsv.target_doctor_id,rbsv.owner_doctor_id) where dp.id=$1 and rbsv.active=true`, [recipient.recipientDoctorId]);
+  let created = 0;
+  const pushes: CreatedNotificationRow[] = [];
+  for (const target of targets.rows) {
+    const inserted = await pool.query<CreatedNotificationRow>(`insert into doctor_portal.reporting_board_notification_events (saved_view_id,recipient_user_id,recipient_doctor_id,appointment_id,event_type,delivery_channel,status,title,body,action_url,dedupe_key,metadata_json,delivered_at) values ($1,$2,$3,$4,$5,'in_app','delivered',$6,$7,$8,$9,$10::jsonb,now()) on conflict (dedupe_key) do nothing returning id,saved_view_id as "savedViewId",title,body,action_url as "actionUrl"`, [target.savedViewId, target.recipientUserId, target.recipientDoctorId, input.recallAppointmentId, input.eventType, title, body, `/reporting/worklist/${target.token}`, `${input.recallRequestId}:${input.eventType}:${input.recallAppointmentId}:${target.savedViewId}`, JSON.stringify({ recallRequestId: input.recallRequestId, recallAppointmentId: input.recallAppointmentId })]);
+    created += Number(inserted.rowCount ?? 0); if (inserted.rows[0]) pushes.push(inserted.rows[0]);
+  }
+  await Promise.all(pushes.map((notification) => sendSavedViewPushNotifications(notification).catch(() => undefined)));
   return created;
 }
 

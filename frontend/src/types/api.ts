@@ -516,6 +516,9 @@ export interface ReportingBoardCaseRow {
   comparisonPreparationNote?: string | null;
   caseCategory: string;
   appointmentStatus: string;
+  activeComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | null;
+  latestComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
+  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | null;
   requiresReport: boolean;
   reportingPriorityId: number | null;
   reportingPriorityCode: string | null;
@@ -842,6 +845,7 @@ export interface ReportingBoardMobileCase {
   requiresReport: boolean;
   activeComplementaryRecallStatus: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
+  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | null;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
   manualFinalByDoctorId?: number | null;
