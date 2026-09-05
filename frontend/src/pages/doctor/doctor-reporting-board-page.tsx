@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
+import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import {
   bulkAssignNextReportingCases,
   bulkReassignSelectedReportingCases,
@@ -1696,6 +1697,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [fullResyncPending, setFullResyncPending] = useState(false);
   const [fullResync, setFullResync] = useState<FullResyncState | null>(storedFullResync);
   const [refreshingReportAppointmentId, setRefreshingReportAppointmentId] = useState<number | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
@@ -2604,11 +2606,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   {cases.map((row) => {
                     const selected = selectedCaseKeys.includes(row.caseKey);
                     return (
-                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
+                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)} onClick={() => setDetailsTarget(row)}>
                         <td className="px-3 py-1.5"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
                           checked={selected}
+                          onClick={(event) => event.stopPropagation()}
                           onChange={(event) => {
                             const checked = event.target.checked;
                             setSelectedCaseKeys((current) => checked ? [...new Set([...current, row.caseKey])] : current.filter((key) => key !== row.caseKey));
@@ -2626,7 +2629,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         {showAssignedDoctorColumn && <td className="px-3 py-1.5"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
                         <td className="px-3 py-1.5"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-1.5"><CompactStatusCell row={row} /></td>
-                        <td className="px-2 py-1.5 text-right">
+                        <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
                           <RowActionMenu
                             row={row}
                             canManage={canManage}
@@ -2854,6 +2857,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onChange={setSettingsDraft}
         onSave={() => updateSettingsMutation.mutate()}
       />
+      {detailsTarget && <DoctorReadOnlyDetailsDrawer
+        patientId={detailsTarget.patientId}
+        appointmentId={detailsTarget.appointmentId}
+        initialTab="appointment"
+        patientLabel={detailsTarget.patientEnglishName || detailsTarget.patientArabicName || detailsTarget.patientMrn}
+        placement="viewport"
+        onClose={() => setDetailsTarget(null)}
+      />}
       {manualFinalTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

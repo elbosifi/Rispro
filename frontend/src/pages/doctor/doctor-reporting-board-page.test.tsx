@@ -46,6 +46,8 @@ const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchOhifViewerAvailabilityMock = vi.fn();
 const launchReportingBoardCaseInOhifMock = vi.fn();
 const fetchOhifRetrievalJobMock = vi.fn();
+const getAppointmentByIdMock = vi.fn();
+const fetchPatientDirectorySummaryMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -88,6 +90,8 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
   launchReportingBoardCaseInOhif: (...args: unknown[]) => launchReportingBoardCaseInOhifMock(...args),
   fetchOhifRetrievalJob: (...args: unknown[]) => fetchOhifRetrievalJobMock(...args),
+  getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
+  fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -357,6 +361,8 @@ describe("DoctorReportingBoardPage", () => {
       examTypes: [],
       priorities: [{ id: 3, code: "stat", nameEn: "STAT", nameAr: "STAT", sortOrder: 0 }],
     });
+    getAppointmentByIdMock.mockResolvedValue(null);
+    fetchPatientDirectorySummaryMock.mockResolvedValue(null);
     assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
     unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
     assignComparisonRequestMock.mockResolvedValue({ assignmentId: 101, comparisonRequestId: 77 });
@@ -416,6 +422,59 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByText("STAT")).toBeTruthy();
     expect(within(row!).getByLabelText("Draft report")).toBeTruthy();
     expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
+  });
+
+  it("opens the shared appointment and patient drawer from a case information cell and closes it", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByText("MRN-7"));
+
+    expect(await screen.findByRole("complementary", { name: "Appointment and patient details" })).toBeTruthy();
+    await waitFor(() => expect(getAppointmentByIdMock).toHaveBeenCalledWith(42));
+    expect(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByText("Alpha Patient")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByRole("button", { name: "Close appointment and patient details" }));
+    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
+  });
+
+  it("keeps case selection independent from opening details", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select case V2-000042" }));
+
+    expect(await screen.findByText("1 selected")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
+    expect(getAppointmentByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Actions menu independent from opening details", async () => {
+    renderPage();
+    const row = (await screen.findByText("V2-000042")).closest("tr")!;
+
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
+    expect(getAppointmentByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("opens linked appointment details from a comparison row without breaking comparison actions", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [comparisonRow],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+    const row = (await screen.findByText("CMP-000077")).closest("tr")!;
+
+    fireEvent.click(within(row).getByText("Comparison request"));
+    expect(await screen.findByRole("complementary", { name: "Appointment and patient details" })).toBeTruthy();
+    await waitFor(() => expect(getAppointmentByIdMock).toHaveBeenCalledWith(620));
+    fireEvent.click(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByRole("button", { name: "Close appointment and patient details" }));
+
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Refresh report status" }));
+    await waitFor(() => expect(refreshReportingBoardComparisonSonicDicomStatusMock).toHaveBeenCalledWith(77));
   });
 
   it("shows assigned and actual SonicDICOM finalizer as separate desktop facts", async () => {
