@@ -19,6 +19,7 @@ import {
   claimReportingBoardBulkAssignmentJobForRunNow,
   claimDueReportingBoardBulkAssignmentJobs,
   createAssignedToMeNotifications,
+  createAdditionalImagingNotification,
   clearReportingBoardCaseManualFinal as clearReportingBoardCaseManualFinalRecord,
   createReportingBoardBulkAssignmentJob,
   createSavedView,
@@ -93,6 +94,7 @@ import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-
 import { median, minutesBetween, minutesSince, percentile, withTimelineMetrics } from "./reporting-board-metrics.js";
 import { getProtocolingHistoricalPacsCandidates, getProtocolingHistorySonicDicomRedirect, getProtocolingPatientHistory } from "./protocoling-repository.js";
 import { resolveComplementaryRecallReportFinality } from "../appointments-v2/recall/complementary-recall.service.js";
+import { queueComplementaryRecallFinalizedEmail } from "../appointments-v2/recall/complementary-recall-email.js";
 
 export interface Actor {
   userId: UserId;
@@ -447,7 +449,7 @@ async function listUnifiedReportingBoardCases(
     const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
     return resolved
       .filter((row) => matchesAssignmentFilters(row, filters))
-      .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
+      .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && row.bookingDate < todayIso()))
       .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()))
       .sort(compareReportingBoardRows(filters));
   }
@@ -461,7 +463,7 @@ async function listUnifiedReportingBoardCases(
   ]);
   const resolved = (await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus))
     .filter((row) => matchesAssignmentFilters(row, filters))
-    .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
+    .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && row.bookingDate < todayIso()))
     .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
   const visibleRows = resolved
     .sort(compareReportingBoardRows(filters))
@@ -556,7 +558,7 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     if (priorityCode === "urgent") summary.urgent += 1;
     if (statOrUrgent) summary.statOrUrgent += 1;
     if (requiredNotFinal) summary.requiredNotFinal += 1;
-    if (requiredNotFinal && row.bookingDate < today) summary.overdue += 1;
+    if (requiredNotFinal && !row.workflowHold && row.bookingDate < today) summary.overdue += 1;
     if (modalityCode === "CT") summary.ct += 1;
     if (modalityCode === "MR") summary.mr += 1;
     if (status === "final") summary.final += 1;
@@ -570,7 +572,7 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     if (completedToAssignedMinutes !== null) completedToAssignedValues.push(completedToAssignedMinutes);
     const assignedToFinalMinutes = postHocAssignment || !row.reportFinalAt ? null : minutesBetween(row.currentAssignedAt, row.reportFinalAt);
     if (assignedToFinalMinutes !== null) assignedToFinalValues.push(assignedToFinalMinutes);
-    const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" ? minutesSince(row.currentAssignedAt, nowMs) : null;
+    const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" && !row.workflowHold ? minutesSince(row.currentAssignedAt, nowMs) : null;
     if (activeAssignmentAge !== null) activeAssignmentAges.push(activeAssignmentAge);
     if (row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && row.completedAt) summary.completedUnassigned += 1;
 
@@ -1171,11 +1173,20 @@ export async function markReportingBoardCaseManualFinal(
     actor: { userId: actor.userId, doctorId: actorDoctorId },
   });
   const client = await pool.connect();
+  let dependencyResolved = false;
   try {
     await client.query("begin");
-    await resolveComplementaryRecallReportFinality(client, appointmentId, Number(actor.userId));
+    dependencyResolved = await resolveComplementaryRecallReportFinality(client, appointmentId, Number(actor.userId));
     await client.query("commit");
-  } catch (error) { await client.query("rollback").catch(() => undefined); throw error; } finally { client.release(); }
+  } catch (error) { await client.query("rollback").catch(() => undefined); console.warn({ type: "additional_imaging_manual_final_dependency_resolution_failed", appointmentId, error: error instanceof Error ? error.message : String(error) }); } finally { client.release(); }
+  if (dependencyResolved) {
+    const recall = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1 and original_report_dependency='report_finalized' order by id desc limit 1", [appointmentId]);
+    const recallId = Number(recall.rows[0]?.id ?? 0);
+    if (recallId) await Promise.all([
+      createAdditionalImagingNotification({ recallRequestId: recallId, recallAppointmentId: appointmentId, eventType: "additional_imaging_report_finalized" }),
+      (async () => { const emailClient = await pool.connect(); try { await queueComplementaryRecallFinalizedEmail(emailClient, { recallRequestId: recallId, recallAppointmentId: appointmentId, actorUserId: Number(actor.userId) }); } finally { emailClient.release(); } })(),
+    ]).catch((error) => console.warn({ type: "additional_imaging_manual_final_notification_failed", appointmentId, error: error instanceof Error ? error.message : String(error) }));
+  }
   return { ok: true, appointmentId, status: "manual_final", override };
 }
 

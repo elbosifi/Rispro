@@ -325,7 +325,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(row?.reportingDisposition, "separate_report");
     assert.equal(row?.receptionAcknowledgedAt, null);
     assert.equal(row?.receptionAcknowledgedByUserId, null);
-    const createAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_requested' order by id desc limit 1", [recall.id]);
+    const createAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string; requestedModalityId?: number; requestedExamTypeId?: number; originalReportDependency?: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_requested' order by id desc limit 1", [recall.id]);
     assert.equal(createAudit.rows[0]?.new_values.reportingDisposition, "separate_report");
     assert.equal(createAudit.rows[0]?.new_values.requestedModalityId, testData.modalityId);
     assert.equal(createAudit.rows[0]?.new_values.requestedExamTypeId, testData.examTypeId);
@@ -534,13 +534,13 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     assert.equal(updated.qaClassification, "protocol_error");
     assert.equal(updated.urgency, "same_day");
     assert.equal(updated.dueAt, "2039-06-16T08:00:00.000Z");
-    assert.equal(updated.reportingDisposition, "no_separate_report");
+    assert.equal(updated.reportingDisposition, "supplement_original_report");
     const updateAudit = await pool.query<{ new_values: { reasonCode: string; qaClassification: string; urgency: string; dueAt: string; reportingDisposition: string } }>("select new_values from audit_log where entity_type = 'complementary_recall_request' and entity_id = $1 and action_type = 'complementary_recall_instructions_updated' order by id desc limit 1", [pending.id]);
     assert.equal(updateAudit.rows[0]?.new_values.reasonCode, "incorrect_protocol");
     assert.equal(updateAudit.rows[0]?.new_values.qaClassification, "protocol_error");
     assert.equal(updateAudit.rows[0]?.new_values.urgency, "same_day");
     assert.equal(updateAudit.rows[0]?.new_values.dueAt, "2039-06-16T08:00:00.000Z");
-    assert.equal(updateAudit.rows[0]?.new_values.reportingDisposition, "no_separate_report");
+    assert.equal(updateAudit.rows[0]?.new_values.reportingDisposition, undefined);
     assert.equal(updated.status, "pending_scheduling");
     assert.equal(updated.recallAppointmentId, null);
     assert.equal((await getComplementaryRecall(pending.id))?.receptionSeenAt, null);

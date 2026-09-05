@@ -518,7 +518,7 @@ export interface ReportingBoardCaseRow {
   appointmentStatus: string;
   activeComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
-  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | null;
+  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | "additional_imaging_ready_for_supplement" | null;
   requiresReport: boolean;
   reportingPriorityId: number | null;
   reportingPriorityCode: string | null;
@@ -800,7 +800,7 @@ export interface ReportingBoardBulkUnassignSelectedPayload {
 
 export interface ReportingBoardNotificationEvent {
   id: number;
-  eventType: "reporting_case_assigned_to_me";
+  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";
   title: string;
   body: string;
   actionUrl: string | null;
@@ -845,7 +845,7 @@ export interface ReportingBoardMobileCase {
   requiresReport: boolean;
   activeComplementaryRecallStatus: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
-  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | null;
+  workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | "additional_imaging_ready_for_supplement" | null;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
   manualFinalByDoctorId?: number | null;

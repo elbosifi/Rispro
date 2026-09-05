@@ -1094,7 +1094,7 @@ export async function listReportingBoardCaseCandidates(
         active_recall.status as "activeComplementaryRecallStatus",
         latest_recall.status as "latestComplementaryRecallStatus",
         case
-          when manual_final.id is not null or cache.report_status = 'final' then null
+          when active_recall.id is not null and active_recall.reporting_disposition = 'supplement_original_report' and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
           when active_recall.id is not null and active_recall.reporting_disposition = 'supplement_original_report' then 'waiting_for_additional_imaging'
           when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
           when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
@@ -1166,7 +1166,8 @@ export async function listReportingBoardCaseCandidates(
         select recall.id, recall.status, recall.reporting_disposition, recall.original_report_dependency
         from appointments_v2.complementary_recall_requests recall
         where recall.original_appointment_id = b.id
-          and recall.status in ('pending_scheduling', 'scheduled')
+          and recall.status <> 'cancelled'
+          and recall.dependency_resolved_at is null
         order by recall.id desc
         limit 1
       ) active_recall on true
@@ -1290,7 +1291,14 @@ export async function listReportingBoardStatsRows(
         case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
         case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
         case when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
-        manual_final.id as "manualFinalOverrideId"
+        manual_final.id as "manualFinalOverrideId",
+        case
+          when unresolved_recall.id is not null and unresolved_recall.reporting_disposition = 'supplement_original_report' and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
+          when unresolved_recall.id is not null and unresolved_recall.reporting_disposition = 'supplement_original_report' then 'waiting_for_additional_imaging'
+          when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
+          when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
+          else null
+        end as "workflowHold"
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -1300,6 +1308,12 @@ export async function listReportingBoardStatsRows(
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+      left join lateral (
+        select recall.id, recall.reporting_disposition, recall.original_report_dependency
+        from appointments_v2.complementary_recall_requests recall
+        where recall.original_appointment_id = b.id and recall.status <> 'cancelled' and recall.dependency_resolved_at is null
+        order by recall.id desc limit 1
+      ) unresolved_recall on true
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
@@ -2280,7 +2294,7 @@ export async function bulkUnassignReportingCases(input: {
 
 function notificationEvent(row: {
   id: number;
-  eventType: "reporting_case_assigned_to_me";
+  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";
   title: string;
   body: string;
   actionUrl: string | null;

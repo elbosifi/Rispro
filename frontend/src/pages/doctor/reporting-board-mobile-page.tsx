@@ -66,6 +66,7 @@ function additionalImagingCardState(row: ReportingBoardMobileCase): { variant: "
   if (row.caseType !== "appointment") return null;
   if (row.workflowHold === "waiting_for_additional_report") return { variant: "info", label: "Waiting for additional report" };
   if (row.workflowHold === "waiting_for_additional_imaging") return { variant: "info", label: "Waiting for additional imaging" };
+  if (row.workflowHold === "additional_imaging_ready_for_supplement") return { variant: "info", label: "Additional imaging ready for supplementation" };
   if (row.activeComplementaryRecallStatus === "pending_scheduling") return { variant: "warning", label: "Additional imaging · Awaiting scheduling" };
   if (row.activeComplementaryRecallStatus === "scheduled") return { variant: "info", label: "Additional imaging · Scheduled" };
   if (row.latestComplementaryRecallStatus === "completed") return { variant: "success", label: "Additional imaging · Completed" };

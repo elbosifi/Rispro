@@ -681,7 +681,7 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
     : row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
   return (
     <div className="flex max-w-40 flex-wrap items-center gap-1" title={rowStatusLabel(row)}>
-      {row.workflowHold ? <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">{row.workflowHold === "waiting_for_additional_report" ? "Waiting for additional report" : "Waiting for additional imaging"}</span> : null}
+      {row.workflowHold ? <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">{row.workflowHold === "waiting_for_additional_report" ? "Waiting for additional report" : row.workflowHold === "additional_imaging_ready_for_supplement" ? "Additional imaging ready for supplementation" : "Waiting for additional imaging"}</span> : null}
       <span aria-label={view.label} title={view.label} className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full border px-1.5 text-xs font-semibold ${view.className}`}>
         <Icon size={14} aria-hidden="true" />
         {view.text ? <span>{view.text}</span> : <span className="sr-only">{view.label}</span>}

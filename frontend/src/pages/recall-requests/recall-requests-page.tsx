@@ -109,6 +109,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   };
   useEffect(() => { if (mode !== "reception") return; const unseen = rows.filter((row) => row.receptionSeenAt == null && (row.status === "pending_scheduling" || row.status === "scheduled")); if (unseen.length && !seen.isPending) seen.mutate({ ids: unseen.map((row) => row.id), pendingIds: unseen.filter((row) => row.status === "pending_scheduling").map((row) => row.id) }); }, [mode, rows, seen]);
   const openEdit = (recall: ComplementaryRecall) => { setReceptionInstruction(recall.receptionInstruction ?? ""); setTechnologistInstruction(recall.technologistInstruction); setReasonCode(recall.reasonCode ?? ""); setQaClassification(recall.qaClassification ?? ""); setUrgency(recall.urgency ?? "routine"); setDueAt(isoToTripoliDateTimeLocal(recall.dueAt)); setReportingDisposition(recall.reportingDisposition ?? "supplement_original_report"); setEditTarget(recall); };
+  useEffect(() => { if (!editTarget) return; document.querySelector<HTMLSelectElement>('select[aria-label="Reporting disposition"]')?.setAttribute("disabled", ""); }, [editTarget]);
 
   return <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4" dir={isArabic ? "rtl" : "ltr"}>
     <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4">

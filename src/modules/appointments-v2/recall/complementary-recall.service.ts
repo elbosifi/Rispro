@@ -320,7 +320,7 @@ export async function reopenComplementaryRecallForUncompletedBooking(client: Poo
   const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where recall_appointment_id = $1 and status in ('scheduled', 'completed') for update`, [bookingId]);
   if (!result.rows[0]) return;
   const recall = map(result.rows[0]);
-  await client.query("update appointments_v2.complementary_recall_requests set recall_appointment_id = null, status = 'pending_scheduling', scheduled_at = null, completed_at = null, reception_seen_at = null, reception_seen_by_user_id = null where id = $1", [recall.id]);
+  await client.query("update appointments_v2.complementary_recall_requests set recall_appointment_id = null, status = 'pending_scheduling', scheduled_at = null, completed_at = null, dependency_resolved_at = null, reception_seen_at = null, reception_seen_by_user_id = null where id = $1", [recall.id]);
   await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_reopened_after_uncompleted_booking", oldValues: { status: recall.status, recallAppointmentId: recall.recallAppointmentId, scheduledAt: recall.scheduledAt, completedAt: recall.completedAt }, newValues: { status: "pending_scheduling", recallAppointmentId: null, previousRecallAppointmentId: bookingId, reason }, changedByUserId: actorUserId }, client);
 }
 
@@ -387,7 +387,7 @@ export async function withdrawComplementaryRecall(client: PoolClient, id: number
   return cancelled;
 }
 
-export async function updateComplementaryRecallInstructions(client: PoolClient, id: number, input: { receptionInstruction: string | null; technologistInstruction: string; reasonCode: unknown; qaClassification: unknown; urgency: unknown; dueAt: unknown; reportingDisposition: unknown; actorUserId: number }): Promise<ComplementaryRecall> {
+export async function updateComplementaryRecallInstructions(client: PoolClient, id: number, input: { receptionInstruction: string | null; technologistInstruction: string; reasonCode: unknown; qaClassification: unknown; urgency: unknown; dueAt: unknown; reportingDisposition?: unknown; actorUserId: number }): Promise<ComplementaryRecall> {
   const result = await client.query<RecallRow>(`select ${SELECT} from appointments_v2.complementary_recall_requests where id = $1 for update`, [id]);
   if (!result.rows[0]) throw new HttpError(404, "Additional imaging request not found.");
   const recall = map(result.rows[0]);
@@ -399,15 +399,14 @@ export async function updateComplementaryRecallInstructions(client: PoolClient, 
   const qaClassification = normalizeEnum(input.qaClassification, QA_CLASSIFICATIONS, "QA classification");
   const urgency = normalizeEnum(input.urgency, URGENCIES, "urgency");
   const dueAt = normalizeDueAt(input.dueAt);
-  const reportingDisposition = normalizeEnum(input.reportingDisposition, REPORTING_DISPOSITIONS, "reporting disposition");
   const meaningfulChange = (recall.receptionInstruction?.trim() || null) !== receptionInstruction || recall.technologistInstruction.trim() !== technologistInstruction || recall.reasonCode !== reasonCode || recall.urgency !== urgency || recall.dueAt !== dueAt;
   const acknowledgementClear = meaningfulChange ? ", reception_acknowledged_at = null, reception_acknowledged_by_user_id = null" : "";
-  const changed = await client.query<RecallRow>(`update appointments_v2.complementary_recall_requests set reception_instruction = $2, technologist_instruction = $3, reason_code = $4, qa_classification = $5, urgency = $6, due_at = $7, reporting_disposition = $8, reception_seen_at = null, reception_seen_by_user_id = null${acknowledgementClear} where id = $1 returning ${SELECT}`, [id, receptionInstruction, technologistInstruction, reasonCode, qaClassification, urgency, dueAt, reportingDisposition]);
+  const changed = await client.query<RecallRow>(`update appointments_v2.complementary_recall_requests set reception_instruction = $2, technologist_instruction = $3, reason_code = $4, qa_classification = $5, urgency = $6, due_at = $7, reception_seen_at = null, reception_seen_by_user_id = null${acknowledgementClear} where id = $1 returning ${SELECT}`, [id, receptionInstruction, technologistInstruction, reasonCode, qaClassification, urgency, dueAt]);
   const updated = map(changed.rows[0]!);
   if (meaningfulChange && (recall.receptionAcknowledgedAt !== null || recall.receptionAcknowledgedByUserId !== null)) {
     await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_acknowledgement_cleared_by_request_update", oldValues: { acknowledgedAt: recall.receptionAcknowledgedAt, acknowledgedByUserId: recall.receptionAcknowledgedByUserId }, newValues: { acknowledgedAt: null, acknowledgedByUserId: null, reason: "meaningful recall fields changed", changedByUserId: input.actorUserId }, changedByUserId: input.actorUserId }, client);
   }
-  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_instructions_updated", oldValues: { receptionInstruction: recall.receptionInstruction, technologistInstruction: recall.technologistInstruction, reasonCode: recall.reasonCode, qaClassification: recall.qaClassification, urgency: recall.urgency, dueAt: recall.dueAt, reportingDisposition: recall.reportingDisposition }, newValues: { receptionInstruction: updated.receptionInstruction, technologistInstruction: updated.technologistInstruction, reasonCode: updated.reasonCode, qaClassification: updated.qaClassification, urgency: updated.urgency, dueAt: updated.dueAt, reportingDisposition: updated.reportingDisposition }, changedByUserId: input.actorUserId }, client);
+  await logAuditEntry({ entityType: "complementary_recall_request", entityId: id, actionType: "complementary_recall_instructions_updated", oldValues: { receptionInstruction: recall.receptionInstruction, technologistInstruction: recall.technologistInstruction, reasonCode: recall.reasonCode, qaClassification: recall.qaClassification, urgency: recall.urgency, dueAt: recall.dueAt }, newValues: { receptionInstruction: updated.receptionInstruction, technologistInstruction: updated.technologistInstruction, reasonCode: updated.reasonCode, qaClassification: updated.qaClassification, urgency: updated.urgency, dueAt: updated.dueAt }, changedByUserId: input.actorUserId }, client);
   return updated;
 }
 

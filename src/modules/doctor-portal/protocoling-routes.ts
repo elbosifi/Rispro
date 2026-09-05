@@ -200,7 +200,7 @@ router.patch("/complementary-recalls/:recallId", asyncRoute(async (req: DoctorRe
   if (typeof technologistInstruction !== "string") throw new HttpError(400, "Technologist instruction is required.");
   const receptionInstruction = body.receptionInstruction ?? body.reception_instruction;
   if (receptionInstruction != null && typeof receptionInstruction !== "string") throw new HttpError(400, "Reception instruction must be a string or null.");
-  const recall = await withTransaction((client) => updateComplementaryRecallInstructions(client, positiveInteger(req.params.recallId, "recallId"), { receptionInstruction: typeof receptionInstruction === "string" ? receptionInstruction : null, technologistInstruction, reasonCode: body.reasonCode ?? body.reason_code, qaClassification: body.qaClassification ?? body.qa_classification, urgency: body.urgency, dueAt: body.dueAt ?? body.due_at, reportingDisposition: body.reportingDisposition ?? body.reporting_disposition, actorUserId: userId! }));
+  const recall = await withTransaction((client) => updateComplementaryRecallInstructions(client, positiveInteger(req.params.recallId, "recallId"), { receptionInstruction: typeof receptionInstruction === "string" ? receptionInstruction : null, technologistInstruction, reasonCode: body.reasonCode ?? body.reason_code, qaClassification: body.qaClassification ?? body.qa_classification, urgency: body.urgency, dueAt: body.dueAt ?? body.due_at, actorUserId: userId! }));
   res.json({ recall });
 }));
 
