@@ -62,7 +62,7 @@ interface PersistedCacheRow {
 export interface ComparisonSonicDicomCacheCandidate extends ReportLookupContext {
   comparisonAssignmentId: number;
   comparisonRequestId: number;
-  assignedDoctorUsername: string | null;
+  assignedDoctorSonicAccount: string | null;
   assignedAt: string;
   storedDocumentId: string | null;
   storedDocumentUpdatedAt: string | null;
@@ -180,7 +180,7 @@ function comparisonObservationFromHistory(
       type: "comparison_sonicdicom_multiple_document_candidates",
       comparisonAssignmentId: candidate.comparisonAssignmentId,
       comparisonRequestId: candidate.comparisonRequestId,
-      account: candidate.assignedDoctorUsername,
+      account: candidate.assignedDoctorSonicAccount,
     }));
   }
   if (selected.bootstrapRejected) console.warn(JSON.stringify({
@@ -311,7 +311,7 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
       b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
       b.requires_report as "requiresReport", b.status,
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
-      assigned_user.username as "assignedDoctorUsername", comparison_cache.sonicdicom_document_id as "storedDocumentId",
+      coalesce(nullif(btrim(assigned_user.email), ''), nullif(btrim(assigned_user.username), '')) as "assignedDoctorSonicAccount", comparison_cache.sonicdicom_document_id as "storedDocumentId",
       comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
       manual.id is not null as "primaryManualFinal"
@@ -339,7 +339,7 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
     storedDocumentUpdatedAt: row.storedDocumentUpdatedAt == null ? null : String(row.storedDocumentUpdatedAt),
     primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
     primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
-    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorSonicAccount: row.assignedDoctorSonicAccount == null ? null : String(row.assignedDoctorSonicAccount),
     assignedAt: String(row.assignedAt),
   }));
 }
@@ -355,7 +355,7 @@ export async function selectComparisonSonicDicomCacheCandidatesByRequestIds(
       b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
       b.requires_report as "requiresReport", b.status,
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
-      assigned_user.username as "assignedDoctorUsername", comparison_cache.sonicdicom_document_id as "storedDocumentId",
+      coalesce(nullif(btrim(assigned_user.email), ''), nullif(btrim(assigned_user.username), '')) as "assignedDoctorSonicAccount", comparison_cache.sonicdicom_document_id as "storedDocumentId",
       comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
       manual.id is not null as "primaryManualFinal"
@@ -382,7 +382,7 @@ export async function selectComparisonSonicDicomCacheCandidatesByRequestIds(
     storedDocumentUpdatedAt: row.storedDocumentUpdatedAt == null ? null : String(row.storedDocumentUpdatedAt),
     primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
     primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
-    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorSonicAccount: row.assignedDoctorSonicAccount == null ? null : String(row.assignedDoctorSonicAccount),
     assignedAt: String(row.assignedAt),
   }));
 }

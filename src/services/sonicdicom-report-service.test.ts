@@ -171,7 +171,7 @@ describe("SonicDICOM comparison document correlation", () => {
 
   it("keeps the known primary document out of a different doctor's comparison correlation", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
       { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
@@ -179,9 +179,19 @@ describe("SonicDICOM comparison document correlation", () => {
     assert.equal(selected.document?.documentId, "B");
   });
 
+  it("matches the assigned Sonic account with trimmed case-insensitive email identity", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorSonicAccount: "  Seraj.Alsaifi@NCCB.LY  ", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "B", account: "seraj.alsaifi@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
+      { documentId: "A", account: "primary@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "B");
+  });
+
   it("handles a same-doctor comparison by requiring a distinct post-assignment document", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.a@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.a@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "B", account: "doctor.a@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
       { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
@@ -191,14 +201,14 @@ describe("SonicDICOM comparison document correlation", () => {
 
   it("does not guess that an unassigned doctor's draft is a comparison document", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: null, primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([{ documentId: "C", account: "doctor.c@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" }]));
     assert.equal(selected.document, null);
   });
 
   it("keeps a durable DocumentId correlation even when another matching document is newer", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" },
       { documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
@@ -208,7 +218,7 @@ describe("SonicDICOM comparison document correlation", () => {
 
   it("matches durable DocumentId correlation case-insensitively", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: "document-b", primaryDocumentId: "document-a", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: "document-b", primaryDocumentId: "document-a", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "DOCUMENT-B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
       { documentId: "DOCUMENT-A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
@@ -219,7 +229,7 @@ describe("SonicDICOM comparison document correlation", () => {
   it("selects the newest active replacement when multiple tombstones are newer than stored B", () => {
     for (const statusCode of [1, 6]) {
       const selected = selectSonicDicomComparisonDocument({
-        storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+        storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
       }, history([
         { documentId: "D", account: "doctor.b@nccb.ly", statusCode: 7, updatedAt: "2026-09-01T13:00:00.000Z" },
         { documentId: "C", account: "doctor.b@nccb.ly", statusCode, updatedAt: "2026-09-01T12:00:00.000Z" },
@@ -232,7 +242,7 @@ describe("SonicDICOM comparison document correlation", () => {
 
   it("uses configured no-report codes when excluding replacement candidates", () => {
     const selected = selectSonicDicomComparisonDocument({
-      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "D", account: "doctor.b@nccb.ly", statusCode: 42, updatedAt: "2026-09-01T13:00:00.000Z" },
       { documentId: "C", account: "doctor.b@nccb.ly", statusCode: 1, updatedAt: "2026-09-01T12:00:00.000Z" },
@@ -245,7 +255,7 @@ describe("SonicDICOM comparison document correlation", () => {
   it("uses the cached stored timestamp when B is physically missing from history", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: "B", storedDocumentUpdatedAt: "2026-09-01T11:00:00.000Z", primaryDocumentId: "A",
-      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T12:00:00.000Z" },
       { documentId: "X", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:05:00.000Z" },
@@ -256,7 +266,7 @@ describe("SonicDICOM comparison document correlation", () => {
   it("fails closed when stored B is missing and has no trustworthy cached timestamp", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: "B", storedDocumentUpdatedAt: null, primaryDocumentId: "A",
-      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T12:00:00.000Z" },
       { documentId: "X", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:05:00.000Z" },
@@ -268,7 +278,7 @@ describe("SonicDICOM comparison document correlation", () => {
   it("rejects an ambiguous polluted primary bootstrap without an alternate Final", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft",
-      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([{ documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" }]));
     assert.equal(selected.document, null);
     assert.equal(selected.bootstrapRejected, true);

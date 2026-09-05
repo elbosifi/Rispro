@@ -115,7 +115,7 @@ export interface SonicDicomComparisonDocumentSelection {
   storedDocumentStatusCode?: number | null;
   primaryDocumentId: string | null;
   primaryCachedReportStatus?: string | null;
-  assignedDoctorUsername: string | null;
+  assignedDoctorSonicAccount: string | null;
   assignedAt: string;
 }
 
@@ -202,7 +202,7 @@ export function selectSonicDicomComparisonDocument(
   if (storedId && !Number.isFinite(storedUpdatedAt)) {
     return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: true };
   }
-  const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorUsername);
+  const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorSonicAccount);
   const assignedAt = Date.parse(candidate.assignedAt);
   if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
   const matches = history.documents.filter((document) => {
