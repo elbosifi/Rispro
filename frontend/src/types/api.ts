@@ -820,6 +820,7 @@ export interface ReportingBoardMobileCase {
   comparisonRequestId: number | null;
   patientName: string;
   mrn: string | null;
+  patientDicomId: string | null;
   accessionNumber: string;
   date: string;
   time: string | null;

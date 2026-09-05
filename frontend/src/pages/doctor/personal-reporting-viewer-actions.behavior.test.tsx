@@ -54,6 +54,7 @@ function makeRow(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBo
     comparisonRequestId: null,
     patientName: "Patient One",
     mrn: "MRN-42",
+    patientDicomId: "PRIMARY-42",
     accessionNumber: "ACC-42",
     date: "2026-09-02",
     time: "09:30",

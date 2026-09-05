@@ -1162,6 +1162,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     comparisonRequestId: row.comparisonRequestId,
     patientName: row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`,
     mrn: row.patientMrn,
+    patientDicomId: row.patientDicomId ?? null,
     accessionNumber: row.accessionNumber,
     date: row.bookingDate,
     time: row.bookingTime,

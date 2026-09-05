@@ -339,6 +339,7 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
     comparisonRequestId: null,
     patientName: "Patient One",
     mrn: "MRN-42",
+    patientDicomId: "PRIMARY-42",
     accessionNumber: "ACC-42",
     date: "2026-09-02",
     time: "09:30",
@@ -417,6 +418,22 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.getByText("Draft")).toBeTruthy();
     expect(screen.queryByText(/clinical indication/i)).toBeNull();
     expect(screen.queryByText("MR · MR")).toBeNull();
+  });
+
+  it("shows the primary identifier and compact study metadata on the card and in details", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
+    renderPage();
+
+    const card = (await screen.findByText("Patient One")).closest<HTMLElement>("article")!;
+    expect(within(card).getByText("PRIMARY-42")).toBeTruthy();
+    expect(within(card).getByText("ACC-42")).toBeTruthy();
+    expect(within(card).getByText(/2026-09-02 09:30/)).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Open case details for Patient One" }));
+    const details = await screen.findByRole("dialog");
+    expect(within(details).getByText("Primary ID:")).toBeTruthy();
+    expect(within(details).getByText("PRIMARY-42")).toBeTruthy();
+    expect(within(details).getByText("MRN-42")).toBeTruthy();
   });
 
   it.each([
@@ -755,7 +772,7 @@ describe("Personal Reporting Desk case presentation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
 
     expect(screen.getByText("MRN-42")).toBeTruthy();
-    expect(screen.getByText("ACC-42")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("ACC-42")).toBeTruthy();
     expect(screen.getByText("Non-oncology")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy MRN" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy accession" })).toBeTruthy();
