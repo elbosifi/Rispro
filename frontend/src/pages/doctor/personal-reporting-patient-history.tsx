@@ -91,7 +91,7 @@ function HistoryStudyActions({ caseIdentity, accession }: { caseIdentity: Person
   const normalizedAccession = accession?.trim() ?? "";
   if (!normalizedAccession) return null;
   const actionClasses = isMobile
-    ? "btn-secondary inline-flex h-9 w-9 items-center justify-center p-0"
+    ? "btn-secondary inline-flex h-[var(--control-height-sm)] items-center gap-1.5 px-2.5 text-sm"
     : "btn-secondary inline-flex h-9 items-center gap-1.5 px-2.5 text-sm";
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -104,7 +104,7 @@ function HistoryStudyActions({ caseIdentity, accession }: { caseIdentity: Person
         className={actionClasses}
       >
         <ExternalLink size={15} aria-hidden="true" />
-        <span className={isMobile ? "sr-only" : undefined}>SonicDICOM</span>
+        <span>SonicDICOM</span>
       </a>
       {!isMobile && isWindowsWorkstation() ? (
         <a

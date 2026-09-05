@@ -266,6 +266,7 @@ describe("PersonalReportingPatientHistory", () => {
     const links = await screen.findAllByRole("link", { name: "Open in SonicDICOM" });
     expect(links).toHaveLength(2);
     expect(links.every((link) => link.getAttribute("target") === "_blank" && link.getAttribute("rel") === "noopener noreferrer")).toBe(true);
+    expect(links.every((link) => link.textContent?.includes("SonicDICOM"))).toBe(true);
     expect(screen.queryByRole("link", { name: "Open in RadiAnt" })).toBeNull();
     expect(screen.queryByRole("button", { name: /OHIF/i })).toBeNull();
   });
