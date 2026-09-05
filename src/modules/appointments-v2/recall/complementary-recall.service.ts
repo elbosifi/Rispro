@@ -3,8 +3,9 @@ import { pool } from "../../../db/pool.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { logAuditEntry } from "../../../services/audit-service.js";
 import { PROTOCOLING_MODALITY_SQL } from "../../../services/protocoling-modality.js";
-import { queueComplementaryRecallCompletedEmail, getComplementaryRecallCompletionEmailStatuses, type CompletionEmailNotification } from "./complementary-recall-email.js";
+import { queueComplementaryRecallCompletedEmail, queueComplementaryRecallFinalizedEmail, getComplementaryRecallCompletionEmailStatuses, type CompletionEmailNotification } from "./complementary-recall-email.js";
 import { uploadDocumentIdempotently, upsertDocumentAppointmentLinks } from "../../../services/document-service.js";
+import { createAdditionalImagingNotification } from "../../doctor-portal/reporting-board-repository.js";
 
 export type ComplementaryRecallStatus = "pending_scheduling" | "scheduled" | "completed" | "cancelled";
 export type ComplementaryRecallReasonCode = "missing_sequence_phase" | "incomplete_anatomical_coverage" | "motion_nondiagnostic_quality" | "incorrect_protocol" | "incorrect_contrast_phase_timing" | "additional_diagnostic_characterization" | "technical_equipment_problem" | "patient_related_limitation" | "other";
@@ -180,7 +181,7 @@ export async function createComplementaryRecall(client: PoolClient, input: { ori
   const plan = await normalizeReportingPlan(client, input);
   let result;
   try {
-    result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, reason_code, qa_classification, urgency, due_at, reporting_disposition, requested_modality_id, requested_exam_type_id, original_report_dependency, notify_on_arrival, notify_on_imaging_completed, status, requested_by_user_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending_scheduling',$14) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, reasonCode, qaClassification, urgency, dueAt, plan.reportingDisposition, plan.requestedModalityId, plan.requestedExamTypeId, plan.originalReportDependency, input.notifyOnArrival === true, input.notifyOnImagingCompleted === true, input.requestedByUserId]);
+    result = await client.query<RecallRow>(`insert into appointments_v2.complementary_recall_requests (original_appointment_id, reception_instruction, technologist_instruction, reason_code, qa_classification, urgency, due_at, reporting_disposition, requested_modality_id, requested_exam_type_id, original_report_dependency, dependency_resolved_at, notify_on_arrival, notify_on_imaging_completed, status, requested_by_user_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,case when $11='none' then now() else null end,$12,$13,'pending_scheduling',$14) returning ${SELECT}`, [input.originalAppointmentId, input.receptionInstruction?.trim() || null, text, reasonCode, qaClassification, urgency, dueAt, plan.reportingDisposition, plan.requestedModalityId, plan.requestedExamTypeId, plan.originalReportDependency, input.notifyOnArrival === true, input.notifyOnImagingCompleted === true, input.requestedByUserId]);
   } catch (error) {
     if ((error as { code?: string }).code === "23505") throw new HttpError(409, "An active additional imaging request already exists for this appointment.");
     throw error;
@@ -351,6 +352,21 @@ export async function resolveComplementaryRecallReportFinality(client: PoolClien
   if (!recall) return false;
   await logAuditEntry({ entityType: "complementary_recall_request", entityId: recall.id, actionType: "complementary_recall_original_report_dependency_resolved", newValues: { dependency: "report_finalized", recallAppointmentId: bookingId }, changedByUserId: actorUserId }, client);
   return true;
+}
+
+/** Replays durable finalized-report delivery independently of the resolution transition. */
+export async function ensureComplementaryRecallFinalizedSideEffects(bookingId: number, actorUserId: number | null): Promise<void> {
+  const result = await pool.query<{ id: number }>(`select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1 and status='completed' and reporting_disposition='separate_report' and original_report_dependency='report_finalized' and dependency_resolved_at is not null order by id desc`, [bookingId]);
+  for (const row of result.rows) {
+    const recallId = Number(row.id);
+    await createAdditionalImagingNotification({ recallRequestId: recallId, recallAppointmentId: bookingId, eventType: "additional_imaging_report_finalized" }).catch((error) => console.warn({ type: "additional_imaging_finalized_notification_ensure_failed", recallId, bookingId, error: error instanceof Error ? error.message : String(error) }));
+    const client = await pool.connect();
+    try {
+      await queueComplementaryRecallFinalizedEmail(client, { recallRequestId: recallId, recallAppointmentId: bookingId, actorUserId });
+    } catch (error) {
+      console.warn({ type: "additional_imaging_finalized_email_ensure_failed", recallId, bookingId, error: error instanceof Error ? error.message : String(error) });
+    } finally { client.release(); }
+  }
 }
 
 export async function generateComplementaryRecallRequestDocument(recallId: number, recallAppointmentId: number): Promise<void> {

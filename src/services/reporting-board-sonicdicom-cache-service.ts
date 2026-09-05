@@ -12,9 +12,7 @@ import {
   type SonicDicomDocumentHistoryResult,
 } from "./sonicdicom-report-service.js";
 import { insertDoctorAuditEvent } from "../modules/doctor-portal/profile-repository.js";
-import { resolveComplementaryRecallReportFinality } from "../modules/appointments-v2/recall/complementary-recall.service.js";
-import { queueComplementaryRecallFinalizedEmail } from "../modules/appointments-v2/recall/complementary-recall-email.js";
-import { createAdditionalImagingNotification } from "../modules/doctor-portal/reporting-board-repository.js";
+import { ensureComplementaryRecallFinalizedSideEffects, resolveComplementaryRecallReportFinality } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 
 export type ReportingBoardSonicDicomReaders = {
   checkStatusesBatch: typeof checkSonicDicomReportStatusesBatch;
@@ -516,23 +514,15 @@ export async function persistReportingBoardSonicDicomCacheResults(
     });
     if (row.status === "final") {
       const client = await pool.connect();
-      let resolved = false;
       try {
         await client.query("begin");
-        resolved = await resolveComplementaryRecallReportFinality(client, Number(row.appointmentId), null);
+        await resolveComplementaryRecallReportFinality(client, Number(row.appointmentId), null);
         await client.query("commit");
       } catch (error) {
         await client.query("rollback").catch(() => undefined);
         console.warn(JSON.stringify({ type: "additional_imaging_final_dependency_resolution_failed", appointmentId: Number(row.appointmentId), error: error instanceof Error ? error.message : String(error) }));
       } finally { client.release(); }
-      if (resolved) {
-        const recall = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1 and original_report_dependency='report_finalized' order by id desc limit 1", [Number(row.appointmentId)]);
-        const recallId = Number(recall.rows[0]?.id ?? 0);
-        if (recallId) await Promise.all([
-          createAdditionalImagingNotification({ recallRequestId: recallId, recallAppointmentId: Number(row.appointmentId), eventType: "additional_imaging_report_finalized" }),
-          (async () => { const emailClient = await pool.connect(); try { await queueComplementaryRecallFinalizedEmail(emailClient, { recallRequestId: recallId, recallAppointmentId: Number(row.appointmentId), actorUserId: null }); } finally { emailClient.release(); } })(),
-        ]).catch((error) => console.warn(JSON.stringify({ type: "additional_imaging_final_notification_failed", appointmentId: Number(row.appointmentId), error: error instanceof Error ? error.message : String(error) })));
-      }
+      await ensureComplementaryRecallFinalizedSideEffects(Number(row.appointmentId), null);
     }
   }
   return updated.rows.map((row) => ({ ...row, appointmentId: Number(row.appointmentId) }));

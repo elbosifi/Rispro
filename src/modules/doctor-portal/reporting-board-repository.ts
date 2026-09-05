@@ -1094,7 +1094,7 @@ export async function listReportingBoardCaseCandidates(
         active_recall.status as "activeComplementaryRecallStatus",
         latest_recall.status as "latestComplementaryRecallStatus",
         case
-          when active_recall.id is not null and active_recall.reporting_disposition = 'supplement_original_report' and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
+          when supplement_follow_up.id is not null and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
           when active_recall.id is not null and active_recall.reporting_disposition = 'supplement_original_report' then 'waiting_for_additional_imaging'
           when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
           when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
@@ -1168,9 +1168,18 @@ export async function listReportingBoardCaseCandidates(
         where recall.original_appointment_id = b.id
           and recall.status <> 'cancelled'
           and recall.dependency_resolved_at is null
-        order by recall.id desc
+          and ((recall.reporting_disposition = 'supplement_original_report' and recall.status in ('pending_scheduling', 'scheduled')) or (recall.reporting_disposition = 'separate_report' and recall.original_report_dependency in ('imaging_completed', 'report_finalized')))
+        order by case when recall.original_report_dependency = 'report_finalized' then 0 else 1 end, recall.id asc
         limit 1
       ) active_recall on true
+      left join lateral (
+        select recall.id
+        from appointments_v2.complementary_recall_requests recall
+        where recall.original_appointment_id = b.id and recall.status = 'completed'
+          and recall.reporting_disposition = 'supplement_original_report'
+          and recall.dependency_resolved_at is not null and recall.supplement_follow_up_acknowledged_at is null
+        order by recall.completed_at desc, recall.id desc limit 1
+      ) supplement_follow_up on true
       left join lateral (
         select latest_recall.status
         from appointments_v2.complementary_recall_requests latest_recall
@@ -1293,7 +1302,7 @@ export async function listReportingBoardStatsRows(
         case when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
         manual_final.id as "manualFinalOverrideId",
         case
-          when unresolved_recall.id is not null and unresolved_recall.reporting_disposition = 'supplement_original_report' and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
+          when supplement_follow_up.id is not null and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
           when unresolved_recall.id is not null and unresolved_recall.reporting_disposition = 'supplement_original_report' then 'waiting_for_additional_imaging'
           when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
           when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
@@ -1312,8 +1321,17 @@ export async function listReportingBoardStatsRows(
         select recall.id, recall.reporting_disposition, recall.original_report_dependency
         from appointments_v2.complementary_recall_requests recall
         where recall.original_appointment_id = b.id and recall.status <> 'cancelled' and recall.dependency_resolved_at is null
-        order by recall.id desc limit 1
+          and ((recall.reporting_disposition = 'supplement_original_report' and recall.status in ('pending_scheduling', 'scheduled')) or (recall.reporting_disposition = 'separate_report' and recall.original_report_dependency in ('imaging_completed', 'report_finalized')))
+        order by case when recall.original_report_dependency = 'report_finalized' then 0 else 1 end, recall.id asc limit 1
       ) unresolved_recall on true
+      left join lateral (
+        select recall.id
+        from appointments_v2.complementary_recall_requests recall
+        where recall.original_appointment_id = b.id and recall.status = 'completed'
+          and recall.reporting_disposition = 'supplement_original_report'
+          and recall.dependency_resolved_at is not null and recall.supplement_follow_up_acknowledged_at is null
+        order by recall.completed_at desc, recall.id desc limit 1
+      ) supplement_follow_up on true
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
