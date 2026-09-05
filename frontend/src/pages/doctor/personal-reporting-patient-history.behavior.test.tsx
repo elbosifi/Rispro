@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PersonalReportingPatientHistory, type PersonalReportingHistoryCase } from "./personal-reporting-patient-history";
+import { PersonalReportingHistoryButton, PersonalReportingPatientHistory, type PersonalReportingHistoryCase } from "./personal-reporting-patient-history";
 import type { HistoricalPacsCandidate, ProtocolingPatientHistoryItem, ProtocolingPatientHistoryResponse } from "@/types/api";
 
 const testState = vi.hoisted(() => ({
@@ -140,6 +140,13 @@ describe("PersonalReportingPatientHistory", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
+  });
+
+  it("shows the History label on the Personal Desk button on mobile", () => {
+    const onClick = vi.fn();
+    render(<PersonalReportingHistoryButton onClick={onClick} />);
+
+    expect(screen.getByRole("button", { name: "Patient History" }).textContent).toContain("History");
   });
 
   it("uses a full-height, edge-to-edge mobile History panel contract", async () => {

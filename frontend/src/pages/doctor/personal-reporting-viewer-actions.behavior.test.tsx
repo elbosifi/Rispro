@@ -71,6 +71,8 @@ function makeRow(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBo
     priorityCode: "routine",
     reportStatus: "draft",
     requiresReport: true,
+    activeComplementaryRecallStatus: null,
+    latestComplementaryRecallStatus: null,
     appointmentStatus: "completed",
     assignmentStatus: "assigned",
     canAssign: true,
@@ -135,6 +137,8 @@ describe("PersonalReportingViewerActions", () => {
 
     expect(screen.getByRole("link", { name: "Open in SonicDICOM" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open in OHIF" })).toBeTruthy();
+    expect(screen.getByText("SonicDICOM")).toBeTruthy();
+    expect(screen.getByText("OHIF")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Open in RadiAnt" })).toBeNull();
   });
 

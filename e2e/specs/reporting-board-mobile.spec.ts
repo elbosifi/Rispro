@@ -107,10 +107,12 @@ test("authenticated doctor finalizes an own case and finds it in finalized histo
   await page.setViewportSize({ width: 390, height: 844 });
   await openAuthenticatedPersonalDesk(page);
   await page.getByRole("button", { name: "Open case details for E2E Reporting Finalize" }).click();
-  await expect(page.getByRole("button", { name: "Finalize report" })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Finalize report" }).click();
-  await expect(page.getByRole("status")).toHaveText("Report finalized under your account.");
+  await expect(page.getByRole("button", { name: "Mark final in RISpro" })).toBeVisible();
+  await page.getByRole("button", { name: "Mark final in RISpro" }).click();
+  const finalDialog = page.getByRole("dialog").last();
+  await finalDialog.getByRole("textbox", { name: "Reason" }).fill("Reviewed and marked final in RISpro");
+  await finalDialog.getByRole("button", { name: "Mark final in RISpro" }).click();
+  await expect(page.getByRole("status")).toHaveText("Case marked final in RISpro.");
   await expect(page.getByText("E2E Reporting Finalize")).not.toBeVisible();
 
   await page.getByRole("button", { name: "Filters" }).click();
@@ -142,6 +144,6 @@ test("authenticated Personal Desk remains personal on desktop", async ({ page })
   await expect(page.getByText("E2E Reporting Assigned")).toBeVisible();
   await page.getByRole("button", { name: "Open case details for E2E Reporting Assigned" }).click();
   const details = page.getByRole("dialog");
-  await expect(details.getByText("Assigned doctor:")).toBeVisible();
+  await expect(details.getByText("Assigned doctor:")).not.toBeVisible();
   await expect(details.getByText("Reassign case", { exact: true })).not.toBeVisible();
 });

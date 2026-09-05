@@ -1181,6 +1181,8 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     priorityCode: row.reportingPriorityCode,
     reportStatus: row.reportStatus,
     requiresReport: row.requiresReport,
+    activeComplementaryRecallStatus: row.caseType === "appointment" ? row.activeComplementaryRecallStatus ?? null : null,
+    latestComplementaryRecallStatus: row.caseType === "appointment" ? row.latestComplementaryRecallStatus ?? null : null,
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: row.manualFinalOverrideId ?? null,
     manualFinalByDoctorId: row.manualFinalByDoctorId ?? null,

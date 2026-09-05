@@ -147,6 +147,8 @@ export interface ReportingBoardCaseRow {
   comparisonPreparationNote?: string | null;
   caseCategory: string;
   appointmentStatus: string;
+  activeComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | null;
+  latestComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
   requiresReport: boolean;
   reportingPriorityId: number | null;
   reportingPriorityCode: string | null;

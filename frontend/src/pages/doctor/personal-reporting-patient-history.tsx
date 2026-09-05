@@ -132,10 +132,10 @@ export function PersonalReportingHistoryButton({ onClick }: { onClick: () => voi
       onClick={onClick}
       aria-label="Patient History"
       title="Patient History"
-      className="w-9 px-0 sm:w-auto sm:px-3"
+      className="gap-1.5"
     >
       <HistoryIcon size={15} aria-hidden="true" />
-      <span className="sr-only sm:not-sr-only">History</span>
+      <span>History</span>
     </Button>
   );
 }

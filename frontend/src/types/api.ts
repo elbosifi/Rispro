@@ -839,6 +839,8 @@ export interface ReportingBoardMobileCase {
   priorityCode: string | null;
   reportStatus: string;
   requiresReport: boolean;
+  activeComplementaryRecallStatus: "pending_scheduling" | "scheduled" | null;
+  latestComplementaryRecallStatus: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
   manualFinalByDoctorId?: number | null;

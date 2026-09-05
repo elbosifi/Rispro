@@ -1928,9 +1928,32 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await assignDirectly(assignedOther, otherDoctor.doctorId);
     await assignDirectly(assignedNoPermission, noFinalizeDoctor.doctorId);
 
+    const recall = await api<{ recall: { id: number; status: string } }>(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${assigned}/complementary-recalls`, {
+      method: "POST",
+      body: {
+        reasonCode: "technical_equipment_problem",
+        qaClassification: "technical_repeat",
+        urgency: "routine",
+        dueAt: null,
+        reportingDisposition: "supplement_original_report",
+        receptionInstruction: null,
+        technologistInstruction: "Repeat the affected acquisition.",
+      },
+    });
+    assert.equal(recall.status, 201, JSON.stringify(recall.data));
+    const blocked = await api(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${assigned}/mark-final`, {
+      method: "POST",
+      body: { reason: "Reviewed active imaging dependency" },
+    });
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.data));
+    assert.equal((blocked.data as { error?: string }).error, "Additional imaging is pending or scheduled. Complete or withdraw it before marking this case final in RISpro.");
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.reporting_board_manual_final_overrides where appointment_id = $1 and cleared_at is null`, [assigned])).rows[0].count, 0);
+    const withdrawn = await api(targetDoctor.cookie, `/api/doctor/reporting-board/complementary-recalls/${recall.data.recall.id}/withdraw`, { method: "POST" });
+    assert.equal(withdrawn.status, 200, JSON.stringify(withdrawn.data));
+
     const success = await api<{ status: string }>(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${assigned}/mark-final`, {
       method: "POST",
-      body: { reason: "Finalized manually by assigned doctor from Personal Reporting Desk." },
+      body: { reason: "Reviewed and marked final in RISpro" },
     });
     assert.equal(success.status, 200, JSON.stringify(success.data));
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${unassigned}/mark-final`, { method: "POST", body: { reason: "not allowed" } })).status, 403);
@@ -2367,8 +2390,57 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(ownAfterCreate.status, 200, JSON.stringify(ownAfterCreate.data));
     assert.equal(ownAfterCreate.data.recall?.id, ownCreate.data.recall.id);
     assert.equal(ownAfterCreate.data.recall?.status, "pending_scheduling");
+    const ownWorklist = await getDoctorWorklist(doctor, false);
+    type RecallMobileView = {
+      cases: Array<{
+        appointmentId: number;
+        activeComplementaryRecallStatus: string | null;
+        latestComplementaryRecallStatus: string | null;
+      }>;
+    };
+    const pendingMobile = await api<RecallMobileView>(doctor.cookie, `/api/reporting/saved-views/public/${ownWorklist.token}/mobile?q=${encodeURIComponent("Personal Desk assigned recall")}&limit=100`);
+    assert.equal(pendingMobile.status, 200, JSON.stringify(pendingMobile.data));
+    const pendingCase = pendingMobile.data.cases.find((row) => row.appointmentId === ownAppointmentId);
+    assert.ok(pendingCase);
+    assert.equal(pendingCase.activeComplementaryRecallStatus, "pending_scheduling");
+    assert.equal(pendingCase.latestComplementaryRecallStatus, "pending_scheduling");
     const ownWithdraw = await api(doctor.cookie, `/api/doctor/reporting-board/complementary-recalls/${ownCreate.data.recall.id}/withdraw`, { method: "POST" });
     assert.equal(ownWithdraw.status, 200, JSON.stringify(ownWithdraw.data));
+    const completedCreate = await createRequest(doctor.cookie, ownAppointmentId);
+    assert.equal(completedCreate.status, 201, JSON.stringify(completedCreate.data));
+    const completedRecallBooking = await pool.query<{ id: string }>(
+      `
+        insert into appointments_v2.bookings (
+          patient_id, modality_id, exam_type_id, reporting_priority_id,
+          booking_date, booking_time, case_category, requires_report, study_instance_uid, status, notes,
+          completed_at, policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code, special_reason_note,
+          is_walk_in, created_by_user_id, updated_by_user_id
+        )
+        select patient_id, modality_id, exam_type_id, reporting_priority_id,
+          $2::date, '10:00'::time, case_category, requires_report, null, 'completed', null,
+          $3::timestamptz, policy_version_id, 'standard', false, null, null,
+          false, created_by_user_id, updated_by_user_id
+        from appointments_v2.bookings
+        where id = $1
+        returning id::text as id
+      `,
+      [ownAppointmentId, addDays(20), "2026-05-02T08:00:00.000Z"]
+    );
+    const completedRecallBookingId = Number(completedRecallBooking.rows[0]!.id);
+    await pool.query(
+      `update appointments_v2.complementary_recall_requests set recall_appointment_id = $2, status = 'scheduled', scheduled_at = now() where id = $1`,
+      [completedCreate.data.recall.id, completedRecallBookingId]
+    );
+    await pool.query(
+      `update appointments_v2.complementary_recall_requests set status = 'completed', completed_at = now() where id = $1`,
+      [completedCreate.data.recall.id]
+    );
+    const completedMobile = await api<RecallMobileView>(doctor.cookie, `/api/reporting/saved-views/public/${ownWorklist.token}/mobile?q=${encodeURIComponent("Personal Desk assigned recall")}&limit=100`);
+    assert.equal(completedMobile.status, 200, JSON.stringify(completedMobile.data));
+    const completedCase = completedMobile.data.cases.find((row) => row.appointmentId === ownAppointmentId);
+    assert.ok(completedCase);
+    assert.equal(completedCase.activeComplementaryRecallStatus, null);
+    assert.equal(completedCase.latestComplementaryRecallStatus, "completed");
 
     const unassignedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(19), patientName: "Personal Desk unassigned recall" });
     const unassignedActive = await api(doctor.cookie, `/api/doctor/reporting-board/cases/${unassignedAppointmentId}/complementary-recalls/active`);

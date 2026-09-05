@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { ExternalLink, Monitor } from "lucide-react";
 
 import { fetchOhifRetrievalJob, launchReportingBoardCaseInOhif } from "@/lib/api-hooks";
@@ -28,12 +28,12 @@ function useIsMobileViewport(): boolean {
 
 function actionClasses(isMobile: boolean): string {
   return isMobile
-    ? "btn-secondary inline-flex h-9 w-9 items-center justify-center p-0"
+    ? "btn-secondary inline-flex h-[var(--control-height-sm)] items-center gap-1.5 px-2.5 text-sm"
     : "btn-secondary inline-flex h-9 items-center gap-1.5 px-2.5 text-sm";
 }
 
-function actionText(isMobile: boolean, label: string): ReactNode {
-  return <span className={isMobile ? "sr-only" : undefined}>{label}</span>;
+function actionText(_isMobile: boolean, label: string) {
+  return <span>{label}</span>;
 }
 
 function retrievalErrorMessage(status: string, message: string): string {
@@ -127,7 +127,7 @@ export function PersonalReportingViewerActions({
         <Button
           type="button"
           variant="secondary"
-          size={isMobile ? "icon" : "sm"}
+          size="sm"
           aria-label="Open in OHIF"
           title={isResolving ? viewerMessage : "Open in OHIF"}
           disabled={isResolving}

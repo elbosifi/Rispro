@@ -356,6 +356,8 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
     priorityCode: "routine",
     reportStatus: "draft",
     requiresReport: true,
+    activeComplementaryRecallStatus: null,
+    latestComplementaryRecallStatus: null,
     appointmentStatus: "completed",
     assignmentStatus: "assigned",
     canAssign: true,
@@ -417,6 +419,31 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.queryByText("MR · MR")).toBeNull();
   });
 
+  it.each([
+    ["pending", makeCase({ activeComplementaryRecallStatus: "pending_scheduling", latestComplementaryRecallStatus: "pending_scheduling" }), /Additional imaging .*Awaiting scheduling/],
+    ["scheduled", makeCase({ activeComplementaryRecallStatus: "scheduled", latestComplementaryRecallStatus: "scheduled" }), /Additional imaging .*Scheduled/],
+    ["completed", makeCase({ activeComplementaryRecallStatus: null, latestComplementaryRecallStatus: "completed" }), /Additional imaging .*Completed/],
+  ] as const)("shows the %s additional-imaging state on the worklist card", async (_label, row, expected) => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [row] });
+    renderPage();
+
+    expect(await screen.findByText(expected)).toBeTruthy();
+  });
+
+  it("does not show a cancelled latest request as an active card dependency", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ latestComplementaryRecallStatus: "cancelled" })] });
+    renderPage();
+
+    await screen.findByText("Patient One");
+    expect(screen.queryByText(/Additional imaging .*Awaiting scheduling|Additional imaging .*Scheduled|Additional imaging .*Completed/)).toBeNull();
+  });
+
+  it("keeps Refresh visible as a text action", async () => {
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Refresh" })).toBeTruthy();
+  });
+
   it("shows Request additional imaging for an eligible appointment with no active recall", async () => {
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
     renderPage();
@@ -452,27 +479,58 @@ describe("Personal Reporting Desk case presentation", () => {
   });
 
   it("shows Awaiting scheduling and Withdraw request for a pending active recall", async () => {
-    testState.fetchActiveRecall.mockResolvedValue({ id: 12, status: "pending_scheduling", recallAppointmentId: null });
+    testState.fetchActiveRecall.mockResolvedValue({ id: 12, status: "pending_scheduling", recallAppointmentId: null, technologistInstruction: "Repeat the delayed phase" });
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
 
     expect(await screen.findByText("Awaiting scheduling")).toBeTruthy();
+    expect(screen.getByText("The primary case is waiting for this additional imaging.")).toBeTruthy();
+    expect(screen.getByText("Repeat the delayed phase")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
     expect(screen.getByRole("button", { name: "Withdraw request" })).toBeTruthy();
   });
 
   it("shows Scheduled and does not offer withdrawal for a scheduled active recall", async () => {
-    testState.fetchActiveRecall.mockResolvedValue({ id: 13, status: "scheduled", recallAppointmentId: 77 });
+    testState.fetchActiveRecall.mockResolvedValue({ id: 13, status: "scheduled", recallAppointmentId: 77, recallAppointmentDate: "2026-09-03", recallAppointmentTime: "11:30", recallAppointmentAccession: "V2-000077", technologistInstruction: "Acquire the delayed phase" });
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase()] });
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
 
     expect(await screen.findByText("Scheduled")).toBeTruthy();
+    expect(screen.getByText("The primary case remains open until the additional study is completed.")).toBeTruthy();
+    expect(screen.getByText("2026-09-03")).toBeTruthy();
+    expect(screen.getByText("11:30")).toBeTruthy();
+    expect(screen.getByText("V2-000077")).toBeTruthy();
+    expect(screen.getByText("Acquire the delayed phase")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Request additional imaging" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Withdraw request" })).toBeNull();
+  });
+
+  it("shows a completed latest recall as complete and asks the doctor to review it", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ latestComplementaryRecallStatus: "completed" })] });
+    testState.fetchActiveRecall.mockResolvedValue(null);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByText("Completed")).toBeTruthy();
+    expect(screen.getByText("Additional imaging is complete. Review the additional study before marking the primary case final.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request further imaging" })).toBeTruthy();
+  });
+
+  it("shows a cancelled recall as history and allows another request", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ latestComplementaryRecallStatus: "cancelled" })] });
+    testState.fetchActiveRecall.mockResolvedValue(null);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(await screen.findByText("Previous additional imaging request cancelled.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request additional imaging" })).toBeTruthy();
+    expect(screen.queryByText("Cancelled")).toBeNull();
   });
 
   it("creates through the Reporting Board facade and refreshes active recall state", async () => {
@@ -698,7 +756,7 @@ describe("Personal Reporting Desk case presentation", () => {
 
     expect(screen.getByText("MRN-42")).toBeTruthy();
     expect(screen.getByText("ACC-42")).toBeTruthy();
-    expect(screen.getByText("Category:")).toBeTruthy();
+    expect(screen.getByText("Non-oncology")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy MRN" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy accession" })).toBeTruthy();
     expect(screen.getByText("2026-08-01")).toBeTruthy();
@@ -736,14 +794,14 @@ describe("Personal Reporting Desk case presentation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
 
     expect(await screen.findByRole("button", { name: "Request additional imaging" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Finalize report" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Mark final in RISpro" })).toBeTruthy();
     firstRender.unmount();
 
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ requiresReport: false, exclusionReason: "report_not_required" })] });
     renderPage();
     await screen.findByText("Patient One");
     fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
-    expect(screen.queryByRole("button", { name: "Finalize report" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark final in RISpro" })).toBeNull();
   });
 
   async function openCaseDetails(row: ReportingBoardMobileCase, allowedActions: Partial<ReportingBoardMobileResponse["allowedActions"]> = {}) {
@@ -762,13 +820,62 @@ describe("Personal Reporting Desk case presentation", () => {
     ["final", makeCase({ reportStatus: "final", canAssignToMe: false }), false, {}],
   ] as const)("does not expose appointment self-finalization for %s cases", async (_label, row, canClaim, allowedActions) => {
     const view = await openCaseDetails(row, allowedActions);
-    expect(screen.queryByRole("button", { name: "Finalize report" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark final in RISpro" })).toBeNull();
     expect(Boolean(within(view).queryByRole("button", { name: "Claim case" }))).toBe(canClaim);
   });
 
   it("shows appointment self-finalization only for the assigned doctor with the server capability", async () => {
     const view = await openCaseDetails(makeCase());
-    expect(within(view).getByRole("button", { name: "Finalize report" })).toBeTruthy();
+    expect(within(view).getByRole("button", { name: "Mark final in RISpro" })).toBeTruthy();
+  });
+
+  it("requires a reason and sends it when marking a case final in RISpro", async () => {
+    const user = userEvent.setup();
+    const view = await openCaseDetails(makeCase());
+
+    await user.click(within(view).getByRole("button", { name: "Mark final in RISpro" }));
+    const finalDialog = screen.getAllByRole("dialog").at(-1)!;
+    const confirm = within(finalDialog).getByRole("button", { name: "Mark final in RISpro" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await user.type(within(finalDialog).getByRole("textbox", { name: "Reason" }), "  Review completed in RISpro  ");
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    await user.click(confirm);
+
+    await waitFor(() => expect(testState.finalize).toHaveBeenCalledWith(42, { reason: "Review completed in RISpro" }));
+    expect(await screen.findByText("Case marked final in RISpro.")).toBeTruthy();
+  });
+
+  it("disables RISpro manual finalization while additional imaging is active", async () => {
+    const view = await openCaseDetails(makeCase({ activeComplementaryRecallStatus: "pending_scheduling", latestComplementaryRecallStatus: "pending_scheduling" }));
+
+    const action = within(view).getByRole("button", { name: "Mark final in RISpro" });
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    expect(within(view).getByText("Complete or withdraw the active additional-imaging request before marking this case final.")).toBeTruthy();
+  });
+
+  it("permits RISpro manual finalization after completed additional imaging", async () => {
+    const view = await openCaseDetails(makeCase({ latestComplementaryRecallStatus: "completed" }));
+
+    expect((within(view).getByRole("button", { name: "Mark final in RISpro" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("compacts own case details without repeating the assigned doctor", async () => {
+    const view = await openCaseDetails(makeCase());
+
+    expect(within(view).getByText("MRI Knee · MR")).toBeTruthy();
+    expect(within(view).getByText("Non-oncology")).toBeTruthy();
+    expect(within(view).queryByText("non_oncology")).toBeNull();
+    expect(within(view).queryByText("Assigned doctor:")).toBeNull();
+  });
+
+  it("keeps the assigned doctor in supervisor cross-doctor details", async () => {
+    testState.user = { id: 99, username: "manager", fullName: "Dr Manager", role: "supervisor" };
+    testState.fetchView.mockResolvedValue({ ...viewData(), currentDoctorId: 99, allowedActions: { ...viewData().allowedActions, accessLevel: "supervisor" }, cases: [makeCase()] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+
+    expect(screen.getByText("Assigned doctor:")).toBeTruthy();
+    expect(screen.getByText("Dr Reader")).toBeTruthy();
   });
 
   it("labels an unfinished SonicDICOM-final comparison as completion in RISpro", async () => {
@@ -838,9 +945,10 @@ describe("Personal Reporting Desk case presentation", () => {
     testState.finalize.mockRejectedValue(new Error("No active reporting assignment found."));
     const view = await openCaseDetails(makeCase());
     const initialFetches = testState.fetchView.mock.calls.length;
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-
-    fireEvent.click(within(view).getByRole("button", { name: "Finalize report" }));
+    fireEvent.click(within(view).getByRole("button", { name: "Mark final in RISpro" }));
+    const finalDialog = screen.getAllByRole("dialog").at(-1)!;
+    fireEvent.change(within(finalDialog).getByRole("textbox", { name: "Reason" }), { target: { value: "Retry after assignment check" } });
+    fireEvent.click(within(finalDialog).getByRole("button", { name: "Mark final in RISpro" }));
 
     expect(await screen.findByText("No active reporting assignment found.")).toBeTruthy();
     await waitFor(() => expect(testState.fetchView.mock.calls.length).toBeGreaterThan(initialFetches));

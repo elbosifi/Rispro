@@ -1091,6 +1091,8 @@ export async function listReportingBoardCaseCandidates(
         null::text as "linkedPreviousAccessionNumber",
         b.case_category as "caseCategory",
         b.status as "appointmentStatus",
+        active_recall.status as "activeComplementaryRecallStatus",
+        latest_recall.status as "latestComplementaryRecallStatus",
         b.requires_report as "requiresReport",
         b.reporting_priority_id as "reportingPriorityId",
         rp.code as "reportingPriorityCode",
@@ -1153,6 +1155,21 @@ export async function listReportingBoardCaseCandidates(
         order by pi.id asc
         limit 1
       ) primary_identifier on true
+      left join lateral (
+        select recall.status
+        from appointments_v2.complementary_recall_requests recall
+        where recall.original_appointment_id = b.id
+          and recall.status in ('pending_scheduling', 'scheduled')
+        order by recall.id desc
+        limit 1
+      ) active_recall on true
+      left join lateral (
+        select latest_recall.status
+        from appointments_v2.complementary_recall_requests latest_recall
+        where latest_recall.original_appointment_id = b.id
+        order by latest_recall.id desc
+        limit 1
+      ) latest_recall on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
@@ -1186,6 +1203,8 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     modalityId: Number(row.modalityId),
     examTypeId: nullableNumber(row.examTypeId),
     linkedPreviousBookingId: nullableNumber(row.linkedPreviousBookingId),
+    activeComplementaryRecallStatus: row.activeComplementaryRecallStatus ?? null,
+    latestComplementaryRecallStatus: row.latestComplementaryRecallStatus ?? null,
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
@@ -1466,6 +1485,19 @@ export async function markReportingBoardCaseManualFinal(input: {
     );
     const row = booking.rows[0];
     if (!row) throw new HttpError(404, "Case not found.");
+    const activeRecall = await client.query<{ id: number }>(
+      `
+        select id
+        from appointments_v2.complementary_recall_requests
+        where original_appointment_id = $1
+          and status in ('pending_scheduling', 'scheduled')
+        limit 1
+      `,
+      [input.appointmentId]
+    );
+    if (activeRecall.rows[0]) {
+      throw new HttpError(409, "Additional imaging is pending or scheduled. Complete or withdraw it before marking this case final in RISpro.");
+    }
     if (row.status !== "completed") throw new HttpError(409, "Only completed Reporting Board cases can be manually marked final.");
 
     const existing = await client.query<{ id: number }>(
