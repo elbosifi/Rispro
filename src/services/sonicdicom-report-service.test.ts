@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
-import { __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
+import { __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
   ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
@@ -22,6 +22,56 @@ const readiness = (overrides: Partial<{
   latestDocumentId: "20",
   finalizedByAccount: "doctor.b@nccb.ly",
   ...overrides,
+});
+
+describe("SonicDICOM active document SQL parameter binding", () => {
+  const createSqlFakes = () => {
+    const calls: Array<{ name: string; type: unknown; value: unknown }> = [];
+    const sqlInt = () => Symbol("sql.Int");
+    const sqlNVarChar = (_size?: number) => Symbol("sql.NVarChar");
+    const request = {
+      input(name: string, type: unknown, value: unknown) {
+        calls.push({ name, type, value });
+        return request;
+      },
+      query: async () => ({ recordset: [] }),
+    };
+    const sql = {
+      ConnectionPool: class {
+        async connect() {}
+        async close() {}
+        request() { return request; }
+      },
+      Int: sqlInt,
+      NVarChar: sqlNVarChar,
+    };
+    return { calls, request, sql, sqlInt, sqlNVarChar };
+  };
+
+  it("binds one configured no-report status as SQL Int with a numeric value", () => {
+    const { calls, request, sql, sqlInt, sqlNVarChar } = createSqlFakes();
+    const predicate = __activeDocumentPredicateForTest(request, sql, [7], "noReportStatus");
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].name, "noReportStatus0");
+    assert.equal(calls[0].type, sqlInt);
+    assert.notEqual(calls[0].type, sqlNVarChar);
+    assert.equal(calls[0].value, 7);
+    assert.equal(typeof calls[0].value, "number");
+    assert.match(predicate, /d\.Status not in \(@noReportStatus0\)/);
+  });
+
+  it("binds multiple configured no-report statuses as SQL Int with numeric values", () => {
+    const { calls, request, sql, sqlInt } = createSqlFakes();
+    const predicate = __activeDocumentPredicateForTest(request, sql, [7, 42], "noReportStatus");
+
+    assert.deepEqual(calls, [
+      { name: "noReportStatus0", type: sqlInt, value: 7 },
+      { name: "noReportStatus1", type: sqlInt, value: 42 },
+    ]);
+    assert.match(predicate, /d\.Status not in \(@noReportStatus0, @noReportStatus1\)/);
+    assert.deepEqual(calls.map((call) => typeof call.value), ["number", "number"]);
+  });
 });
 
 describe("SonicDICOM SQL document status mapping", () => {

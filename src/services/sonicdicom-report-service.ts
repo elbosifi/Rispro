@@ -145,6 +145,7 @@ interface SqlConnectionPool {
 
 type SqlModule = {
   ConnectionPool: new (config: unknown) => SqlConnectionPool;
+  Int: () => unknown;
   NVarChar: (size?: number) => unknown;
 };
 
@@ -158,8 +159,12 @@ function normalizedSonicAccount(value: string | null | undefined): string {
 function activeDocumentPredicate(request: SqlRequest, sql: SqlModule, statusCodes: number[], prefix: string, column = "d.Status"): string {
   const codes = [...new Set(statusCodes.filter((value) => Number.isInteger(value)))];
   if (!codes.length) return "1 = 1";
-  codes.forEach((code, index) => request.input(`${prefix}${index}`, sql.NVarChar(16), code));
+  codes.forEach((code, index) => request.input(`${prefix}${index}`, sql.Int, code));
   return `${column} not in (${codes.map((_, index) => `@${prefix}${index}`).join(", ")})`;
+}
+
+export function __activeDocumentPredicateForTest(request: SqlRequest, sql: SqlModule, statusCodes: number[], prefix: string, column = "d.Status"): string {
+  return activeDocumentPredicate(request, sql, statusCodes, prefix, column);
 }
 
 export function __isSonicDicomActiveDocumentStatusForTest(statusCode: number | null, noReportStatusCodes: number[]): boolean {
