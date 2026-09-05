@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
-import { __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
+import { __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
   ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
@@ -30,6 +30,24 @@ describe("SonicDICOM SQL document status mapping", () => {
     assert.equal(__mapSonicDicomSqlStatusCodeForTest(settings, 1).state, "draft");
     assert.equal(__mapSonicDicomSqlStatusCodeForTest(settings, 7).state, "no_report");
     assert.equal(__mapSonicDicomSqlStatusCodeForTest(settings, 999).state, "unavailable");
+  });
+
+  it("excludes a newer tombstone from active readiness while retaining the earlier Final", () => {
+    const documents = [
+      { documentId: "A", statusCode: 6, updatedAt: "2026-09-01T10:00:00.000Z" },
+      { documentId: "B", statusCode: 7, updatedAt: "2026-09-01T11:00:00.000Z" },
+    ];
+    const active = documents.filter((document) => __isSonicDicomActiveDocumentStatusForTest(document.statusCode, settings.sonicDicomSqlNoReportStatusCodes));
+    assert.deepEqual(active, [documents[0]]);
+    assert.equal(__mapSonicDicomSqlStatusCodeForTest(settings, active[0].statusCode, active[0].updatedAt, active[0].documentId).state, "final");
+  });
+
+  it("retains Final and tombstone documents in metadata history", () => {
+    const history = __documentHistoriesFromSqlRowsForTest(["1.2.3"], "study_instance_uid", [
+      { StudyInstanceUID: "1.2.3", FoundStudy: 1, FoundReport: 1, ReportNo: 9284, Id: "B", Account: "doctor.b", Status: 7, UpdatedAt: "2026-09-01T11:00:00.000Z" },
+      { StudyInstanceUID: "1.2.3", FoundStudy: 1, FoundReport: 1, ReportNo: 9284, Id: "A", Account: "doctor.a", Status: 6, UpdatedAt: "2026-09-01T10:00:00.000Z" },
+    ]).get("1.2.3");
+    assert.deepEqual(history?.documents.map((document) => ({ id: document.documentId, status: document.statusCode })), [{ id: "B", status: 7 }, { id: "A", status: 6 }]);
   });
 
   it("uses a found StudyInstanceUID result without calling accession fallback", async () => {

@@ -1104,7 +1104,7 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
   const finalizedAt = optionalIso(row.reportFinalAt);
   const sonicStatus = String(row.sonicReportStatus ?? "");
   const sonicCheckedAt = optionalIso(row.sonicLastSuccessAt);
-  const hasSonicObservation = !finalizedAt && sonicCheckedAt !== null &&
+  const hasSonicObservation = sonicCheckedAt !== null &&
     ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(sonicStatus);
   const effectiveStatus = finalizedAt ? "final" : hasSonicObservation ? sonicStatus as ReportingBoardCaseRow["reportStatus"] : "no_report";
   const effectiveFinalAt = finalizedAt ?? (hasSonicObservation && sonicStatus === "final" ? optionalIso(row.sonicReportFinalAt) : null);
@@ -1229,7 +1229,13 @@ export async function listComparisonReportingBoardRows(
       join patients p on p.id = cr.patient_id
       left join modalities m on m.id = cr.linked_modality_id
       left join doctor_portal.comparison_case_assignments cca on cca.comparison_request_id = cr.id and cca.status = 'active'
-      left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
+      left join lateral (
+        select cache.*
+        from doctor_portal.comparison_sonicdicom_cache cache
+        where cache.comparison_request_id = cr.id
+        order by (cache.comparison_assignment_id = cca.id) desc, cache.last_success_at desc nulls last, cache.updated_at desc, cache.comparison_assignment_id desc
+        limit 1
+      ) comparison_cache on true
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.user_id = cr.finalized_by
       left join lateral (

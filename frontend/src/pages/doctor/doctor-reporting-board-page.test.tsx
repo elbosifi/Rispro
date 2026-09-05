@@ -1447,6 +1447,28 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByRole("heading", { name: /Board settings/i })).toBeNull();
   });
 
+  it("keeps SonicDICOM-final comparisons actionable until RISpro finalization", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...comparisonRow, appointmentStatus: "completed", reportStatus: "final", reportStatusSource: "sonicdicom" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+    const row = (await screen.findByText("CMP-000077")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
+    expect(await screen.findByRole("menuitem", { name: "Complete comparison in RISpro" })).toBeTruthy();
+  });
+
+  it("does not offer comparison completion after RISpro finalization", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...comparisonRow, appointmentStatus: "finalized", reportStatus: "final", reportStatusSource: "rispro" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+    const row = (await screen.findByText("CMP-000077")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
+    expect(screen.queryByRole("menuitem", { name: "Complete comparison in RISpro" })).toBeNull();
+  });
+
   it("builds print URLs with reporting board parameters", () => {
     const url = buildReportingBoardPrintUrl({
       filters: { reportStatus: "required_not_final", assignedDoctorId: 5 },

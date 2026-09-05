@@ -31,6 +31,12 @@ describe("Personal Reporting Desk", () => {
     assert.match(page, /finalizeComparisonRequest/);
   });
 
+  it("shows a tombstoned comparison warning without reopening RISpro finalization", () => {
+    assert.match(page, /row\.caseType === "comparison" && row\.sonicDicomDocumentRemoved/);
+    assert.match(page, /SonicDICOM comparison report removed/);
+    assert.match(page, /comparisonFinal = canFinalizeOwnReports && selected\?\.caseType === "comparison" && selected\.appointmentStatus !== "finalized"/);
+  });
+
   it("keeps Personal Desk APIs on Reporting Board facades instead of protocoling mutations", () => {
     const api = readFileSync("src/lib/api/doctor-portal-reporting.ts", "utf8");
     assert.match(api, /fetchReportingBoardPatientHistory[\s\S]*?\/doctor\/reporting-board\/cases\/\$\{appointmentId\}\/history/);

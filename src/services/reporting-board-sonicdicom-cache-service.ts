@@ -13,6 +13,21 @@ import {
 } from "./sonicdicom-report-service.js";
 import { insertDoctorAuditEvent } from "../modules/doctor-portal/profile-repository.js";
 
+export type ReportingBoardSonicDicomReaders = {
+  checkStatusesBatch: typeof checkSonicDicomReportStatusesBatch;
+  fetchDocumentHistoriesBatch: typeof fetchSonicDicomDocumentHistoriesBatch;
+};
+
+const productionSonicDicomReaders: ReportingBoardSonicDicomReaders = {
+  checkStatusesBatch: checkSonicDicomReportStatusesBatch,
+  fetchDocumentHistoriesBatch: fetchSonicDicomDocumentHistoriesBatch,
+};
+let sonicDicomReaders = productionSonicDicomReaders;
+
+export function __setReportingBoardSonicDicomReadersForTest(readers: ReportingBoardSonicDicomReaders | null): void {
+  sonicDicomReaders = readers ?? productionSonicDicomReaders;
+}
+
 export type ReportingBoardCacheStatus = "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
 
 export interface ReportingBoardSonicDicomCacheCandidate extends ReportLookupContext {
@@ -557,12 +572,12 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
   const primary = [...primaryContexts.values()];
   let resolved = new Map<number, ReportStatusResult>();
   try {
-    resolved = primary.length ? await checkSonicDicomReportStatusesBatch(primary, { audit: false }) : resolved;
+    resolved = primary.length ? await sonicDicomReaders.checkStatusesBatch(primary, { audit: false }) : resolved;
   } catch (error) {
     await persistReportingBoardSonicDicomCacheResults(primary.map((context) => ({ context, result: null, error })), settings);
     await persistComparisonSonicDicomCacheObservations(comparisonCandidates.map((candidate) => ({
       candidate,
-      observation: { status: "unavailable", successful: false, reportNo: null, documentId: candidate.storedDocumentId, account: null, reportFinalAt: null, correlationMethod: null },
+      observation: { status: "unavailable", successful: false, reportNo: null, documentId: candidate.storedDocumentId, account: null, statusCode: null, documentUpdatedAt: null, correlatedDocuments: [], reportFinalAt: null, correlationMethod: null },
       error,
     })), settings);
     return { candidates: candidates.length + comparisonCandidates.length, successful: 0, changedStatus: 0, final: 0, failed: candidates.length + comparisonCandidates.length };
@@ -575,7 +590,7 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
       lookupKey: `study:${context.bookingId}`, accessionNumber: context.accessionNumber, studyInstanceUid: context.studyInstanceUid,
     }])).values()];
     for (let index = 0; index < historyContexts.length; index += 200) {
-      const batch = await fetchSonicDicomDocumentHistoriesBatch(historyContexts.slice(index, index + 200));
+      const batch = await sonicDicomReaders.fetchDocumentHistoriesBatch(historyContexts.slice(index, index + 200));
       for (const [key, value] of batch) histories.set(key, value);
     }
   } catch (error) {

@@ -161,6 +161,10 @@ function activeDocumentPredicate(request: SqlRequest, sql: SqlModule, statusCode
   return `${column} not in (${codes.map((_, index) => `@${prefix}${index}`).join(", ")})`;
 }
 
+export function __isSonicDicomActiveDocumentStatusForTest(statusCode: number | null, noReportStatusCodes: number[]): boolean {
+  return statusCode == null || !new Set(noReportStatusCodes.filter(Number.isInteger)).has(statusCode);
+}
+
 /** SonicDICOM GUID equality is case-insensitive but audit storage preserves original text. */
 export function normalizeSonicDicomDocumentId(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
@@ -505,8 +509,16 @@ async function querySqlDocumentHistoryBatch(
     outer apply (select d.Id, d.Account, d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo) document
     order by document.UpdatedAt desc, document.Id desc
   `)).recordset ?? [];
+  return documentHistoriesFromSqlRows(uniqueIdentifiers, method, rows);
+}
+
+function documentHistoriesFromSqlRows(
+  identifiers: string[],
+  method: "study_instance_uid" | "accession_fallback",
+  rows: SqlDocumentHistoryRow[]
+): Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">> {
   const histories = new Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">>();
-  for (const identifier of uniqueIdentifiers) histories.set(identifier, { foundStudy: false, foundReport: false, reportNo: null, documents: [] });
+  for (const identifier of identifiers) histories.set(identifier, { foundStudy: false, foundReport: false, reportNo: null, documents: [] });
   for (const row of rows) {
     const key = String(method === "study_instance_uid" ? row.StudyInstanceUID ?? "" : row.AccessionNumber ?? "").trim();
     if (!key) continue;
@@ -534,6 +546,14 @@ async function querySqlDocumentHistoryBatch(
     });
   }
   return histories;
+}
+
+export function __documentHistoriesFromSqlRowsForTest(
+  identifiers: string[],
+  method: "study_instance_uid" | "accession_fallback",
+  rows: SqlDocumentHistoryRow[]
+): Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">> {
+  return documentHistoriesFromSqlRows(identifiers, method, rows);
 }
 
 /**
