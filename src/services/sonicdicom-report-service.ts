@@ -111,6 +111,7 @@ export interface SonicDicomDocumentHistoryResult {
 
 export interface SonicDicomComparisonDocumentSelection {
   storedDocumentId: string | null;
+  storedDocumentUpdatedAt?: string | null;
   storedDocumentStatusCode?: number | null;
   primaryDocumentId: string | null;
   primaryCachedReportStatus?: string | null;
@@ -182,27 +183,33 @@ export function selectSonicDicomComparisonDocument(
   candidate: SonicDicomComparisonDocumentSelection,
   history: SonicDicomDocumentHistoryResult,
   options: { noReportStatusCodes?: number[]; finalStatusCodes?: number[] } = {}
-): { document: SonicDicomReportDocument | null; multipleCandidates: boolean; storedDocument: SonicDicomReportDocument | null; bootstrapRejected: boolean } {
+): { document: SonicDicomReportDocument | null; multipleCandidates: boolean; storedDocument: SonicDicomReportDocument | null; bootstrapRejected: boolean; failClosed: boolean } {
   const storedId = normalizeSonicDicomDocumentId(candidate.storedDocumentId);
   const primaryId = normalizeSonicDicomDocumentId(candidate.primaryDocumentId);
   const storedDocument = storedId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === storedId) ?? null : null;
-  const tombstones = new Set(options.noReportStatusCodes ?? [7]);
+  const tombstones = new Set((options.noReportStatusCodes ?? [7]).filter(Number.isInteger));
   const finals = new Set(options.finalStatusCodes ?? [6]);
-  if (storedDocument && !tombstones.has(Number(storedDocument.statusCode))) {
-    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false };
+  const isActive = (document: SonicDicomReportDocument) => document.statusCode == null || !tombstones.has(document.statusCode);
+  if (storedDocument && isActive(storedDocument)) {
+    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
+  }
+  const storedUpdatedAt = Date.parse(storedDocument?.updatedAt ?? candidate.storedDocumentUpdatedAt ?? "");
+  if (storedId && !Number.isFinite(storedUpdatedAt)) {
+    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: true };
   }
   const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorUsername);
   const assignedAt = Date.parse(candidate.assignedAt);
-  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false };
+  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
   const matches = history.documents.filter((document) => {
     const updatedAt = Date.parse(document.updatedAt ?? "");
     const documentId = normalizeSonicDicomDocumentId(document.documentId);
     return documentId !== storedId && documentId !== primaryId &&
       normalizedSonicAccount(document.account) === assignedAccount &&
       Number.isFinite(updatedAt) && updatedAt >= assignedAt;
-  }).filter((document) => !storedDocument || Date.parse(document.updatedAt ?? "") > Date.parse(storedDocument.updatedAt ?? ""))
+  }).filter((document) => !storedId || isActive(document))
+    .filter((document) => !storedId || Date.parse(document.updatedAt ?? "") > storedUpdatedAt)
     .sort(newerDocumentFirst);
-  if (matches.length) return { document: matches[0], multipleCandidates: matches.length > 1, storedDocument, bootstrapRejected: false };
+  if (matches.length) return { document: matches[0], multipleCandidates: matches.length > 1, storedDocument, bootstrapRejected: false, failClosed: false };
 
   const cachedPrimary = primaryId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === primaryId) ?? null : null;
   const primaryWasNonFinal = candidate.primaryCachedReportStatus !== "final";
@@ -213,9 +220,10 @@ export function selectSonicDicomComparisonDocument(
       Number.isFinite(updatedAt) && (updatedAt < assignedAt || updatedAt < primaryUpdatedAt);
   });
   const bootstrapCandidate = cachedPrimary && primaryWasNonFinal &&
+    (!storedId || isActive(cachedPrimary)) &&
     normalizedSonicAccount(cachedPrimary.account) === assignedAccount && Number.isFinite(primaryUpdatedAt) && primaryUpdatedAt >= assignedAt;
-  if (bootstrapCandidate && alternatePrimary) return { document: cachedPrimary, multipleCandidates: false, storedDocument, bootstrapRejected: false };
-  return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: Boolean(bootstrapCandidate) };
+  if (bootstrapCandidate && alternatePrimary) return { document: cachedPrimary, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
+  return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: Boolean(bootstrapCandidate), failClosed: false };
 }
 
 function validateDatabaseName(name: string, fallback: string): string {

@@ -65,6 +65,7 @@ export interface ComparisonSonicDicomCacheCandidate extends ReportLookupContext 
   assignedDoctorUsername: string | null;
   assignedAt: string;
   storedDocumentId: string | null;
+  storedDocumentUpdatedAt: string | null;
   primaryDocumentId: string | null;
   primaryCachedReportStatus: string | null;
   primaryManualFinal: boolean;
@@ -187,6 +188,10 @@ function comparisonObservationFromHistory(
     comparisonAssignmentId: candidate.comparisonAssignmentId,
     comparisonRequestId: candidate.comparisonRequestId,
   }));
+  if (selected.failClosed) return {
+    status: "unavailable", successful: false, reportNo: history.reportNo, documentId: candidate.storedDocumentId,
+    account: null, reportFinalAt: null, correlationMethod: history.correlationMethod, ...noObservation,
+  };
   if (!selected.document) return {
     status: "no_report", successful: true, reportNo: history.reportNo, documentId: candidate.storedDocumentId,
     account: null, reportFinalAt: null, correlationMethod: history.correlationMethod, ...noObservation,
@@ -307,6 +312,7 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
       b.requires_report as "requiresReport", b.status,
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
       assigned_user.username as "assignedDoctorUsername", comparison_cache.sonicdicom_document_id as "storedDocumentId",
+      comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
       manual.id is not null as "primaryManualFinal"
     from doctor_portal.comparison_case_assignments cca
@@ -330,6 +336,7 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
     comparisonRequestId: Number(row.comparisonRequestId),
     primaryManualFinal: Boolean(row.primaryManualFinal),
     storedDocumentId: row.storedDocumentId == null ? null : String(row.storedDocumentId),
+    storedDocumentUpdatedAt: row.storedDocumentUpdatedAt == null ? null : String(row.storedDocumentUpdatedAt),
     primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
     primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
     assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
@@ -597,11 +604,11 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
     historyError = error;
   }
 
-  await persistComparisonSonicDicomCacheObservations(comparisonCandidates.map((candidate) => ({
-    candidate,
-    observation: comparisonObservationFromHistory(candidate, histories.get(`study:${candidate.bookingId}`) ?? null, settings),
-    error: historyError,
-  })), settings);
+  const comparisonObservations = comparisonCandidates.map((candidate) => {
+    const observation = comparisonObservationFromHistory(candidate, histories.get(`study:${candidate.bookingId}`) ?? null, settings);
+    return { candidate, observation, error: historyError ?? (!observation.successful ? "SonicDICOM comparison correlation was not safely established" : null) };
+  });
+  await persistComparisonSonicDicomCacheObservations(comparisonObservations, settings);
 
   const comparisonDocumentIds = await knownComparisonDocumentIdsByAppointment(primary.map((context) => context.bookingId));
   const primaryInputs = primary.map((context) => {
@@ -613,7 +620,11 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
       return { context, result: normal, error: normal?.state === "unavailable" ? "SonicDICOM unavailable" : null };
     }
     if (!excluded?.size) return { context, result: normal, error: normal?.state === "unavailable" ? "SonicDICOM unavailable" : null };
-    const document = history.documents.find((candidate) => !excluded.has(normalizeSonicDicomDocumentId(candidate.documentId))) ?? null;
+    const noReportStatuses = new Set(settings.sonicDicomSqlNoReportStatusCodes.filter(Number.isInteger));
+    const document = history.documents.find((candidate) =>
+      !excluded.has(normalizeSonicDicomDocumentId(candidate.documentId)) &&
+      (candidate.statusCode == null || !noReportStatuses.has(candidate.statusCode))
+    ) ?? null;
     const result = document
       ? mapSonicDicomDocumentStatus(settings, document.statusCode, document.updatedAt, document.documentId, document.account, history.correlationMethod)
       : {
@@ -628,12 +639,11 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
   for (const candidate of candidates) {
     const value = primaryInputs.find((input) => input.context.bookingId === candidate.bookingId)?.result ?? null;
     const persisted = persistedById.get(candidate.bookingId) ?? { changed: false, status: "unavailable" as const };
-    if (value?.state === "unavailable") failed += 1; else successful += 1;
+    if (!value || value.state === "unavailable") failed += 1; else successful += 1;
     if (persisted.changed) changedStatus += 1;
     if (persisted.status === "final") final += 1;
   }
-  for (const candidate of comparisonCandidates) {
-    const observation = comparisonObservationFromHistory(candidate, histories.get(`study:${candidate.bookingId}`) ?? null, settings);
+  for (const { observation } of comparisonObservations) {
     if (observation.successful) successful += 1; else failed += 1;
     if (observation.status === "final") final += 1;
   }

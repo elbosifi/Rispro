@@ -165,4 +165,62 @@ describe("SonicDICOM comparison document correlation", () => {
     ]));
     assert.equal(selected.document?.documentId, "DOCUMENT-B");
   });
+
+  it("selects the newest active replacement when multiple tombstones are newer than stored B", () => {
+    for (const statusCode of [1, 6]) {
+      const selected = selectSonicDicomComparisonDocument({
+        storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+      }, history([
+        { documentId: "D", account: "doctor.b@nccb.ly", statusCode: 7, updatedAt: "2026-09-01T13:00:00.000Z" },
+        { documentId: "C", account: "doctor.b@nccb.ly", statusCode, updatedAt: "2026-09-01T12:00:00.000Z" },
+        { documentId: "B", account: "doctor.b@nccb.ly", statusCode: 7, updatedAt: "2026-09-01T11:00:00.000Z" },
+        { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+      ]), { noReportStatusCodes: [7], finalStatusCodes: [6] });
+      assert.equal(selected.document?.documentId, "C");
+    }
+  });
+
+  it("uses configured no-report codes when excluding replacement candidates", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "D", account: "doctor.b@nccb.ly", statusCode: 42, updatedAt: "2026-09-01T13:00:00.000Z" },
+      { documentId: "C", account: "doctor.b@nccb.ly", statusCode: 1, updatedAt: "2026-09-01T12:00:00.000Z" },
+      { documentId: "B", account: "doctor.b@nccb.ly", statusCode: 42, updatedAt: "2026-09-01T11:00:00.000Z" },
+      { documentId: "A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+    ]), { noReportStatusCodes: [42], finalStatusCodes: [6] });
+    assert.equal(selected.document?.documentId, "C");
+  });
+
+  it("uses the cached stored timestamp when B is physically missing from history", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: "B", storedDocumentUpdatedAt: "2026-09-01T11:00:00.000Z", primaryDocumentId: "A",
+      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T12:00:00.000Z" },
+      { documentId: "X", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:05:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "C");
+  });
+
+  it("fails closed when stored B is missing and has no trustworthy cached timestamp", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: "B", storedDocumentUpdatedAt: null, primaryDocumentId: "A",
+      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T12:00:00.000Z" },
+      { documentId: "X", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:05:00.000Z" },
+    ]));
+    assert.equal(selected.document, null);
+    assert.equal(selected.failClosed, true);
+  });
+
+  it("rejects an ambiguous polluted primary bootstrap without an alternate Final", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft",
+      assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([{ documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" }]));
+    assert.equal(selected.document, null);
+    assert.equal(selected.bootstrapRejected, true);
+  });
 });

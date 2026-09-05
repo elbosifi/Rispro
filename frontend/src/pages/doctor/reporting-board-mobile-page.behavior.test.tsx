@@ -771,6 +771,35 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(within(view).getByRole("button", { name: "Finalize report" })).toBeTruthy();
   });
 
+  it("labels an unfinished SonicDICOM-final comparison as completion in RISpro", async () => {
+    const view = await openCaseDetails(makeCase({
+      caseType: "comparison", caseKey: "comparison:sonic-final", appointmentId: 0, comparisonRequestId: 13,
+      reportStatus: "final", reportStatusSource: "sonicdicom", appointmentStatus: "completed",
+      assignmentStatus: "assigned", assignedDoctorId: 7,
+    }));
+    expect(within(view).getByRole("button", { name: "Complete comparison in RISpro" })).toBeTruthy();
+    expect(within(view).queryByRole("button", { name: "Finalize comparison report" })).toBeNull();
+  });
+
+  it("does not expose a completion action for a RISpro-finalized comparison", async () => {
+    const view = await openCaseDetails(makeCase({
+      caseType: "comparison", caseKey: "comparison:rispro-final", appointmentId: 0, comparisonRequestId: 14,
+      reportStatus: "final", reportStatusSource: "rispro", appointmentStatus: "finalized",
+      assignmentStatus: "assigned", assignedDoctorId: 7,
+    }));
+    expect(within(view).queryByRole("button", { name: "Complete comparison in RISpro" })).toBeNull();
+    expect(within(view).queryByRole("button", { name: "Finalize comparison report" })).toBeNull();
+  });
+
+  it("renders the SonicDICOM comparison removal warning on the case card", async () => {
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({
+      caseType: "comparison", caseKey: "comparison:removed", appointmentId: 0, comparisonRequestId: 15,
+      sonicDicomDocumentRemoved: true,
+    })] });
+    renderPage();
+    expect(await screen.findByText("SonicDICOM comparison report removed")).toBeTruthy();
+  });
+
   it.each([
     ["assigned", makeCase({ caseType: "comparison", caseKey: "comparison:9", appointmentId: 0, comparisonRequestId: 9 }), true],
     ["unassigned", makeCase({ caseType: "comparison", caseKey: "comparison:10", appointmentId: 0, comparisonRequestId: 10, assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }), false],
