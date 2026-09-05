@@ -2484,6 +2484,7 @@ export async function assignReportingBoardCaseToDoctor(
   await requireRosterManager(actor);
   const rows = await listReportingBoardCasesByAppointmentIds([input.appointmentId]);
   const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
+  if (verification.finalIds.has(input.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
   if (verification.unavailableIds.has(input.appointmentId)) throw new HttpError(503, "Report finality could not be verified. Please try again.");
   const result = await assignDoctorCase(actor, {
     appointmentId: input.appointmentId,
