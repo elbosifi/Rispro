@@ -37,7 +37,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/shared";
-import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityPreviousStudies, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchRequestScanStatus, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityPreviousStudiesResponse } from "@/lib/api-hooks";
+import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityHistoricalPacsCandidates, fetchModalityPatientHistory, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchRequestScanStatus, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, searchModalityHistoricalPacsPatientId, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityHistoricalPacsCandidatesResponse } from "@/lib/api-hooks";
 import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t, type TranslationKey } from "@/lib/i18n";
@@ -46,8 +46,9 @@ import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-forma
 import { pushToast } from "@/lib/toast";
 import { historicalDicomDateToIso, shouldHideHistoricalCandidateStudy } from "@/lib/historical-pacs-presentation";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AppointmentLookups, AppointmentStatus, HistoricalPacsStudy, ModalityProtocolAssignment } from "@/types/api";
+import type { AppointmentLookups, AppointmentStatus, HistoricalPacsCandidate, HistoricalPacsStudy, ModalityProtocolAssignment, ProtocolingPatientHistoryResponse } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
+import { buildRadiantPacsTagUrl } from "../doctor/doctor-reporting-board-page.helpers";
 
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
 const LIVE_BOARD_STATUSES = new Set<AppointmentStatus>(["in-progress", "arrived", "waiting", "scheduled"]);
@@ -598,8 +599,10 @@ export default function ModalityPage() {
   });
   const cdDestinationsQuery = useQuery({ queryKey: ["modality", "cd-robots"], queryFn: fetchCdRobotDestinations, staleTime: 60_000 });
   const cdHistoryQuery = useQuery({ queryKey: ["modality", "cd-deliveries", cdDialog?.appointment.id], queryFn: () => fetchCdRobotDeliveries(cdDialog!.appointment.id), enabled: cdDialog != null });
-  const previousStudiesQuery = useQuery({ queryKey: ["modality", "previous-studies", selectedAppointmentId], queryFn: () => fetchModalityPreviousStudies(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
-  const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", selectedAppointmentId] }), onError: () => pushToast({ type: "error", title: t(language, "modality.previousStudies.saveFailed") }) });
+  const previousStudiesHistoryQuery = useQuery<ProtocolingPatientHistoryResponse>({ queryKey: ["modality", "previous-studies", "history", selectedAppointmentId], queryFn: () => fetchModalityPatientHistory(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
+  const historicalPacsCandidatesQuery = useQuery<ModalityHistoricalPacsCandidatesResponse>({ queryKey: ["modality", "previous-studies", "historical-candidates", selectedAppointmentId], queryFn: () => fetchModalityHistoricalPacsCandidates(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
+  const oldPacsPatientIdMutation = useMutation({ mutationFn: ({ appointmentId, patientId }: { appointmentId: number; patientId: string }) => searchModalityHistoricalPacsPatientId(appointmentId, patientId) });
+  const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", "historical-candidates", selectedAppointmentId] }), onError: () => pushToast({ type: "error", title: t(language, "modality.previousStudies.saveFailed") }) });
 
   useEffect(() => {
     const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
@@ -1628,7 +1631,26 @@ export default function ModalityPage() {
               </main>
                 </> : null}
                 {selectedAppointmentTab === "previousStudies" ? <div className="min-h-0 flex-1 overflow-auto bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
-                  <PreviousStudiesPanel language={language} data={previousStudiesQuery.data} isLoading={previousStudiesQuery.isLoading} isError={previousStudiesQuery.isError} onRetry={() => void previousStudiesQuery.refetch()} onAttest={(studyInstanceUid, status) => attestationMutation.mutate({ studyInstanceUid, status })} isSaving={attestationMutation.isPending} />
+                  <SplitPreviousStudiesPanel
+                    language={language}
+                    appointmentId={selectedAppointment.id}
+                    history={previousStudiesHistoryQuery.data}
+                    historyIsLoading={previousStudiesHistoryQuery.isLoading}
+                    historyIsError={previousStudiesHistoryQuery.isError}
+                    onRetryHistory={() => void previousStudiesHistoryQuery.refetch()}
+                    historicalCandidates={historicalPacsCandidatesQuery.data?.historicalCandidates}
+                    historicalCandidatesIndexStatus={historicalPacsCandidatesQuery.data?.historicalPacsIndexStatus}
+                    historicalCandidatesIsFetching={historicalPacsCandidatesQuery.isFetching}
+                    historicalCandidatesIsError={historicalPacsCandidatesQuery.isError || historicalPacsCandidatesQuery.data?.historicalCandidatesError === true}
+                    onRetryHistoricalCandidates={() => void historicalPacsCandidatesQuery.refetch()}
+                    manualHistoricalCandidates={oldPacsPatientIdMutation.variables?.appointmentId === selectedAppointment.id ? oldPacsPatientIdMutation.data : undefined}
+                    manualSearchIsPending={oldPacsPatientIdMutation.isPending}
+                    manualSearchIsSuccess={oldPacsPatientIdMutation.isSuccess && oldPacsPatientIdMutation.variables?.appointmentId === selectedAppointment.id}
+                    manualSearchIsError={oldPacsPatientIdMutation.isError}
+                    onSearchOldPatientId={(patientId) => oldPacsPatientIdMutation.mutate({ appointmentId: selectedAppointment.id, patientId })}
+                    onAttest={(studyInstanceUid, status) => attestationMutation.mutate({ studyInstanceUid, status })}
+                    isSaving={attestationMutation.isPending}
+                  />
                 </div> : null}
               </Tabs>
 
@@ -1845,29 +1867,139 @@ export default function ModalityPage() {
   );
 }
 
-function PreviousStudiesPanel({ language, data, isLoading, isError, onRetry, onAttest, isSaving }: { language: Language; data: ModalityPreviousStudiesResponse | undefined; isLoading: boolean; isError: boolean; onRetry: () => void; onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void; isSaving: boolean }) {
+function SplitPreviousStudiesPanel({
+  language,
+  appointmentId,
+  history,
+  historyIsLoading,
+  historyIsError,
+  onRetryHistory,
+  historicalCandidates,
+  historicalCandidatesIndexStatus,
+  historicalCandidatesIsFetching,
+  historicalCandidatesIsError,
+  onRetryHistoricalCandidates,
+  manualHistoricalCandidates,
+  manualSearchIsPending,
+  manualSearchIsSuccess,
+  manualSearchIsError,
+  onSearchOldPatientId,
+  onAttest,
+  isSaving,
+}: {
+  language: Language;
+  appointmentId: number;
+  history: ProtocolingPatientHistoryResponse | undefined;
+  historyIsLoading: boolean;
+  historyIsError: boolean;
+  onRetryHistory: () => void;
+  historicalCandidates: HistoricalPacsCandidate[] | undefined;
+  historicalCandidatesIndexStatus: "ready" | "stale" | "unavailable" | "uninitialized" | undefined;
+  historicalCandidatesIsFetching: boolean;
+  historicalCandidatesIsError: boolean;
+  onRetryHistoricalCandidates: () => void;
+  manualHistoricalCandidates: HistoricalPacsCandidate[] | undefined;
+  manualSearchIsPending: boolean;
+  manualSearchIsSuccess: boolean;
+  manualSearchIsError: boolean;
+  onSearchOldPatientId: (patientId: string) => void;
+  onAttest: (studyInstanceUid: string, status: "confirmed" | "denied") => void;
+  isSaving: boolean;
+}) {
   const [pendingAttestation, setPendingAttestation] = useState<{ studyInstanceUid: string; nextStatus: "confirmed" | "denied" } | null>(null);
-  if (isLoading) return <div className="p-4 text-sm text-muted-foreground">{t(language, "modality.previousStudies.loading")}</div>;
-  if (isError) return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">{t(language, "modality.previousStudies.failed")}</p><Button variant="secondary" size="sm" onClick={onRetry}>{t(language, "modality.previousStudies.retry")}</Button></div>;
-  if (!data) return null;
-  const visibleCandidates = data.historicalCandidates.map((candidate) => ({ ...candidate, studies: candidate.studies.filter((study) => !shouldHideHistoricalCandidateStudy(study)) })).filter((candidate) => candidate.studies.length > 0);
+  const [oldPacsPatientId, setOldPacsPatientId] = useState("");
+
+  if (historyIsLoading && !history) {
+    return <div className="p-4 text-sm text-muted-foreground">{t(language, "modality.previousStudies.loading")}</div>;
+  }
+  if (historyIsError && !history) {
+    return <div className="space-y-3 p-4"><p role="alert" className="text-sm text-red-700">{t(language, "modality.previousStudies.failed")}</p><Button variant="secondary" size="sm" onClick={onRetryHistory}>{t(language, "modality.previousStudies.retry")}</Button></div>;
+  }
+  if (!history) return null;
+
+  const visibleCandidates = (historicalCandidates ?? [])
+    .map((candidate) => ({ ...candidate, studies: candidate.studies.filter((study) => !shouldHideHistoricalCandidateStudy(study)) }))
+    .filter((candidate) => candidate.studies.length > 0);
+  const historicalIndexStatus = historicalCandidatesIndexStatus ?? history.historicalPacsIndexStatus;
+  const historicalStatusMessage = historicalIndexStatus === "stale"
+    ? t(language, "modality.previousStudies.stale")
+    : historicalIndexStatus === "unavailable"
+      ? t(language, "modality.previousStudies.unavailable")
+      : historicalIndexStatus === "uninitialized"
+        ? t(language, "modality.previousStudies.uninitialized")
+        : null;
+  const historicalSearchFailed = historicalCandidatesIsError;
+  const showHistoricalSection = visibleCandidates.length > 0;
+  const patientDicomId = history.currentPatient?.patientId?.trim() || "";
   const requestAttestation = (studyInstanceUid: string, currentStatus: "confirmed" | "denied" | null, nextStatus: "confirmed" | "denied") => {
     if (currentStatus === null && nextStatus === "confirmed") return onAttest(studyInstanceUid, nextStatus);
     setPendingAttestation({ studyInstanceUid, nextStatus });
   };
-  return <div className="grid gap-4 lg:grid-cols-2">
-    <section className="rounded-lg border border-slate-200 bg-white p-3"><h3 className="font-semibold">{t(language, "modality.previousStudies.risproHistory")}</h3>{data.history.items.length ? <div className="mt-3 space-y-2">{data.history.items.map((item) => <div key={`${item.appointmentId}-${item.studyInstanceUid}`} className="rounded border border-slate-200 p-2 text-sm"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{item.date ? formatDateLy(item.date) : t(language, "modality.previousStudies.unknownDate")} · {item.description || t(language, "modality.previousStudies.study")}</p><Badge variant={item.source === "rispro_pacs" ? "info" : "secondary"} size="sm">{t(language, item.source === "rispro_pacs" ? "modality.previousStudies.inPacs" : item.source === "rispro_only" ? "modality.previousStudies.notInPacs" : "modality.previousStudies.pacsOnly")}</Badge></div><p className="text-muted-foreground">{item.modalities.join(", ") || t(language, "modality.previousStudies.modalityUnavailable")}{item.accessionNumber ? ` · ${t(language, "modality.previousStudies.accession")} ${item.accessionNumber}` : ""}{item.appointmentStatus ? ` · ${previousStudyAppointmentStatusLabel(language, item.appointmentStatus)}` : ""}</p>{item.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 text-xs text-amber-800">{t(language, "modality.previousStudies.identityWarning")}</p> : null}</div>)}</div> : <p className="mt-3 text-sm text-muted-foreground">{t(language, "modality.previousStudies.none")}</p>}</section>
-    <section className="rounded-lg border border-amber-200 bg-amber-50/40 p-3"><h3 className="font-semibold">{t(language, "modality.previousStudies.matches")}</h3>{data.historicalCandidatesError ? <div className="mt-3 space-y-2"><p role="alert" className="text-sm text-red-700">{t(language, "modality.previousStudies.failed")}</p><Button variant="secondary" size="sm" onClick={onRetry}>{t(language, "modality.previousStudies.retry")}</Button></div> : <>{data.historicalPacsIndexStatus === "stale" ? <p className="mt-3 text-sm text-amber-800">{t(language, "modality.previousStudies.stale")}</p> : null}{data.historicalPacsIndexStatus === "unavailable" ? <p className="mt-3 text-sm text-muted-foreground">{t(language, "modality.previousStudies.unavailable")}</p> : null}{data.historicalPacsIndexStatus === "uninitialized" ? <p className="mt-3 text-sm text-muted-foreground">{t(language, "modality.previousStudies.uninitialized")}</p> : null}{visibleCandidates.length ? <div className="mt-3 space-y-3">{visibleCandidates.map((candidate) => <div key={candidate.historicalPatientId} className="rounded border border-amber-200 bg-white/80 p-2 text-sm"><Badge variant={candidate.classification === "exact" ? "info" : "warning"} size="sm">{t(language, candidate.classification === "exact" ? "modality.previousStudies.exactMatch" : candidate.classification === "strong_demographic" ? "modality.previousStudies.strongDemographicMatch" : candidate.classification === "ambiguous" ? "modality.previousStudies.ambiguousCandidate" : "modality.previousStudies.possibleMatch")}</Badge><p className="mt-1 font-semibold">{candidate.patientName || EMPTY_VALUE}</p><div className="mt-1 grid gap-x-3 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3"><p>{t(language, "modality.previousStudies.oldPatientId")}: {candidate.historicalPatientId || EMPTY_VALUE}</p><p>{t(language, "modality.previousStudies.dob")}: {historicalDicomDateToIso(candidate.patientBirthDate) ? formatDateLy(historicalDicomDateToIso(candidate.patientBirthDate)) : candidate.patientBirthDate || EMPTY_VALUE}</p><p>{t(language, "modality.previousStudies.sex")}: {sexLabel(language, candidate.patientSex)}</p></div><details className="mt-1"><summary className="cursor-pointer font-semibold">{t(language, "modality.previousStudies.why")}</summary><p>{candidate.reasons.map((reason) => historicalMatchReasonLabel(language, reason)).join(", ")}</p></details><div className="mt-2 space-y-2">{candidate.studies.map((study) => <HistoricalPacsStudyAttestation key={study.orthancStudyId} language={language} study={study} onRequestAttestation={requestAttestation} pendingAttestation={pendingAttestation} onCancelPending={() => setPendingAttestation(null)} onConfirmPending={() => { if (pendingAttestation) { onAttest(pendingAttestation.studyInstanceUid, pendingAttestation.nextStatus); setPendingAttestation(null); } }} isSaving={isSaving} />)}</div></div>)}</div> : data.historicalPacsIndexStatus === "ready" ? <p className="mt-3 text-sm text-muted-foreground">{t(language, "modality.previousStudies.noMatches")}</p> : null}</>}</section>
+  const finishPendingAttestation = () => {
+    if (!pendingAttestation) return;
+    onAttest(pendingAttestation.studyInstanceUid, pendingAttestation.nextStatus);
+    setPendingAttestation(null);
+  };
+  const candidateProps = {
+    language,
+    appointmentId,
+    pendingAttestation,
+    onCancelPending: () => setPendingAttestation(null),
+    onConfirmPending: finishPendingAttestation,
+    onRequestAttestation: requestAttestation,
+    isSaving,
+  };
+
+  return <div className={showHistoricalSection ? "grid gap-4 lg:grid-cols-2" : "space-y-4"}>
+    <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h3 className="font-semibold">{t(language, "modality.previousStudies.risproHistory")}</h3>
+        <div className="flex flex-wrap gap-1">
+          {patientDicomId ? <><a href={"/api/v2/read/modality/appointments/" + appointmentId + "/previous-studies/open-sonicdicom?scope=patient"} target="_blank" rel="noopener noreferrer" className="rounded border px-2 py-1.5 text-xs font-semibold">{t(language, "modality.previousStudies.patientStudies")}</a><a href={buildRadiantPacsTagUrl("00100020", patientDicomId)} className="rounded border px-2 py-1.5 text-xs font-semibold">{t(language, "modality.previousStudies.patientStudiesRadiAnt")}</a></> : null}
+        </div>
+      </div>
+      {historicalCandidatesIsFetching ? <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite"><span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />{t(language, "modality.previousStudies.searching")}</div> : null}
+      {history.items.length ? <div className="mt-3 space-y-2">{history.items.map((item) => {
+        const hasPacsStudy = item.source !== "rispro_only";
+        const accessionNumber = item.accessionNumber?.trim() || "";
+        return <div key={String(item.appointmentId) + "-" + String(item.studyInstanceUid)} className="rounded border border-slate-200 p-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2"><p className="font-medium">{item.date ? formatDateLy(item.date) : t(language, "modality.previousStudies.unknownDate")} · {item.description || t(language, "modality.previousStudies.study")}</p><Badge variant={item.source === "rispro_pacs" ? "info" : "secondary"} size="sm">{t(language, item.source === "rispro_pacs" ? "modality.previousStudies.inPacs" : item.source === "rispro_only" ? "modality.previousStudies.notInPacs" : "modality.previousStudies.pacsOnly")}</Badge></div>
+          <p className="text-muted-foreground">{item.modalities.join(", ") || t(language, "modality.previousStudies.modalityUnavailable")}{item.accessionNumber ? " · " + t(language, "modality.previousStudies.accession") + " " + item.accessionNumber : ""}{item.appointmentStatus ? " · " + previousStudyAppointmentStatusLabel(language, item.appointmentStatus) : ""}</p>
+          {item.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 text-xs text-amber-800">{t(language, "modality.previousStudies.identityWarning")}</p> : null}
+          {hasPacsStudy && accessionNumber ? <div className="mt-2 flex flex-wrap gap-1"><a href={"/api/v2/read/modality/appointments/" + appointmentId + "/previous-studies/open-sonicdicom?scope=study&accession=" + encodeURIComponent(accessionNumber)} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">{t(language, "modality.previousStudies.openInSonicDicom")}</a><a href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">{t(language, "modality.previousStudies.openInRadiAnt")}</a></div> : null}
+        </div>;
+      })}</div> : <p className="mt-3 text-sm text-muted-foreground">{t(language, "modality.previousStudies.none")}</p>}
+      {historicalSearchFailed && !showHistoricalSection ? <div className="mt-3 space-y-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800"><p className="font-semibold">{t(language, "modality.previousStudies.failed")}</p><Button variant="secondary" size="sm" onClick={onRetryHistoricalCandidates}>{t(language, "modality.previousStudies.retry")}</Button></div> : null}
+      {!historicalSearchFailed && historicalStatusMessage && !showHistoricalSection ? <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{historicalStatusMessage}</p> : null}
+      <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); const patientId = oldPacsPatientId.trim(); if (patientId) onSearchOldPatientId(patientId); }}>
+        <label className="min-w-0 flex-1 text-xs font-semibold">{t(language, "modality.previousStudies.searchOldPatientId")}<Input aria-label={t(language, "modality.previousStudies.searchOldPatientId")} className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
+        <Button type="submit" variant="outline" size="sm" disabled={!oldPacsPatientId.trim() || manualSearchIsPending}>{manualSearchIsPending ? t(language, "modality.previousStudies.searching") : t(language, "common.search")}</Button>
+      </form>
+      {manualSearchIsError ? <p role="alert" className="mt-2 text-xs text-red-700">{t(language, "modality.previousStudies.failed")}</p> : null}
+      {manualSearchIsSuccess && manualHistoricalCandidates?.length === 0 ? <p className="mt-2 text-xs text-muted-foreground">{t(language, "modality.previousStudies.noMatches")}</p> : null}
+      {manualHistoricalCandidates?.length ? <div className="mt-3"><SplitModalityHistoricalPacsCandidates {...candidateProps} candidates={manualHistoricalCandidates} /></div> : null}
+    </section>
+    {showHistoricalSection ? <section className="rounded-lg border border-amber-200 bg-amber-50/40 p-3"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{t(language, "modality.previousStudies.matches")}</h3>{historicalCandidatesIsFetching ? <span className="text-xs text-muted-foreground" role="status">{t(language, "modality.previousStudies.searching")}</span> : null}</div>{historicalSearchFailed ? <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800">{t(language, "modality.previousStudies.failed")}</p> : null}{historicalStatusMessage ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{historicalStatusMessage}</p> : null}<div className="mt-3"><SplitModalityHistoricalPacsCandidates {...candidateProps} candidates={visibleCandidates} /></div></section> : null}
   </div>;
 }
 
-function HistoricalPacsStudyAttestation({ language, study, onRequestAttestation, pendingAttestation, onCancelPending, onConfirmPending, isSaving }: { language: Language; study: HistoricalPacsStudy; onRequestAttestation: (studyInstanceUid: string, currentStatus: "confirmed" | "denied" | null, nextStatus: "confirmed" | "denied") => void; pendingAttestation: { studyInstanceUid: string; nextStatus: "confirmed" | "denied" } | null; onCancelPending: () => void; onConfirmPending: () => void; isSaving: boolean }) {
+function SplitModalityHistoricalPacsCandidates({ language, appointmentId, candidates, pendingAttestation, onCancelPending, onConfirmPending, onRequestAttestation, isSaving }: { language: Language; appointmentId: number; candidates: HistoricalPacsCandidate[]; pendingAttestation: { studyInstanceUid: string; nextStatus: "confirmed" | "denied" } | null; onCancelPending: () => void; onConfirmPending: () => void; onRequestAttestation: (studyInstanceUid: string, currentStatus: "confirmed" | "denied" | null, nextStatus: "confirmed" | "denied") => void; isSaving: boolean }) {
+  const visibleCandidates = candidates.map((candidate) => ({ ...candidate, studies: candidate.studies.filter((study) => !shouldHideHistoricalCandidateStudy(study)) })).filter((candidate) => candidate.studies.length > 0);
+  return <div className="space-y-3">{visibleCandidates.map((candidate) => {
+    const candidateBirthDate = historicalDicomDateToIso(candidate.patientBirthDate);
+    return <div key={candidate.historicalPatientId} className="rounded border border-amber-200 bg-white/80 p-2 text-sm"><Badge variant={candidate.classification === "exact" ? "info" : "warning"} size="sm">{t(language, candidate.classification === "exact" ? "modality.previousStudies.exactMatch" : candidate.classification === "strong_demographic" ? "modality.previousStudies.strongDemographicMatch" : candidate.classification === "ambiguous" ? "modality.previousStudies.ambiguousCandidate" : "modality.previousStudies.possibleMatch")}</Badge><p className="mt-1 font-semibold">{candidate.patientName || EMPTY_VALUE}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-xs"><p dir="ltr" className="font-semibold">{t(language, "modality.previousStudies.oldPatientId")}: {candidate.historicalPatientId || EMPTY_VALUE}</p>{candidate.historicalPatientId.trim() ? <a href={buildRadiantPacsTagUrl("00100020", candidate.historicalPatientId)} className="rounded border border-amber-300 px-2 py-1 text-xs font-semibold">{t(language, "modality.previousStudies.openOldStudiesRadiAnt")}</a> : null}</div><div className="mt-1 grid gap-x-3 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3"><p>{t(language, "modality.previousStudies.dob")}: {candidateBirthDate ? formatDateLy(candidateBirthDate) : candidate.patientBirthDate || EMPTY_VALUE}</p><p>{t(language, "modality.previousStudies.sex")}: {sexLabel(language, candidate.patientSex)}</p><p>{candidate.studies.length} {t(language, "modality.previousStudies.study")}{candidate.studies.length === 1 ? "" : "s"}</p></div><details className="mt-1"><summary className="cursor-pointer font-semibold">{t(language, "modality.previousStudies.why")}</summary><p>{candidate.reasons.map((reason) => historicalMatchReasonLabel(language, reason)).join(", ")}</p></details><div className="mt-2 space-y-2 border-t border-amber-200 pt-2">{candidate.studies.map((study) => <SplitHistoricalPacsStudyAttestation key={study.orthancStudyId} language={language} appointmentId={appointmentId} study={study} onRequestAttestation={onRequestAttestation} pendingAttestation={pendingAttestation} onCancelPending={onCancelPending} onConfirmPending={onConfirmPending} isSaving={isSaving} />)}</div></div>;
+  })}</div>;
+}
+
+function SplitHistoricalPacsStudyAttestation({ language, appointmentId, study, onRequestAttestation, pendingAttestation, onCancelPending, onConfirmPending, isSaving }: { language: Language; appointmentId: number; study: HistoricalPacsStudy; onRequestAttestation: (studyInstanceUid: string, currentStatus: "confirmed" | "denied" | null, nextStatus: "confirmed" | "denied") => void; pendingAttestation: { studyInstanceUid: string; nextStatus: "confirmed" | "denied" } | null; onCancelPending: () => void; onConfirmPending: () => void; isSaving: boolean }) {
   const uid = study.studyInstanceUid?.trim();
   const date = historicalDicomDateToIso(study.studyDate);
   const currentStatus = study.attestation?.status ?? null;
   const isPending = pendingAttestation?.studyInstanceUid === uid;
-  return <div className="rounded border border-amber-200 p-2"><p className="font-medium">{date ? formatDateLy(date) : t(language, "modality.previousStudies.unknownDate")} · {study.studyDescription || t(language, "modality.previousStudies.study")}</p><p className="text-xs text-muted-foreground">{study.modalitiesInStudy.join(", ") || t(language, "modality.previousStudies.modalityUnavailable")}{study.accessionNumber ? ` · ${t(language, "modality.previousStudies.accession")} ${study.accessionNumber}` : ""}</p>{uid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">{t(language, "modality.previousStudies.studyUid")}: {uid}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{study.seriesCount} {t(language, "modality.previousStudies.series")} · {study.instanceCount} {t(language, study.instanceCount === 1 ? "modality.previousStudies.image" : "modality.previousStudies.images")}</p><p className="mt-2 text-xs font-semibold text-foreground">{study.attestation ? <>{t(language, study.attestation.status === "confirmed" ? "modality.previousStudies.confirmed" : "modality.previousStudies.denied")}<br />{t(language, "modality.previousStudies.recordedBy")} {study.attestation.recordedByName || t(language, "modality.previousStudies.staff")} · {formatDateTimeLy(study.attestation.recordedAt)}</> : t(language, "modality.previousStudies.unreviewed")}</p>{uid ? isPending ? <div className="mt-2 space-y-2"><p className="text-xs text-amber-900">{t(language, "modality.previousStudies.confirmationRequired")}</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={isSaving} onClick={onCancelPending}>{t(language, "modality.previousStudies.cancel")}</Button><Button size="sm" disabled={isSaving} onClick={onConfirmPending}>{t(language, "modality.previousStudies.confirmChange")}</Button></div></div> : <div className="mt-2 flex flex-wrap gap-2">{currentStatus !== "confirmed" ? <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onRequestAttestation(uid, currentStatus, "confirmed")}>{t(language, "modality.previousStudies.confirm")}</Button> : null}{currentStatus !== "denied" ? <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onRequestAttestation(uid, currentStatus, "denied")}>{t(language, "modality.previousStudies.deny")}</Button> : null}</div> : null}</div>;
+  const accessionNumber = study.accessionNumber?.trim() || "";
+  return <div className="rounded border border-amber-200 p-2"><p className="font-medium">{date ? formatDateLy(date) : t(language, "modality.previousStudies.unknownDate")} · {study.studyDescription || t(language, "modality.previousStudies.study")}</p><p className="text-xs text-muted-foreground">{study.modalitiesInStudy.join(", ") || t(language, "modality.previousStudies.modalityUnavailable")}{study.accessionNumber ? " · " + t(language, "modality.previousStudies.accession") + " " + study.accessionNumber : ""}</p>{uid ? <p className="mt-1 break-all text-[11px] text-muted-foreground">{t(language, "modality.previousStudies.studyUid")}: {uid}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{study.seriesCount} {t(language, "modality.previousStudies.series")} · {study.instanceCount} {t(language, study.instanceCount === 1 ? "modality.previousStudies.image" : "modality.previousStudies.images")}</p>{study.attestation ? <p className="mt-2 text-xs font-semibold text-foreground">{t(language, study.attestation.status === "confirmed" ? "modality.previousStudies.confirmed" : "modality.previousStudies.denied")}<br />{t(language, "modality.previousStudies.recordedBy")} {study.attestation.recordedByName || t(language, "modality.previousStudies.staff")} · {formatDateTimeLy(study.attestation.recordedAt)}</p> : <p className="mt-2 text-xs font-semibold text-foreground">{t(language, "modality.previousStudies.unreviewed")}</p>}{accessionNumber ? <div className="mt-2 flex flex-wrap gap-1"><a href={"/api/v2/read/modality/appointments/" + appointmentId + "/previous-studies/open-sonicdicom?scope=study&accession=" + encodeURIComponent(accessionNumber)} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">{t(language, "modality.previousStudies.openInSonicDicom")}</a><a href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">{t(language, "modality.previousStudies.openInRadiAnt")}</a></div> : null}{uid ? isPending ? <div className="mt-2 space-y-2"><p className="text-xs text-amber-900">{t(language, "modality.previousStudies.confirmationRequired")}</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={isSaving} onClick={onCancelPending}>{t(language, "modality.previousStudies.cancel")}</Button><Button size="sm" disabled={isSaving} onClick={onConfirmPending}>{t(language, "modality.previousStudies.confirmChange")}</Button></div></div> : <div className="mt-2 flex flex-wrap gap-2">{currentStatus !== "confirmed" ? <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onRequestAttestation(uid, currentStatus, "confirmed")}>{t(language, "modality.previousStudies.confirm")}</Button> : null}{currentStatus !== "denied" ? <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => onRequestAttestation(uid, currentStatus, "denied")}>{t(language, "modality.previousStudies.deny")}</Button> : null}</div> : null}</div>;
 }
+
 
 function ClinicalBannerField({
   label,

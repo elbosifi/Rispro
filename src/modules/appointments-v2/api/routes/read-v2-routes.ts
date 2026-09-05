@@ -35,7 +35,8 @@ import {
   qualifyingRequestDocumentExistsSql,
 } from "../../../../services/request-document-protocol-policy.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../../services/protocoling-modality.js";
-import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, recordModalityHistoricalPacsPatientAttestation } from "../../../doctor-portal/protocoling-repository.js";
+import { asString } from "../../../../utils/request-coercion.js";
+import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, getModalitySonicDicomRedirect, recordModalityHistoricalPacsPatientAttestation, searchModalityHistoricalPacsPatientId } from "../../../doctor-portal/protocoling-repository.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1571,6 +1572,39 @@ router.get("/modality/appointments/:appointmentId/previous-studies", requirePage
   const history = await getModalityPatientHistory(appointmentId);
   try { res.json({ history, ...(await getModalityHistoricalPacsCandidates(appointmentId)), historicalCandidatesError: false }); }
   catch { res.json({ history, historicalCandidates: [], historicalPacsIndexStatus: "unavailable", historicalPacsLastSuccessAt: null, historicalCandidatesError: true }); }
+}));
+
+router.get("/modality/appointments/:appointmentId/previous-studies/history", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Invalid appointment ID.");
+  res.json(await getModalityPatientHistory(appointmentId));
+}));
+
+router.get("/modality/appointments/:appointmentId/previous-studies/historical-candidates", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Invalid appointment ID.");
+  try { res.json({ ...(await getModalityHistoricalPacsCandidates(appointmentId)), historicalCandidatesError: false }); }
+  catch (error) {
+    if (error instanceof HttpError && error.statusCode === 404) throw error;
+    res.json({ historicalCandidates: [], historicalPacsIndexStatus: "unavailable", historicalPacsLastSuccessAt: null, historicalCandidatesError: true });
+  }
+}));
+
+router.post("/modality/appointments/:appointmentId/previous-studies/old-patient-id", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Invalid appointment ID.");
+  const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+  const patientId = asString(body.patientId).trim();
+  if (!patientId || patientId.length > 256) throw new HttpError(400, "Invalid old PACS Patient ID.");
+  res.json(await searchModalityHistoricalPacsPatientId(appointmentId, patientId));
+}));
+
+router.get("/modality/appointments/:appointmentId/previous-studies/open-sonicdicom", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Invalid appointment ID.");
+  const scope = req.query.scope === "patient" ? "patient" : "study";
+  const accessionNumber = typeof req.query.accession === "string" ? req.query.accession : null;
+  res.redirect(await getModalitySonicDicomRedirect(appointmentId, scope, accessionNumber, req.hostname));
 }));
 
 router.post("/modality/appointments/:appointmentId/previous-studies/attestations", requirePageAccess("modality"), asyncRoute(async (req: Request, res: Response) => {

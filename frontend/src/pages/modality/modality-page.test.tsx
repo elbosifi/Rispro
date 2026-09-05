@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
-import type { ModalityProtocolAssignment } from "@/types/api";
+import type { HistoricalPacsCandidate, ModalityProtocolAssignment } from "@/types/api";
+import { buildRadiantPacsTagUrl } from "../doctor/doctor-reporting-board-page.helpers";
 
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
@@ -16,6 +17,9 @@ const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
 const fetchRequestScanStatusMock = vi.fn();
 const fetchModalityPreviousStudiesMock = vi.fn();
+const fetchModalityPatientHistoryMock = vi.fn();
+const fetchModalityHistoricalPacsCandidatesMock = vi.fn();
+const searchModalityHistoricalPacsPatientIdMock = vi.fn();
 const recordModalityHistoricalPacsAttestationMock = vi.fn();
 const pushToastMock = vi.fn();
 const listAppointmentDocumentsMock = vi.fn();
@@ -46,6 +50,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
   fetchRequestScanStatus: (...args: unknown[]) => fetchRequestScanStatusMock(...args),
   fetchModalityPreviousStudies: (...args: unknown[]) => fetchModalityPreviousStudiesMock(...args),
+  fetchModalityPatientHistory: (...args: unknown[]) => fetchModalityPatientHistoryMock(...args),
+  fetchModalityHistoricalPacsCandidates: (...args: unknown[]) => fetchModalityHistoricalPacsCandidatesMock(...args),
+  searchModalityHistoricalPacsPatientId: (...args: unknown[]) => searchModalityHistoricalPacsPatientIdMock(...args),
   recordModalityHistoricalPacsAttestation: (...args: unknown[]) => recordModalityHistoricalPacsAttestationMock(...args),
   listAppointmentDocuments: (...args: unknown[]) => listAppointmentDocumentsMock(...args),
   fetchRequestDocumentProtocolPolicy: (...args: unknown[]) => fetchRequestDocumentProtocolPolicyMock(...args),
@@ -234,6 +241,24 @@ function mriAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): Mod
   };
 }
 
+function modalityHistoricalCandidate(overrides: Partial<HistoricalPacsCandidate> = {}): HistoricalPacsCandidate {
+  return {
+    historicalPatientId: "OLD-77",
+    patientName: "Historical Patient",
+    patientBirthDate: "19801231",
+    patientSex: "F",
+    classification: "strong_demographic",
+    reasons: ["exact_normalized_name"],
+    authoritative: false,
+    matchRank: 1,
+    nameSimilarity: 1,
+    phoneticMatchCount: 0,
+    studyCount: 1,
+    studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.old", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "Historical Patient", patientBirthDate: "19801231", patientSex: "F", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 10 }],
+    ...overrides,
+  };
+}
+
 function renderPage(
   rows: AppointmentWithDetails[],
   initialEntry = "/modality",
@@ -278,6 +303,9 @@ function renderPage(
   retryCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
   updateAppointmentStatusMock.mockResolvedValue({ ok: true });
   if (!fetchModalityPreviousStudiesMock.getMockImplementation()) fetchModalityPreviousStudiesMock.mockResolvedValue({ history: { items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }, historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, historicalCandidatesError: false });
+  if (!fetchModalityPatientHistoryMock.getMockImplementation()) fetchModalityPatientHistoryMock.mockImplementation(async (appointmentId: number) => (await fetchModalityPreviousStudiesMock(appointmentId)).history);
+  if (!fetchModalityHistoricalPacsCandidatesMock.getMockImplementation()) fetchModalityHistoricalPacsCandidatesMock.mockImplementation(async (appointmentId: number) => { const response = await fetchModalityPreviousStudiesMock(appointmentId); return { historicalCandidates: response.historicalCandidates, historicalPacsIndexStatus: response.historicalPacsIndexStatus, historicalPacsLastSuccessAt: response.historicalPacsLastSuccessAt, historicalCandidatesError: response.historicalCandidatesError }; });
+  if (!searchModalityHistoricalPacsPatientIdMock.getMockImplementation()) searchModalityHistoricalPacsPatientIdMock.mockResolvedValue([]);
   recordModalityHistoricalPacsAttestationMock.mockResolvedValue({ studyInstanceUid: "1.2.3", status: "confirmed", recordedByUserId: 1, recordedByName: "Modality Staff", recordedAt: "2026-06-18T08:00:00Z" });
 
   return render(
@@ -2037,7 +2065,7 @@ describe("ModalityPage modality board", () => {
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     if (stateMessage) expect(await screen.findByText(stateMessage)).toBeTruthy();
     if (candidateMayRender && historicalPacsIndexStatus === "stale") expect(screen.getByText("Historical Patient")).toBeTruthy();
-    if (historicalPacsIndexStatus === "ready") expect(await screen.findByText(/No possible matches found/)).toBeTruthy();
+    if (historicalPacsIndexStatus === "ready") expect(screen.queryByRole("heading", { name: "Historical PACS matches" })).toBeNull();
     else expect(screen.queryByText(/No possible matches found/)).toBeNull();
   });
 
@@ -2050,5 +2078,83 @@ describe("ModalityPage modality board", () => {
     expect(screen.getByRole("button", { name: "Previous studies" }).getAttribute("data-state")).toBe("active");
     expect(screen.getByRole("button", { name: "Appointment" }).getAttribute("data-state")).toBe("inactive");
     await waitFor(() => expect(fetchModalityPreviousStudiesMock).toHaveBeenCalledWith(52));
+  });
+
+  it("renders current patient history while historical PACS matching is unresolved", async () => {
+    let resolveHistorical!: (value: { historicalCandidates: []; historicalPacsIndexStatus: "ready"; historicalPacsLastSuccessAt: null }) => void;
+    fetchModalityPatientHistoryMock.mockResolvedValue({
+      items: [{ appointmentId: 2, orthancStudyId: "current-study", studyInstanceUid: "1.2.current", accessionNumber: "CURRENT-ACC", date: "2024-01-01", time: "09:00", modalities: ["CT"], description: "Current history appears first", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs", identityDiscrepancy: null }],
+      pacsStatus: "available",
+      historicalPacsIndexStatus: "ready",
+      historicalPacsLastSuccessAt: null,
+      currentPatient: { id: 10, patientId: "DICOM-10", name: "Patient One", birthDate: null },
+    });
+    fetchModalityHistoricalPacsCandidatesMock.mockReturnValue(new Promise((resolve) => { resolveHistorical = resolve; }));
+
+    const user = await openBoard([appointment({ id: 61 })]);
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    expect(await screen.findByText(/Current history appears first/)).toBeTruthy();
+    expect(screen.getByText("Searching older PACS records…")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Historical PACS matches" })).toBeNull();
+    expect(fetchModalityPatientHistoryMock).toHaveBeenCalledWith(61);
+    expect(fetchModalityHistoricalPacsCandidatesMock).toHaveBeenCalledWith(61);
+
+    await act(async () => resolveHistorical({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null }));
+    expect(screen.getByText(/Current history appears first/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Searching older PACS records…")).toBeNull());
+  });
+
+  it("provides safe patient and PACS study opening actions without reconciliation", async () => {
+    const candidate = modalityHistoricalCandidate();
+    fetchModalityPatientHistoryMock.mockResolvedValue({
+      items: [{ appointmentId: 2, orthancStudyId: "current-study", studyInstanceUid: "1.2.current", accessionNumber: "CURRENT-ACC", date: "2024-01-01", time: "09:00", modalities: ["CT"], description: "Current PACS study", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs", identityDiscrepancy: null }, { appointmentId: 3, orthancStudyId: null, studyInstanceUid: null, accessionNumber: "RIS-ONLY-ACC", date: "2024-01-02", time: "09:00", modalities: ["CT"], description: "RISpro-only study", appointmentStatus: "completed", reportAvailable: false, source: "rispro_only", identityDiscrepancy: null }],
+      pacsStatus: "available",
+      historicalPacsIndexStatus: "ready",
+      historicalPacsLastSuccessAt: null,
+      currentPatient: { id: 10, patientId: "CANONICAL-10", name: "Patient One", birthDate: null },
+    });
+    fetchModalityHistoricalPacsCandidatesMock.mockResolvedValue({ historicalCandidates: [candidate], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+
+    const user = await openBoard([appointment({ id: 62 })]);
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    expect(screen.getByRole("link", { name: "Patient studies" }).getAttribute("href")).toBe("/api/v2/read/modality/appointments/62/previous-studies/open-sonicdicom?scope=patient");
+    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "CANONICAL-10"));
+
+    const currentSonic = screen.getAllByRole("link", { name: "SonicDICOM" }).find((link) => link.getAttribute("href")?.includes("accession=CURRENT-ACC"));
+    expect(currentSonic).toBeTruthy();
+    const currentRadiant = screen.getAllByRole("link", { name: "RadiAnt" }).find((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "CURRENT-ACC"));
+    expect(currentRadiant).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("RIS-ONLY-ACC"))).toBe(false);
+    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "RIS-ONLY-ACC"))).toBe(false);
+    expect(screen.getByRole("link", { name: "Open old patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
+    expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("accession=OLD-ACC"))).toBe(true);
+    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "OLD-ACC"))).toBe(true);
+    expect(screen.queryByText(/Reconcile patient identity/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reconcile/i })).toBeNull();
+  });
+
+  it("submits an old PACS Patient ID search and renders the returned studies", async () => {
+    const baseStudy = modalityHistoricalCandidate().studies[0]!;
+    const candidate = modalityHistoricalCandidate({ historicalPatientId: "OLD-MANUAL", patientName: "Manual historical patient", studies: [{ ...baseStudy, orthancStudyId: "manual-study", studyInstanceUid: "1.2.manual", accessionNumber: "MANUAL-ACC", patientId: "OLD-MANUAL", studyDescription: "Manual historical study" }] });
+    fetchModalityPatientHistoryMock.mockResolvedValue({
+      items: [],
+      pacsStatus: "available",
+      historicalPacsIndexStatus: "ready",
+      historicalPacsLastSuccessAt: null,
+      currentPatient: { id: 10, patientId: "DICOM-10", name: "Patient One", birthDate: null },
+    });
+    fetchModalityHistoricalPacsCandidatesMock.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    searchModalityHistoricalPacsPatientIdMock.mockResolvedValue([candidate]);
+
+    const user = await openBoard([appointment({ id: 63 })]);
+    await user.click(screen.getByRole("button", { name: "History" }));
+    await user.type(screen.getByRole("textbox", { name: "Search old PACS Patient ID" }), "OLD-MANUAL");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await waitFor(() => expect(searchModalityHistoricalPacsPatientIdMock).toHaveBeenCalledWith(63, "OLD-MANUAL"));
+    expect(await screen.findByText(/Manual historical study/)).toBeTruthy();
+    expect(screen.getByText("Old Patient ID: OLD-MANUAL")).toBeTruthy();
   });
 });

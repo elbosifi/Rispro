@@ -16,6 +16,7 @@ const TEST_PREFIX = "MODALITY_PREVIOUS_STUDIES_";
 const candidateUid = "1.2.840.113619.2.55.3.604688433.1";
 const otherPatientUid = "1.2.840.113619.2.55.3.604688433.2";
 let failCandidateDiscovery = false;
+let manualPatientIdLookupCandidates: unknown[] = [];
 const reconciliationRequests = mock.fn();
 
 mock.module("../../../../services/historical-pacs-index-service.js", {
@@ -55,7 +56,7 @@ mock.module("../../../../services/historical-pacs-index-service.js", {
       };
     },
     getHistoricalPacsReconciliationForPatient: async () => [],
-    lookupHistoricalPacsByPatientId: async () => [],
+    lookupHistoricalPacsByPatientId: async () => manualPatientIdLookupCandidates,
   },
 });
 
@@ -108,11 +109,17 @@ if (!isDatabaseAvailable()) {
         app = await createTestApp();
         const permittedCookie = createTestAuthCookie(testData.userId, "supervisor");
         const getPath = (id: string | number) => `/api/v2/read/modality/appointments/${id}/previous-studies`;
+        const historyPath = (id: string | number) => `${getPath(id)}/history`;
+        const historicalCandidatesPath = (id: string | number) => `${getPath(id)}/historical-candidates`;
+        const oldPatientIdPath = (id: string | number) => `${getPath(id)}/old-patient-id`;
+        const sonicPath = (id: string | number, query: string) => `${getPath(id)}/open-sonicdicom${query}`;
         const postPath = (id: string | number) => `${getPath(id)}/attestations`;
 
         for (const invalidId of [0, -1, "not-a-number"]) {
           const response: { status: number } = await fetchJson<unknown>(app.baseUrl, getPath(invalidId), { cookie: permittedCookie });
           assert.equal(response.status, 400);
+          assert.equal((await fetchJson<unknown>(app.baseUrl, historyPath(invalidId), { cookie: permittedCookie })).status, 400);
+          assert.equal((await fetchJson<unknown>(app.baseUrl, historicalCandidatesPath(invalidId), { cookie: permittedCookie })).status, 400);
         }
         assert.equal((await fetchJson(app.baseUrl, postPath(0), { method: "POST", cookie: permittedCookie, body: {} })).status, 400);
         for (const status of ["approved", "yes", "", null]) {
@@ -126,10 +133,101 @@ if (!isDatabaseAvailable()) {
 
         assert.equal((await fetchJson(app.baseUrl, getPath(genericBookingId))).status, 401);
         assert.equal((await fetchJson(app.baseUrl, getPath(genericBookingId), { cookie: createTestAuthCookie(testData.userId, "doctor") })).status, 403);
+        assert.equal((await fetchJson(app.baseUrl, historyPath(genericBookingId))).status, 401);
+        assert.equal((await fetchJson(app.baseUrl, historicalCandidatesPath(genericBookingId))).status, 401);
+        assert.equal((await fetchJson(app.baseUrl, historyPath(genericBookingId), { cookie: createTestAuthCookie(testData.userId, "doctor") })).status, 403);
+        assert.equal((await fetchJson(app.baseUrl, historicalCandidatesPath(genericBookingId), { cookie: createTestAuthCookie(testData.userId, "doctor") })).status, 403);
 
         const genericResponse = await fetchJson<Record<string, unknown>>(app.baseUrl, getPath(genericBookingId), { cookie: permittedCookie });
         assert.equal(genericResponse.status, 200, "A non-CT/MRI Modality booking must resolve through getModalityAppointmentContext");
         assert.ok(Array.isArray((genericResponse.data.history as Record<string, unknown>).items));
+        const focusedHistory = await fetchJson<Record<string, unknown>>(app.baseUrl, historyPath(genericBookingId), { cookie: permittedCookie });
+        assert.equal(focusedHistory.status, 200);
+        assert.ok(Array.isArray(focusedHistory.data.items));
+        const focusedCandidates = await fetchJson<Record<string, unknown>>(app.baseUrl, historicalCandidatesPath(genericBookingId), { cookie: permittedCookie });
+        assert.equal(focusedCandidates.status, 200);
+        assert.ok(Array.isArray(focusedCandidates.data.historicalCandidates));
+        assert.equal((await fetchJson(app.baseUrl, historyPath(999999999), { cookie: permittedCookie })).status, 404);
+        assert.equal((await fetchJson(app.baseUrl, historicalCandidatesPath(999999999), { cookie: permittedCookie })).status, 404);
+
+        manualPatientIdLookupCandidates = [{
+          historicalPatientId: "OLD-MANUAL",
+          patientName: "Manual Historical Patient",
+          patientBirthDate: "19801231",
+          patientSex: "F",
+          classification: "possible",
+          reasons: ["manual_patient_id_search"],
+          authoritative: true,
+          matchRank: 1,
+          nameSimilarity: 0,
+          phoneticMatchCount: 0,
+          studyCount: 1,
+          studies: [{
+            orthancStudyId: "manual-orthanc",
+            studyInstanceUid: "1.2.manual",
+            accessionNumber: "MANUAL-ACC",
+            patientId: "OLD-MANUAL",
+            patientName: "Manual Historical Patient",
+            patientBirthDate: "19801231",
+            patientSex: "F",
+            studyDate: "20240102",
+            studyDescription: "Manual historical CT",
+            modalitiesInStudy: ["CT"],
+            seriesCount: 1,
+            instanceCount: 1,
+          }],
+        }];
+        assert.equal((await fetchJson(app.baseUrl, oldPatientIdPath(attestationBookingId), { method: "POST" })).status, 401);
+        assert.equal((await fetchJson(app.baseUrl, oldPatientIdPath(attestationBookingId), { method: "POST", cookie: createTestAuthCookie(testData.userId, "doctor") })).status, 403);
+        assert.equal((await fetchJson(app.baseUrl, oldPatientIdPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: {} })).status, 400);
+        assert.equal((await fetchJson(app.baseUrl, oldPatientIdPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { patientId: "" } })).status, 400);
+        assert.equal((await fetchJson(app.baseUrl, oldPatientIdPath(attestationBookingId), { method: "POST", cookie: permittedCookie, body: { patientId: "x".repeat(257) } })).status, 400);
+        const manualSearch = await fetchJson<{ candidates: Array<{ historicalPatientId: string }> }>(app.baseUrl, oldPatientIdPath(attestationBookingId), {
+          method: "POST",
+          cookie: permittedCookie,
+          body: { patientId: "OLD-MANUAL", currentPatientId: otherPatientId, recordedByUserId: 999999 },
+        });
+        assert.equal(manualSearch.status, 200);
+        assert.equal(manualSearch.data.candidates[0]?.historicalPatientId, "OLD-MANUAL");
+
+        assert.equal((await fetchJson(app.baseUrl, `${getPath(attestationBookingId)}/patient-identity-reconciliation`, { method: "POST", cookie: permittedCookie, body: {} })).status, 404);
+
+        assert.equal((await fetch(app.baseUrl + sonicPath(attestationBookingId, "?scope=patient"), { redirect: "manual" })).status, 401);
+        assert.equal((await fetch(app.baseUrl + sonicPath(attestationBookingId, "?scope=patient"), { headers: { Cookie: createTestAuthCookie(testData.userId, "doctor") }, redirect: "manual" })).status, 403);
+        const patientIdentity = await pool.query<{ patient_id: string }>(
+          "select coalesce(nullif(trim(identifier_value), ''), nullif(trim(national_id), '')) as patient_id from patients where id=$1",
+          [testData.patientId],
+        );
+        assert.ok(patientIdentity.rows[0]?.patient_id);
+        const storedSonicSetting = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+          "select setting_value, updated_by_user_id from system_settings where category='sonicdicom_reports' and setting_key='config' limit 1",
+        );
+        const originalSonicSetting = storedSonicSetting.rows[0] ?? null;
+        await pool.query(
+          `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+           values ('sonicdicom_reports', 'config', $1::jsonb, $2)
+           on conflict (category, setting_key) do update
+           set setting_value=excluded.setting_value, updated_by_user_id=excluded.updated_by_user_id, updated_at=now()`,
+          [JSON.stringify({ value: { sonicDicomReportsEnabled: true, sonicDicomPublicBaseUrl: "https://sonic.example/viewer", sonicDicomLocalBaseUrl: "http://192.168.1.30/viewer" } }), testData.userId],
+        );
+        try {
+          const patientOpen = await fetch(app.baseUrl + sonicPath(attestationBookingId, "?scope=patient"), { headers: { Cookie: permittedCookie, Host: "192.168.1.20" }, redirect: "manual" });
+          assert.equal(patientOpen.status, 302);
+          assert.equal(patientOpen.headers.get("location"), `http://192.168.1.30/viewer/#/list?patientid=${encodeURIComponent(patientIdentity.rows[0]!.patient_id)}`);
+          const studyOpen = await fetch(app.baseUrl + sonicPath(attestationBookingId, "?scope=study&accession=V2-" + String(attestationBookingId).padStart(6, "0")), { headers: { Cookie: permittedCookie, Host: "192.168.1.20" }, redirect: "manual" });
+          assert.equal(studyOpen.status, 302);
+          assert.match(studyOpen.headers.get("location") ?? "", /#\/viewer\?accessionnumber=V2-0/);
+          assert.equal((await fetch(app.baseUrl + sonicPath(999999999, "?scope=patient"), { headers: { Cookie: permittedCookie }, redirect: "manual" })).status, 404);
+        } finally {
+          if (originalSonicSetting) {
+            await pool.query(
+              "update system_settings set setting_value=$1::jsonb, updated_by_user_id=$2, updated_at=now() where category='sonicdicom_reports' and setting_key='config'",
+              [JSON.stringify(originalSonicSetting.setting_value), originalSonicSetting.updated_by_user_id],
+            );
+          } else {
+            await pool.query("delete from system_settings where category='sonicdicom_reports' and setting_key='config'");
+          }
+        }
 
         const accepted = await fetchJson<{ attestation: Record<string, unknown> }>(app.baseUrl, postPath(attestationBookingId), {
           method: "POST",
@@ -165,6 +263,14 @@ if (!isDatabaseAvailable()) {
         assert.equal(reconciliationRequests.mock.calls.length, 0, "Attestation must not request reconciliation or a PACS mutation");
 
         failCandidateDiscovery = true;
+        const focusedHistoryDuringCandidateFailure = await fetchJson<Record<string, unknown>>(app.baseUrl, historyPath(genericBookingId), { cookie: permittedCookie });
+        assert.equal(focusedHistoryDuringCandidateFailure.status, 200);
+        assert.ok(Array.isArray(focusedHistoryDuringCandidateFailure.data.items));
+        const focusedCandidatesDuringFailure = await fetchJson<Record<string, unknown>>(app.baseUrl, historicalCandidatesPath(genericBookingId), { cookie: permittedCookie });
+        assert.equal(focusedCandidatesDuringFailure.status, 200);
+        assert.deepEqual(focusedCandidatesDuringFailure.data.historicalCandidates, []);
+        assert.equal(focusedCandidatesDuringFailure.data.historicalPacsIndexStatus, "unavailable");
+        assert.equal(focusedCandidatesDuringFailure.data.historicalCandidatesError, true);
         const partialFailure = await fetchJson<Record<string, unknown>>(app.baseUrl, getPath(genericBookingId), { cookie: permittedCookie });
         assert.equal(partialFailure.status, 200);
         assert.ok(Array.isArray((partialFailure.data.history as Record<string, unknown>).items));
@@ -173,6 +279,7 @@ if (!isDatabaseAvailable()) {
         assert.equal(partialFailure.data.historicalCandidatesError, true);
       } finally {
         failCandidateDiscovery = false;
+        manualPatientIdLookupCandidates = [];
         reconciliationRequests.mock.resetCalls();
         if (app) await app.close();
         await pool.query("delete from historical_pacs_patient_attestations where study_instance_uid in ($1, $2)", [candidateUid, otherPatientUid]);

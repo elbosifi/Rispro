@@ -640,6 +640,12 @@ export async function getModalityHistoricalPacsCandidates(appointmentId: number)
   return getHistoricalPacsCandidatesForContext(current);
 }
 
+export async function searchModalityHistoricalPacsPatientId(appointmentId: number, oldPatientId: string) {
+  const current = await getModalityAppointmentContext(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  return { candidates: await attachPatientIdentityReconciliationToHistoricalCandidates(await lookupHistoricalPacsByPatientId(oldPatientId), undefined, current.patientId) };
+}
+
 export async function getProtocolingPatientHistory(appointmentId: number) {
   const current = await getProtocolingAppointment(appointmentId);
   if (!current) throw new HttpError(404, "Appointment not found.");
@@ -650,6 +656,19 @@ export async function getModalityPatientHistory(appointmentId: number) {
   const current = await getModalityAppointmentContext(appointmentId);
   if (!current) throw new HttpError(404, "Appointment not found.");
   return getPatientHistoryForContext(current);
+}
+
+export async function getModalitySonicDicomRedirect(appointmentId: number, scope: "study" | "patient", accessionNumber: string | null, requestHostname: string): Promise<string> {
+  const current = await getModalityAppointmentContext(appointmentId);
+  if (!current) throw new HttpError(404, "Appointment not found.");
+  const value = scope === "patient" ? current.patientDicomId : accessionNumber?.trim() || current.accessionNumber;
+  if (!value) throw new HttpError(400, scope === "study" ? "Accession number is unavailable." : "DICOM Patient ID is unavailable.");
+  return buildSonicDicomStaffViewerUrl({
+    settings: await readSonicDicomReportSettings(),
+    requestHostname,
+    target: scope === "study" ? "studyViewer" : "patientList",
+    value,
+  });
 }
 
 async function recordHistoricalPacsPatientAttestationForContext(current: PreviousStudiesAppointmentContext, studyInstanceUid: string, status: "confirmed" | "denied", recordedByUserId: number) {
