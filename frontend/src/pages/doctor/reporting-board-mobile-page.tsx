@@ -130,7 +130,7 @@ export function ReportingBoardMobilePage() {
   const signOut = () => void logout(`${location.pathname}${location.search}${location.hash}`);
   const canFinalizeOwnReports = Boolean(user && data.allowedActions.authenticated && ownDesk && data.allowedActions.finalizeOwnReports);
   const appointmentFinal = canFinalizeOwnReports && selected?.caseType === "appointment" && selected.appointmentStatus === "completed" && selected.requiresReport && selected.reportStatus !== "final" && selected.exclusionReason !== "report_not_required" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data.currentDoctorId;
-  const comparisonFinal = canFinalizeOwnReports && selected?.caseType === "comparison" && selected.reportStatus !== "final" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data.currentDoctorId;
+  const comparisonFinal = canFinalizeOwnReports && selected?.caseType === "comparison" && selected.appointmentStatus !== "finalized" && selected.assignmentStatus === "assigned" && selected.assignedDoctorId === data.currentDoctorId;
   const activeRecall = activeRecallQuery.data ?? null;
   const additionalImagingEligible = selectedOwnAssignedAppointment && selected?.appointmentStatus === "completed";
   const showAdditionalImagingSection = selectedOwnAssignedAppointment && (additionalImagingEligible || activeRecall != null || activeRecallQuery.isPending || activeRecallQuery.isError);

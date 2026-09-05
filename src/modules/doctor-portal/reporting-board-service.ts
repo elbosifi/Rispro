@@ -269,11 +269,11 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   const resolved: ReportingBoardCaseRow[] = [];
   for (const row of rows) {
     if (row.caseType === "comparison") {
-      const canAssign = row.canAssign && row.reportStatus !== "final";
+      const canAssign = row.canAssign && row.appointmentStatus !== "finalized";
       resolved.push(withProtectedTimelineMetrics({
         ...row,
         canAssign,
-        exclusionReason: canAssign ? null : row.exclusionReason ?? (row.reportStatus === "final" ? "report_final" : null),
+        exclusionReason: canAssign ? null : row.exclusionReason ?? (row.appointmentStatus === "finalized" ? "report_final" : null),
       }));
       continue;
     }
@@ -300,7 +300,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
 
   if (!reportStatus || reportStatus === "all") return resolved;
   if (reportStatus === "required_not_final") {
-    return resolved.filter((row) => row.requiresReport && row.reportStatus !== "final");
+    return resolved.filter((row) => row.requiresReport && (row.caseType === "comparison" ? row.appointmentStatus !== "finalized" : row.reportStatus !== "final"));
   }
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
@@ -486,6 +486,7 @@ function statsReportStatus(row: ReportingBoardStatsInputRow): ReportingBoardCase
 }
 
 function statsRequiredNotFinal(row: ReportingBoardStatsInputRow): boolean {
+  if (row.caseType === "comparison") return row.appointmentStatus !== "finalized";
   return row.requiresReport && statsReportStatus(row) !== "final";
 }
 
@@ -1174,6 +1175,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     finalizedByDoctorName: row.finalizedByDoctorName,
     sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount,
     sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId,
+    sonicDicomDocumentRemoved: row.sonicDicomDocumentRemoved ?? false,
     assignmentMatch: row.assignmentMatch,
     priority: row.reportingPriorityName || row.reportingPriorityCode,
     priorityCode: row.reportingPriorityCode,

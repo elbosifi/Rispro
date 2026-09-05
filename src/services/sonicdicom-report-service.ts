@@ -111,7 +111,9 @@ export interface SonicDicomDocumentHistoryResult {
 
 export interface SonicDicomComparisonDocumentSelection {
   storedDocumentId: string | null;
+  storedDocumentStatusCode?: number | null;
   primaryDocumentId: string | null;
+  primaryCachedReportStatus?: string | null;
   assignedDoctorUsername: string | null;
   assignedAt: string;
 }
@@ -152,24 +154,64 @@ function normalizedSonicAccount(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
-/** Account and assignment time constrain a new correlation; a stored DocumentId is immutable. */
+function activeDocumentPredicate(request: SqlRequest, sql: SqlModule, statusCodes: number[], prefix: string, column = "d.Status"): string {
+  const codes = [...new Set(statusCodes.filter((value) => Number.isInteger(value)))];
+  if (!codes.length) return "1 = 1";
+  codes.forEach((code, index) => request.input(`${prefix}${index}`, sql.NVarChar(16), code));
+  return `${column} not in (${codes.map((_, index) => `@${prefix}${index}`).join(", ")})`;
+}
+
+/** SonicDICOM GUID equality is case-insensitive but audit storage preserves original text. */
+export function normalizeSonicDicomDocumentId(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function newerDocumentFirst(left: SonicDicomReportDocument, right: SonicDicomReportDocument): number {
+  const leftAt = Date.parse(left.updatedAt ?? "");
+  const rightAt = Date.parse(right.updatedAt ?? "");
+  if (leftAt !== rightAt) return rightAt - leftAt;
+  return normalizeSonicDicomDocumentId(right.documentId).localeCompare(normalizeSonicDicomDocumentId(left.documentId));
+}
+
+/** Account and assignment time constrain correlation; a tombstoned current document can be replaced. */
 export function selectSonicDicomComparisonDocument(
   candidate: SonicDicomComparisonDocumentSelection,
-  history: SonicDicomDocumentHistoryResult
-): { document: SonicDicomReportDocument | null; multipleCandidates: boolean } {
-  if (candidate.storedDocumentId) {
-    return { document: history.documents.find((document) => document.documentId === candidate.storedDocumentId) ?? null, multipleCandidates: false };
+  history: SonicDicomDocumentHistoryResult,
+  options: { noReportStatusCodes?: number[]; finalStatusCodes?: number[] } = {}
+): { document: SonicDicomReportDocument | null; multipleCandidates: boolean; storedDocument: SonicDicomReportDocument | null; bootstrapRejected: boolean } {
+  const storedId = normalizeSonicDicomDocumentId(candidate.storedDocumentId);
+  const primaryId = normalizeSonicDicomDocumentId(candidate.primaryDocumentId);
+  const storedDocument = storedId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === storedId) ?? null : null;
+  const tombstones = new Set(options.noReportStatusCodes ?? [7]);
+  const finals = new Set(options.finalStatusCodes ?? [6]);
+  if (storedDocument && !tombstones.has(Number(storedDocument.statusCode))) {
+    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false };
   }
   const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorUsername);
   const assignedAt = Date.parse(candidate.assignedAt);
-  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: null, multipleCandidates: false };
+  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false };
   const matches = history.documents.filter((document) => {
     const updatedAt = Date.parse(document.updatedAt ?? "");
-    return document.documentId !== candidate.primaryDocumentId &&
+    const documentId = normalizeSonicDicomDocumentId(document.documentId);
+    return documentId !== storedId && documentId !== primaryId &&
       normalizedSonicAccount(document.account) === assignedAccount &&
       Number.isFinite(updatedAt) && updatedAt >= assignedAt;
+  }).filter((document) => !storedDocument || Date.parse(document.updatedAt ?? "") > Date.parse(storedDocument.updatedAt ?? ""))
+    .sort(newerDocumentFirst);
+  if (matches.length) return { document: matches[0], multipleCandidates: matches.length > 1, storedDocument, bootstrapRejected: false };
+
+  const cachedPrimary = primaryId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === primaryId) ?? null : null;
+  const primaryWasNonFinal = candidate.primaryCachedReportStatus !== "final";
+  const primaryUpdatedAt = Date.parse(cachedPrimary?.updatedAt ?? "");
+  const alternatePrimary = history.documents.some((document) => {
+    const updatedAt = Date.parse(document.updatedAt ?? "");
+    return normalizeSonicDicomDocumentId(document.documentId) !== primaryId && finals.has(Number(document.statusCode)) &&
+      Number.isFinite(updatedAt) && (updatedAt < assignedAt || updatedAt < primaryUpdatedAt);
   });
-  return { document: matches[0] ?? null, multipleCandidates: matches.length > 1 };
+  const bootstrapCandidate = cachedPrimary && primaryWasNonFinal &&
+    normalizedSonicAccount(cachedPrimary.account) === assignedAccount && Number.isFinite(primaryUpdatedAt) && primaryUpdatedAt >= assignedAt;
+  if (bootstrapCandidate && alternatePrimary) return { document: cachedPrimary, multipleCandidates: false, storedDocument, bootstrapRejected: false };
+  return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: Boolean(bootstrapCandidate) };
 }
 
 function validateDatabaseName(name: string, fallback: string): string {
@@ -299,10 +341,12 @@ async function querySqlReportReadinessByAccession(
   sql: SqlModule,
   dicomDb: string,
   reportDb: string,
-  accessionNumber: string
+  accessionNumber: string,
+  noReportStatusCodes: number[]
 ): Promise<SqlReadiness> {
   const request = pool.request();
   request.input("accessionNumber", sql.NVarChar(128), accessionNumber);
+  const activeDocument = activeDocumentPredicate(request, sql, noReportStatusCodes, "noReportStatus");
   const result = await request.query<SqlReadinessRow>(
     `with StudyMatch as (
        select top 1 s.StudyInstanceUID
@@ -322,6 +366,7 @@ async function querySqlReportReadinessByAccession(
        from [${reportDb}].[dbo].[Documents] d
        inner join ReportMatch r
          on d.Report = r.ReportNo
+       where ${activeDocument}
        order by d.UpdatedAt desc, d.Id desc
      )
      select
@@ -349,10 +394,12 @@ async function querySqlReportReadinessByStudyInstanceUid(
   sql: SqlModule,
   dicomDb: string,
   reportDb: string,
-  studyInstanceUid: string
+  studyInstanceUid: string,
+  noReportStatusCodes: number[]
 ): Promise<SqlReadiness> {
   const request = pool.request();
   request.input("studyInstanceUid", sql.NVarChar(128), studyInstanceUid);
+  const activeDocument = activeDocumentPredicate(request, sql, noReportStatusCodes, "noReportStatus");
   const result = await request.query<SqlReadinessRow>(
     `with StudyMatch as (
        select top 1 s.StudyInstanceUID
@@ -371,6 +418,7 @@ async function querySqlReportReadinessByStudyInstanceUid(
        from [${reportDb}].[dbo].[Documents] d
        inner join ReportMatch r
          on d.Report = r.ReportNo
+       where ${activeDocument}
        order by d.UpdatedAt desc, d.Id desc
      )
      select
@@ -390,11 +438,13 @@ async function querySqlReportReadinessBatch(
   dicomDb: string,
   reportDb: string,
   identifiers: string[],
-  method: "study_instance_uid" | "accession_fallback"
+  method: "study_instance_uid" | "accession_fallback",
+  noReportStatusCodes: number[]
 ): Promise<Map<string, SqlReadiness>> {
   const uniqueIdentifiers = [...new Set(identifiers.map((value) => value.trim()).filter(Boolean))];
   if (!uniqueIdentifiers.length) return new Map();
   const request = pool.request();
+  const activeDocument = activeDocumentPredicate(request, sql, noReportStatusCodes, `noReportStatus${method}`);
   const parameterPrefix = method === "study_instance_uid" ? "studyInstanceUid" : "accession";
   const valueRows = uniqueIdentifiers.map((identifier, index) => {
     request.input(`${parameterPrefix}${index}`, sql.NVarChar(128), identifier);
@@ -414,7 +464,7 @@ async function querySqlReportReadinessBatch(
     from InputIdentifiers input
     outer apply (select top 1 s.StudyInstanceUID from [${dicomDb}].[dbo].[Studies] s where ${studyPredicate} order by ${studyOrder}) study
     outer apply (select top 1 r.No as ReportNo from [${reportDb}].[dbo].[Reports] r where r.StudyInstanceUID = study.StudyInstanceUID order by r.No desc) report
-    outer apply (select top 1 d.Id, d.Account, d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo order by d.UpdatedAt desc, d.Id desc) document
+    outer apply (select top 1 d.Id, d.Account, d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo and ${activeDocument} order by d.UpdatedAt desc, d.Id desc) document
   `)).recordset;
   return new Map(rows.map((row) => [
     String(method === "study_instance_uid" ? row.StudyInstanceUID ?? "" : row.AccessionNumber ?? "").trim(),
@@ -540,14 +590,17 @@ async function queryReportStatusByReportNo(
   pool: SqlConnectionPool,
   sql: SqlModule,
   reportDb: string,
-  reportNo: string
+  reportNo: string,
+  noReportStatusCodes: number[]
 ): Promise<{ statusCode: number | null; foundRow: boolean; documentUpdatedAt: string | null }> {
   const request = pool.request();
   request.input("reportNo", sql.NVarChar(128), reportNo);
+  const activeDocument = activeDocumentPredicate(request, sql, noReportStatusCodes, "noReportStatus");
   const result = await request.query<{ Status?: number; UpdatedAt?: Date | string | null }>(
     `select top 1 d.Status, d.UpdatedAt
      from [${reportDb}].[dbo].[Documents] d
      where d.Report = @reportNo
+       and ${activeDocument}
      order by d.UpdatedAt desc, d.Id desc`
   );
   const row = result.recordset?.[0];
@@ -614,11 +667,11 @@ async function resolveSqlReadiness(
     let correlationMethod: ReportStatusResult["correlationMethod"] = null;
     let readiness: SqlReadiness | null = null;
     if (studyInstanceUid) {
-      readiness = await querySqlReportReadinessByStudyInstanceUid(pool, sql, dicomDb, reportDb, studyInstanceUid);
+      readiness = await querySqlReportReadinessByStudyInstanceUid(pool, sql, dicomDb, reportDb, studyInstanceUid, settings.sonicDicomSqlNoReportStatusCodes);
       if (readiness.foundStudy) correlationMethod = "study_instance_uid";
     }
     if (!readiness?.foundStudy && accession) {
-      readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession);
+      readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession, settings.sonicDicomSqlNoReportStatusCodes);
       if (readiness.foundStudy) correlationMethod = "accession_fallback";
     }
     if (!accession) {
@@ -641,7 +694,7 @@ async function resolveSqlReadiness(
       };
     }
 
-    if (!readiness) readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession);
+    if (!readiness) readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession, settings.sonicDicomSqlNoReportStatusCodes);
     if (!readiness.foundStudy) {
       return {
         foundStudy: false,
@@ -765,7 +818,7 @@ export async function checkSonicDicomReportStatusesBatch(
       const readinessByUid = await querySqlReportReadinessBatch(
         pool, sql, dicomDb, reportDb,
         unique.map((context) => String(context.studyInstanceUid || "").trim()),
-        "study_instance_uid"
+        "study_instance_uid", settings.sonicDicomSqlNoReportStatusCodes
       );
       const fallbackContexts = unique.filter((context) => {
         const uid = String(context.studyInstanceUid || "").trim();
@@ -774,7 +827,7 @@ export async function checkSonicDicomReportStatusesBatch(
       const readinessByAccession = await querySqlReportReadinessBatch(
         pool, sql, dicomDb, reportDb,
         fallbackContexts.map((context) => String(context.accessionNumber || "").trim()),
-        "accession_fallback"
+        "accession_fallback", settings.sonicDicomSqlNoReportStatusCodes
       );
       for (const context of unique) {
         const uid = String(context.studyInstanceUid || "").trim();
@@ -999,7 +1052,7 @@ export async function testSonicDicomSqlReadiness(input: {
         };
       }
       const statusLookup = await withSqlConnection(settings, async ({ sql, pool }) =>
-        queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
+        queryReportStatusByReportNo(pool, sql, reportDb, reportNo, settings.sonicDicomSqlNoReportStatusCodes)
       );
       const mapped: ReportStatusResult = statusLookup.foundRow
         ? mapSonicDicomDocumentStatus(settings, statusLookup.statusCode, statusLookup.documentUpdatedAt)

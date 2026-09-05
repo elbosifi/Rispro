@@ -159,6 +159,7 @@ export interface ReportingBoardCaseRow {
   finalizedByDoctorName: string | null;
   sonicDicomFinalizedByAccount: string | null;
   sonicDicomLatestDocumentId: string | null;
+  sonicDicomDocumentRemoved?: boolean;
   sonicDicomCorrelationMethod: "study_instance_uid" | "accession_fallback" | null;
   assignmentMatch: ReportingBoardCaseAssignmentMatch;
   assignmentStatus: "assigned" | "unassigned";

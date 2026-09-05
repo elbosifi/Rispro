@@ -511,7 +511,7 @@ function reportStatusView(row: ReportingBoardCaseRow) {
     final: { label: "Final report", text: "", icon: CheckCircle2, className: "border-emerald-200 bg-white text-emerald-700" },
     draft: { label: "Draft report", text: "Draft", icon: FilePenLine, className: "border-amber-300 bg-white text-amber-800" },
     no_report: row.requiresReport
-      ? { label: "No report yet", text: "No report", icon: Minus, className: "border-slate-200 bg-white text-slate-500" }
+      ? { label: row.caseType === "comparison" && row.sonicDicomDocumentRemoved ? "Removed from SonicDICOM" : "No report yet", text: row.caseType === "comparison" && row.sonicDicomDocumentRemoved ? "Removed" : "No report", icon: Minus, className: "border-slate-200 bg-white text-slate-500" }
       : { label: "Report not required", text: "Report not required", icon: Minus, className: "border-slate-200 bg-white text-slate-500" },
     study_not_found: { label: "Study not found in PACS", text: "Missing", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
     unavailable: { label: "Report status unavailable", text: "PACS", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
@@ -694,6 +694,9 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
         <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700" title={row.manualFinalReason ?? "Manual final override"}>
           Final · manual
         </span>
+      )}
+      {row.caseType === "comparison" && row.sonicDicomDocumentRemoved && (
+        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">SonicDICOM comparison report removed</span>
       )}
       {finalizer && (
         <span className="inline-flex max-w-40 flex-col rounded-md border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] text-slate-700" title={`Finalized by ${finalizer}; ${finalizerRelationship}`}>
@@ -954,11 +957,11 @@ function RowActionMenu({
           Mark study as discontinued
         </button>
       )}
-      {row.caseType === "comparison" && row.reportStatus !== "final" && (
+      {row.caseType === "comparison" && row.appointmentStatus !== "finalized" && (
         <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
           {!showFinalize ? (
             <button type="button" role="menuitem" onClick={() => setShowFinalize(true)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
-              Finalize comparison manually
+              {row.reportStatus === "final" ? "Complete comparison in RISpro" : "Finalize comparison manually"}
             </button>
           ) : (
             <div className="grid gap-2 px-2 py-1.5">

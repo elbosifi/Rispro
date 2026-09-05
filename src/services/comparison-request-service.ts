@@ -1107,6 +1107,8 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(sonicStatus);
   const effectiveStatus = finalizedAt ? "final" : hasSonicObservation ? sonicStatus as ReportingBoardCaseRow["reportStatus"] : "no_report";
   const effectiveFinalAt = finalizedAt ?? (hasSonicObservation && sonicStatus === "final" ? optionalIso(row.sonicReportFinalAt) : null);
+  const sonicDicomDocumentRemoved = hasSonicObservation && sonicStatus === "no_report" &&
+    row.sonicDocumentId != null && row.sonicStatusCode != null;
   return {
     caseType: "comparison",
     caseKey: `comparison:${Number(row.comparisonRequestId)}`,
@@ -1145,6 +1147,7 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     finalizedByDoctorName: row.finalizedByDoctorName == null ? null : String(row.finalizedByDoctorName),
     sonicDicomFinalizedByAccount: hasSonicObservation ? row.sonicAccount == null ? null : String(row.sonicAccount) : null,
     sonicDicomLatestDocumentId: hasSonicObservation ? row.sonicDocumentId == null ? null : String(row.sonicDocumentId) : null,
+    sonicDicomDocumentRemoved,
     sonicDicomCorrelationMethod: hasSonicObservation && (row.sonicCorrelationMethod === "study_instance_uid" || row.sonicCorrelationMethod === "accession_fallback") ? row.sonicCorrelationMethod : null,
     assignmentMatch: "not_applicable",
     assignmentStatus: row.assignedDoctorId == null ? "unassigned" : "assigned",
@@ -1217,6 +1220,7 @@ export async function listComparisonReportingBoardRows(
         comparison_cache.report_status as "sonicReportStatus",
         comparison_cache.report_final_at as "sonicReportFinalAt",
         comparison_cache.sonicdicom_document_id as "sonicDocumentId",
+        comparison_cache.sonicdicom_status_code as "sonicStatusCode",
         comparison_cache.sonicdicom_account as "sonicAccount",
         comparison_cache.correlation_method as "sonicCorrelationMethod",
         comparison_cache.last_success_at as "sonicLastSuccessAt"
