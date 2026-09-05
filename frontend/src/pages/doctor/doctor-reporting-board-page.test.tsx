@@ -12,6 +12,7 @@ const fetchReportingBoardCasesMock = vi.fn();
 const fetchReportingBoardStatsMock = vi.fn();
 const refreshReportingBoardSonicDicomMock = vi.fn();
 const refreshReportingBoardCaseSonicDicomStatusMock = vi.fn();
+const refreshReportingBoardComparisonSonicDicomStatusMock = vi.fn();
 const queueFullReportingBoardSonicDicomResyncMock = vi.fn();
 const fetchFullReportingBoardSonicDicomResyncStatusMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
@@ -53,6 +54,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardStats: (...args: unknown[]) => fetchReportingBoardStatsMock(...args),
   refreshReportingBoardSonicDicom: (...args: unknown[]) => refreshReportingBoardSonicDicomMock(...args),
   refreshReportingBoardCaseSonicDicomStatus: (...args: unknown[]) => refreshReportingBoardCaseSonicDicomStatusMock(...args),
+  refreshReportingBoardComparisonSonicDicomStatus: (...args: unknown[]) => refreshReportingBoardComparisonSonicDicomStatusMock(...args),
   queueFullReportingBoardSonicDicomResync: (...args: unknown[]) => queueFullReportingBoardSonicDicomResyncMock(...args),
   fetchFullReportingBoardSonicDicomResyncStatus: (...args: unknown[]) => fetchFullReportingBoardSonicDicomResyncStatusMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
@@ -270,6 +272,7 @@ describe("DoctorReportingBoardPage", () => {
     updateReportingBoardSettingsMock.mockResolvedValue({});
     refreshReportingBoardSonicDicomMock.mockResolvedValue({ ok: true, checked: 1, successful: 1, failed: 0, checkedAt: "2026-08-19T10:00:00.000Z" });
     refreshReportingBoardCaseSonicDicomStatusMock.mockResolvedValue({ ok: true, appointmentId: 42, successful: true, previousStatus: "final", reportStatus: "final", changed: false, cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" });
+    refreshReportingBoardComparisonSonicDicomStatusMock.mockResolvedValue({ ok: true, comparisonRequestId: 77, successful: true, reportStatus: "draft", cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" });
     queueFullReportingBoardSonicDicomResyncMock.mockResolvedValue({ ok: true, queued: 1234, requestedAt: "2026-08-22T10:00:00.000Z" });
     fetchFullReportingBoardSonicDicomResyncStatusMock.mockResolvedValue({ ok: true, remaining: 0, failed: 0 });
     fetchReportingBoardCasesMock.mockResolvedValue({
@@ -786,6 +789,23 @@ describe("DoctorReportingBoardPage", () => {
       expect(await screen.findByText(message)).toBeTruthy();
     }
     expect(refreshReportingBoardCaseSonicDicomStatusMock).toHaveBeenCalledWith(42);
+  });
+
+  it("refreshes a comparison report status from the row action menu", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [comparisonRow],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("CMP-000077")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
+    expect(await screen.findByRole("menuitem", { name: "Refresh report status" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh report status" }));
+
+    await waitFor(() => expect(refreshReportingBoardComparisonSonicDicomStatusMock).toHaveBeenCalledWith(77));
+    expect(refreshReportingBoardCaseSonicDicomStatusMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Comparison report status refreshed: Draft.")).toBeTruthy();
   });
 
   it("shows RadiAnt actions only on Windows and builds tag search URLs", async () => {

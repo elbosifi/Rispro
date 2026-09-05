@@ -616,6 +616,10 @@ export async function refreshReportingBoardCaseSonicDicomStatus(appointmentId: n
   return api(`/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`, { method: "POST" });
 }
 
+export async function refreshReportingBoardComparisonSonicDicomStatus(comparisonRequestId: number): Promise<{ ok: true; comparisonRequestId: number; successful: boolean; reportStatus: string; cachedStatusRetained: boolean; checkedAt: string }> {
+  return api(`/doctor/reporting-board/comparisons/${comparisonRequestId}/refresh-sonicdicom`, { method: "POST" });
+}
+
 export async function queueFullReportingBoardSonicDicomResync(): Promise<{ ok: true; queued: number; requestedAt: string }> {
   return api("/doctor/reporting-board/resync-sonicdicom", { method: "POST" });
 }

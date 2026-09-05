@@ -8,7 +8,7 @@ import {
   type ReportLookupContext,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, findComparisonRequestById, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -736,7 +736,17 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
     }
   }
 
-  return { ok: true, checked: contexts.length, successful, failed, checkedAt: new Date().toISOString() };
+  const comparisonRequestIds = [...new Set(cases
+    .filter((row) => row.caseType === "comparison" && row.comparisonRequestId !== null && Number.isInteger(row.comparisonRequestId) && row.comparisonRequestId > 0)
+    .map((row) => row.comparisonRequestId as number))];
+  const comparisonCandidates = await selectComparisonSonicDicomCacheCandidatesByRequestIds(comparisonRequestIds);
+  if (comparisonCandidates.length) {
+    const comparisonRefresh = await refreshReportingBoardSonicDicomCacheCandidates([], comparisonCandidates);
+    successful += comparisonRefresh.successful;
+    failed += comparisonRefresh.failed;
+  }
+
+  return { ok: true, checked: contexts.length + comparisonCandidates.length, successful, failed, checkedAt: new Date().toISOString() };
 }
 
 export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, appointmentId: number): Promise<{
@@ -790,6 +800,39 @@ export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, ap
     previousStatus,
     reportStatus: cache.status,
     changed: cache.changed,
+    cachedStatusRetained: !successful,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+export async function refreshReportingBoardComparisonSonicDicomStatus(actor: Actor, comparisonRequestId: number): Promise<{
+  ok: true;
+  comparisonRequestId: number;
+  successful: boolean;
+  reportStatus: string;
+  cachedStatusRetained: boolean;
+  checkedAt: string;
+}> {
+  await requirePersonalReportingBoardComparison(actor, comparisonRequestId);
+  const candidates = await selectComparisonSonicDicomCacheCandidatesByRequestIds([comparisonRequestId]);
+  const candidate = candidates[0];
+  if (!candidate) throw new HttpError(404, "Active comparison assignment not found.");
+
+  await refreshReportingBoardSonicDicomCacheCandidates([], [candidate]);
+  const cache = await pool.query<{ report_status: string; last_attempt_at: string | null; last_success_at: string | null }>(
+    `select report_status, last_attempt_at, last_success_at from doctor_portal.comparison_sonicdicom_cache where comparison_assignment_id = $1`,
+    [candidate.comparisonAssignmentId]
+  );
+  const row = cache.rows[0];
+  if (!row) throw new HttpError(409, "Comparison SonicDICOM cache is unavailable.");
+  const lastAttemptAt = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : NaN;
+  const lastSuccessAt = row.last_success_at ? new Date(row.last_success_at).getTime() : NaN;
+  const successful = Number.isFinite(lastAttemptAt) && Number.isFinite(lastSuccessAt) && lastSuccessAt >= lastAttemptAt;
+  return {
+    ok: true,
+    comparisonRequestId,
+    successful,
+    reportStatus: row.report_status,
     cachedStatusRetained: !successful,
     checkedAt: new Date().toISOString(),
   };

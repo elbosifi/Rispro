@@ -344,6 +344,49 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
   }));
 }
 
+export async function selectComparisonSonicDicomCacheCandidatesByRequestIds(
+  comparisonRequestIds: number[],
+  db: Queryable = pool
+): Promise<ComparisonSonicDicomCacheCandidate[]> {
+  const ids = [...new Set(comparisonRequestIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return [];
+  const result = await db.query<ComparisonSonicDicomCacheCandidate>(`
+    select
+      b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
+      b.requires_report as "requiresReport", b.status,
+      cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
+      assigned_user.username as "assignedDoctorUsername", comparison_cache.sonicdicom_document_id as "storedDocumentId",
+      comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
+      primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
+      manual.id is not null as "primaryManualFinal"
+    from doctor_portal.comparison_case_assignments cca
+    join comparison_requests cr on cr.id = cca.comparison_request_id
+    join appointments_v2.bookings b on b.id = cr.linked_previous_booking_id
+    join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
+    join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
+    left join doctor_portal.reporting_board_sonicdicom_cache primary_cache on primary_cache.appointment_id = b.id
+    left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
+    where cca.status = 'active'
+      and cr.status in ('ready_for_reporting', 'assigned', 'finalized')
+      and cr.id = any($1::bigint[])
+    order by cca.assigned_at asc, cca.id asc
+  `, [ids]);
+  return result.rows.map((row) => ({
+    ...row,
+    bookingId: Number(row.bookingId),
+    comparisonAssignmentId: Number(row.comparisonAssignmentId),
+    comparisonRequestId: Number(row.comparisonRequestId),
+    primaryManualFinal: Boolean(row.primaryManualFinal),
+    storedDocumentId: row.storedDocumentId == null ? null : String(row.storedDocumentId),
+    storedDocumentUpdatedAt: row.storedDocumentUpdatedAt == null ? null : String(row.storedDocumentUpdatedAt),
+    primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
+    primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
+    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedAt: String(row.assignedAt),
+  }));
+}
+
 export async function persistReportingBoardSonicDicomCacheResult(
   context: ReportLookupContext,
   result: ReportStatusResult | null,

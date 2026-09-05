@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
-import { fetchFullReportingBoardSonicDicomResyncStatus, fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardCaseSonicDicomStatus, refreshReportingBoardSonicDicom } from "./api-hooks";
+import { fetchFullReportingBoardSonicDicomResyncStatus, fetchReportingBoardCases, fetchReportingBoardStats, queueFullReportingBoardSonicDicomResync, refreshReportingBoardCaseSonicDicomStatus, refreshReportingBoardComparisonSonicDicomStatus, refreshReportingBoardSonicDicom } from "./api-hooks";
 
 vi.mock("@/lib/api-client", () => ({
   api: vi.fn(),
@@ -64,5 +64,13 @@ describe("reporting board api hooks", () => {
     await refreshReportingBoardCaseSonicDicomStatus(42);
 
     expect(api).toHaveBeenCalledWith("/doctor/reporting-board/cases/42/refresh-sonicdicom", { method: "POST" });
+  });
+
+  it("posts a single Reporting Board comparison SonicDICOM refresh", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, comparisonRequestId: 77, successful: true, reportStatus: "draft", cachedStatusRetained: false, checkedAt: "2026-08-23T10:00:00.000Z" });
+
+    await refreshReportingBoardComparisonSonicDicomStatus(77);
+
+    expect(api).toHaveBeenCalledWith("/doctor/reporting-board/comparisons/77/refresh-sonicdicom", { method: "POST" });
   });
 });

@@ -46,6 +46,7 @@ import {
   readMyReportingBoardNotification,
   refreshReportingBoardSonicDicomStatuses,
   refreshReportingBoardCaseSonicDicomStatus,
+  refreshReportingBoardComparisonSonicDicomStatus,
   queueFullReportingBoardSonicDicomResyncForManager,
   reconcileReportingBoardAssignmentToSonicFinalizer,
   resumeScheduledReportingBoardBulkAssignmentJob,
@@ -485,6 +486,13 @@ router.get(
   "/comparisons/:comparisonRequestId/history",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await getPersonalReportingBoardComparisonHistory(actor(req), requiredPositiveInteger(req.params.comparisonRequestId, "comparisonRequestId")));
+  })
+);
+
+router.post(
+  "/comparisons/:comparisonRequestId/refresh-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await refreshReportingBoardComparisonSonicDicomStatus(actor(req), requiredPositiveInteger(req.params.comparisonRequestId, "comparisonRequestId")));
   })
 );
 

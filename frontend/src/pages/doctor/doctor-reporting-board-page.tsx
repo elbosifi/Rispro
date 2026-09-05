@@ -28,6 +28,7 @@ import {
   queueFullReportingBoardSonicDicomResync,
   reconcileReportingBoardAssignmentToSonicFinalizer,
   refreshReportingBoardCaseSonicDicomStatus,
+  refreshReportingBoardComparisonSonicDicomStatus,
   refreshReportingBoardSonicDicom,
   fetchRosterDoctors,
   finalizeComparisonRequest,
@@ -905,7 +906,7 @@ function RowActionMenu({
           Open patient list in SonicDICOM
         </button>
       )}
-      {row.caseType === "appointment" && (
+      {(row.caseType === "appointment" || (row.caseType === "comparison" && row.comparisonRequestId !== null)) && (
         <button type="button" role="menuitem" disabled={refreshingReportStatus} onClick={() => { setOpen(false); void onRefreshReportStatus(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">
           {refreshingReportStatus ? "Refreshing report status…" : "Refresh report status"}
         </button>
@@ -2248,13 +2249,23 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const refreshCaseReportStatus = async (row: ReportingBoardCaseRow) => {
     setRefreshingReportAppointmentId(row.appointmentId);
     try {
-      const result = await refreshReportingBoardCaseSonicDicomStatus(row.appointmentId);
-      if (!result.successful) {
-        setBoardActionMessage({ tone: "error", text: `Could not refresh this report status. SonicDICOM is unavailable; cached ${reportStatusFeedbackLabel(result.reportStatus)} status was retained.` });
-      } else if (result.changed) {
-        setBoardActionMessage({ tone: "success", text: `Report status refreshed: ${reportStatusFeedbackLabel(result.previousStatus)} → ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+      if (row.caseType === "comparison") {
+        if (row.comparisonRequestId === null) throw new Error("Comparison request ID is missing.");
+        const result = await refreshReportingBoardComparisonSonicDicomStatus(row.comparisonRequestId);
+        if (!result.successful) {
+          setBoardActionMessage({ tone: "error", text: `Could not refresh comparison report status; cached ${reportStatusFeedbackLabel(result.reportStatus)} retained.` });
+        } else {
+          setBoardActionMessage({ tone: "success", text: `Comparison report status refreshed: ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+        }
       } else {
-        setBoardActionMessage({ tone: "success", text: `Report status refreshed. SonicDICOM still reports ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+        const result = await refreshReportingBoardCaseSonicDicomStatus(row.appointmentId);
+        if (!result.successful) {
+          setBoardActionMessage({ tone: "error", text: `Could not refresh this report status. SonicDICOM is unavailable; cached ${reportStatusFeedbackLabel(result.reportStatus)} status was retained.` });
+        } else if (result.changed) {
+          setBoardActionMessage({ tone: "success", text: `Report status refreshed: ${reportStatusFeedbackLabel(result.previousStatus)} → ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+        } else {
+          setBoardActionMessage({ tone: "success", text: `Report status refreshed. SonicDICOM still reports ${reportStatusFeedbackLabel(result.reportStatus)}.` });
+        }
       }
       await Promise.all([casesQuery.refetch(), statsQuery.refetch()]);
     } catch (error) {
