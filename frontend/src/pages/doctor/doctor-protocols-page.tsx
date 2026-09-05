@@ -1092,7 +1092,11 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
   );
 }
 
-function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
+export function ProtocolingAppointmentWorkspace({ appointmentId, canAssign, onClose }: { appointmentId: number; canAssign: boolean; onClose: () => void }) {
+  return <ProtocolingWorklist canAssign={canAssign} embeddedAppointmentId={appointmentId} onEmbeddedClose={onClose} />;
+}
+
+function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -1105,11 +1109,15 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const [waitingFirst, setWaitingFirst] = useState(false);
   const [search, setSearch] = useState("");
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
-  const selectedAppointmentId = (() => {
+  const selectedAppointmentId = embeddedAppointmentId ?? (() => {
     const appointmentId = Number(new URLSearchParams(location.search).get("appointmentId"));
     return Number.isInteger(appointmentId) && appointmentId > 0 ? appointmentId : null;
   })();
   const updateSelectedAppointment = useCallback((appointmentId: number | null) => {
+    if (embeddedAppointmentId !== undefined) {
+      if (appointmentId === null) onEmbeddedClose?.();
+      return;
+    }
     const params = new URLSearchParams(location.search);
     if (appointmentId === null) {
       params.delete("appointmentId");
@@ -1117,7 +1125,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
       params.set("appointmentId", String(appointmentId));
     }
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  }, [embeddedAppointmentId, location.pathname, location.search, navigate, onEmbeddedClose]);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -1212,7 +1220,8 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   };
 
   return (
-    <section className="space-y-4">
+    <section className={embeddedAppointmentId !== undefined ? "contents" : "space-y-4"}>
+      {embeddedAppointmentId === undefined ? <>
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Protocoling</p>
         <h2 className="mt-1 text-2xl font-semibold text-foreground">Protocoling Worklist</h2>
@@ -1278,6 +1287,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
         </SettingsTable>
       )}
 
+      </> : null}
       {selectedAppointment && (
         <ProtocolAssignmentModal
           key={selectedAppointment.appointmentId}

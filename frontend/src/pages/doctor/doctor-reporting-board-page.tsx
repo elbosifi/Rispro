@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
-import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
+import { ProtocolingAppointmentWorkspace } from "@/pages/doctor/doctor-protocols-page";
 import {
   bulkAssignNextReportingCases,
   bulkReassignSelectedReportingCases,
@@ -1697,7 +1697,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [fullResyncPending, setFullResyncPending] = useState(false);
   const [fullResync, setFullResync] = useState<FullResyncState | null>(storedFullResync);
   const [refreshingReportAppointmentId, setRefreshingReportAppointmentId] = useState<number | null>(null);
-  const [detailsTarget, setDetailsTarget] = useState<ReportingBoardCaseRow | null>(null);
+  const [protocolingAppointmentId, setProtocolingAppointmentId] = useState<number | null>(null);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
@@ -2606,12 +2606,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   {cases.map((row) => {
                     const selected = selectedCaseKeys.includes(row.caseKey);
                     return (
-                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)} onClick={() => setDetailsTarget(row)}>
+                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
                         <td className="px-3 py-1.5"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
                           checked={selected}
-                          onClick={(event) => event.stopPropagation()}
                           onChange={(event) => {
                             const checked = event.target.checked;
                             setSelectedCaseKeys((current) => checked ? [...new Set([...current, row.caseKey])] : current.filter((key) => key !== row.caseKey));
@@ -2619,7 +2618,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         /></td>
                         <td className="px-3 py-1.5">
                           <div className="flex min-w-44 flex-col gap-1">
-                            <span className="font-semibold text-foreground">{patientName(row)}</span>
+                            {row.caseType === "appointment" ? <button type="button" onClick={() => setProtocolingAppointmentId(row.appointmentId)} className="w-fit cursor-pointer rounded-sm font-semibold text-foreground hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">{patientName(row)}</button> : <span className="font-semibold text-foreground">{patientName(row)}</span>}
                             <PriorityBadge row={row} />
                           </div>
                         </td>
@@ -2629,7 +2628,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         {showAssignedDoctorColumn && <td className="px-3 py-1.5"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
                         <td className="px-3 py-1.5"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-1.5"><CompactStatusCell row={row} /></td>
-                        <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
+                        <td className="px-2 py-1.5 text-right">
                           <RowActionMenu
                             row={row}
                             canManage={canManage}
@@ -2857,13 +2856,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onChange={setSettingsDraft}
         onSave={() => updateSettingsMutation.mutate()}
       />
-      {detailsTarget && <DoctorReadOnlyDetailsDrawer
-        patientId={detailsTarget.patientId}
-        appointmentId={detailsTarget.appointmentId}
-        initialTab="appointment"
-        patientLabel={detailsTarget.patientEnglishName || detailsTarget.patientArabicName || detailsTarget.patientMrn}
-        placement="viewport"
-        onClose={() => setDetailsTarget(null)}
+      {protocolingAppointmentId !== null && <ProtocolingAppointmentWorkspace
+        appointmentId={protocolingAppointmentId}
+        canAssign={Boolean(me.canAssignProtocols)}
+        onClose={() => setProtocolingAppointmentId(null)}
       />}
       {manualFinalTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">

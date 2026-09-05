@@ -1,6 +1,7 @@
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 import { buildReportingBoardPrintUrl } from "./doctor-reporting-board-page.helpers";
@@ -46,8 +47,7 @@ const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchOhifViewerAvailabilityMock = vi.fn();
 const launchReportingBoardCaseInOhifMock = vi.fn();
 const fetchOhifRetrievalJobMock = vi.fn();
-const getAppointmentByIdMock = vi.fn();
-const fetchPatientDirectorySummaryMock = vi.fn();
+const protocolingWorkspaceMock = vi.fn(({ appointmentId, onClose }: { appointmentId: number; onClose: () => void }) => <section data-testid="protocoling-appointment-workspace" data-appointment-id={appointmentId}><button type="button" onClick={onClose}>Close protocoling workspace</button></section>);
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -90,8 +90,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
   launchReportingBoardCaseInOhif: (...args: unknown[]) => launchReportingBoardCaseInOhifMock(...args),
   fetchOhifRetrievalJob: (...args: unknown[]) => fetchOhifRetrievalJobMock(...args),
-  getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
-  fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
+}));
+
+vi.mock("@/pages/doctor/doctor-protocols-page", () => ({
+  ProtocolingAppointmentWorkspace: (props: { appointmentId: number; onClose: () => void }) => protocolingWorkspaceMock(props),
 }));
 
 const managerMe: DoctorMe = {
@@ -361,8 +363,6 @@ describe("DoctorReportingBoardPage", () => {
       examTypes: [],
       priorities: [{ id: 3, code: "stat", nameEn: "STAT", nameAr: "STAT", sortOrder: 0 }],
     });
-    getAppointmentByIdMock.mockResolvedValue(null);
-    fetchPatientDirectorySummaryMock.mockResolvedValue(null);
     assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
     unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
     assignComparisonRequestMock.mockResolvedValue({ assignmentId: 101, comparisonRequestId: 77 });
@@ -424,42 +424,59 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
   });
 
-  it("opens the shared appointment and patient drawer from a case information cell and closes it", async () => {
+  it("opens the full Protocoling workspace from the patient name and closes back to the board", async () => {
     renderPage();
-
-    fireEvent.click(await screen.findByText("MRN-7"));
-
-    expect(await screen.findByRole("complementary", { name: "Appointment and patient details" })).toBeTruthy();
-    await waitFor(() => expect(getAppointmentByIdMock).toHaveBeenCalledWith(42));
-    expect(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByText("Alpha Patient")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("true");
-
-    fireEvent.click(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByRole("button", { name: "Close appointment and patient details" }));
-    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
-  });
-
-  it("keeps case selection independent from opening details", async () => {
-    renderPage();
-
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select case V2-000042" }));
 
-    expect(await screen.findByText("1 selected")).toBeTruthy();
-    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
-    expect(getAppointmentByIdMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Alpha Patient" }));
+
+    expect((await screen.findByTestId("protocoling-appointment-workspace")).getAttribute("data-appointment-id")).toBe("42");
+    expect(protocolingWorkspaceMock).toHaveBeenCalledWith(expect.objectContaining({ appointmentId: 42 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close protocoling workspace" }));
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
+    expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
-  it("keeps the Actions menu independent from opening details", async () => {
+  it("opens the Protocoling workspace with keyboard activation of the patient name", async () => {
+    renderPage();
+    const patientButton = await screen.findByRole("button", { name: "Alpha Patient" });
+
+    patientButton.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect((await screen.findByTestId("protocoling-appointment-workspace")).getAttribute("data-appointment-id")).toBe("42");
+  });
+
+  it("keeps blank row clicks and case selection independent from Protocoling", async () => {
+    renderPage();
+    const row = (await screen.findByRole("button", { name: "Alpha Patient" })).closest("tr")!;
+
+    fireEvent.click(within(row).getByText("STAT"));
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
+
+    fireEvent.click(within(row).getByRole("checkbox", { name: "Select case V2-000042" }));
+
+    expect(await screen.findByText("1 selected")).toBeTruthy();
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
+  });
+
+  it("keeps study, report/PACS actions, and the Actions menu independent from Protocoling", async () => {
     renderPage();
     const row = (await screen.findByText("V2-000042")).closest("tr")!;
 
+    fireEvent.click(within(row).getByText(/CT.*CT Brain/));
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-
-    expect(await screen.findByRole("menu")).toBeTruthy();
-    expect(screen.queryByRole("complementary", { name: "Appointment and patient details" })).toBeNull();
-    expect(getAppointmentByIdMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open this study in SonicDICOM" }));
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Refresh report status" }));
+    await waitFor(() => expect(refreshReportingBoardCaseSonicDicomStatusMock).toHaveBeenCalledWith(42));
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
   });
 
-  it("opens linked appointment details from a comparison row without breaking comparison actions", async () => {
+  it("leaves comparison patient names non-opening while preserving comparison actions", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [comparisonRow],
       filters: { reportStatus: "all", limit: 100, offset: 0 },
@@ -467,10 +484,9 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
     const row = (await screen.findByText("CMP-000077")).closest("tr")!;
 
-    fireEvent.click(within(row).getByText("Comparison request"));
-    expect(await screen.findByRole("complementary", { name: "Appointment and patient details" })).toBeTruthy();
-    await waitFor(() => expect(getAppointmentByIdMock).toHaveBeenCalledWith(620));
-    fireEvent.click(within(screen.getByRole("complementary", { name: "Appointment and patient details" })).getByRole("button", { name: "Close appointment and patient details" }));
+    expect(within(row).queryByRole("button", { name: "Alpha Patient" })).toBeNull();
+    fireEvent.click(within(row).getByText("Alpha Patient"));
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
 
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Refresh report status" }));

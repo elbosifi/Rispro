@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
-import { DoctorProtocolsPage } from "./doctor-protocols-page";
+import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
 
 function render(ui: ReactElement) {
   return renderTestingLibrary(<MemoryRouter>{ui}</MemoryRouter>);
@@ -84,6 +84,7 @@ vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false, t: (key: TranslationKey) => translate("en", key) }) }));
 vi.mock("@/v2/appointments/api", () => ({
   rescheduleV2Booking: mockRescheduleBooking,
+  fetchV2Modalities: vi.fn(async () => []),
   useV2ExamTypes: () => ({ data: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }], isLoading: false, isError: false }),
 }));
 vi.mock("@/components/appointments/appointment-information-view", () => ({
@@ -142,6 +143,20 @@ describe("Doctor protocoling request documents", () => {
     renderTestingLibrary(<MemoryRouter initialEntries={["/doctor/protocols?appointmentId=42"]}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
 
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
+  });
+
+  it("renders the existing Protocoling workspace for an embedded appointment without navigating", async () => {
+    const onClose = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><ProtocolingAppointmentWorkspace appointmentId={42} canAssign onClose={onClose} /></QueryClientProvider>);
+
+    expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
+    expect(mockFetchAppointmentDetail).toHaveBeenCalledWith(42);
+    expect(screen.getByRole("button", { name: "Patient history" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open appointment and patient details" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Assign and next" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("requires structured recall selections and sends their default metadata", async () => {
