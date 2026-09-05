@@ -9,6 +9,7 @@ import type { ReportingBoardMobileCase, ReportingBoardMobileResponse, User } fro
 
 const testState = vi.hoisted(() => ({
   user: null as User | null,
+  authLoading: false,
   fetchView: vi.fn(),
   fetchActiveRecall: vi.fn(),
   createRecall: vi.fn(),
@@ -33,7 +34,7 @@ const testState = vi.hoisted(() => ({
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
-  useAuth: () => ({ user: testState.user, isLoading: false, logout: testState.logout }),
+  useAuth: () => ({ user: testState.user, isLoading: testState.authLoading, logout: testState.logout }),
 }));
 
 vi.mock("@/components/auth/passkey-settings-button", () => ({
@@ -133,9 +134,10 @@ function LocationStateProbe() {
 }
 
 function renderPage() {
-  return render(
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const page = () => (
     <MemoryRouter initialEntries={["/reporting/worklist/token?tab=urgent#case-42"]}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <QueryClientProvider client={queryClient}>
         <Routes>
           <Route path="/reporting/worklist/:token" element={<ReportingBoardMobilePage />} />
           <Route path="/login" element={<LocationStateProbe />} />
@@ -143,6 +145,8 @@ function renderPage() {
       </QueryClientProvider>
     </MemoryRouter>
   );
+  const rendered = render(page());
+  return { ...rendered, rerenderPage: () => rendered.rerender(page()) };
 }
 
 async function openAccount() {
@@ -156,6 +160,7 @@ async function openAccount() {
 describe("Personal Reporting Desk authentication and current-device notifications", () => {
   beforeEach(() => {
     testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
+    testState.authLoading = false;
     testState.fetchView.mockResolvedValue(viewData());
     testState.fetchActiveRecall.mockResolvedValue(null);
     testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
@@ -177,6 +182,7 @@ describe("Personal Reporting Desk authentication and current-device notification
   afterEach(() => {
     vi.clearAllMocks();
     testState.user = null;
+    testState.authLoading = false;
     Reflect.deleteProperty(window, "PushManager");
     Reflect.deleteProperty(window, "Notification");
     Reflect.deleteProperty(navigator, "serviceWorker");
@@ -229,6 +235,28 @@ describe("Personal Reporting Desk authentication and current-device notification
     expect(testState.subscribe).not.toHaveBeenCalled();
     expect(testState.unsubscribe).not.toHaveBeenCalled();
     expect(testState.sendTest).not.toHaveBeenCalled();
+  });
+
+  it("refetches the mounted Personal Desk after anonymous login and exposes owner actions", async () => {
+    testState.user = null;
+    const anonymousView = viewData();
+    const authenticatedView = viewData();
+    testState.fetchView
+      .mockResolvedValueOnce({ ...anonymousView, currentDoctorId: null, allowedActions: { ...anonymousView.allowedActions, authenticated: false, readOnly: true, finalizeOwnReports: false }, cases: [makeCase()] })
+      .mockResolvedValueOnce({ ...authenticatedView, currentDoctorId: authenticatedView.savedView.targetDoctorId, allowedActions: { ...authenticatedView.allowedActions, authenticated: true, readOnly: false, finalizeOwnReports: true }, cases: [makeCase()] });
+    const page = renderPage();
+
+    expect(await screen.findByText("Patient One")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
+    expect(screen.queryByRole("button", { name: "Mark final in RISpro" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Patient History" })).toBeNull();
+
+    testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
+    page.rerenderPage();
+
+    await waitFor(() => expect(testState.fetchView).toHaveBeenCalledTimes(2));
+    expect((await screen.findAllByRole("button", { name: "Patient History" })).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Mark final in RISpro" })).toBeTruthy();
   });
 
   it("shows unsupported push state without working notification actions", async () => {
