@@ -8,7 +8,7 @@ import {
   type ReportLookupContext,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds, type ReportingBoardSonicDicomCacheCandidate } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, findComparisonRequestById, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -690,6 +690,26 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   return { filters, ...aggregateReportingBoardStats(rows) };
 }
 
+function reportingBoardSonicDicomCacheCandidate(row: ReportingBoardCaseRow): ReportingBoardSonicDicomCacheCandidate {
+  return {
+    bookingId: row.appointmentId,
+    accessionNumber: row.accessionNumber,
+    studyInstanceUid: row.studyInstanceUid,
+    requiresReport: row.requiresReport,
+    status: row.appointmentStatus,
+    assigned: row.assignmentStatus === "assigned",
+    priorityCode: row.reportingPriorityCode,
+    cacheStatus: row.reportStatus,
+    lastSuccessAt: row.reportStatusCheckedAt,
+  };
+}
+
+function cacheRefreshWasSuccessful(lastAttemptAt: string | null, lastSuccessAt: string | null): boolean {
+  const attempt = lastAttemptAt ? new Date(lastAttemptAt).getTime() : NaN;
+  const success = lastSuccessAt ? new Date(lastSuccessAt).getTime() : NaN;
+  return Number.isFinite(attempt) && Number.isFinite(success) && success >= attempt;
+}
+
 export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, input: ReportingBoardFilters): Promise<{
   ok: true;
   checked: number;
@@ -698,55 +718,50 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
   checkedAt: string;
 }> {
   const { cases } = await getReportingBoardCases(actor, input);
-  const contexts: ReportLookupContext[] = cases
+  const primaryCandidates = cases
     .filter((row) => row.caseType === "appointment" && row.appointmentStatus === "completed" && row.requiresReport && !row.manualFinalOverrideId)
-    .map((row) => ({
-      bookingId: row.appointmentId,
-      accessionNumber: row.accessionNumber,
-      studyInstanceUid: row.studyInstanceUid,
-      requiresReport: row.requiresReport,
-      status: row.appointmentStatus,
-    }));
-  const settings = await readSonicDicomReportSettings();
-  let successful = 0;
-  let failed = 0;
-
-  for (let start = 0; start < contexts.length; start += MAX_SONICDICOM_BATCH_SIZE) {
-    const batch = contexts.slice(start, start + MAX_SONICDICOM_BATCH_SIZE);
-    let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
-    let failure: unknown = null;
-    try {
-      statuses = await assignmentBatchChecker(batch, { audit: false });
-    } catch (error) {
-      failure = error;
-    }
-    await persistReportingBoardSonicDicomCacheResults(batch.map((context) => {
-      const result = statuses.get(context.bookingId) ?? null;
-      const unavailable = !result || result.state === "unavailable";
-      return {
-        context,
-        result,
-        error: failure ?? (unavailable ? "SonicDICOM unavailable during manual Reporting Board refresh" : null),
-      };
-    }), settings);
-    for (const context of batch) {
-      const state = statuses.get(context.bookingId)?.state;
-      if (state === "final" || state === "draft" || state === "no_report" || state === "study_not_found") successful += 1;
-      else failed += 1;
-    }
-  }
+    .map(reportingBoardSonicDicomCacheCandidate);
 
   const comparisonRequestIds = [...new Set(cases
     .filter((row) => row.caseType === "comparison" && row.comparisonRequestId !== null && Number.isInteger(row.comparisonRequestId) && row.comparisonRequestId > 0)
     .map((row) => row.comparisonRequestId as number))];
   const comparisonCandidates = await selectComparisonSonicDicomCacheCandidatesByRequestIds(comparisonRequestIds);
-  if (comparisonCandidates.length) {
-    const comparisonRefresh = await refreshReportingBoardSonicDicomCacheCandidates([], comparisonCandidates);
-    successful += comparisonRefresh.successful;
-    failed += comparisonRefresh.failed;
+  const processedComparisonAssignmentIds = new Set<number>();
+  for (let start = 0; start < primaryCandidates.length; start += MAX_SONICDICOM_BATCH_SIZE) {
+    const batch = primaryCandidates.slice(start, start + MAX_SONICDICOM_BATCH_SIZE);
+    const appointmentIds = new Set(batch.map((candidate) => candidate.bookingId));
+    const visibleComparisonCandidates = comparisonCandidates.filter((candidate) => appointmentIds.has(candidate.bookingId));
+    await refreshReportingBoardSonicDicomCacheCandidates(batch, visibleComparisonCandidates);
+    for (const candidate of visibleComparisonCandidates) processedComparisonAssignmentIds.add(candidate.comparisonAssignmentId);
+  }
+  const remainingComparisonCandidates = comparisonCandidates.filter((candidate) => !processedComparisonAssignmentIds.has(candidate.comparisonAssignmentId));
+  for (let start = 0; start < remainingComparisonCandidates.length; start += MAX_SONICDICOM_BATCH_SIZE) {
+    await refreshReportingBoardSonicDicomCacheCandidates([], remainingComparisonCandidates.slice(start, start + MAX_SONICDICOM_BATCH_SIZE));
   }
 
-  return { ok: true, checked: contexts.length + comparisonCandidates.length, successful, failed, checkedAt: new Date().toISOString() };
+  const primaryCacheRows = primaryCandidates.length
+    ? await pool.query<{ appointment_id: number; last_attempt_at: string | null; last_success_at: string | null }>(
+      `select appointment_id, last_attempt_at, last_success_at from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = any($1::bigint[])`,
+      [primaryCandidates.map((candidate) => candidate.bookingId)]
+    )
+    : { rows: [] };
+  const comparisonCacheRows = comparisonCandidates.length
+    ? await pool.query<{ comparison_assignment_id: number; last_attempt_at: string | null; last_success_at: string | null }>(
+      `select comparison_assignment_id, last_attempt_at, last_success_at from doctor_portal.comparison_sonicdicom_cache where comparison_assignment_id = any($1::bigint[])`,
+      [comparisonCandidates.map((candidate) => candidate.comparisonAssignmentId)]
+    )
+    : { rows: [] };
+  const primaryCacheById = new Map(primaryCacheRows.rows.map((row) => [Number(row.appointment_id), row]));
+  const comparisonCacheById = new Map(comparisonCacheRows.rows.map((row) => [Number(row.comparison_assignment_id), row]));
+  const successful = primaryCandidates.filter((candidate) => {
+    const row = primaryCacheById.get(candidate.bookingId);
+    return Boolean(row && cacheRefreshWasSuccessful(row.last_attempt_at, row.last_success_at));
+  }).length + comparisonCandidates.filter((candidate) => {
+    const row = comparisonCacheById.get(candidate.comparisonAssignmentId);
+    return Boolean(row && cacheRefreshWasSuccessful(row.last_attempt_at, row.last_success_at));
+  }).length;
+  const checked = primaryCandidates.length + comparisonCandidates.length;
+  return { ok: true, checked, successful, failed: checked - successful, checkedAt: new Date().toISOString() };
 }
 
 export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, appointmentId: number): Promise<{
@@ -769,37 +784,24 @@ export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, ap
   }
   if (row.manualFinalOverrideId) throw new HttpError(409, "This Reporting Board case has an active manual final override.");
 
-  const context: ReportLookupContext = {
-    bookingId: row.appointmentId,
-    accessionNumber: row.accessionNumber,
-    studyInstanceUid: row.studyInstanceUid,
-    requiresReport: row.requiresReport,
-    status: row.appointmentStatus,
-  };
+  const candidate = reportingBoardSonicDicomCacheCandidate(row);
   const previousStatus = row.reportStatus ?? "unavailable";
-  let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
-  let failure: unknown = null;
-  try {
-    statuses = await assignmentBatchChecker([context], { audit: false });
-  } catch (error) {
-    failure = error;
-  }
-  const result = statuses.get(appointmentId) ?? null;
-  const successful = Boolean(result && ["final", "draft", "no_report", "study_not_found"].includes(result.state));
-  const settings = await readSonicDicomReportSettings();
-  const persisted = await persistReportingBoardSonicDicomCacheResults([{
-    context,
-    result,
-    error: failure ?? (!successful ? "SonicDICOM unavailable during single Reporting Board refresh" : null),
-  }], settings);
-  const cache = persisted[0] ?? { changed: false, status: previousStatus };
+  await refreshReportingBoardSonicDicomCacheCandidates([candidate], []);
+  const cacheResult = await pool.query<{ report_status: string; last_attempt_at: string | null; last_success_at: string | null }>(
+    `select report_status, last_attempt_at, last_success_at from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`,
+    [appointmentId]
+  );
+  const cache = cacheResult.rows[0];
+  if (!cache) throw new HttpError(409, "Reporting Board SonicDICOM cache is unavailable.");
+  const successful = cacheRefreshWasSuccessful(cache.last_attempt_at, cache.last_success_at);
+  const changed = successful && cache.report_status !== previousStatus;
   return {
     ok: true,
     appointmentId,
     successful,
     previousStatus,
-    reportStatus: cache.status,
-    changed: cache.changed,
+    reportStatus: cache.report_status,
+    changed,
     cachedStatusRetained: !successful,
     checkedAt: new Date().toISOString(),
   };
