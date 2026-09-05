@@ -1192,6 +1192,17 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const finalizedRow = finalized.data.cases.find((row) => row.comparisonRequestId === comparison);
     assert.deepEqual({ comparisonRequestId: finalizedRow?.comparisonRequestId, reportStatus: finalizedRow?.reportStatus, reportStatusSource: finalizedRow?.reportStatusSource }, { comparisonRequestId: comparison, reportStatus: "final", reportStatusSource: "sonicdicom" });
 
+    const unfinishedComparison = await api<{ cases: Array<{ comparisonRequestId: number | null; reportStatus: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?q=${encodeURIComponent(label)}&caseSource=comparisons&reportStatus=required_not_final&limit=20`
+    );
+    assert.equal(unfinishedComparison.status, 200, JSON.stringify(unfinishedComparison.data));
+    const unfinishedComparisonRow = unfinishedComparison.data.cases.find((row) => row.comparisonRequestId === comparison);
+    assert.deepEqual(
+      { comparisonRequestId: unfinishedComparisonRow?.comparisonRequestId, reportStatus: unfinishedComparisonRow?.reportStatus },
+      { comparisonRequestId: comparison, reportStatus: "final" }
+    );
+
     await assignComparisonDirectly(comparison, otherDoctor.doctorId);
     const secondAssignment = await pool.query<{ id: string }>(`select id::text from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active'`, [comparison]);
     const secondAssignmentId = Number(secondAssignment.rows[0].id);
@@ -1386,14 +1397,15 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
   it("returns cached PACS notes only to authenticated mobile reporting-board readers", async () => {
     guard();
     const notedBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "cached-note" });
-    const emptyBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "empty-note" });
+    const linkedComparisonBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "linked-comparison-note" });
+    const linkedComparisonId = await createComparisonRequestForBooking(linkedComparisonBookingId, `${addDays(-1)}T08:00:00.000Z`, "appointment scope regression");
     await pool.query(
       `update doctor_portal.reporting_board_sonicdicom_cache set sonicdicom_study_note = $2, last_success_at = now(), source = 'sonicdicom' where appointment_id = $1`,
       [notedBookingId, "Cached SonicDICOM study note"]
     );
     const view = await createSavedView(admin, false, { appointmentId: notedBookingId });
     const path = `/api/reporting/saved-views/public/${view.token}/mobile`;
-    const authenticated = await api<{ cases: Array<{ appointmentId: number; sonicDicomStudyNote: string | null; sonicDicomStudyNoteCheckedAt: string | null; sonicDicomStudyNoteSource: string | null }> }>(doctor.cookie, path);
+    const authenticated = await api<{ cases: Array<{ caseType: string; appointmentId: number; comparisonRequestId: number | null; sonicDicomStudyNote: string | null; sonicDicomStudyNoteCheckedAt: string | null; sonicDicomStudyNoteSource: string | null }> }>(doctor.cookie, path);
     assert.equal(authenticated.status, 200);
     assert.deepEqual(authenticated.data.cases.map((row) => row.appointmentId), [notedBookingId]);
     assert.equal(authenticated.data.cases[0].sonicDicomStudyNote, "Cached SonicDICOM study note");
@@ -1407,10 +1419,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(anonymous.data.cases[0].sonicDicomStudyNoteCheckedAt, null);
     assert.equal(anonymous.data.cases[0].sonicDicomStudyNoteSource, null);
 
-    const emptyView = await createSavedView(admin, false, { appointmentId: emptyBookingId });
-    const empty = await api<{ cases: Array<{ sonicDicomStudyNote: string | null }> }>(doctor.cookie, `/api/reporting/saved-views/public/${emptyView.token}/mobile`);
-    assert.equal(empty.status, 200);
-    assert.equal(empty.data.cases[0].sonicDicomStudyNote, null);
+    const linkedComparisonView = await createSavedView(admin, false, { appointmentId: linkedComparisonBookingId });
+    const linkedComparison = await api<{ cases: Array<{ caseType: string; appointmentId: number; comparisonRequestId: number | null; sonicDicomStudyNote: string | null }> }>(doctor.cookie, `/api/reporting/saved-views/public/${linkedComparisonView.token}/mobile`);
+    assert.equal(linkedComparison.status, 200);
+    assert.equal(linkedComparison.data.cases.some((row) => row.caseType === "comparison" && row.appointmentId === linkedComparisonBookingId && row.comparisonRequestId === linkedComparisonId), true);
+    assert.ok(linkedComparison.data.cases.every((row) => row.appointmentId === linkedComparisonBookingId));
+    assert.equal(linkedComparison.data.cases.find((row) => row.caseType === "appointment")?.sonicDicomStudyNote, null);
   });
 
   it("uses the requested non-first mobile case identity for detail, reassignment, and unassignment", async () => {

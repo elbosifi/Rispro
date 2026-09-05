@@ -1080,6 +1080,7 @@ function comparisonReportingWhere(filters: ReportingBoardFilters, values: unknow
   if (filters.assignedDoctorId) where.push(`cca.assigned_doctor_id = ${addComparisonFilter(values, filters.assignedDoctorId)}`);
   if (filters.assignmentStatus === "unassigned") where.push(`cca.id is null`);
   if (filters.assignmentStatus === "assigned") where.push(`cca.id is not null`);
+  if (filters.appointmentId) where.push(`cr.linked_previous_booking_id = ${addComparisonFilter(values, filters.appointmentId)}`);
   if (filters.comparisonRequestId) where.push(`cr.id = ${addComparisonFilter(values, filters.comparisonRequestId)}`);
   if (filters.caseCategory && filters.caseCategory !== "comparison") where.push(`false`);
   if (filters.priorityCode) where.push(`false`);

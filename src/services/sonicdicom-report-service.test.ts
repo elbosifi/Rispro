@@ -137,4 +137,14 @@ describe("SonicDICOM comparison document correlation", () => {
     ]));
     assert.equal(selected.document?.documentId, "B");
   });
+
+  it("matches durable DocumentId correlation case-insensitively", () => {
+    const selected = selectSonicDicomComparisonDocument({
+      storedDocumentId: "document-b", primaryDocumentId: "document-a", assignedDoctorUsername: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
+    }, history([
+      { documentId: "DOCUMENT-B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
+      { documentId: "DOCUMENT-A", account: "doctor.a@nccb.ly", statusCode: 6, updatedAt: "2026-09-01T09:00:00.000Z" },
+    ]));
+    assert.equal(selected.document?.documentId, "DOCUMENT-B");
+  });
 });
