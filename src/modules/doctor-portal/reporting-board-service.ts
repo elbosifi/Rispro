@@ -4,11 +4,9 @@ import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
 import {
   buildSonicDicomStaffViewerUrl,
-  checkSonicDicomReportStatusesBatch,
-  type ReportLookupContext,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, persistReportingBoardSonicDicomCacheResults, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds, type ReportingBoardSonicDicomCacheCandidate } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds, type ReportingBoardSonicDicomCacheCandidate } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, findComparisonRequestById, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -121,12 +119,7 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
-let assignmentBatchChecker = checkSonicDicomReportStatusesBatch;
 type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
-
-export function __setReportingBoardAssignmentBatchCheckerForTest(checker: typeof checkSonicDicomReportStatusesBatch | null): void {
-  assignmentBatchChecker = checker ?? checkSonicDicomReportStatusesBatch;
-}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -1967,18 +1960,30 @@ interface AssignmentRevalidation { eligibleIds: Set<number>; finalIds: Set<numbe
 async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBoardCaseRow[]): Promise<AssignmentRevalidation> {
   const appointments = rows.filter((row) => row.caseType === "appointment");
   if (!appointments.length) return { eligibleIds: new Set(), finalIds: new Set(), unavailableIds: new Set() };
-  const contexts = appointments.map((row) => ({ bookingId: row.appointmentId, accessionNumber: row.accessionNumber, studyInstanceUid: row.studyInstanceUid, requiresReport: row.requiresReport, status: row.appointmentStatus }));
-  let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
-  let failure: unknown = null;
-  try { statuses = await assignmentBatchChecker(contexts, { audit: false }); } catch (error) { failure = error; }
-  const settings = await readSonicDicomReportSettings();
-  await persistReportingBoardSonicDicomCacheResults(contexts.map((context) => ({ context, result: statuses.get(context.bookingId) ?? null, error: failure ?? "SonicDICOM unavailable during assignment revalidation" })), settings);
+  const candidates = appointments.map(reportingBoardSonicDicomCacheCandidate);
+  await refreshReportingBoardSonicDicomCacheCandidates(candidates, []);
+  const cacheResult = await pool.query<{
+    appointment_id: number;
+    report_status: string;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+  }>(
+    `select appointment_id, report_status, last_attempt_at, last_success_at from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = any($1::bigint[])`,
+    [candidates.map((candidate) => candidate.bookingId)]
+  );
+  const cacheByAppointmentId = new Map(cacheResult.rows.map((row) => [Number(row.appointment_id), row]));
   const eligibleIds = new Set<number>(); const finalIds = new Set<number>(); const unavailableIds = new Set<number>();
-  for (const context of contexts) {
-    const state = statuses.get(context.bookingId)?.state;
-    if (state === "final") finalIds.add(context.bookingId);
-    else if (state === "draft" || state === "no_report" || state === "study_not_found") eligibleIds.add(context.bookingId);
-    else unavailableIds.add(context.bookingId);
+  for (const candidate of candidates) {
+    const cache = cacheByAppointmentId.get(candidate.bookingId);
+    if (!cache || !cacheRefreshWasSuccessful(cache.last_attempt_at, cache.last_success_at)) {
+      unavailableIds.add(candidate.bookingId);
+    } else if (cache.report_status === "final") {
+      finalIds.add(candidate.bookingId);
+    } else if (cache.report_status === "draft" || cache.report_status === "no_report" || cache.report_status === "study_not_found") {
+      eligibleIds.add(candidate.bookingId);
+    } else {
+      unavailableIds.add(candidate.bookingId);
+    }
   }
   return { eligibleIds, finalIds, unavailableIds };
 }
