@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +27,7 @@ type AvailabilityParams = {
 
 let availabilityResponses: Record<AvailabilityParams["caseCategory"], AvailabilityResponse>;
 let availabilityIsLoading = false;
-let availabilityIsError = false;
+let availabilityErrorByCategory: Record<AvailabilityParams["caseCategory"], boolean>;
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
@@ -161,12 +161,12 @@ describe("CalendarPage registration drilldown", () => {
     vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
     vi.clearAllMocks();
     availabilityIsLoading = false;
-    availabilityIsError = false;
+    availabilityErrorByCategory = { oncology: false, non_oncology: false };
     setAvailability();
     useV2AvailabilityMock.mockImplementation((params: AvailabilityParams | undefined) => ({
       data: params ? availabilityResponses[params.caseCategory] : undefined,
       isLoading: params != null && availabilityIsLoading,
-      isError: params != null && availabilityIsError,
+      isError: params != null && availabilityErrorByCategory[params.caseCategory],
     }));
     fetchPatientDirectorySummaryMock.mockResolvedValue({
       demographics: {
@@ -478,9 +478,61 @@ describe("CalendarPage registration drilldown", () => {
     });
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Available 4").length).toBeGreaterThan(0);
     expect(screen.getAllByText("4 of 20 remaining").length).toBeGreaterThan(0);
     expect(dayButton!.getAttribute("aria-label")).toContain("Capacity availability: Available, 4 of 20 remaining");
+  });
+
+  it("uses the oncology reserved capacity for partitioned denominators", async () => {
+    setAvailability({ items: [makeAvailabilityDay(
+      {
+        date: "2026-05-20",
+        bucketMode: "partitioned",
+        modalityTotalCapacity: 20,
+        remainingCapacity: 12,
+        oncology: { reserved: 10, filled: 8, remaining: 2 },
+      },
+      { remainingStandardCapacity: 2 }
+    )] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Available 2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2 of 10 remaining").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByTestId("calendar-capacity-badge").textContent).toContain("Available 2");
+    expect(screen.queryByText("2 of 20 remaining")).toBeNull();
+    expect(dayButton!.getAttribute("aria-label")).toContain("Available, 2 of 10 remaining");
+  });
+
+  it("uses the non-oncology reserved capacity for partitioned denominators", async () => {
+    setAvailability({ items: [] }, { items: [makeAvailabilityDay(
+      {
+        date: "2026-05-20",
+        bucketMode: "partitioned",
+        modalityTotalCapacity: 20,
+        remainingCapacity: 12,
+        nonOncology: { reserved: 7, filled: 4, remaining: 3 },
+      },
+      { remainingStandardCapacity: 3 }
+    )] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("non_oncology");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Available 3").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("3 of 7 remaining").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByTestId("calendar-capacity-badge").textContent).toContain("Available 3");
+    expect(screen.queryByText("3 of 20 remaining")).toBeNull();
+    expect(dayButton!.getAttribute("aria-label")).toContain("Available, 3 of 7 remaining");
   });
 
   it("shows Restricted for category exhaustion", async () => {
@@ -586,7 +638,7 @@ describe("CalendarPage registration drilldown", () => {
   });
 
   it("shows an availability error without disabling registration actions", async () => {
-    availabilityIsError = true;
+    availabilityErrorByCategory = { oncology: true, non_oncology: true };
     renderPage();
 
     await screen.findByTestId("modality-summary-modality:1");
@@ -596,5 +648,37 @@ describe("CalendarPage registration drilldown", () => {
     expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Open day registrations" }));
     expect(navigateMock).toHaveBeenCalledWith("/registrations?date=2026-05-02");
+  });
+
+  it("hides successful partial capacity when All Categories has an error", async () => {
+    setAvailability(
+      { items: [makeAvailabilityDay({ date: "2026-05-20", bucketMode: "total_only" })] },
+      { items: [] }
+    );
+    availabilityErrorByCategory = { oncology: false, non_oncology: true };
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+
+    expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
+    expect(screen.queryByTestId("calendar-capacity-cell")).toBeNull();
+    const dayButton = findCalendarDayButton("May 20, 2026");
+    expect(dayButton?.getAttribute("aria-label")).not.toContain("Capacity availability");
+    expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("hides stale capacity when the selected category query errors", async () => {
+    setAvailability({ items: [makeAvailabilityDay({ date: "2026-05-20", bucketMode: "total_only" })] });
+    availabilityErrorByCategory = { oncology: true, non_oncology: false };
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+
+    expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
+    expect(screen.queryByTestId("calendar-capacity-cell")).toBeNull();
+    expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
