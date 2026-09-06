@@ -26,7 +26,7 @@ function renderPage(modality?: { id: number; code: string; name: string; onBack:
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/request-scans" element={<RequestScansPage modality={modality} />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
-function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
+function mock(jobs = [archiveFailure], appointments: Array<Record<string, unknown>> = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", national_id: null, patient_date_of_birth: "1981-01-01", sex: null, modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
     const value = String(input);
     if (value.includes("/manual-study-match/candidates")) return response({ context: { patient_name: "Patient One", patient_primary_id: "PID-9", patient_national_id: null, patient_mrn: "MRN-9", appointment_accession_number: "V2-000009", appointment_booking_date: "2026-07-25", modality_code: "CT" }, candidates: [{ patientName: "Patient One", patientId: "PID-9", accessionNumber: "V2-000009", studyDate: "20260818", studyDescription: "CT Head", modalitiesInStudy: ["CT", "SR"], studyInstanceUid: "2.25.101", match: { patientIdentity: "match", accession: "match", studyDate: "mismatch", modality: "match", bookingStudyInstanceUid: "unknown" } }] });
@@ -117,13 +117,13 @@ describe("RequestScansPage", () => {
     expect(fileCall?.[0]).toBe("/api/request-scans/22/file");
     expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(preview.getAttribute("src")).toBe("blob:request-scan-22");
+    expect(preview.getAttribute("src")).toBe("blob:request-scan-22#view=FitH");
     expect(screen.getByRole("link", { name: "Open full size" }).getAttribute("href")).toBe("/api/request-scans/22/file");
     expect(screen.getByRole("heading", { name: "Search results" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Selected appointment" }).textContent).toContain("No appointment selected");
     expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect((screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:request-scan-22");
   });
 
@@ -142,7 +142,7 @@ describe("RequestScansPage", () => {
 
   it("matches the selected numeric modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
     const fetchMock = mock([unassignedFailure], [
-      { id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
+      { id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", national_id: "NID-12", patient_date_of_birth: "1981-01-01", sex: "F", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
       { id: 13, modality_id: 8, accession_number: "V2-000013", patient_name: "Other Modality", patient_name_en: "Other Modality", patient_mrn: "MRN-13", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-08-10", appointment_time: "10:00", appointment_status: "scheduled" },
     ]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
@@ -155,9 +155,15 @@ describe("RequestScansPage", () => {
     const selectedAppointment = screen.getByRole("region", { name: "Selected appointment" });
     expect(selectedAppointment.textContent).toContain("V2-000012");
     expect(selectedAppointment.textContent).toContain("Selected Patient");
-    const attach = screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement;
+    expect(selectedAppointment.textContent).toContain("MRN-12");
+    expect(selectedAppointment.textContent).toContain("NID-12");
+    expect(selectedAppointment.textContent).toContain("1 Jan 1981");
+    expect(selectedAppointment.textContent).toContain("10 Aug 2026");
+    expect(selectedAppointment.textContent).not.toContain("1981-01-01");
+    expect(selectedAppointment.textContent).not.toContain("2026-08-10");
+    const attach = screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement;
     expect(screen.getByText("This document will become part of the selected patient’s medical record.")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: /I verified the patient identity/ })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /I compared the scanned request/ })).toBeTruthy();
     expect(attach.disabled).toBe(true);
     fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
     expect(attach.disabled).toBe(false);
@@ -169,7 +175,7 @@ describe("RequestScansPage", () => {
     const fetchMock = mock([unassignedFailure]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Dismiss scan" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ignore scan" }));
     expect(screen.queryByLabelText("Find RIS appointment")).toBeNull();
     expect(await screen.findByText("Dismiss failed Request Scan")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
@@ -179,7 +185,7 @@ describe("RequestScansPage", () => {
     mock([unassignedFailure]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    expect(screen.getByRole("button", { name: "Dismiss scan" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ignore scan" })).toBeTruthy();
   });
 
   it("does not expose assignment dismissal to modality staff or receptionists", async () => {
@@ -187,13 +193,13 @@ describe("RequestScansPage", () => {
     mock([unassignedFailure]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    expect(screen.queryByRole("button", { name: "Dismiss scan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ignore scan" })).toBeNull();
     cleanup();
     authState.role = "receptionist";
     mock([unassignedFailure]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    expect(screen.queryByRole("button", { name: "Dismiss scan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ignore scan" })).toBeNull();
   });
 
   it("uses contextual modality folder wording while keeping the global scan action", async () => {
@@ -652,8 +658,8 @@ describe("RequestScansPage", () => {
     expect(await screen.findByRole("option", { name: /V2-000012/ })).toBeTruthy();
     fireEvent.change(comboboxes[1], { target: { value: "12" } });
     expect((await screen.findAllByText("Selected Patient")).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("checkbox", { name: /I verified the patient identity/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and attach" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I compared the scanned request/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach to appointment" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/9/manual-assign"))).toBe(true));
   });
 
