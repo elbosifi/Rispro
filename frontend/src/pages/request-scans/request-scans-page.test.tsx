@@ -140,8 +140,8 @@ describe("RequestScansPage", () => {
     expect(image.getAttribute("src")).toBe("blob:request-scan-23");
   });
 
-  it("matches the selected numeric modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
-    const fetchMock = mock([unassignedFailure], [
+  it("matches the selected numeric modality ID, opens confirmation, and keeps another modality disabled", async () => {
+    mock([unassignedFailure], [
       { id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", national_id: "NID-12", patient_date_of_birth: "1981-01-01", sex: "F", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
       { id: 13, modality_id: 8, accession_number: "V2-000013", patient_name: "Other Modality", patient_name_en: "Other Modality", patient_mrn: "MRN-13", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-08-10", appointment_time: "10:00", appointment_status: "scheduled" },
     ]);
@@ -162,13 +162,12 @@ describe("RequestScansPage", () => {
     expect(selectedAppointment.textContent).not.toContain("1981-01-01");
     expect(selectedAppointment.textContent).not.toContain("2026-08-10");
     const attach = screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement;
-    expect(screen.getByText("This document will become part of the selected patient’s medical record.")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: /I compared the scanned request/ })).toBeTruthy();
-    expect(attach.disabled).toBe(true);
-    fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
     expect(attach.disabled).toBe(false);
     fireEvent.click(attach);
-    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input).includes("/22/manual-assign") && JSON.parse(String(options?.body)).patientIdentityConfirmed === true)).toBe(true));
+    expect(await screen.findByRole("heading", { name: "Final identity confirmation" })).toBeTruthy();
+    expect(screen.getByText("This document will become part of the selected patient’s medical record.")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /I compared the scanned request/ })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm and attach" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("reuses the existing dismiss confirmation and endpoint from the assignment modal", async () => {
@@ -648,19 +647,40 @@ describe("RequestScansPage", () => {
     expect(await screen.findByText(/already attached documents will not be duplicated/)).toBeTruthy();
   });
 
-  it("keeps manual assignment and patient-identity confirmation behavior", async () => {
+  it("keeps assignment inspection open until the final identity confirmation", async () => {
     const fetchMock = mock([{ ...archiveFailure, document_id: null, attachment_completed_at: null, appointment_id: null }]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
-    expect(await screen.findByText("Scanned request")).toBeTruthy();
+    expect((await screen.findAllByText("request.pdf")).length).toBeGreaterThanOrEqual(2);
+    const assignmentHeader = screen.getByRole("heading", { name: "Assign request scan to appointment" }).parentElement!;
+    expect(assignmentHeader.textContent).toContain("request.pdf");
+    expect(assignmentHeader.textContent).toContain("Scanned");
+    expect(assignmentHeader.textContent).toContain("24 Jul 2026");
     expect(screen.getByLabelText("Find RIS appointment")).toBeTruthy();
     const comboboxes = screen.getAllByRole("combobox");
     expect(await screen.findByRole("option", { name: /V2-000012/ })).toBeTruthy();
     fireEvent.change(comboboxes[1], { target: { value: "12" } });
     expect((await screen.findAllByText("Selected Patient")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("checkbox", { name: /I compared the scanned request/ })).toBeNull();
+    const attach = screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement;
+    expect(attach.disabled).toBe(false);
+    fireEvent.click(attach);
+    const confirmation = (await screen.findByRole("heading", { name: "Final identity confirmation" })).closest('[role="dialog"]') as HTMLElement;
+    expect(within(confirmation).getByText("MRN-12")).toBeTruthy();
+    expect(within(confirmation).getByText("V2-000012")).toBeTruthy();
+    expect(within(confirmation).getByText("Brain")).toBeTruthy();
+    expect(within(confirmation).getByText("MRI")).toBeTruthy();
+    const confirm = within(confirmation).getByRole("button", { name: "Confirm and attach" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Final identity confirmation" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/9/manual-assign"))).toBe(false);
+
+    fireEvent.click(attach);
     fireEvent.click(screen.getByRole("checkbox", { name: /I compared the scanned request/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Attach to appointment" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/9/manual-assign"))).toBe(true));
+    expect((screen.getByRole("button", { name: "Confirm and attach" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and attach" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input).endsWith("/9/manual-assign") && JSON.parse(String(options?.body)).patientIdentityConfirmed === true)).toBe(true));
   });
 
   it("does not offer archive retry controls for completed records", async () => {
