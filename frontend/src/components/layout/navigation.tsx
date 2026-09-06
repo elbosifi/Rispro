@@ -47,6 +47,7 @@ import { NavigationMenuItem } from "@/components/layout/navigation-menu-item";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
 const NAV_ITEMS = APP_NAV_ITEMS;
+type NavigateHandler = (route: string, search?: string) => void;
 
 export function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
   const navigate = useNavigate();
@@ -189,7 +190,7 @@ function NavButton({
   showTooltip?: boolean;
   language: Language;
   index: number;
-  onClick: () => void;
+  onClick: (search?: string) => void;
 }) {
   const { data: recallSummary } = useQuery({ queryKey: ["complementary-recalls", "reception-summary"], queryFn: fetchComplementaryRecallReceptionSummary, enabled: item.route === "recall.requests", refetchInterval: 30_000, staleTime: 15_000, retry: false });
   const { data: requestScanSummary } = useQuery({ queryKey: ["request-scans", "reception-summary"], queryFn: fetchRequestScanReceptionSummary, enabled: item.route === "request.scans", refetchInterval: 15_000, staleTime: 10_000, refetchIntervalInBackground: false, retry: false });
@@ -246,7 +247,11 @@ function NavButton({
       attentionPulse={item.route === "recall.requests" && attentionPulse}
       eventFlash={item.route === "request.scans" ? requestScanEventFlash : null}
       trailing={item.route === "recall.requests" && ((recallSummary?.pendingCount ?? 0) > 0 || recallNeedsAttention) ? <span className="flex items-center gap-1">{(recallSummary?.pendingCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={countLabel} title={countLabel}>{recallSummary!.pendingCount}</span> : null}{(recallSummary?.unseenPendingCount ?? 0) > 0 ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" aria-label={newLabel} title={newLabel}>+</span> : null}{recallNeedsAttention ? <span className="rounded-full border border-amber-500 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-950 dark:bg-amber-950/30 dark:text-amber-100" aria-label={recallAttentionLabel} title={recallAttentionLabel}>!</span> : null}</span> : item.route === "request.scans" && (requestScanSummary?.needsAttentionCount ?? 0) > 0 ? <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" aria-label={requestScanCountLabel} title={requestScanCountLabel}>{requestScanSummary!.needsAttentionCount}</span> : null}
-      onClick={onClick}
+      onClick={() => {
+        const search = item.route === "request.scans" && (requestScanSummary?.needsAttentionCount ?? 0) > 0 ? "tab=failed" : undefined;
+        if (search) onClick(search);
+        else onClick();
+      }}
     />
   );
 }
@@ -343,7 +348,7 @@ function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, 
   currentRoute: string;
   isRtl: boolean;
   language: Language;
-  onNavigate: (route: string) => void;
+  onNavigate: NavigateHandler;
   showTooltips?: boolean;
   idPrefix?: string;
 }) {
@@ -376,7 +381,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
   isRtl: boolean;
   language: Language;
   onToggle: () => void;
-  onNavigate: (route: string) => void;
+  onNavigate: NavigateHandler;
   showTooltips?: boolean;
   idPrefix?: string;
 }) {
@@ -400,7 +405,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
       )}
       <div id={sectionId} className={`${collapsed || expanded ? "space-y-0.5" : "hidden"}`}>
         {items.map((item, index) => (
-          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={index} onClick={() => onNavigate(item.route)} />
+          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={index} onClick={(search) => search ? onNavigate(item.route, search) : onNavigate(item.route)} />
         ))}
       </div>
     </section>
@@ -427,7 +432,7 @@ function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGro
   isRtl: boolean;
   language: Language;
   onToggleGroup: (groupKey: SidebarGroupKey) => void;
-  onNavigate: (route: string) => void;
+  onNavigate: NavigateHandler;
   showTooltips: boolean;
   idPrefix: string;
   afterDashboard?: ReactNode;
@@ -436,7 +441,7 @@ function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGro
   return (
     <div className="space-y-2">
       {quickGroup ? <QuickActionsSection items={quickGroup.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} /> : null}
-      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} collapsed={collapsed} showTooltip={showTooltips} language={language} index={0} onClick={(search) => search ? onNavigate(visibleDashboard.route, search) : onNavigate(visibleDashboard.route)} /> : null}
       {afterDashboard}
       {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => onToggleGroup(group.key)} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} />)}
     </div>
@@ -642,7 +647,7 @@ export function SideNav({
   isRtl: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
-  onNavigate: (route: string) => void;
+  onNavigate: NavigateHandler;
 }) {
   const { visibleGroups, visibleDashboard } = useNavigationModel(user);
   const { expandedGroups, toggleGroup } = useNavigationGroupState({
@@ -786,7 +791,7 @@ export function MobileDrawer({
   user: User | null;
   language: Language;
   isRtl: boolean;
-  onNavigate: (route: string) => void;
+  onNavigate: NavigateHandler;
   onClose: () => void;
   onToggleLanguage: () => void;
   onLogout: () => void;
@@ -844,8 +849,9 @@ export function MobileDrawer({
             isRtl={isRtl}
             language={language}
             onToggleGroup={toggleGroup}
-            onNavigate={(route) => {
-              onNavigate(route);
+            onNavigate={(route, search) => {
+              if (search) onNavigate(route, search);
+              else onNavigate(route);
               onClose();
             }}
             showTooltips={false}

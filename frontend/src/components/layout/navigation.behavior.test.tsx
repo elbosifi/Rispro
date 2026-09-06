@@ -46,8 +46,8 @@ const matrixState: { value: unknown } = { value: DEFAULT_PAGE_VISIBILITY_MATRIX 
 const recallSummaryState: { value: unknown } = { value: { pendingCount: 0, unseenPendingCount: 0 } };
 const requestScanSummaryState: { value: { needsAttentionCount: number; latestProcessedAt: string | null; latestFailedAt: string | null } | undefined } = { value: undefined };
 
-function requestScanSideNav() {
-  return <SideNav currentRoute="dashboard" user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }} language="en" isRtl={false} onNavigate={() => {}} />;
+function requestScanSideNav(onNavigate: (route: string, search?: string) => void = () => {}) {
+  return <SideNav currentRoute="dashboard" user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }} language="en" isRtl={false} onNavigate={onNavigate} />;
 }
 
 function mockPointerMode(fine: boolean) {
@@ -1039,6 +1039,26 @@ describe("Navigation governance", () => {
     render(requestScanSideNav());
 
     expect(screen.getByRole("button", { name: "Request Scans" }).querySelector("span.rounded-full.bg-red-600")).toBeNull();
+  });
+
+  it("opens global Request Scans on Needs attention when failed scans exist", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    requestScanSummaryState.value = { needsAttentionCount: 2, latestProcessedAt: null, latestFailedAt: "2026-08-30T08:20:00.000Z" };
+    const onNavigate = vi.fn();
+    render(requestScanSideNav(onNavigate));
+
+    await userEvent.click(screen.getByRole("button", { name: "Request Scans" }));
+    expect(onNavigate).toHaveBeenCalledWith("request.scans", "tab=failed");
+  });
+
+  it("opens global Request Scans on its default view when no failed scans exist", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    requestScanSummaryState.value = { needsAttentionCount: 0, latestProcessedAt: null, latestFailedAt: null };
+    const onNavigate = vi.fn();
+    render(requestScanSideNav(onNavigate));
+
+    await userEvent.click(screen.getByRole("button", { name: "Request Scans" }));
+    expect(onNavigate).toHaveBeenCalledWith("request.scans");
   });
 
   it("establishes the initial Request Scans summary as a non-flashing baseline", () => {

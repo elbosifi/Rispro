@@ -166,11 +166,11 @@ function AppContent() {
     : defaultLandingPath;
 
   const handleNavigate = useCallback(
-    (route: string) => {
+    (route: string, search?: string) => {
       const path = APP_ROUTE_PATHS[route as keyof typeof APP_ROUTE_PATHS];
       if (path) {
         localStorage.setItem("rispro-route", route);
-        navigate(path);
+        navigate(search ? `${path}?${search}` : path);
       }
     },
     [navigate]
