@@ -9,7 +9,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { getPatientRequirementReasonCodes, getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { pushToast } from "@/lib/toast";
-import { Button, Card, Input, Badge, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
+import { Alert, AlertDescription, AlertTitle, Button, Card, Input, Badge, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 
 type QueueView = "all" | "entered" | "not_entered" | "walk_in";
@@ -68,10 +68,35 @@ function formatElapsedSince(language: string, value: string | null | undefined):
   const startedAt = new Date(value).getTime();
   if (!Number.isFinite(startedAt)) return "—";
   const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return language === "ar" ? `${minutes} د` : `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return language === "ar" ? `${hours}س ${remainingMinutes}د` : `${hours}h ${remainingMinutes}m`;
+}
+
+type QueueStatusBadgeVariant = "success" | "warning" | "error" | "info" | "neutral" | "accent";
+
+function getStatusBadgeVariant(entry: QueueEntry, inQueue: boolean): QueueStatusBadgeVariant {
+  if (!inQueue) return "neutral";
+
+  switch (entry.appointmentStatus) {
+    case "arrived":
+      return "info";
+    case "waiting":
+      return "warning";
+    case "in-progress":
+      return "accent";
+    case "completed":
+      return "success";
+    case "no-show":
+      return "error";
+    case "scheduled":
+    case "cancelled":
+    case "discontinued":
+    case "voided":
+    default:
+      return "neutral";
+  }
 }
 
 export default function QueuePage() {
@@ -85,7 +110,6 @@ export default function QueuePage() {
   const [queueSearch, setQueueSearch] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("all");
   const [queueModalityId, setQueueModalityId] = useState("");
-  const [showOldNoShows, setShowOldNoShows] = useState(false);
   const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -320,36 +344,23 @@ export default function QueuePage() {
   const enteredCount = queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled").length;
   const notEnteredCount = queueEntries.filter((entry) => entry.appointmentStatus === "scheduled").length;
   const walkInCount = queueEntries.filter((entry) => entry.isWalkIn).length;
-  const oldNoShowCandidates: QueueSnapshot["oldNoShowCandidates"] = [];
   const hasActiveFilters = !!queueSearch || queueView !== "all" || !!queueModalityId;
   const lastUpdatedLabel = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en", { hour: "2-digit", minute: "2-digit" })
     : t("queue.lastUpdatedUnknown");
-  const enteredQueueLabel = language === "ar" ? "دخلوا إلى قائمة الإنتظار" : "Entered Queue";
-  const notEnteredQueueLabel = language === "ar" ? "المريض لم يصل بعد" : "Not Entered Yet";
-  const scheduledLabel = language === "ar" ? "مجدول" : "Scheduled";
-  const walkInLabel = language === "ar" ? "دخول مباشر" : "Walk-in";
+  const enteredQueueLabel = t("queue.summary.checkedIn");
+  const notEnteredQueueLabel = t("queue.summary.notArrived");
+  const scheduledLabel = t("queue.status.scheduled");
+  const walkInLabel = t("queue.summary.walkIn");
   const clearQueueFilters = () => {
     setQueueSearch("");
     setQueueView("all");
     setQueueModalityId("");
   };
-  const filteredEmptyMessage = chooseLocalized(
-    language,
-    "لا يوجد مرضى يطابقون عوامل التصفية الحالية.",
-    "No patients match the current filters."
-  );
-  const filteredClearLabel = chooseLocalized(language, "مسح عوامل التصفية", "Clear filters");
-  const checkedInEmptyMessage = chooseLocalized(
-    language,
-    "لا يوجد مرضى مسجلو الحضور بعد. امسح رقم الوصول أو أدخل مريضاً مجدولاً.",
-    "No checked-in patients yet. Scan an accession or check in a scheduled patient."
-  );
-  const notCheckedInEmptyMessage = chooseLocalized(
-    language,
-    "لا يوجد مرضى مجدولون بانتظار تسجيل الحضور.",
-    "No scheduled patients are waiting for check-in."
-  );
+  const filteredEmptyMessage = t("queue.emptyFiltered");
+  const filteredClearLabel = t("queue.clearFilters");
+  const checkedInEmptyMessage = t("queue.emptyCheckedIn");
+  const notCheckedInEmptyMessage = t("queue.emptyScheduled");
   const openRegistration = (entry: QueueEntry) => {
     navigate(`/registrations?appointmentId=${entry.appointmentId}&patientId=${entry.patientId}`);
   };
@@ -369,13 +380,26 @@ export default function QueuePage() {
   };
   const getStatusLabel = (entry: QueueEntry, inQueue: boolean) => {
     if (!inQueue) return scheduledLabel;
-    if (entry.appointmentStatus === "arrived") return chooseLocalized(language, "تم النداء", "Called");
-    if (entry.appointmentStatus === "waiting") return chooseLocalized(language, "في الانتظار", "Waiting");
-    if (entry.appointmentStatus === "in-progress") return chooseLocalized(language, "قيد التنفيذ", "In progress");
-    if (entry.appointmentStatus === "completed") return chooseLocalized(language, "مكتمل", "Completed");
-    if (entry.appointmentStatus === "no-show") return chooseLocalized(language, "غياب", "No-show");
-    if (entry.appointmentStatus === "cancelled") return chooseLocalized(language, "ملغي", "Cancelled");
-    return entry.queueStatus;
+    switch (entry.appointmentStatus) {
+      case "arrived":
+        return t("queue.status.arrived");
+      case "waiting":
+        return t("queue.status.waiting");
+      case "in-progress":
+        return t("queue.status.inProgress");
+      case "completed":
+        return t("queue.status.completed");
+      case "no-show":
+        return t("queue.status.noShow");
+      case "cancelled":
+        return t("queue.status.cancelled");
+      case "discontinued":
+        return t("queue.status.discontinued");
+      case "voided":
+        return t("queue.status.voided");
+      default:
+        return entry.queueStatus;
+    }
   };
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => {
     const arrivedAt = entry.arrivedAt ?? entry.scannedAt ?? null;
@@ -387,7 +411,7 @@ export default function QueuePage() {
       .join(", ");
 
     return (
-    <li key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
+    <li key={entry.id} className="p-3 sm:p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -403,41 +427,34 @@ export default function QueuePage() {
                 {t("queue.multipleAppointments", { count: entry.sameDayAppointmentCount ?? entry.relatedAppointments?.length ?? 0 })}
               </Badge>
             )}
+            <Badge variant={getStatusBadgeVariant(entry, inQueue)} size="sm">
+              {getStatusLabel(entry, inQueue)}
+            </Badge>
+            {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
           </div>
-          <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
+          <p className="mt-1 text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
           {inQueue && arrivedAt ? (
-            <p className="text-xs text-muted-foreground">
-              {chooseLocalized(language, "دخل: ", "Entered: ")}
-              {" "}
-              {formatClockValue(language, arrivedAt)}
+            <p className="mt-1 text-sm font-medium text-foreground">
+              <span className="text-muted-foreground">{t("queue.enteredAt", { time: formatClockValue(language, arrivedAt) })}</span>
               <span className="px-1">•</span>
-              {chooseLocalized(language, "الانتظار: ", "Waiting: ")}
-              {" "}
-              {formatElapsedSince(language, arrivedAt)}
+              <span className="font-semibold">{t("queue.waitingFor", { duration: formatElapsedSince(language, arrivedAt) })}</span>
             </p>
           ) : null}
-          <p className="text-sm text-muted-foreground">
+          <p className="mt-1 text-sm font-medium text-foreground">
             {chooseLocalized(language, entry.modalityNameAr, entry.modalityNameEn)}
             {entry.examNameEn || entry.examNameAr ? ` • ${chooseLocalized(language, entry.examNameAr, entry.examNameEn)}` : ""}
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {entry.phone1 || t("queue.noId")} • {entry.nationalId || t("queue.noId")}
           </p>
           {entry.hasMultipleAppointments && relatedAppointmentHint && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {t("queue.alsoToday", { items: relatedAppointmentHint })}
             </p>
           )}
-          {entry.notes && <p className="text-sm text-muted-foreground">{entry.notes}</p>}
+          {entry.notes && <p className="text-xs text-muted-foreground">{entry.notes}</p>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            variant={inQueue ? "warning" : "neutral"}
-            size="sm"
-          >
-            {getStatusLabel(entry, inQueue)}
-          </Badge>
-          {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <Button
             size="sm"
             variant="secondary"
@@ -470,7 +487,7 @@ export default function QueuePage() {
               variant="secondary"
               onClick={() => handleNoShow(entry.appointmentId)}
             >
-              Review no-show
+              {t("queue.reviewNoShow")}
             </Button>
           )}
           {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
@@ -487,37 +504,16 @@ export default function QueuePage() {
     </li>
     );
   };
-  const renderNoShowCandidate = (candidate: QueueSnapshot["noShowCandidates"][number], oldCandidate = false) => (
-    <li key={`${oldCandidate ? "old" : "today"}-${candidate.appointmentId}`} className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <button
-          type="button"
-          className="text-start font-medium underline-offset-2 hover:text-accent hover:underline"
-          onClick={() => setSelectedPatientId(candidate.patientId)}
-        >
-          {chooseLocalized(language, candidate.arabicFullName, candidate.englishFullName)}
-        </button>
-        <p className="text-sm text-muted-foreground font-mono">
-          {candidate.appointmentDate} - {candidate.accessionNumber}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {chooseLocalized(language, candidate.modalityNameAr, candidate.modalityNameEn)}
-          {candidate.phone1 ? ` • ${candidate.phone1}` : ""}
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant="destructive"
-        onClick={() => navigate(`/queue/no-shows?appointmentId=${candidate.appointmentId}`)}
-      >
-        {t("queue.markNoShow")}
-      </Button>
-    </li>
-  );
+  const summaryItems: { view: QueueView; label: string; value: number }[] = [
+    { view: "all", label: t("queue.summary.total"), value: queue?.summary.total_appointments ?? queueEntries.length },
+    { view: "entered", label: enteredQueueLabel, value: enteredCount },
+    { view: "not_entered", label: notEnteredQueueLabel, value: notEnteredCount },
+    { view: "walk_in", label: walkInLabel, value: walkInCount },
+  ];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="space-y-3 sm:space-y-4">
+    <div className="w-full max-w-[1600px] mx-auto space-y-4">
+      <div className="space-y-2 sm:space-y-3">
         <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -543,61 +539,82 @@ export default function QueuePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <QueueStat label={t("queue.totalAppointments")} value={queue?.summary.total_appointments ?? queueEntries.length} />
-        <QueueStat label={enteredQueueLabel} value={enteredCount} tone="amber" />
-        <QueueStat label={notEnteredQueueLabel} value={notEnteredCount} />
-        <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
-      </div>
-
-      <Card className="p-4" role="region" aria-label="No-show review status">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="font-semibold">No-show review</h2>
-            <p className="text-sm text-muted-foreground">
-              {!queue?.reviewActive
-                ? `Review has not opened yet. It opens at ${queue?.reviewTime ?? "17:00"} Africa/Tripoli time.`
-                : queue.autoNoShowEnabled
-                  ? "Automatic processing is active; the server worker runs even when this page is closed."
-                  : "Manual confirmation is active. Review eligible appointments in the dedicated workspace."}
-            </p>
-          </div>
-          <Button type="button" variant="secondary" onClick={() => navigate("/queue/no-shows")}>Open review workspace</Button>
+      <Card className="overflow-hidden" role="group" aria-label={t("queue.summaryLabel")}>
+        <div className="grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-4 sm:divide-y-0 rtl:divide-x-reverse">
+          {summaryItems.map((item) => (
+            <button
+              key={item.view}
+              type="button"
+              aria-label={`${item.label}: ${item.value}`}
+              aria-pressed={queueView === item.view}
+              onClick={() => setQueueView(item.view)}
+              className={`min-w-0 px-3 py-2.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                queueView === item.view ? "bg-accent/10 text-foreground" : "hover:bg-muted/40"
+              }`}
+            >
+              <span className="block truncate text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground">{item.label}</span>
+              <span className="mt-0.5 block text-lg font-semibold leading-none">{item.value}</span>
+            </button>
+          ))}
         </div>
       </Card>
 
-      <Card className="p-4 sm:p-5" role="region" aria-label={t("queue.scanAccession")}>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <div className="flex-1">
-            <h3 className="text-lg font-semibold">{t("queue.scanAccession")}</h3>
-            <form onSubmit={handleScan} className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <Input
-                type="text"
-                value={scanValue}
-                onChange={(e) => {
-                  setScanValue(e.target.value);
-                  if (scanWarning) setScanWarning(null);
-                }}
-                placeholder={t("queue.scanPlaceholder")}
-                dir="ltr"
-                className="h-11 flex-1"
-              />
-              <Button type="submit" disabled={scanMutation.isPending || !scanValue.trim()} className="h-11">
-                {scanMutation.isPending ? t("common.loading") : t("queue.scan")}
-              </Button>
-            </form>
-            {scanWarning ? (
-              <p className="mt-2 text-sm font-medium text-amber-700">{scanWarning}</p>
-            ) : null}
+      {!queue?.reviewActive ? (
+        <div role="status" className="px-1 text-sm text-muted-foreground">
+          {t("queue.noShowReviewOpens", { time: queue?.reviewTime ?? "17:00" })}
+        </div>
+      ) : queue.autoNoShowEnabled ? (
+        <div role="status" className="px-1 text-sm text-muted-foreground">
+          {t("queue.noShowAutomatic")}
+        </div>
+      ) : queue.noShowCandidates.length > 0 ? (
+        <Alert variant="warning" role="region" aria-label={t("queue.noShowReviewStatus")} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <AlertTitle>{t("queue.noShowReviewTitle")}</AlertTitle>
+            <AlertDescription>{t("queue.noShowManualCount", { count: queue.noShowCandidates.length })}</AlertDescription>
           </div>
+          <Button type="button" variant="secondary" size="sm" onClick={() => navigate("/queue/no-shows")}>
+            {t("queue.openReviewWorkspace")}
+          </Button>
+        </Alert>
+      ) : (
+        <div role="status" className="px-1 text-sm text-muted-foreground">
+          {t("queue.noShowManualEmpty")}
+        </div>
+      )}
+
+      <Card className="p-3" role="region" aria-label={t("queue.scanAccession")}>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <h3 className="shrink-0 text-sm font-semibold">{t("queue.scanAccession")}</h3>
+          <form onSubmit={handleScan} className="flex min-w-0 flex-1 gap-2">
+            <Input
+              type="text"
+              value={scanValue}
+              onChange={(e) => {
+                setScanValue(e.target.value);
+                if (scanWarning) setScanWarning(null);
+              }}
+              placeholder={t("queue.scanPlaceholder")}
+              dir="ltr"
+              className="h-10 min-w-0 flex-1"
+            />
+            <Button type="submit" disabled={scanMutation.isPending || !scanValue.trim()} className="h-10 shrink-0">
+              {scanMutation.isPending ? t("common.loading") : t("queue.scan")}
+            </Button>
+          </form>
           <Button
             type="button"
             variant="secondary"
+            size="sm"
+            className="shrink-0"
             onClick={() => window.open("/queue/check-in", "_blank", "noopener,noreferrer")}
           >
             {t("queue.openFullScreenCheckIn")}
           </Button>
         </div>
+        {scanWarning ? (
+          <p className="mt-2 text-sm font-medium text-amber-700">{scanWarning}</p>
+        ) : null}
       </Card>
 
       {isWalkInEnabled && (
@@ -666,10 +683,9 @@ export default function QueuePage() {
         </Card>
       )}
 
-      <Card className="p-3 sm:p-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-3">
-            <label className="space-y-1">
+      <Card className="p-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end">
+            <label className="min-w-0 md:flex-[2]">
               <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 <Search size={12} />
                 {t("queue.searchQueue")}
@@ -681,7 +697,7 @@ export default function QueuePage() {
                 className="h-10"
               />
             </label>
-            <label className="space-y-1">
+            <label className="min-w-0 md:flex-1">
               <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 {t("queue.view")}
               </span>
@@ -696,7 +712,7 @@ export default function QueuePage() {
                 <option value="walk_in">{walkInLabel}</option>
               </select>
             </label>
-            <label className="space-y-1">
+            <label className="min-w-0 md:flex-1">
               <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 {t("queue.modality")}
               </span>
@@ -713,98 +729,21 @@ export default function QueuePage() {
                 ))}
               </select>
             </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              {t("queue.lastUpdated")}: {lastUpdatedLabel}
-            </span>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => void queryClient.invalidateQueries({ queryKey: ["queue"] })}
-              disabled={isFetching}
-            >
-              <RefreshCw size={14} className={isFetching ? "animate-spin" : undefined} />
-              {t("queue.refresh")}
-            </Button>
+          <div className="flex shrink-0 items-center gap-2">
             {hasActiveFilters && (
               <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters}>
                 {t("calendar.clearFilters")}
               </Button>
-            )}
+              )}
           </div>
         </div>
       </Card>
 
-      {oldNoShowCandidates.length > 0 && (
-        <Card className="p-3 sm:p-4 border-amber-200 bg-amber-50/70" role="region" aria-label={chooseLocalized(language, "تنظيف الغياب القديم", "Old no-show cleanup")}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-amber-900">
-                {chooseLocalized(language, "تنظيف الغياب القديم", "Old no-show cleanup")}
-              </h3>
-              <p className="text-sm text-amber-800">
-                {chooseLocalized(
-                  language,
-                  `${oldNoShowCandidates.length} موعد قديم مجدول يحتاج مراجعة`,
-                  `${oldNoShowCandidates.length} old scheduled appointment${oldNoShowCandidates.length === 1 ? " needs" : "s need"} review`
-                )}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowOldNoShows((current) => !current)}>
-                {showOldNoShows ? chooseLocalized(language, "إخفاء", "Hide") : chooseLocalized(language, "مراجعة", "Review")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  navigate("/queue/no-shows");
-                }}
-                style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
-              >
-                {chooseLocalized(language, "تأكيد الكل كغياب", "Mark all no-show")}
-              </Button>
-            </div>
-          </div>
-          {showOldNoShows ? (
-            <ul className="mt-3 divide-y divide-amber-200 rounded-lg border border-amber-200 bg-card max-h-[300px] overflow-y-auto">
-              {oldNoShowCandidates.map((candidate) => renderNoShowCandidate(candidate, true))}
-            </ul>
-          ) : null}
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card className="overflow-hidden" role="region" aria-label={chooseLocalized(language, "المواعيد المجدولة بدون حضور", "Scheduled but not checked in")}>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <Card className={`overflow-hidden ${notEnteredCount === 0 ? "xl:col-span-4" : "xl:col-span-3"}`} role="region" aria-label={t("queue.checkedInWaiting")}>
           <div className="p-4 border-b border-border flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold">{chooseLocalized(language, "المواعيد المجدولة بدون حضور", "Scheduled but not checked in")}</h3>
-              <p className="text-sm text-muted-foreground">{notEnteredQueueEntries.length} / {notEnteredCount}</p>
-            </div>
-          </div>
-          {notEnteredQueueEntries.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
-              <p>{hasActiveFilters ? filteredEmptyMessage : notCheckedInEmptyMessage}</p>
-              {hasActiveFilters ? (
-                <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters} className="mt-3">
-                  {filteredClearLabel}
-                </Button>
-              ) : null}
-            </div>
-          ) : (
-            <ul className="divide-y divide-border max-h-[620px] overflow-y-auto">
-              {notEnteredQueueEntries.map((entry) => renderQueueEntry(entry, false))}
-            </ul>
-          )}
-        </Card>
-
-        <Card className="overflow-hidden" role="region" aria-label={chooseLocalized(language, "مسجلو الحضور / في الانتظار", "Checked in / waiting")}>
-          <div className="p-4 border-b border-border flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">{chooseLocalized(language, "مسجلو الحضور / في الانتظار", "Checked in / waiting")}</h3>
+              <h3 className="text-lg font-semibold">{t("queue.checkedInWaiting")}</h3>
               <p className="text-sm text-muted-foreground">{enteredQueueEntries.length} / {enteredCount}</p>
             </div>
             {queue ? (
@@ -826,6 +765,29 @@ export default function QueuePage() {
           ) : (
             <ul className="divide-y divide-border max-h-[620px] overflow-y-auto">
               {enteredQueueEntries.map((entry) => renderQueueEntry(entry, true))}
+            </ul>
+          )}
+        </Card>
+
+        <Card className={`overflow-hidden ${notEnteredCount === 0 ? "xl:col-span-1" : "xl:col-span-2"}`} role="region" aria-label={t("queue.scheduledNotCheckedIn")}>
+          <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">{t("queue.scheduledNotCheckedIn")}</h3>
+              <p className="text-sm text-muted-foreground">{notEnteredQueueEntries.length} / {notEnteredCount}</p>
+            </div>
+          </div>
+          {notEnteredQueueEntries.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              <p>{hasActiveFilters ? filteredEmptyMessage : notCheckedInEmptyMessage}</p>
+              {hasActiveFilters ? (
+                <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters} className="mt-3">
+                  {filteredClearLabel}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border max-h-[620px] overflow-y-auto">
+              {notEnteredQueueEntries.map((entry) => renderQueueEntry(entry, false))}
             </ul>
           )}
         </Card>
@@ -868,29 +830,5 @@ export default function QueuePage() {
         </DialogContent>
       </Dialog>
      </div>
-  );
-}
-
-function QueueStat({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: number;
-  tone?: "neutral" | "amber" | "sky";
-}) {
-  const toneClass =
-    tone === "amber"
-      ? "border-amber-200 bg-amber-50 text-amber-700"
-      : tone === "sky"
-        ? "border-sky-200 bg-sky-50 text-sky-700"
-        : "border-border bg-muted/30 text-foreground";
-
-  return (
-    <div className={`rounded-xl border p-3 ${toneClass}`}>
-      <p className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-75">{label}</p>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
-    </div>
   );
 }

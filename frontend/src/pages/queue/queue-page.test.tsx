@@ -282,8 +282,8 @@ describe("QueuePage multiple appointment marker", () => {
 
     const enteredRow = await screen.findByText(/ACC-44/);
     const enteredCard = enteredRow.closest("li")!;
-    expect(within(enteredCard).getByText(/Entered:/i)).toBeTruthy();
-    expect(enteredCard.textContent).toMatch(/Waiting: 1h (9|10)m/i);
+    expect(within(enteredCard).getByText(/Entered/i)).toBeTruthy();
+    expect(enteredCard.textContent).toMatch(/Waiting 1h (9|10)m/i);
 
     const scheduledRow = screen.getByText(/ACC-45/);
     const scheduledCard = scheduledRow.closest("li")!;
@@ -303,6 +303,30 @@ describe("QueuePage command center layout", () => {
       ],
     });
     fetchSettingsMock.mockResolvedValue({ walk_in_queue: "disabled" });
+  });
+
+  it("renders one refresh control and compact summary controls", async () => {
+    const user = userEvent.setup();
+    fetchQueueSnapshotMock.mockResolvedValue(enteredQueueSnapshot);
+
+    renderPage();
+
+    await screen.findByText(/ACC-44/);
+    expect(screen.getAllByRole("button", { name: /Refresh/i })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /Total.*2/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Checked in.*1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Not arrived.*1/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Walk-in.*0/i })).toBeTruthy();
+
+    const view = screen.getByRole("combobox", { name: "View" });
+    await user.click(screen.getByRole("button", { name: /Checked in.*1/i }));
+    expect((view as HTMLSelectElement).value).toBe("entered");
+    await user.click(screen.getByRole("button", { name: /Not arrived.*1/i }));
+    expect((view as HTMLSelectElement).value).toBe("not_entered");
+    await user.click(screen.getByRole("button", { name: /Walk-in.*0/i }));
+    expect((view as HTMLSelectElement).value).toBe("walk_in");
+    await user.click(screen.getByRole("button", { name: /Total.*2/i }));
+    expect((view as HTMLSelectElement).value).toBe("all");
   });
 
   it("renders a primary scan bar and submits scans with Enter", async () => {
@@ -327,7 +351,7 @@ describe("QueuePage command center layout", () => {
     renderPage();
 
     await screen.findByText(/ACC-44/);
-    const scheduledColumn = screen.getByRole("region", { name: /Scheduled but not checked in/i });
+    const scheduledColumn = screen.getByRole("region", { name: /Scheduled \/ not checked in/i });
     const checkedInColumn = screen.getByRole("region", { name: /Checked in \/ waiting/i });
 
     expect(within(scheduledColumn).getByText(/ACC-44/)).toBeTruthy();
@@ -343,14 +367,72 @@ describe("QueuePage command center layout", () => {
     expect(screen.getByText(/No scheduled patients are waiting for check-in/i)).toBeTruthy();
   });
 
-  it("keeps old no-show cleanup in the dedicated review workspace", async () => {
+  it("keeps the before-review no-show status compact", async () => {
     fetchQueueSnapshotMock.mockResolvedValue(queueSnapshot);
     const { unmount } = renderPage();
 
     await screen.findByText("Patient Name");
-    expect(screen.queryByRole("region", { name: /Old no-show cleanup/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /Open review workspace/i })).toBeTruthy();
+    expect(screen.getByText(/No-show review opens at 18:00/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open review workspace/i })).toBeNull();
     unmount();
+  });
+
+  it("shows a review action only for actionable manual no-shows", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue({
+      ...queueSnapshot,
+      reviewActive: true,
+      autoNoShowEnabled: false,
+      noShowCandidates: [
+        {
+          appointmentId: 44,
+          accessionNumber: "ACC-44",
+          appointmentDate: "2026-06-18",
+          patientId: 22,
+          arabicFullName: "Patient Name",
+          englishFullName: "Patient Name",
+          phone1: null,
+          modalityNameAr: "CT",
+          modalityNameEn: "CT",
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("region", { name: /No-show review status/i })).toBeTruthy();
+    expect(screen.getByText(/1 appointment\(s\) are ready for manual review/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Open review workspace/i })).toBeTruthy();
+  });
+
+  it("keeps automatic no-show processing informational", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue({
+      ...queueSnapshot,
+      reviewActive: true,
+      autoNoShowEnabled: true,
+      noShowCandidates: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText(/Automatic no-show processing is active/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Open review workspace/i })).toBeNull();
+  });
+
+  it("displays arrived bookings as Arrived rather than Called", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue({
+      ...queueSnapshot,
+      summary: { ...queueSnapshot.summary, scheduled_count: 0, arrived_count: 1 },
+      queueEntries: [{
+        ...queueSnapshot.queueEntries[0],
+        appointmentStatus: "arrived",
+        arrivedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+      }],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Arrived", { exact: true })).toBeTruthy();
+    expect(screen.queryByText("Called", { exact: true })).toBeNull();
   });
 
   it("filters queue rows and shows a filtered empty state", async () => {
