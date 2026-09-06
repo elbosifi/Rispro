@@ -175,26 +175,67 @@ describe("CalendarPage registration drilldown", () => {
   it("shows modality registration summaries for the selected day and opens a filtered modal", async () => {
     renderPage();
 
-    await screen.findByText("2 total registrations");
-    expect(getSidebarSummaryButton(/CT/i)).toBeTruthy();
-    expect(getSidebarSummaryButton(/MRI/i)).toBeTruthy();
-    expect(screen.getAllByText("Total").length).toBeGreaterThan(0);
+    await screen.findByTestId("modality-summary-modality:1");
+    expect(getSidebarSummaryButton(/CT, 2 registrations/i)).toBeTruthy();
+    expect(getSidebarSummaryButton(/MRI, 1 registration/i)).toBeTruthy();
+    expect(screen.getByText("Total")).toBeTruthy();
     expect(screen.getAllByText("Oncology").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Non-oncology").length).toBeGreaterThan(0);
-    expect(screen.getByText("2 total registrations")).toBeTruthy();
-    expect(screen.getByText("1 total registrations")).toBeTruthy();
 
     fireEvent.click(getSidebarSummaryButton(/CT/i));
     await screen.findByText("Alpha One");
+    expect(screen.getByText(/2 total registrations/)).toBeTruthy();
     expect(screen.getByText("ACC-1")).toBeTruthy();
     expect(screen.getByText("ACC-2")).toBeTruthy();
     expect(screen.queryByText("ACC-3")).toBeNull();
   });
 
+  it("renders the selected registration count once", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value: "1" } });
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-day-summary").textContent || "").toContain("2 registrations");
+    });
+    const selectedDaySummary = screen.getByTestId("selected-day-summary").textContent || "";
+
+    expect(selectedDaySummary).toContain("2 registrations");
+    expect(selectedDaySummary).not.toContain("2 2 registrations");
+  });
+
+  it("updates the selected-date inspector when another calendar date is selected", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    const otherDateButton = screen
+      .getAllByRole("button")
+      .find((button) => /\b2026\b/.test(button.getAttribute("aria-label") || ""));
+    expect(otherDateButton).toBeTruthy();
+    const expectedDate = (otherDateButton?.getAttribute("aria-label") || "").match(/^[^,]+, [^,]+ \d+, \d{4}/)?.[0];
+    expect(expectedDate).toBeTruthy();
+
+    fireEvent.click(otherDateButton!);
+
+    const selectedDaySummary = screen.getByTestId("selected-day-summary").textContent || "";
+    expect(selectedDaySummary).toContain("Selected date");
+    expect(selectedDaySummary).toContain(expectedDate!);
+    expect(selectedDaySummary).toContain("0 registrations");
+  });
+
+  it("opens registrations for the effective selected date", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    fireEvent.click(screen.getByRole("button", { name: "Open day registrations" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/registrations?date=2026-05-02");
+  });
+
   it("opens registrations for the selected appointment from the modal", async () => {
     renderPage();
 
-    await screen.findByText("2 total registrations");
+    await screen.findByTestId("modality-summary-modality:1");
     fireEvent.click(getSidebarSummaryButton(/CT/i));
     await screen.findByText("Alpha One");
     fireEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
@@ -211,7 +252,7 @@ describe("CalendarPage registration drilldown", () => {
 
   it("respects the top-level modality filter in the selected-day summaries", async () => {
     renderPage();
-    await screen.findByText("2 total registrations");
+    await screen.findByTestId("modality-summary-modality:1");
 
     fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value: "2" } });
 
@@ -226,20 +267,20 @@ describe("CalendarPage registration drilldown", () => {
     await waitFor(() => {
       const summaryContainer = getSelectedDaySummaryContainer();
       expect(summaryContainer.textContent || "").toContain("MRI");
-      expect(summaryContainer.textContent || "").not.toContain("CT2 total registrations");
+      expect(summaryContainer.textContent || "").not.toContain("CT");
       expect(screen.getByTestId("modality-summary-modality:2")).toBeTruthy();
       expect(screen.queryByTestId("modality-summary-modality:1")).toBeNull();
-      expect(screen.getByText("1 total registrations")).toBeTruthy();
+      expect(screen.getByTestId("selected-day-summary").textContent || "").toContain("1 registration");
     });
   });
 
   it("counts unknown category in total only", async () => {
     renderPage();
 
-    await screen.findByText("1 total registrations");
+    await screen.findByTestId("modality-summary-modality:1");
     fireEvent.click(getSidebarSummaryButton(/MRI/i));
     await screen.findByText("Gamma Three");
-    expect(screen.getByText("1 total registrations")).toBeTruthy();
+    expect(screen.getByText(/1 total registrations/)).toBeTruthy();
     expect(screen.getAllByText("Oncology").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Non-oncology").length).toBeGreaterThan(0);
     expect(screen.getAllByText("0").length).toBeGreaterThan(0);
@@ -247,13 +288,13 @@ describe("CalendarPage registration drilldown", () => {
 
   it("keeps print day list available when registrations exist", async () => {
     renderPage();
-    await screen.findByText("2 total registrations");
+    await screen.findByTestId("modality-summary-modality:1");
     expect((screen.getByRole("button", { name: "Print day list" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("prints the selected day directly without navigating to the print tab", async () => {
     renderPage();
-    await screen.findByText("2 total registrations");
+    await screen.findByTestId("modality-summary-modality:1");
 
     fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value: "1" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Category" }), { target: { value: "oncology" } });

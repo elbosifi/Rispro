@@ -102,7 +102,7 @@ export default function CalendarPage() {
     return acc;
   }, {} as Record<string, AppointmentWithDetails[]>), [filteredAppointments]);
 
-  const monthStats = useMemo(() => buildMonthStats(filteredAppointments, language), [filteredAppointments, language]);
+  const monthStats = useMemo(() => buildMonthStats(filteredAppointments), [filteredAppointments]);
 
   const firstAppointmentDate = useMemo(
     () =>
@@ -193,7 +193,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="w-full max-w-[1600px] mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
@@ -206,10 +206,10 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <Card className="p-3 sm:p-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+      <Card className="p-3">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:flex-1">
-            <label className="space-y-1">
+            <label className="space-y-0.5">
               <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 <Search size={12} />
                 {t(language, "calendar.search")}
@@ -222,7 +222,7 @@ export default function CalendarPage() {
                 aria-label={t(language, "calendar.search")}
               />
             </label>
-            <label className="space-y-1">
+            <label className="space-y-0.5">
               <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 <ListFilter size={12} />
                 {t(language, "calendar.modalityFilter")}
@@ -241,7 +241,7 @@ export default function CalendarPage() {
                 ))}
               </select>
             </label>
-            <label className="space-y-1">
+            <label className="space-y-0.5">
               <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 {t(language, "calendar.categoryFilter")}
               </span>
@@ -256,7 +256,7 @@ export default function CalendarPage() {
                 <option value="non_oncology">{t(language, "calendar.nonOncologyLabel")}</option>
               </select>
             </label>
-            <label className="space-y-1">
+            <label className="space-y-0.5">
               <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 {t(language, "calendar.statusFilter")}
               </span>
@@ -293,9 +293,9 @@ export default function CalendarPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         {/* Calendar Grid */}
-        <Card className="lg:col-span-2 overflow-hidden p-0">
+        <Card className="overflow-hidden p-0 xl:col-span-3">
           {/* Header */}
           <div className="border-b border-border p-3 sm:p-4">
             <div className="flex items-center justify-between gap-2">
@@ -303,10 +303,16 @@ export default function CalendarPage() {
                 <ChevronLeft size={20} />
               </button>
               <div className="min-w-0 text-center">
-                <h3 className="truncate text-base font-semibold sm:text-xl">
+                <h3 className="truncate text-sm font-semibold sm:text-xl">
                   {displayDate.toLocaleString(language === "ar" ? "ar-LY" : "en", { month: "long", year: "numeric" })}
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.monthTotal", { count: monthStats.total })}</p>
+                <p className="mt-1 flex flex-wrap items-center justify-center gap-x-2 text-xs text-muted-foreground">
+                  <span>{registrationCountLabel(language, monthStats.total)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{t(language, "calendar.oncologyLabel")}: {monthStats.oncology}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{t(language, "calendar.nonOncologyLabel")}: {monthStats.nonOncology}</span>
+                </p>
               </div>
               <div className="flex gap-1.5">
                 <Button variant="secondary" size="sm" onClick={goToday} className="h-10 px-3">
@@ -318,12 +324,6 @@ export default function CalendarPage() {
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-              <SummaryStat label={t(language, "calendar.totalLabel")} value={monthStats.total} />
-              <SummaryStat label={t(language, "calendar.oncologyLabel")} value={monthStats.oncology} />
-              <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={monthStats.nonOncology} />
-              <SummaryStat label={t(language, "calendar.busiestDay")} value={monthStats.busiestCount} detail={monthStats.busiestLabel} />
-            </div>
           </div>
 
           {/* Weekday Headers */}
@@ -344,6 +344,7 @@ export default function CalendarPage() {
                 <button
                   key={day.date}
                   onClick={() => selectDay(day.date)}
+                  aria-label={`${formatSelectedDateDisplay(day.date, language)}, ${registrationCountLabel(language, day.count)}, ${t(language, "calendar.oncologyLabel")}: ${day.oncology}, ${t(language, "calendar.nonOncologyLabel")}: ${day.nonOncology}`}
                   className={`relative min-h-[76px] border-b border-e border-border p-1.5 text-right transition-all duration-200 hover:bg-muted/50 sm:min-h-[112px] sm:p-3 ${
                     !day.isCurrentMonth ? "bg-muted/30" : ""
                   } ${day.isSelected ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
@@ -360,31 +361,29 @@ export default function CalendarPage() {
                     {day.dayNumber}
                   </span>
                   {day.count > 0 && (
-                    <div className="mt-1 space-y-1">
-                      <div className="flex flex-wrap justify-end gap-1">
-                        <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold text-accent sm:text-[11px]">
-                          {day.count}
+                    <div className="mt-1 min-w-0 space-y-0.5">
+                      <p className="truncate text-[10px] font-semibold leading-tight sm:text-xs">
+                        <span className="sm:hidden" aria-hidden="true">
+                          {t(language, "calendar.registrationShort", { count: day.count })}
                         </span>
-                        {day.oncology > 0 && (
-                          <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 sm:text-[11px]">
-                            {day.oncology}
-                          </span>
-                        )}
-                        {day.nonOncology > 0 && (
-                          <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 sm:text-[11px]">
-                            {day.nonOncology}
-                          </span>
-                        )}
-                      </div>
+                        <span className="hidden sm:inline" aria-hidden="true">
+                          {registrationCountLabel(language, day.count)}
+                        </span>
+                      </p>
+                      <p className="hidden truncate text-[10px] leading-tight text-muted-foreground sm:block">
+                        <span className="text-rose-700">{t(language, "calendar.oncologyShort")}: {day.oncology}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span className="text-sky-700">{t(language, "calendar.nonOncologyShort")}: {day.nonOncology}</span>
+                      </p>
                       <div className="hidden space-y-1 sm:block">
-                      {day.summary.slice(0, 2).map((s, i) => (
-                        <div key={i} className="text-xs text-muted-foreground truncate text-right">
-                          {s.modality} ({s.count})
-                        </div>
-                      ))}
-                      {day.summary.length > 2 && (
-                        <div className="text-xs text-muted-foreground text-right">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
-                      )}
+                        {day.summary.slice(0, 2).map((s, i) => (
+                          <div key={i} className="truncate text-right text-xs text-muted-foreground">
+                            {s.modality} ({s.count})
+                          </div>
+                        ))}
+                        {day.summary.length > 2 && (
+                          <div className="text-right text-xs text-muted-foreground">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -395,38 +394,49 @@ export default function CalendarPage() {
         </Card>
 
         {/* Sidebar: Selected Day Registration Summary */}
-        <div>
-          <Card className="overflow-hidden sticky top-6">
-            <div className="p-4 border-b border-border" data-testid="selected-day-summary">
-              <h3 className="font-semibold text-lg">
-                {effectiveSelectedDate === formatDate(new Date()) ? t(language, "calendar.todayRegistrations") : t(language, "calendar.dayRegistrations", { date: formatDateDisplay(effectiveSelectedDate) })}
+        <div className="xl:col-span-1">
+          <Card className="overflow-hidden xl:sticky xl:top-6">
+            <div className="border-b border-border p-3 sm:p-4" data-testid="selected-day-summary">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                  {t(language, "calendar.selectedDate")}
+                </p>
+                {effectiveSelectedDate === formatDate(new Date()) ? (
+                  <Badge variant="info" size="sm">{t(language, "calendar.today")}</Badge>
+                ) : null}
+              </div>
+              <h3 className="mt-1 text-lg font-semibold leading-tight">
+                {formatSelectedDateDisplay(effectiveSelectedDate, language)}
               </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.registrationCount", { count: 1 }) : t(language, "calendar.registrationCountPlural", { count: selectedAppointments.length })}
+              <p className="mt-1 text-sm text-muted-foreground">
+                {registrationCountLabel(language, selectedAppointments.length)}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-col gap-2">
                 <Button
                   size="sm"
-                  onClick={printSelectedDayList}
-                  disabled={selectedAppointments.length === 0}
-                >
-                  {t(language, "calendar.printDayList")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => navigate(`/print?date=${effectiveSelectedDate}`)}
-                >
-                  {t(language, "calendar.openPrintTab")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
+                  className="w-full justify-center"
                   onClick={openRegistrationsForSelectedDay}
                   disabled={selectedAppointments.length === 0}
                 >
                   {t(language, "calendar.openDayRegistrations")}
                 </Button>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={printSelectedDayList}
+                    disabled={selectedAppointments.length === 0}
+                  >
+                    {t(language, "calendar.printDayList")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => navigate(`/print?date=${effectiveSelectedDate}`)}
+                  >
+                    {t(language, "calendar.openPrintTab")}
+                  </Button>
+                </div>
               </div>
             </div>
             {isLoading ? (
@@ -436,32 +446,26 @@ export default function CalendarPage() {
                 {t(language, "calendar.noRegistrations")}
               </div>
             ) : (
-              <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto" data-testid="selected-day-summary-list">
+              <div className="max-h-[600px] space-y-2 overflow-y-auto p-3 sm:p-4" data-testid="selected-day-summary-list">
+                <div className="grid grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] gap-2 px-2 text-[10px] font-mono uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+                  <span className="min-w-0">{t(language, "calendar.modalityFilter")}</span>
+                  <span className="break-words text-right">{t(language, "calendar.totalLabel")}</span>
+                  <span className="break-words text-right">{t(language, "calendar.oncologyLabel")}</span>
+                  <span className="break-words text-right">{t(language, "calendar.nonOncologyLabel")}</span>
+                </div>
                 {selectedDateSummaries.map((summary) => (
                   <button
                     key={summary.key}
                     type="button"
                     onClick={() => openModalitySummary(summary)}
                     data-testid={`modality-summary-${summary.key}`}
-                    aria-label={`${summary.label} ${t(language, "calendar.totalRegistrations", { count: summary.total })}`}
-                    className="w-full rounded-xl border border-border bg-muted/20 p-4 text-left transition-colors hover:bg-muted/50"
+                    aria-label={`${summary.label}, ${registrationCountLabel(language, summary.total)}`}
+                    className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] items-center gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold">{summary.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t(language, "calendar.totalRegistrations", { count: summary.total })}
-                        </p>
-                      </div>
-                      <Badge variant="info" size="sm">
-                        {summary.total}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                      <SummaryStat label={t(language, "calendar.totalLabel")} value={summary.total} />
-                      <SummaryStat label={t(language, "calendar.oncologyLabel")} value={summary.oncology} />
-                      <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={summary.nonOncology} />
-                    </div>
+                    <span className="min-w-0 whitespace-nowrap text-xs font-semibold">{summary.label}</span>
+                    <span className="text-right font-semibold tabular-nums">{summary.total}</span>
+                    <span className="text-right tabular-nums text-rose-700">{summary.oncology}</span>
+                    <span className="text-right tabular-nums text-sky-700">{summary.nonOncology}</span>
                   </button>
                 ))}
               </div>
@@ -600,33 +604,19 @@ function buildSelectedDaySummaries(
   });
 }
 
-function buildMonthStats(appointments: AppointmentWithDetails[], language: "ar" | "en") {
-  const countsByDate = new Map<string, number>();
+function buildMonthStats(appointments: AppointmentWithDetails[]) {
   let oncology = 0;
   let nonOncology = 0;
 
   appointments.forEach((appointment) => {
-    const date = String(appointment.appointmentDate || "").slice(0, 10);
-    if (date) countsByDate.set(date, (countsByDate.get(date) || 0) + 1);
     if (appointment.caseCategory === "oncology") oncology += 1;
     if (appointment.caseCategory === "non_oncology") nonOncology += 1;
-  });
-
-  let busiestDate = "";
-  let busiestCount = 0;
-  countsByDate.forEach((count, date) => {
-    if (count > busiestCount) {
-      busiestDate = date;
-      busiestCount = count;
-    }
   });
 
   return {
     total: appointments.length,
     oncology,
     nonOncology,
-    busiestCount,
-    busiestLabel: busiestDate ? formatDateLy(busiestDate) : t(language, "calendar.none"),
   };
 }
 
@@ -681,6 +671,21 @@ function formatDate(date: Date): string {
 
 function formatDateDisplay(dateStr: string): string {
   return formatDateLy(dateStr);
+}
+
+function formatSelectedDateDisplay(dateStr: string, language: "ar" | "en"): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  return date.toLocaleDateString(language === "ar" ? "ar-LY" : "en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function registrationCountLabel(language: "ar" | "en", count: number): string {
+  return t(language, count === 1 ? "calendar.registrationCount" : "calendar.registrationCountPlural", { count });
 }
 
 function StatusBadge({ language, status }: { language: "ar" | "en"; status: string }) {
