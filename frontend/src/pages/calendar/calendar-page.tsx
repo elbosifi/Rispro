@@ -738,24 +738,30 @@ function CategoryCapacityBadge({
   language,
   entry,
   category,
+  context,
 }: {
   language: "ar" | "en";
   entry: AvailabilityEntry;
   category: Exclude<CapacityCategory, null>;
+  context: "cell" | "inspector";
 }) {
   const statusLabel = capacityStatusLabel(language, entry.row.status);
-  const label = entry.row.status === "available" && entry.row.remainingCapacity != null
-    ? `${statusLabel} ${entry.row.remainingCapacity}`
+  const categoryLabel = t(language, category === "oncology" ? "calendar.oncologyShort" : "calendar.nonOncologyShort");
+  const label = context === "cell"
+    ? `${categoryLabel} \u00b7 ${entry.row.status === "available" && entry.row.remainingCapacity != null ? entry.row.remainingCapacity : statusLabel}`
     : statusLabel;
+  const ariaLabel = context === "cell"
+    ? `${t(language, category === "oncology" ? "calendar.oncologyLabel" : "calendar.nonOncologyLabel")}: ${capacityAriaText(language, entry, category, true)}`
+    : capacityAriaText(language, entry, category, true);
 
   return (
     <Badge
       variant={category === "oncology" ? "error" : "info"}
       size="sm"
-      className="whitespace-nowrap px-1.5 py-0.5 text-[0.65rem] leading-none"
+      className={`whitespace-nowrap ${context === "cell" ? "px-1.5 py-0.5 text-[0.6rem] leading-none" : ""}`}
       data-testid="calendar-capacity-badge"
       data-category={category}
-      aria-label={capacityAriaText(language, entry, category, true)}
+      aria-label={ariaLabel}
     >
       {label}
     </Badge>
@@ -813,10 +819,10 @@ function buildCapacityAriaLabel(
 ): string | null {
   const capacityLabel = t(language, "calendar.capacityAvailability");
   if (categoryFilter === "oncology" && availability.oncology) {
-    return `${capacityLabel}: ${capacityAriaText(language, availability.oncology, "oncology", true)}`;
+    return `${capacityLabel}: ${t(language, "calendar.oncologyLabel")}: ${capacityAriaText(language, availability.oncology, "oncology", true)}`;
   }
   if (categoryFilter === "non_oncology" && availability.nonOncology) {
-    return `${capacityLabel}: ${capacityAriaText(language, availability.nonOncology, "non_oncology", true)}`;
+    return `${capacityLabel}: ${t(language, "calendar.nonOncologyLabel")}: ${capacityAriaText(language, availability.nonOncology, "non_oncology", true)}`;
   }
   if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
     return `${capacityLabel}: ${capacityAriaText(language, availability.oncology, null, true)}`;
@@ -853,21 +859,21 @@ function CalendarCapacityCell({
   if (categoryFilter === "oncology" && availability.oncology) {
     return (
       <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
-        <CapacityStatusLine language={language} entry={availability.oncology} category="oncology" includeCapacity />
+        <CapacityStatusLine language={language} entry={availability.oncology} category="oncology" context="cell" includeCapacity />
       </div>
     );
   }
   if (categoryFilter === "non_oncology" && availability.nonOncology) {
     return (
       <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
-        <CapacityStatusLine language={language} entry={availability.nonOncology} category="non_oncology" includeCapacity />
+        <CapacityStatusLine language={language} entry={availability.nonOncology} category="non_oncology" context="cell" includeCapacity />
       </div>
     );
   }
   if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
     return (
       <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
-        <CapacityStatusLine language={language} entry={availability.oncology} category={null} includeCapacity />
+        <CapacityStatusLine language={language} entry={availability.oncology} category={null} context="cell" includeCapacity />
       </div>
     );
   }
@@ -875,10 +881,10 @@ function CalendarCapacityCell({
   return (
     <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
       {availability.oncology ? (
-        <CapacityStatusLine language={language} label={t(language, "calendar.oncologyShort")} entry={availability.oncology} category="oncology" />
+        <CapacityStatusLine language={language} entry={availability.oncology} category="oncology" context="cell" />
       ) : null}
       {availability.nonOncology ? (
-        <CapacityStatusLine language={language} label={t(language, "calendar.nonOncologyShort")} entry={availability.nonOncology} category="non_oncology" />
+        <CapacityStatusLine language={language} entry={availability.nonOncology} category="non_oncology" context="cell" />
       ) : null}
     </div>
   );
@@ -889,16 +895,18 @@ function CapacityStatusLine({
   label,
   entry,
   category,
+  context = "inspector",
   includeCapacity = false,
 }: {
   language: "ar" | "en";
   label?: string;
   entry: AvailabilityEntry;
   category: CapacityCategory;
+  context?: "cell" | "inspector";
   includeCapacity?: boolean;
 }) {
   if (category != null) {
-    return <CategoryCapacityBadge language={language} entry={entry} category={category} />;
+    return <CategoryCapacityBadge language={language} entry={entry} category={category} context={context ?? "inspector"} />;
   }
 
   const detail = capacityCellDetail(language, entry, category, includeCapacity);
@@ -972,21 +980,21 @@ function CalendarCapacityDetails({
   if (categoryFilter === "oncology" && availability.oncology) {
     return (
       <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
-        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" includeCapacity />
+        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" context="inspector" includeCapacity />
       </div>
     );
   }
   if (categoryFilter === "non_oncology" && availability.nonOncology) {
     return (
       <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
-        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} category="non_oncology" includeCapacity />
+        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} category="non_oncology" context="inspector" includeCapacity />
       </div>
     );
   }
   if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
     return (
       <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
-        <CapacityDetailRow language={language} entry={availability.oncology} category={null} includeCapacity />
+        <CapacityDetailRow language={language} entry={availability.oncology} category={null} context="inspector" includeCapacity />
       </div>
     );
   }
@@ -996,14 +1004,14 @@ function CalendarCapacityDetails({
     <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
       {totalEntry ? (
         <p className="text-xs text-muted-foreground">
-          {t(language, "calendar.capacityBookedOf", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity })}
+          {t(language, "calendar.capacitySummary", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity })}
         </p>
       ) : null}
       {availability.oncology ? (
-        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" />
+        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" context="inspector" />
       ) : null}
       {availability.nonOncology ? (
-        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} category="non_oncology" />
+        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} category="non_oncology" context="inspector" />
       ) : null}
     </div>
   );
@@ -1014,12 +1022,14 @@ function CapacityDetailRow({
   label,
   entry,
   category,
+  context = "inspector",
   includeCapacity = false,
 }: {
   language: "ar" | "en";
   label?: string;
   entry: AvailabilityEntry;
   category: CapacityCategory;
+  context?: "cell" | "inspector";
   includeCapacity?: boolean;
 }) {
   const detail = capacityRemainingLabel(language, entry, category, includeCapacity);
@@ -1028,12 +1038,15 @@ function CapacityDetailRow({
       {label ? <span className="text-muted-foreground">{label}</span> : <span />}
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         {category != null ? (
-          <CategoryCapacityBadge language={language} entry={entry} category={category} />
+          <CategoryCapacityBadge language={language} entry={entry} category={category} context={context ?? "inspector"} />
         ) : (
           <Badge variant={entry.row.status} size="sm">{capacityStatusLabel(language, entry.row.status)}</Badge>
         )}
         {detail ? <span className="tabular-nums text-muted-foreground">{detail}</span> : null}
       </div>
+      {context === "inspector" && category != null && entry.row.status === "restricted" ? (
+        <p className="basis-full text-[11px] leading-snug text-muted-foreground">{t(language, "calendar.capacityRestrictedPolicy")}</p>
+      ) : null}
     </div>
   );
 }

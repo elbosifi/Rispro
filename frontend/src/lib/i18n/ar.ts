@@ -1681,6 +1681,8 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "calendar.capacityRemaining": "{count} متبقٍ",
   "calendar.capacityRemainingOf": "{remaining} من {capacity} متبقٍ",
   "calendar.capacityBookedOf": "{booked} من {capacity} محجوز",
+  "calendar.capacitySummary": "السعة الإجمالية {capacity} · المحجوز {booked}",
+  "calendar.capacityRestrictedPolicy": "مقيّد بسبب سياسة الجدولة",
 
   "modality.title": "لوحة الأجهزة",
   "modality.refresh": "تحديث",

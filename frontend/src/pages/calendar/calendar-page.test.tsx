@@ -478,9 +478,39 @@ describe("CalendarPage registration drilldown", () => {
     });
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Available 4").length).toBeGreaterThan(0);
+    const capacityCell = screen.getByTestId("calendar-capacity-cell");
+    expect(within(capacityCell).getByText("Onc \u00b7 4")).toBeTruthy();
+    expect(within(capacityCell).queryByText("Available 4")).toBeNull();
+    const capacityDetails = screen.getByTestId("calendar-capacity-details-2026-05-20");
+    expect(within(capacityDetails).getByText("Oncology")).toBeTruthy();
+    expect(within(capacityDetails).getByText("Available")).toBeTruthy();
     expect(screen.getAllByText("4 of 20 remaining").length).toBeGreaterThan(0);
-    expect(dayButton!.getAttribute("aria-label")).toContain("Capacity availability: Available, 4 of 20 remaining");
+    expect(dayButton!.getAttribute("aria-label")).toContain("Capacity availability: Oncology: Available, 4 of 20 remaining");
+  });
+
+  it("shows the authoritative total capacity summary in the inspector", async () => {
+    const totalDay = makeAvailabilityDay(
+      {
+        bucketMode: "partitioned",
+        modalityTotalCapacity: 25,
+        bookedTotal: 0,
+        bookedCount: 0,
+        remainingCapacity: 11,
+        oncology: { reserved: 15, filled: 4, remaining: 11 },
+        nonOncology: { reserved: 10, filled: 0, remaining: 10 },
+      },
+      { remainingStandardCapacity: 11 }
+    );
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getByText("25 total capacity \u00b7 0 booked")).toBeTruthy();
+    expect(screen.queryByText("0 of 25 booked")).toBeNull();
   });
 
   it("uses the oncology reserved capacity for partitioned denominators", async () => {
@@ -502,11 +532,11 @@ describe("CalendarPage registration drilldown", () => {
     const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Available 2").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-cell")).getByText("Onc \u00b7 2")).toBeTruthy();
     expect(screen.getAllByText("2 of 10 remaining").length).toBeGreaterThan(0);
-    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByTestId("calendar-capacity-badge").textContent).toContain("Available 2");
+    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByText("Available")).toBeTruthy();
     expect(screen.queryByText("2 of 20 remaining")).toBeNull();
-    expect(dayButton!.getAttribute("aria-label")).toContain("Available, 2 of 10 remaining");
+    expect(dayButton!.getAttribute("aria-label")).toContain("Oncology: Available, 2 of 10 remaining");
   });
 
   it("uses the non-oncology reserved capacity for partitioned denominators", async () => {
@@ -528,30 +558,36 @@ describe("CalendarPage registration drilldown", () => {
     const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Available 3").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-cell")).getByText("Non-onc \u00b7 3")).toBeTruthy();
     expect(screen.getAllByText("3 of 7 remaining").length).toBeGreaterThan(0);
-    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByTestId("calendar-capacity-badge").textContent).toContain("Available 3");
+    expect(within(screen.getByTestId("calendar-capacity-details-2026-05-20")).getByText("Available")).toBeTruthy();
     expect(screen.queryByText("3 of 20 remaining")).toBeNull();
-    expect(dayButton!.getAttribute("aria-label")).toContain("Available, 3 of 7 remaining");
+    expect(dayButton!.getAttribute("aria-label")).toContain("Non-oncology: Available, 3 of 7 remaining");
   });
 
   it("shows Restricted for category exhaustion", async () => {
-    setAvailability({ items: [makeAvailabilityDay(
-      { date: "2026-05-20", rowDisplayStatus: undefined },
-      {
-        displayStatus: "blocked",
-        reasons: [{ code: "category_capacity_exhausted", severity: "error", message: "Category capacity exhausted" }],
-      }
-    )] });
+    setAvailability(
+      { items: [] },
+      { items: [makeAvailabilityDay(
+        { date: "2026-05-20", rowDisplayStatus: undefined },
+        {
+          displayStatus: "blocked",
+          reasons: [{ code: "category_capacity_exhausted", severity: "error", message: "Category capacity exhausted" }],
+        }
+      )] }
+    );
     renderPage();
 
     await screen.findByTestId("modality-summary-modality:1");
-    selectCategory("oncology");
+    selectCategory("non_oncology");
     selectModality();
     const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Restricted").length).toBeGreaterThan(0);
+    const capacityCell = screen.getByTestId("calendar-capacity-cell");
+    expect(within(capacityCell).getByText("Non-onc \u00b7 Restricted")).toBeTruthy();
+    expect(within(capacityCell).queryByText("Restricted by scheduling policy")).toBeNull();
+    expect(screen.getByText("Restricted by scheduling policy")).toBeTruthy();
     expect(screen.queryByText("Needs Approval")).toBeNull();
   });
 
@@ -572,7 +608,7 @@ describe("CalendarPage registration drilldown", () => {
     const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Full").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-cell")).getByText("Onc \u00b7 Full")).toBeTruthy();
   });
 
   it("shows Blocked for a blocked date", async () => {
@@ -591,7 +627,7 @@ describe("CalendarPage registration drilldown", () => {
     const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
     fireEvent.click(dayButton!);
 
-    expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("calendar-capacity-cell")).getByText("Onc \u00b7 Blocked")).toBeTruthy();
   });
 
   it("keeps capacity visible when the date has zero visible registrations", async () => {

@@ -1640,6 +1640,8 @@ export const en = {
   "calendar.capacityRemaining": "{count} remaining",
   "calendar.capacityRemainingOf": "{remaining} of {capacity} remaining",
   "calendar.capacityBookedOf": "{booked} of {capacity} booked",
+  "calendar.capacitySummary": "{capacity} total capacity · {booked} booked",
+  "calendar.capacityRestrictedPolicy": "Restricted by scheduling policy",
 
   "modality.title": "Modality Board",
   "modality.refresh": "Refresh",
