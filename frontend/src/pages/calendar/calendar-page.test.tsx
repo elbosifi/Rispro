@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CalendarPage from "./calendar-page";
+import type { AvailabilityDayDto, AvailabilityResponse } from "@/v2/appointments/types";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -10,11 +11,32 @@ const fetchPatientDirectorySummaryMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
 const printDayListFromRouteMock = vi.fn();
 const navigateMock = vi.fn();
+const useV2AvailabilityMock = vi.fn();
+
+type AvailabilityParams = {
+  modalityId: number;
+  days: number;
+  offset: number;
+  examTypeId: null;
+  caseCategory: "oncology" | "non_oncology";
+  capacityResolutionMode: "standard";
+  useSpecialQuota: false;
+  specialReasonCode: null;
+  includeOverrideCandidates: false;
+};
+
+let availabilityResponses: Record<AvailabilityParams["caseCategory"], AvailabilityResponse>;
+let availabilityIsLoading = false;
+let availabilityIsError = false;
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
+}));
+
+vi.mock("@/v2/appointments/api", () => ({
+  useV2Availability: (params: AvailabilityParams | undefined) => useV2AvailabilityMock(params),
 }));
 
 vi.mock("@/providers/language-provider", () => ({
@@ -56,9 +78,96 @@ function getSelectedDaySummaryContainer() {
   return screen.getByTestId("selected-day-summary-list");
 }
 
+function makeAvailabilityDay(
+  overrides: Partial<AvailabilityDayDto> = {},
+  decisionOverrides: Partial<AvailabilityDayDto["decision"]> = {}
+): AvailabilityDayDto {
+  const { decision: dayDecision, ...dayOverrides } = overrides;
+  return {
+    date: "2026-05-20",
+    bucketMode: "partitioned",
+    modalityTotalCapacity: 20,
+    bookedTotal: 16,
+    oncology: { reserved: 10, filled: 8, remaining: 2 },
+    nonOncology: { reserved: 10, filled: 8, remaining: 2 },
+    specialQuotaSummary: null,
+    examMixQuotaSummaries: [],
+    dailyCapacity: 20,
+    bookedCount: 16,
+    remainingCapacity: 4,
+    isFull: false,
+    rowDisplayStatus: "available",
+    decision: {
+      isAllowed: true,
+      requiresSupervisorOverride: false,
+      displayStatus: "available",
+      suggestedBookingMode: "standard",
+      consumedCapacityMode: "standard",
+      remainingStandardCapacity: 4,
+      remainingSpecialQuota: null,
+      matchedRuleIds: [],
+      reasons: [],
+      policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "test" },
+      decisionTrace: { evaluatedAt: "2026-05-15T00:00:00.000Z", input: {} },
+      ...dayDecision,
+      ...decisionOverrides,
+    },
+    ...dayOverrides,
+  };
+}
+
+function enabledAvailabilityParams(caseCategory: AvailabilityParams["caseCategory"]): AvailabilityParams {
+  return {
+    modalityId: 1,
+    days: 17,
+    offset: 0,
+    examTypeId: null,
+    caseCategory,
+    capacityResolutionMode: "standard",
+    useSpecialQuota: false,
+    specialReasonCode: null,
+    includeOverrideCandidates: false,
+  };
+}
+
+function setAvailability(
+  oncology: AvailabilityResponse = { items: [] },
+  nonOncology: AvailabilityResponse = { items: [] }
+) {
+  availabilityResponses = { oncology, non_oncology: nonOncology };
+}
+
+function getEnabledAvailabilityCalls() {
+  return useV2AvailabilityMock.mock.calls
+    .map(([params]) => params as AvailabilityParams | undefined)
+    .filter((params): params is AvailabilityParams => params != null);
+}
+
+function selectModality(value = "1") {
+  fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value } });
+}
+
+function selectCategory(value: "oncology" | "non_oncology") {
+  fireEvent.change(screen.getByRole("combobox", { name: "Category" }), { target: { value } });
+}
+
+function findCalendarDayButton(dateLabel: string) {
+  return screen.getAllByRole("button").find((button) => (button.getAttribute("aria-label") || "").includes(dateLabel));
+}
+
 describe("CalendarPage registration drilldown", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
     vi.clearAllMocks();
+    availabilityIsLoading = false;
+    availabilityIsError = false;
+    setAvailability();
+    useV2AvailabilityMock.mockImplementation((params: AvailabilityParams | undefined) => ({
+      data: params ? availabilityResponses[params.caseCategory] : undefined,
+      isLoading: params != null && availabilityIsLoading,
+      isError: params != null && availabilityIsError,
+    }));
     fetchPatientDirectorySummaryMock.mockResolvedValue({
       demographics: {
         id: 11,
@@ -169,7 +278,11 @@ describe("CalendarPage registration drilldown", () => {
     fetchAppointmentsMock.mockImplementation(async (params?: { modalityId?: string }) => {
       if (!params?.modalityId) return baseAppointments;
       return baseAppointments.filter((appointment) => String(appointment.modalityId) === params.modalityId);
-    });
+      });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows modality registration summaries for the selected day and opens a filtered modal", async () => {
@@ -311,5 +424,177 @@ describe("CalendarPage registration drilldown", () => {
       sort: "time-asc",
     }));
     expect(navigateMock).not.toHaveBeenCalledWith(expect.stringContaining("/print"));
+  });
+
+  it("does not enable availability for All Modalities and explains the inspector", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    expect(useV2AvailabilityMock.mock.calls.every(([params]) => params === undefined)).toBe(true);
+    expect(screen.getByText("Select a modality to view capacity availability.")).toBeTruthy();
+    expect(screen.getByTestId("modality-summary-modality:1")).toBeTruthy();
+  });
+
+  it("queries both categories for a selected modality with All Categories", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+
+    await waitFor(() => {
+      const categories = Array.from(new Set(getEnabledAvailabilityCalls().map((params) => params.caseCategory)));
+      expect(categories).toEqual(["oncology", "non_oncology"]);
+    });
+
+    expect(getEnabledAvailabilityCalls().find((params) => params.caseCategory === "oncology")).toEqual(enabledAvailabilityParams("oncology"));
+    expect(getEnabledAvailabilityCalls().find((params) => params.caseCategory === "non_oncology")).toEqual(enabledAvailabilityParams("non_oncology"));
+  });
+
+  it("queries only oncology for a selected modality with the Oncology category", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+
+    await waitFor(() => {
+      expect(getEnabledAvailabilityCalls().some((params) => params.caseCategory === "oncology")).toBe(true);
+      expect(getEnabledAvailabilityCalls().some((params) => params.caseCategory === "non_oncology")).toBe(false);
+    });
+  });
+
+  it("shows available capacity in the day cell and selected-date inspector", async () => {
+    setAvailability({ items: [makeAvailabilityDay({ date: "2026-05-20", bucketMode: "total_only" })] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+
+    const dayButton = await waitFor(() => {
+      const button = findCalendarDayButton("May 20, 2026");
+      expect(button).toBeTruthy();
+      return button;
+    });
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("4 of 20 remaining").length).toBeGreaterThan(0);
+    expect(dayButton!.getAttribute("aria-label")).toContain("Capacity availability: Available, 4 of 20 remaining");
+  });
+
+  it("shows Restricted for category exhaustion", async () => {
+    setAvailability({ items: [makeAvailabilityDay(
+      { date: "2026-05-20", rowDisplayStatus: undefined },
+      {
+        displayStatus: "blocked",
+        reasons: [{ code: "category_capacity_exhausted", severity: "error", message: "Category capacity exhausted" }],
+      }
+    )] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Restricted").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Needs Approval")).toBeNull();
+  });
+
+  it("shows Full for total modality exhaustion", async () => {
+    setAvailability({ items: [makeAvailabilityDay(
+      { date: "2026-05-20", rowDisplayStatus: undefined, remainingCapacity: 0, isFull: true },
+      {
+        displayStatus: "blocked",
+        remainingStandardCapacity: 0,
+        reasons: [{ code: "modality_daily_capacity_exhausted", severity: "error", message: "Modality capacity exhausted" }],
+      }
+    )] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Full").length).toBeGreaterThan(0);
+  });
+
+  it("shows Blocked for a blocked date", async () => {
+    setAvailability({ items: [makeAvailabilityDay(
+      { date: "2026-05-20", rowDisplayStatus: undefined },
+      {
+        displayStatus: "blocked",
+        reasons: [{ code: "weekday_appointments_disabled", severity: "error", message: "Appointments disabled" }],
+      }
+    )] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
+  });
+
+  it("keeps capacity visible when the date has zero visible registrations", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([]);
+    setAvailability({ items: [makeAvailabilityDay({ date: "2026-05-15", bucketMode: "total_only" })] });
+    renderPage();
+
+    expect(await screen.findByText("No registrations found for this day")).toBeTruthy();
+    selectCategory("oncology");
+    selectModality();
+
+    expect(await screen.findByText("4 of 20 remaining")).toBeTruthy();
+  });
+
+  it("does not include registration search or status filters in availability params", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getEnabledAvailabilityCalls().length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "Alpha" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "scheduled" } });
+
+    await waitFor(() => {
+      const latestByCategory = new Map(getEnabledAvailabilityCalls().map((params) => [params.caseCategory, params]));
+      expect(latestByCategory.get("oncology")).toEqual(enabledAvailabilityParams("oncology"));
+      expect(latestByCategory.get("non_oncology")).toEqual(enabledAvailabilityParams("non_oncology"));
+    });
+  });
+
+  it("shows the no-policy message without hiding registration actions", async () => {
+    setAvailability(
+      { items: [], meta: { noPublishedPolicy: true } },
+      { items: [], meta: { noPublishedPolicy: true } }
+    );
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+
+    expect(await screen.findByText("No published scheduling policy is active.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows an availability error without disabling registration actions", async () => {
+    availabilityIsError = true;
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+
+    expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Open day registrations" }));
+    expect(navigateMock).toHaveBeenCalledWith("/registrations?date=2026-05-02");
   });
 });

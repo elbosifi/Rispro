@@ -14,6 +14,9 @@ import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { printDayListFromRoute } from "@/lib/day-list-printing";
 import { Button, Card, Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
+import { useV2Availability } from "@/v2/appointments/api";
+import type { AvailabilityDayDto } from "@/v2/appointments/types";
+import { mapAvailabilityRow, type AvailabilityRowStatus, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/availability-row-mapper";
 
 interface CalendarDay {
   date: string;
@@ -35,6 +38,21 @@ interface ModalitySummary {
   oncology: number;
   nonOncology: number;
   appointments: AppointmentWithDetails[];
+}
+
+interface CalendarAvailabilityWindow {
+  days: number;
+  offset: number;
+}
+
+interface AvailabilityEntry {
+  raw: AvailabilityDayDto;
+  row: AvailabilityRowViewModel;
+}
+
+interface CalendarAvailability {
+  oncology: AvailabilityEntry | null;
+  nonOncology: AvailabilityEntry | null;
 }
 
 export default function CalendarPage() {
@@ -92,6 +110,55 @@ export default function CalendarPage() {
     queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
+
+  const selectedModalityId = modalityFilter ? Number(modalityFilter) : null;
+  const availabilityWindow = useMemo(() => buildCalendarAvailabilityWindow(displayDate), [displayDate]);
+  const availabilityQueryBase = useMemo(() => {
+    if (selectedModalityId == null || !Number.isFinite(selectedModalityId) || !availabilityWindow) return undefined;
+    return {
+      modalityId: selectedModalityId,
+      days: availabilityWindow.days,
+      offset: availabilityWindow.offset,
+      examTypeId: null,
+      capacityResolutionMode: "standard" as const,
+      useSpecialQuota: false,
+      specialReasonCode: null,
+      includeOverrideCandidates: false,
+    };
+  }, [availabilityWindow, selectedModalityId]);
+  const oncologyAvailabilityParams = categoryFilter === "non_oncology" || !availabilityQueryBase
+    ? undefined
+    : { ...availabilityQueryBase, caseCategory: "oncology" as const };
+  const nonOncologyAvailabilityParams = categoryFilter === "oncology" || !availabilityQueryBase
+    ? undefined
+    : { ...availabilityQueryBase, caseCategory: "non_oncology" as const };
+  const oncologyAvailabilityQuery = useV2Availability(oncologyAvailabilityParams);
+  const nonOncologyAvailabilityQuery = useV2Availability(nonOncologyAvailabilityParams);
+  const oncologyAvailabilityByDate = useMemo(
+    () => buildAvailabilityMap(oncologyAvailabilityQuery.data?.items ?? [], language),
+    [language, oncologyAvailabilityQuery.data?.items]
+  );
+  const nonOncologyAvailabilityByDate = useMemo(
+    () => buildAvailabilityMap(nonOncologyAvailabilityQuery.data?.items ?? [], language),
+    [language, nonOncologyAvailabilityQuery.data?.items]
+  );
+  const availabilityEnabled = availabilityQueryBase != null;
+  const availabilityLoading = availabilityEnabled && (
+    (oncologyAvailabilityParams != null && oncologyAvailabilityQuery.isLoading) ||
+    (nonOncologyAvailabilityParams != null && nonOncologyAvailabilityQuery.isLoading)
+  );
+  const availabilityError = availabilityEnabled && (
+    (oncologyAvailabilityParams != null && oncologyAvailabilityQuery.isError) ||
+    (nonOncologyAvailabilityParams != null && nonOncologyAvailabilityQuery.isError)
+  );
+  const availabilityNoPublishedPolicy = availabilityEnabled && (
+    oncologyAvailabilityQuery.data?.meta?.noPublishedPolicy === true ||
+    nonOncologyAvailabilityQuery.data?.meta?.noPublishedPolicy === true
+  );
+  const selectedModality = lookups?.modalities.find((modality) => modality.id === selectedModalityId);
+  const selectedModalityLabel = selectedModality
+    ? chooseLocalized(language, selectedModality.nameAr, selectedModality.nameEn)
+    : modalityFilter;
 
   // Group appointments by date
   const groupedByDate = useMemo(() => filteredAppointments.reduce((acc, apt) => {
@@ -340,11 +407,31 @@ export default function CalendarPage() {
             {isLoading ? (
               <div className="col-span-7 p-12 text-center text-muted-foreground">{t(language, "calendar.loading")}</div>
             ) : (
-              gridDays.map((day) => (
+              gridDays.map((day) => {
+                const dayAvailability = getCalendarAvailability(
+                  day.date,
+                  day.isCurrentMonth,
+                  categoryFilter,
+                  oncologyAvailabilityByDate,
+                  nonOncologyAvailabilityByDate,
+                  selectedModalityId,
+                  availabilityNoPublishedPolicy
+                );
+                const capacityAriaLabel = dayAvailability
+                  ? buildCapacityAriaLabel(language, categoryFilter, dayAvailability)
+                  : null;
+
+                return (
                 <button
                   key={day.date}
                   onClick={() => selectDay(day.date)}
-                  aria-label={`${formatSelectedDateDisplay(day.date, language)}, ${registrationCountLabel(language, day.count)}, ${t(language, "calendar.oncologyLabel")}: ${day.oncology}, ${t(language, "calendar.nonOncologyLabel")}: ${day.nonOncology}`}
+                  aria-label={[
+                    formatSelectedDateDisplay(day.date, language),
+                    registrationCountLabel(language, day.count),
+                    `${t(language, "calendar.oncologyLabel")}: ${day.oncology}`,
+                    `${t(language, "calendar.nonOncologyLabel")}: ${day.nonOncology}`,
+                    capacityAriaLabel,
+                  ].filter(Boolean).join(", ")}
                   className={`relative min-h-[76px] border-b border-e border-border p-1.5 text-right transition-all duration-200 hover:bg-muted/50 sm:min-h-[112px] sm:p-3 ${
                     !day.isCurrentMonth ? "bg-muted/30" : ""
                   } ${day.isSelected ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
@@ -375,20 +462,26 @@ export default function CalendarPage() {
                         <span aria-hidden="true"> · </span>
                         <span className="text-sky-700">{t(language, "calendar.nonOncologyShort")}: {day.nonOncology}</span>
                       </p>
-                      <div className="hidden space-y-1 sm:block">
-                        {day.summary.slice(0, 2).map((s, i) => (
-                          <div key={i} className="truncate text-right text-xs text-muted-foreground">
-                            {s.modality} ({s.count})
-                          </div>
-                        ))}
-                        {day.summary.length > 2 && (
-                          <div className="text-right text-xs text-muted-foreground">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
-                        )}
-                      </div>
+                      {!selectedModalityId ? (
+                        <div className="hidden space-y-1 sm:block">
+                          {day.summary.slice(0, 2).map((s, i) => (
+                            <div key={i} className="truncate text-right text-xs text-muted-foreground">
+                              {s.modality} ({s.count})
+                            </div>
+                          ))}
+                          {day.summary.length > 2 && (
+                            <div className="text-right text-xs text-muted-foreground">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   )}
+                  {selectedModalityId ? (
+                    <CalendarCapacityCell language={language} categoryFilter={categoryFilter} availability={dayAvailability} />
+                  ) : null}
                 </button>
-              ))
+                );
+              })
             )}
           </div>
         </Card>
@@ -411,6 +504,25 @@ export default function CalendarPage() {
               <p className="mt-1 text-sm text-muted-foreground">
                 {registrationCountLabel(language, selectedAppointments.length)}
               </p>
+              <CalendarCapacityInspector
+                language={language}
+                categoryFilter={categoryFilter}
+                selectedModalityId={selectedModalityId}
+                selectedModalityLabel={selectedModalityLabel}
+                selectedDate={effectiveSelectedDate}
+                availability={getCalendarAvailability(
+                  effectiveSelectedDate,
+                  isDateInDisplayedMonth(effectiveSelectedDate, displayDate),
+                  categoryFilter,
+                  oncologyAvailabilityByDate,
+                  nonOncologyAvailabilityByDate,
+                  selectedModalityId,
+                  availabilityNoPublishedPolicy
+                )}
+                isLoading={availabilityLoading}
+                isError={availabilityError}
+                noPublishedPolicy={availabilityNoPublishedPolicy}
+              />
               <div className="mt-4 flex flex-col gap-2">
                 <Button
                   size="sm"
@@ -559,6 +671,307 @@ export default function CalendarPage() {
       {selectedPatientId ? (
         <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
       ) : null}
+    </div>
+  );
+}
+
+function buildCalendarAvailabilityWindow(displayDate: Date): CalendarAvailabilityWindow | null {
+  const backendTodayIso = new Date().toISOString().slice(0, 10);
+  const [todayYear, todayMonth, todayDay] = backendTodayIso.split("-").map(Number);
+  const backendTodayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
+  const visibleMonthStartUtc = Date.UTC(displayDate.getFullYear(), displayDate.getMonth(), 1);
+  const visibleMonthEndUtc = Date.UTC(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
+
+  if (visibleMonthEndUtc < backendTodayUtc) return null;
+
+  const requestStartUtc = Math.max(visibleMonthStartUtc, backendTodayUtc);
+  const offset = Math.floor((requestStartUtc - backendTodayUtc) / 86_400_000);
+  if (offset > 365) return null;
+
+  const days = Math.floor((visibleMonthEndUtc - requestStartUtc) / 86_400_000) + 1;
+  return { days, offset };
+}
+
+function buildAvailabilityMap(items: AvailabilityDayDto[], language: "ar" | "en"): Map<string, AvailabilityEntry> {
+  return new Map(items.map((item) => [item.date, { raw: item, row: mapAvailabilityRow(item, language) }]));
+}
+
+function isDateInDisplayedMonth(date: string, displayDate: Date): boolean {
+  const [year, month] = date.split("-").map(Number);
+  return year === displayDate.getFullYear() && month === displayDate.getMonth() + 1;
+}
+
+function getCalendarAvailability(
+  date: string,
+  isCurrentMonth: boolean,
+  categoryFilter: string,
+  oncologyAvailabilityByDate: Map<string, AvailabilityEntry>,
+  nonOncologyAvailabilityByDate: Map<string, AvailabilityEntry>,
+  selectedModalityId: number | null,
+  noPublishedPolicy: boolean
+): CalendarAvailability | null {
+  if (selectedModalityId == null || !isCurrentMonth || noPublishedPolicy) return null;
+
+  const availability: CalendarAvailability = {
+    oncology: categoryFilter === "non_oncology" ? null : oncologyAvailabilityByDate.get(date) ?? null,
+    nonOncology: categoryFilter === "oncology" ? null : nonOncologyAvailabilityByDate.get(date) ?? null,
+  };
+  return availability.oncology || availability.nonOncology ? availability : null;
+}
+
+const CAPACITY_STATUS_KEYS: Record<AvailabilityRowStatus, "calendar.capacityAvailable" | "calendar.capacityRestricted" | "calendar.capacityFull" | "calendar.capacityBlocked"> = {
+  available: "calendar.capacityAvailable",
+  restricted: "calendar.capacityRestricted",
+  full: "calendar.capacityFull",
+  blocked: "calendar.capacityBlocked",
+};
+
+function capacityStatusLabel(language: "ar" | "en", status: AvailabilityRowStatus): string {
+  return t(language, CAPACITY_STATUS_KEYS[status]);
+}
+
+function capacityRemainingLabel(
+  language: "ar" | "en",
+  row: AvailabilityRowViewModel,
+  includeCapacity: boolean
+): string | null {
+  if (row.remainingCapacity == null) return null;
+  if (includeCapacity && row.dailyCapacity != null) {
+    return t(language, "calendar.capacityRemainingOf", { remaining: row.remainingCapacity, capacity: row.dailyCapacity });
+  }
+  return t(language, "calendar.capacityRemaining", { count: row.remainingCapacity });
+}
+
+function capacityCellDetail(
+  language: "ar" | "en",
+  row: AvailabilityRowViewModel,
+  includeCapacity: boolean
+): string | null {
+  if (row.status !== "available") return null;
+  return capacityRemainingLabel(language, row, includeCapacity);
+}
+
+function areAvailabilityEntriesEffectivelyIdentical(a: AvailabilityEntry, b: AvailabilityEntry): boolean {
+  return a.raw.bucketMode === "total_only" &&
+    b.raw.bucketMode === "total_only" &&
+    a.row.status === b.row.status &&
+    a.row.remainingCapacity === b.row.remainingCapacity &&
+    a.row.dailyCapacity === b.row.dailyCapacity &&
+    a.raw.bookedTotal === b.raw.bookedTotal &&
+    a.raw.modalityTotalCapacity === b.raw.modalityTotalCapacity;
+}
+
+function buildCapacityAriaLabel(
+  language: "ar" | "en",
+  categoryFilter: string,
+  availability: CalendarAvailability
+): string | null {
+  const capacityLabel = t(language, "calendar.capacityAvailability");
+  if (categoryFilter === "oncology" && availability.oncology) {
+    return `${capacityLabel}: ${capacityAriaText(language, availability.oncology, true)}`;
+  }
+  if (categoryFilter === "non_oncology" && availability.nonOncology) {
+    return `${capacityLabel}: ${capacityAriaText(language, availability.nonOncology, true)}`;
+  }
+  if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
+    return `${capacityLabel}: ${capacityAriaText(language, availability.oncology, true)}`;
+  }
+
+  const parts = [
+    availability.oncology ? `${t(language, "calendar.oncologyLabel")}: ${capacityAriaText(language, availability.oncology, false)}` : null,
+    availability.nonOncology ? `${t(language, "calendar.nonOncologyLabel")}: ${capacityAriaText(language, availability.nonOncology, false)}` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(". ") : null;
+}
+
+function capacityAriaText(language: "ar" | "en", entry: AvailabilityEntry, includeCapacity: boolean): string {
+  const detail = capacityCellDetail(language, entry.row, includeCapacity);
+  return [capacityStatusLabel(language, entry.row.status), detail].filter(Boolean).join(", ");
+}
+
+function CalendarCapacityCell({
+  language,
+  categoryFilter,
+  availability,
+}: {
+  language: "ar" | "en";
+  categoryFilter: string;
+  availability: CalendarAvailability | null;
+}) {
+  if (!availability) return null;
+
+  if (categoryFilter === "oncology" && availability.oncology) {
+    return (
+      <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
+        <CapacityStatusLine language={language} entry={availability.oncology} includeCapacity />
+      </div>
+    );
+  }
+  if (categoryFilter === "non_oncology" && availability.nonOncology) {
+    return (
+      <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
+        <CapacityStatusLine language={language} entry={availability.nonOncology} includeCapacity />
+      </div>
+    );
+  }
+  if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
+    return (
+      <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
+        <CapacityStatusLine language={language} entry={availability.oncology} includeCapacity />
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden min-w-0 space-y-0.5 text-right sm:block" data-testid="calendar-capacity-cell">
+      {availability.oncology ? (
+        <CapacityStatusLine language={language} label={t(language, "calendar.oncologyShort")} entry={availability.oncology} />
+      ) : null}
+      {availability.nonOncology ? (
+        <CapacityStatusLine language={language} label={t(language, "calendar.nonOncologyShort")} entry={availability.nonOncology} />
+      ) : null}
+    </div>
+  );
+}
+
+function CapacityStatusLine({
+  language,
+  label,
+  entry,
+  includeCapacity = false,
+}: {
+  language: "ar" | "en";
+  label?: string;
+  entry: AvailabilityEntry;
+  includeCapacity?: boolean;
+}) {
+  const detail = capacityCellDetail(language, entry.row, includeCapacity);
+  return (
+    <div className="flex min-w-0 items-center justify-end gap-1 text-[10px] leading-tight" aria-label={capacityAriaText(language, entry, includeCapacity)}>
+      {label ? <span className="shrink-0 text-muted-foreground">{label}:</span> : null}
+      <Badge variant={entry.row.status} size="sm">{capacityStatusLabel(language, entry.row.status)}</Badge>
+      {detail ? <span className="truncate text-muted-foreground">{detail}</span> : null}
+    </div>
+  );
+}
+
+function CalendarCapacityInspector({
+  language,
+  categoryFilter,
+  selectedModalityId,
+  selectedModalityLabel,
+  selectedDate,
+  availability,
+  isLoading,
+  isError,
+  noPublishedPolicy,
+}: {
+  language: "ar" | "en";
+  categoryFilter: string;
+  selectedModalityId: number | null;
+  selectedModalityLabel: string;
+  selectedDate: string;
+  availability: CalendarAvailability | null;
+  isLoading: boolean;
+  isError: boolean;
+  noPublishedPolicy: boolean;
+}) {
+  return (
+    <section className="mt-4 border-t border-border pt-3" data-testid="calendar-capacity-availability">
+      <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+        <p className="text-xs font-semibold">{t(language, "calendar.capacityAvailability")}</p>
+        {selectedModalityId != null ? <span className="text-xs text-muted-foreground">· {selectedModalityLabel}</span> : null}
+      </div>
+      {selectedModalityId == null ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.selectModalityForCapacity")}</p>
+      ) : isLoading ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.capacityChecking")}</p>
+      ) : isError ? (
+        <p className="mt-1 text-xs text-amber-700" role="status">{t(language, "calendar.capacityError")}</p>
+      ) : noPublishedPolicy ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.capacityNoPolicy")}</p>
+      ) : !availability ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.capacitySupportedDates")}</p>
+      ) : (
+        <CalendarCapacityDetails language={language} categoryFilter={categoryFilter} availability={availability} selectedDate={selectedDate} />
+      )}
+      {selectedModalityId != null ? (
+        <p className="mt-2 text-[11px] leading-snug text-muted-foreground">{t(language, "calendar.capacityBookingDisclaimer")}</p>
+      ) : null}
+    </section>
+  );
+}
+
+function CalendarCapacityDetails({
+  language,
+  categoryFilter,
+  availability,
+  selectedDate,
+}: {
+  language: "ar" | "en";
+  categoryFilter: string;
+  availability: CalendarAvailability;
+  selectedDate: string;
+}) {
+  if (categoryFilter === "oncology" && availability.oncology) {
+    return (
+      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} includeCapacity />
+      </div>
+    );
+  }
+  if (categoryFilter === "non_oncology" && availability.nonOncology) {
+    return (
+      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} includeCapacity />
+      </div>
+    );
+  }
+  if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
+    return (
+      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <CapacityDetailRow language={language} entry={availability.oncology} includeCapacity />
+      </div>
+    );
+  }
+
+  const totalEntry = availability.oncology ?? availability.nonOncology;
+  return (
+    <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+      {totalEntry ? (
+        <p className="text-xs text-muted-foreground">
+          {t(language, "calendar.capacityBookedOf", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity })}
+        </p>
+      ) : null}
+      {availability.oncology ? (
+        <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} />
+      ) : null}
+      {availability.nonOncology ? (
+        <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} />
+      ) : null}
+    </div>
+  );
+}
+
+function CapacityDetailRow({
+  language,
+  label,
+  entry,
+  includeCapacity = false,
+}: {
+  language: "ar" | "en";
+  label?: string;
+  entry: AvailabilityEntry;
+  includeCapacity?: boolean;
+}) {
+  const detail = capacityRemainingLabel(language, entry.row, includeCapacity);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+      {label ? <span className="text-muted-foreground">{label}</span> : <span />}
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <Badge variant={entry.row.status} size="sm">{capacityStatusLabel(language, entry.row.status)}</Badge>
+        {detail ? <span className="tabular-nums text-muted-foreground">{detail}</span> : null}
+      </div>
     </div>
   );
 }
