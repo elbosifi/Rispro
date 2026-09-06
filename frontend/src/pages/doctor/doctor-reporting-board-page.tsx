@@ -2057,6 +2057,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const doctorStats = statsQuery.data?.byDoctor ?? [];
   const canEditSettings = isManager(me);
   const canManage = isManager(me);
+  const canAssignProtocols = Boolean(me.canAssignProtocols);
   const assignmentFilterValue = filters.assignedDoctorId
     ? `doctor:${filters.assignedDoctorId}`
     : filters.assignmentStatus === "unassigned"
@@ -2088,6 +2089,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const activeAssignedDoctorId = filters.assignedDoctorId ?? effectiveFilters.assignedDoctorId ?? null;
   const showAssignedDoctorColumn = !activeAssignedDoctorId;
   const boardDefaults = defaultFilters(settingsQuery.data);
+
+  const refreshReportingBoardAfterProtocolUpdate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+      queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+    ]);
+  };
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -2618,7 +2626,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         /></td>
                         <td className="px-3 py-1.5">
                           <div className="flex min-w-44 flex-col gap-1">
-                            {row.caseType === "appointment" ? <button type="button" onClick={() => setProtocolingAppointmentId(row.appointmentId)} className="w-fit cursor-pointer rounded-sm font-semibold text-foreground hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">{patientName(row)}</button> : <span className="font-semibold text-foreground">{patientName(row)}</span>}
+                            {row.caseType === "appointment" && canAssignProtocols ? <button type="button" onClick={() => setProtocolingAppointmentId(row.appointmentId)} className="w-fit cursor-pointer rounded-sm font-semibold text-foreground hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">{patientName(row)}</button> : <span className="font-semibold text-foreground">{patientName(row)}</span>}
                             <PriorityBadge row={row} />
                           </div>
                         </td>
@@ -2858,7 +2866,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       />
       {protocolingAppointmentId !== null && <ProtocolingAppointmentWorkspace
         appointmentId={protocolingAppointmentId}
-        canAssign={Boolean(me.canAssignProtocols)}
+        canAssign={canAssignProtocols}
+        onUpdated={refreshReportingBoardAfterProtocolUpdate}
         onClose={() => setProtocolingAppointmentId(null)}
       />}
       {manualFinalTarget && (

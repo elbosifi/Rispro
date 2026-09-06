@@ -116,6 +116,8 @@ const me = {
 
 describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
+    mockFetchAppointments.mockReset();
+    mockFetchAppointmentDetail.mockReset();
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
     mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
@@ -145,18 +147,57 @@ describe("Doctor protocoling request documents", () => {
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
   });
 
-  it("renders the existing Protocoling workspace for an embedded appointment without navigating", async () => {
+  it("renders the existing Protocoling workspace as an embedded single case without navigating or polling the worklist", async () => {
     const onClose = vi.fn();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><ProtocolingAppointmentWorkspace appointmentId={42} canAssign onClose={onClose} /></QueryClientProvider>);
 
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
     expect(mockFetchAppointmentDetail).toHaveBeenCalledWith(42);
+    expect(mockFetchAppointments).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Patient history" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open appointment and patient details" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Assign and next" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Previous appointment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next appointment" })).toBeNull();
+    expect(screen.queryByText("1 of 1")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Assign and next" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("shows embedded loading immediately and exposes a retryable detail error", async () => {
+    mockFetchAppointmentDetail.mockRejectedValueOnce(new Error("Temporary appointment detail failure")).mockResolvedValue({ appointment, assignmentDetail: null });
+    const onClose = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><ProtocolingAppointmentWorkspace appointmentId={42} canAssign onClose={onClose} /></QueryClientProvider>);
+
+    expect(screen.getByTestId("protocoling-appointment-workspace-shell")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Loading appointment protocol details");
+    expect(mockFetchAppointments).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("Temporary appointment detail failure");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
+    expect(mockFetchAppointmentDetail).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("notifies the parent after a successful embedded report edit", async () => {
+    const onUpdated = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><ProtocolingAppointmentWorkspace appointmentId={42} canAssign onClose={vi.fn()} onUpdated={onUpdated} /></QueryClientProvider>);
+
+    await screen.findByTestId("protocoling-request-documents");
+    await userEvent.click(screen.getByRole("button", { name: "Edit report requirement" }));
+    await userEvent.click(screen.getByLabelText("No"));
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(mockUpdateReportRequirement).toHaveBeenCalledWith(42, false));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledOnce());
   });
 
   it("requires structured recall selections and sends their default metadata", async () => {

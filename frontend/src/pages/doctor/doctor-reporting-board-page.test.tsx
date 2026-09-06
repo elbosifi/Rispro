@@ -47,7 +47,7 @@ const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchOhifViewerAvailabilityMock = vi.fn();
 const launchReportingBoardCaseInOhifMock = vi.fn();
 const fetchOhifRetrievalJobMock = vi.fn();
-const protocolingWorkspaceMock = vi.fn(({ appointmentId, onClose }: { appointmentId: number; onClose: () => void }) => <section data-testid="protocoling-appointment-workspace" data-appointment-id={appointmentId}><button type="button" onClick={onClose}>Close protocoling workspace</button></section>);
+const protocolingWorkspaceMock = vi.fn(({ appointmentId, onClose, onUpdated }: { appointmentId: number; onClose: () => void; onUpdated?: () => void | Promise<void> }) => <section data-testid="protocoling-appointment-workspace" data-appointment-id={appointmentId}><button type="button" onClick={onClose}>Close protocoling workspace</button><button type="button" onClick={() => void onUpdated?.()}>Save embedded protocol changes</button></section>);
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -93,7 +93,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/pages/doctor/doctor-protocols-page", () => ({
-  ProtocolingAppointmentWorkspace: (props: { appointmentId: number; onClose: () => void }) => protocolingWorkspaceMock(props),
+  ProtocolingAppointmentWorkspace: (props: { appointmentId: number; onClose: () => void; onUpdated?: () => void | Promise<void> }) => protocolingWorkspaceMock(props),
 }));
 
 const managerMe: DoctorMe = {
@@ -123,6 +123,12 @@ const ordinaryDoctorMe: DoctorMe = {
   profile: { ...managerMe.profile!, canSupervise: false },
   canSupervise: false,
   moduleCapabilities: ["doctor"],
+};
+
+const noProtocolPermissionDoctorMe: DoctorMe = {
+  ...ordinaryDoctorMe,
+  profile: { ...ordinaryDoctorMe.profile!, canAssignProtocols: false },
+  canAssignProtocols: false,
 };
 
 const caseRow: ReportingBoardCaseRow = {
@@ -438,6 +444,29 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
+  it("refreshes Reporting Board cases and stats after an embedded Protocoling update", async () => {
+    renderPage();
+    await screen.findByRole("button", { name: "Alpha Patient" });
+    const casesCallsBeforeUpdate = fetchReportingBoardCasesMock.mock.calls.length;
+    const statsCallsBeforeUpdate = fetchReportingBoardStatsMock.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Alpha Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save embedded protocol changes" }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(casesCallsBeforeUpdate));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(statsCallsBeforeUpdate));
+  });
+
+  it("does not make the patient name an opening control without protocol-assignment permission", async () => {
+    renderPage("/doctor/reporting-board", noProtocolPermissionDoctorMe);
+    const patientNameText = await screen.findByText("Alpha Patient");
+    const row = patientNameText.closest("tr")!;
+
+    expect(within(row).queryByRole("button", { name: "Alpha Patient" })).toBeNull();
+    fireEvent.click(patientNameText);
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
+  });
+
   it("opens the Protocoling workspace with keyboard activation of the patient name", async () => {
     renderPage();
     const patientButton = await screen.findByRole("button", { name: "Alpha Patient" });
@@ -451,6 +480,9 @@ describe("DoctorReportingBoardPage", () => {
   it("keeps blank row clicks and case selection independent from Protocoling", async () => {
     renderPage();
     const row = (await screen.findByRole("button", { name: "Alpha Patient" })).closest("tr")!;
+
+    fireEvent.click(row);
+    expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();
 
     fireEvent.click(within(row).getByText("STAT"));
     expect(screen.queryByTestId("protocoling-appointment-workspace")).toBeNull();

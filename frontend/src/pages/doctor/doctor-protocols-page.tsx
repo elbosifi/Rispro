@@ -1092,11 +1092,36 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
   );
 }
 
-export function ProtocolingAppointmentWorkspace({ appointmentId, canAssign, onClose }: { appointmentId: number; canAssign: boolean; onClose: () => void }) {
-  return <ProtocolingWorklist canAssign={canAssign} embeddedAppointmentId={appointmentId} onEmbeddedClose={onClose} />;
+export function ProtocolingAppointmentWorkspace({ appointmentId, canAssign, onClose, onUpdated }: { appointmentId: number; canAssign: boolean; onClose: () => void; onUpdated?: () => void | Promise<void> }) {
+  if (!canAssign) return null;
+  return <ProtocolingWorklist canAssign={canAssign} embeddedAppointmentId={appointmentId} onEmbeddedClose={onClose} onEmbeddedUpdated={onUpdated} />;
 }
 
-function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void }) {
+function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }: { loading: boolean; error: unknown; onRetry: () => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/45 p-2 sm:p-4" onClick={() => { if (!loading) onClose(); }} role="presentation" data-testid="protocoling-appointment-workspace-shell">
+      <section className="relative flex max-h-[94vh] w-[96vw] max-w-2xl min-w-0 flex-col overflow-hidden rounded-lg border bg-background shadow-2xl" role="dialog" aria-modal="true" aria-label="Protocoling workspace" onClick={(event) => event.stopPropagation()}>
+        <header className="flex shrink-0 items-center justify-between border-b px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
+          <h2 className="text-lg font-bold text-foreground">Protocoling workspace</h2>
+          <button type="button" onClick={onClose} className="rounded border p-1.5 font-semibold" aria-label="Close workspace" title="Close workspace"><X size={16} aria-hidden="true" /></button>
+        </header>
+        {loading ? (
+          <div className="p-6 text-sm" style={{ color: "var(--text-muted)" }} role="status" aria-live="polite">Loading appointment protocol details...</div>
+        ) : (
+          <div className="space-y-4 p-6">
+            <p className="text-sm text-red-700" role="alert">{error instanceof Error ? error.message : "Unable to load appointment protocol details."}</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={onRetry} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Retry</button>
+              <button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</button>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose, onEmbeddedUpdated }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void; onEmbeddedUpdated?: () => void | Promise<void> }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -1109,6 +1134,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
   const [waitingFirst, setWaitingFirst] = useState(false);
   const [search, setSearch] = useState("");
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const embedded = embeddedAppointmentId !== undefined;
   const selectedAppointmentId = embeddedAppointmentId ?? (() => {
     const appointmentId = Number(new URLSearchParams(location.search).get("appointmentId"));
     return Number.isInteger(appointmentId) && appointmentId > 0 ? appointmentId : null;
@@ -1140,8 +1166,8 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
   const appointmentsQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", filters],
     queryFn: () => fetchDoctorProtocolingAppointments(filters),
-    enabled: canAssign,
-    refetchInterval: canAssign ? PROTOCOLING_WORKLIST_REFRESH_MS : false,
+    enabled: canAssign && !embedded,
+    refetchInterval: canAssign && !embedded ? PROTOCOLING_WORKLIST_REFRESH_MS : false,
     refetchIntervalInBackground: false,
   });
   const protocolPolicyQuery = useQuery({
@@ -1153,7 +1179,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
   const appointmentDetailQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", selectedAppointmentId],
     queryFn: () => fetchDoctorProtocolingAppointmentDetail(selectedAppointmentId!),
-    enabled: selectedAppointmentId !== null,
+    enabled: canAssign && selectedAppointmentId !== null,
   });
   const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: canAssign });
   const scannersQuery = useQuery({ queryKey: ["doctor", "protocol-library", "scanners"], queryFn: fetchProtocolLibraryScanners, enabled: canAssign });
@@ -1205,6 +1231,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
     const currentIndex = appointments.findIndex((item) => item.appointmentId === currentAppointmentId);
     const next = assignNext && currentIndex >= 0 ? appointments[currentIndex + 1] : null;
     await invalidate();
+    await onEmbeddedUpdated?.();
     if (assignNext && next) {
       updateSelectedAppointment(next.appointmentId);
     } else if (assignNext) {
@@ -1218,6 +1245,15 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
   const handleAssignmentError = (error: unknown) => {
     setAssignmentError(error instanceof Error ? error.message : "Unable to save protocol assignment.");
   };
+
+  if (embedded && !selectedDetail) {
+    return <EmbeddedProtocolingWorkspaceState
+      loading={appointmentDetailQuery.isLoading || appointmentDetailQuery.isFetching}
+      error={appointmentDetailQuery.error}
+      onRetry={() => void appointmentDetailQuery.refetch()}
+      onClose={() => onEmbeddedClose?.()}
+    />;
+  }
 
   return (
     <section className={embeddedAppointmentId !== undefined ? "contents" : "space-y-4"}>
@@ -1301,7 +1337,9 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           saving={assignmentBusy}
           worklistPosition={appointments.findIndex((item) => item.appointmentId === selectedAppointment.appointmentId) + 1}
           worklistTotal={appointments.length}
+          embedded={embedded}
           onNavigate={(direction) => navigateWorklist(direction)}
+          onUpdated={onEmbeddedUpdated}
           onExamTypeUpdated={(examTypeId, examTypeName) => {
             queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, examTypeId, examTypeName } : item));
             queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], (current) => current ? { ...current, appointment: { ...current.appointment, examTypeId, examTypeName } } : current);
@@ -1346,7 +1384,9 @@ function ProtocolAssignmentModal({
   saving,
   worklistPosition,
   worklistTotal,
+  embedded,
   onNavigate,
+  onUpdated,
   onExamTypeUpdated,
   onRequiresReportUpdated,
   onSave,
@@ -1363,7 +1403,9 @@ function ProtocolAssignmentModal({
   saving: boolean;
   worklistPosition: number;
   worklistTotal: number;
+  embedded: boolean;
   onNavigate: (direction: -1 | 1) => void;
+  onUpdated?: () => void | Promise<void>;
   onExamTypeUpdated: (examTypeId: number, examTypeName: string) => void;
   onRequiresReportUpdated: (requiresReport: boolean) => void;
   onSave: (payload: ProtocolAssignmentPayload, assignNext: boolean) => void;
@@ -1409,8 +1451,8 @@ function ProtocolAssignmentModal({
   const title = existing ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols are available. Enter a free-text protocol.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
-  const recallMutation = useMutation({ mutationFn: (payload: Parameters<typeof createComplementaryRecallRequest>[1]) => createComplementaryRecallRequest(appointment.appointmentId, payload), onSuccess: async () => { setRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); pushToast({ type: "success", title: "Additional imaging requested" }); } });
-  const withdrawRecallMutation = useMutation({ mutationFn: () => withdrawComplementaryRecallRequest(appointment.activeComplementaryRecall!.id), onSuccess: async () => { setWithdrawRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); pushToast({ type: "success", title: "Additional imaging withdrawn" }); } });
+  const recallMutation = useMutation({ mutationFn: (payload: Parameters<typeof createComplementaryRecallRequest>[1]) => createComplementaryRecallRequest(appointment.appointmentId, payload), onSuccess: async () => { setRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); await onUpdated?.(); pushToast({ type: "success", title: "Additional imaging requested" }); } });
+  const withdrawRecallMutation = useMutation({ mutationFn: () => withdrawComplementaryRecallRequest(appointment.activeComplementaryRecall!.id), onSuccess: async () => { setWithdrawRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); await onUpdated?.(); pushToast({ type: "success", title: "Additional imaging withdrawn" }); } });
   const protocolOptionLabel = (protocol: ProtocolLibraryProtocol) => `${protocol.name} · ${protocol.modality} · v${protocol.activeVersionNumber}`;
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
@@ -1447,6 +1489,7 @@ function ProtocolAssignmentModal({
         queryClient.invalidateQueries({ queryKey: ["queue"] }),
         queryClient.invalidateQueries({ queryKey: ["calendar"] }),
       ]);
+      await onUpdated?.();
       pushToast({ type: "success", title: "Examination type updated.", message: "The appointment date and time were kept unchanged." });
     },
   });
@@ -1467,6 +1510,7 @@ function ProtocolAssignmentModal({
         queryClient.invalidateQueries({ queryKey: ["queue"] }),
         queryClient.invalidateQueries({ queryKey: ["calendar"] }),
       ]);
+      await onUpdated?.();
       pushToast({ type: "success", title: "Report requirement updated." });
     },
   });
@@ -1521,6 +1565,7 @@ function ProtocolAssignmentModal({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && actionMenuOpen) { event.preventDefault(); setActionMenuOpen(false); return; }
       if (event.key === "Escape" && !saving) requestClose();
+      if (embedded) return;
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName) && !(event.target as HTMLElement).isContentEditable) {
         if (event.key === "ArrowLeft" && worklistPosition > 1) { event.preventDefault(); requestNavigate(-1); }
         if (event.key === "ArrowRight" && worklistPosition > 0 && worklistPosition < worklistTotal) { event.preventDefault(); requestNavigate(1); }
@@ -1528,7 +1573,7 @@ function ProtocolAssignmentModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionMenuOpen, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+  }, [actionMenuOpen, embedded, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
 
   useEffect(() => {
     if (!actionMenuOpen) return;
@@ -1609,11 +1654,11 @@ function ProtocolAssignmentModal({
               </div> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs md:col-span-2 lg:col-span-1 lg:justify-end">
-              <div className="flex items-center gap-1 rounded-md border px-1 py-0.5" style={{ borderColor: "var(--border)" }}>
+              {!embedded ? <div className="flex items-center gap-1 rounded-md border px-1 py-0.5" style={{ borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => requestNavigate(-1)} disabled={saving || worklistPosition <= 1} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous appointment" title="Previous appointment"><ChevronLeft size={15} aria-hidden="true" /></button>
                 {worklistPosition > 0 ? <span className="whitespace-nowrap px-1 text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
                 <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next appointment" title="Next appointment"><ChevronRight size={15} aria-hidden="true" /></button>
-              </div>
+              </div> : null}
               <button type="button" onClick={() => setHistoryOpen((current) => { const next = !current; if (next) { setSelectedHistoryModalities([]); setHistoryLimit(5); } return next; })} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
               <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
@@ -1708,7 +1753,7 @@ function ProtocolAssignmentModal({
                       </div>, document.body) : null}
                     </div> : null}
                    <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{saving ? "Saving..." : "Save"}</button>
-                   <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button>
+                   {!embedded ? <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button> : null}
                  </div>
                </aside>) : null}
              </div>
