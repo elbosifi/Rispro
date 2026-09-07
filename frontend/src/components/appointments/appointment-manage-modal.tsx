@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Pause, Printer, Tags, Upload, UserRound, X } from "lucide-react";
 import {
@@ -171,17 +172,22 @@ function AppointmentHeaderBadgeCluster({ appointment, language, compact = false 
     {additionalImaging ? <Badge size={compact ? "sm" : "default"} variant={additionalImaging.variant} className="whitespace-nowrap !border-violet-200 !bg-violet-50 !text-violet-700">{additionalImaging.label}</Badge> : null}
     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact /> : null}
     </div>
-    {appointment.reportingHold ? <Dialog open={holdDetailsOpen} onClose={() => setHoldDetailsOpen(false)}>
-      <DialogContent maxWidth="480px" dir={language === "ar" ? "rtl" : "ltr"}>
-        <DialogHeader><DialogTitle>{chooseLocalized(language, "تعليق التقارير", "Reporting hold")}</DialogTitle><DialogDescription>{chooseLocalized(language, "هذه الحالة الإدارية منفصلة عن حالة سير العمل وحالة التقرير.", "This administrative reporting state is separate from workflow and report status.")}</DialogDescription></DialogHeader>
-        <dl className="grid gap-3 text-sm">
-          <div><dt className="font-semibold">{chooseLocalized(language, "السبب", "Reason")}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{appointment.reportingHold.reason}</dd></div>
-          <div><dt className="font-semibold">{chooseLocalized(language, "أُوقف بواسطة", "Placed by")}</dt><dd className="mt-1">{appointment.reportingHold.createdByName || chooseLocalized(language, "مستخدم غير معروف", "Unknown user")}</dd></div>
-          <div><dt className="font-semibold">{chooseLocalized(language, "تاريخ التعليق", "Placed at")}</dt><dd dir="ltr" className="mt-1">{formatDateTimeLy(appointment.reportingHold.createdAt)}</dd></div>
-        </dl>
-        <DialogFooter><Button variant="secondary" onClick={() => setHoldDetailsOpen(false)}>{chooseLocalized(language, "إغلاق", "Close")}</Button></DialogFooter>
-      </DialogContent>
-    </Dialog> : null}
+    {appointment.reportingHold && holdDetailsOpen ? createPortal(
+      <div data-testid="reporting-hold-dialog-layer" style={{ position: "relative", zIndex: 100 }}>
+        <Dialog open onClose={() => setHoldDetailsOpen(false)}>
+          <DialogContent maxWidth="480px" dir={language === "ar" ? "rtl" : "ltr"}>
+            <DialogHeader><DialogTitle>{chooseLocalized(language, "تعليق التقارير", "Reporting hold")}</DialogTitle><DialogDescription>{chooseLocalized(language, "هذه الحالة الإدارية منفصلة عن حالة سير العمل وحالة التقرير.", "This administrative reporting state is separate from workflow and report status.")}</DialogDescription></DialogHeader>
+            <dl className="grid gap-3 text-sm">
+              <div><dt className="font-semibold">{chooseLocalized(language, "السبب", "Reason")}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{appointment.reportingHold.reason}</dd></div>
+              <div><dt className="font-semibold">{chooseLocalized(language, "أُوقف بواسطة", "Placed by")}</dt><dd className="mt-1">{appointment.reportingHold.createdByName || chooseLocalized(language, "مستخدم غير معروف", "Unknown user")}</dd></div>
+              <div><dt className="font-semibold">{chooseLocalized(language, "تاريخ التعليق", "Placed at")}</dt><dd dir="ltr" className="mt-1">{formatDateTimeLy(appointment.reportingHold.createdAt)}</dd></div>
+            </dl>
+            <DialogFooter><Button variant="secondary" onClick={() => setHoldDetailsOpen(false)}>{chooseLocalized(language, "إغلاق", "Close")}</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>,
+      document.body,
+    ) : null}
   </>;
 }
 

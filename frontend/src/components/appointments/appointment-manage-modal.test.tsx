@@ -328,6 +328,9 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("heading", { name: "Reporting hold" })).toBeTruthy();
     expect(screen.getByText("Needs administrative review")).toBeTruthy();
     expect(screen.getByText("Manager One")).toBeTruthy();
+    const dialogLayer = screen.getByTestId("reporting-hold-dialog-layer");
+    expect(dialogLayer.parentElement).toBe(document.body);
+    expect(dialogLayer.style.zIndex).toBe("100");
 
     cleanup();
     mocks.getAppointmentById.mockResolvedValueOnce(appointment);
