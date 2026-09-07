@@ -35,7 +35,7 @@ export type BookingStatus =
   | "cancelled"
   | "voided";
 export type PatientIdentityRisk = "none" | "ambiguous";
-export type PatientIdentityVerificationMethod = "primary_identifier" | "exact_dob" | "phone_suffix";
+export type PatientIdentityVerificationMethod = "primary_identifier";
 
 export interface AppointmentPatientSelection {
   id: number;
@@ -47,12 +47,14 @@ export interface AppointmentPatientSelection {
   estimatedDateOfBirth: string | null;
   demographicsEstimated: boolean;
   primaryIdentifierType: string | null;
+  primaryIdentifierTypeLabelAr: string | null;
+  primaryIdentifierTypeLabelEn: string | null;
   maskedPrimaryIdentifier: string | null;
   maskedPhone1: string | null;
   identityRisk: PatientIdentityRisk;
   similarPatientCount: number;
   availableVerificationMethods: PatientIdentityVerificationMethod[];
-  ambiguityRuleVersion: "name_prefix_configurable_v2";
+  ambiguityRuleVersion: "name_prefix_configurable_primary_identifier_v3";
 }
 
 /**

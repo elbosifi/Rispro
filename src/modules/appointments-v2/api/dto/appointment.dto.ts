@@ -32,9 +32,9 @@ export interface CreateAppointmentDto {
   patientIdentityVerificationAssertion?: {
     patientId: number;
     verifierUserId: number;
-    verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
+    verificationMethod: "primary_identifier";
     verifiedAt: string;
-    ambiguityRuleVersion: "name_prefix_configurable_v2";
+    ambiguityRuleVersion: "name_prefix_configurable_primary_identifier_v3";
   } | null;
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;

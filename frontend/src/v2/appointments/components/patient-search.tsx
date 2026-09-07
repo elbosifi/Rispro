@@ -84,6 +84,21 @@ function getPrimaryIdentifier(patient: Patient, language: "ar" | "en"): { label:
   return { label: t(language, "appointments.create.primaryId"), value: null };
 }
 
+const KNOWN_PRIMARY_IDENTIFIER_TYPE_LABELS: Record<string, { ar: string; en: string }> = {
+  national_id: { ar: "الرقم الوطني", en: "National ID" },
+  passport: { ar: "جواز السفر", en: "Passport" },
+  other: { ar: "معرّف آخر", en: "Other identifier" },
+};
+
+function getPrimaryIdentifierTypeLabel(patient: Patient, language: "ar" | "en"): string {
+  const localizedLabel = language === "ar" ? patient.primaryIdentifierTypeLabelAr : patient.primaryIdentifierTypeLabelEn;
+  const alternateLabel = language === "ar" ? patient.primaryIdentifierTypeLabelEn : patient.primaryIdentifierTypeLabelAr;
+  if (localizedLabel?.trim()) return localizedLabel.trim();
+  if (alternateLabel?.trim()) return alternateLabel.trim();
+  const knownLabel = KNOWN_PRIMARY_IDENTIFIER_TYPE_LABELS[String(patient.primaryIdentifierType || "").trim().toLowerCase()];
+  return knownLabel?.[language] ?? t(language, "appointments.identity.methodPrimaryIdentifier");
+}
+
 function renderSex(sex?: string | null, language: "ar" | "en" = "en"): string {
   if (!sex) return "—";
   if (sex.toUpperCase() === "M") return t(language, "appointments.create.male");
@@ -94,12 +109,10 @@ function renderSex(sex?: string | null, language: "ar" | "en" = "en"): string {
 interface IdentityVerificationDialogProps {
   language: "ar" | "en";
   patient: Patient | null;
-  method: PatientIdentityVerificationMethod | null;
   evidence: string;
   error: string | null;
   verifying: boolean;
   onClose: () => void;
-  onMethodChange: (method: PatientIdentityVerificationMethod) => void;
   onEvidenceChange: (value: string) => void;
   onSubmit: () => void;
 }
@@ -107,16 +120,16 @@ interface IdentityVerificationDialogProps {
 function IdentityVerificationDialog({
   language,
   patient,
-  method,
   evidence,
   error,
   verifying,
   onClose,
-  onMethodChange,
   onEvidenceChange,
   onSubmit,
 }: IdentityVerificationDialogProps) {
   const methods = patient?.availableVerificationMethods ?? [];
+  const hasPrimaryIdentifier = methods.includes("primary_identifier");
+  const identifierTypeLabel = patient && hasPrimaryIdentifier ? getPrimaryIdentifierTypeLabel(patient, language) : null;
   return (
     <Dialog open={patient != null} onClose={onClose}>
       <DialogContent>
@@ -125,26 +138,30 @@ function IdentityVerificationDialog({
           <DialogDescription>{t(language, "appointments.identity.verifyDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {methods.map((availableMethod) => (
-            <label key={availableMethod} className="flex items-center gap-2 text-sm">
-              <input type="radio" checked={method === availableMethod} onChange={() => onMethodChange(availableMethod)} />
-              {availableMethod === "primary_identifier" ? t(language, "appointments.identity.methodPrimaryIdentifier") : availableMethod === "exact_dob" ? t(language, "appointments.identity.methodExactDob") : t(language, "appointments.identity.methodPhoneSuffix")}
-            </label>
-          ))}
-          {methods.length === 0 ? (
+          {!hasPrimaryIdentifier ? (
             <p className="text-sm text-amber-700">{t(language, "appointments.identity.noUsableMethod")}</p>
           ) : (
-            <Input
-              value={evidence}
-              onChange={(event) => onEvidenceChange(event.target.value)}
-              placeholder={method === "exact_dob" ? "YYYY-MM-DD" : method === "phone_suffix" ? t(language, "appointments.identity.phoneSuffixPlaceholder") : t(language, "appointments.identity.primaryIdentifierPlaceholder")}
-            />
+            <>
+              <div className="text-sm">
+                {t(language, "appointments.identity.methodPrimaryIdentifier")}
+                <div className="mt-1 text-base font-semibold">{identifierTypeLabel}</div>
+              </div>
+              <label htmlFor="patient-identity-primary-identifier" className="text-sm font-medium">
+                {language === "ar" ? `أدخل ${identifierTypeLabel} كاملاً` : `Enter complete ${identifierTypeLabel}`}
+              </label>
+              <Input
+                id="patient-identity-primary-identifier"
+                value={evidence}
+                onChange={(event) => onEvidenceChange(event.target.value)}
+                placeholder={language === "ar" ? `أدخل ${identifierTypeLabel} كاملاً` : `Enter complete ${identifierTypeLabel}`}
+              />
+            </>
           )}
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>{t(language, "appointments.create.cancel")}</Button>
-          <Button onClick={onSubmit} disabled={verifying || !method || !evidence.trim()}>{verifying ? t(language, "appointments.identity.verifying") : t(language, "appointments.identity.verifyAndSelect")}</Button>
+          <Button onClick={onSubmit} disabled={verifying || !hasPrimaryIdentifier || !evidence.trim()}>{verifying ? t(language, "appointments.identity.verifying") : t(language, "appointments.identity.verifyAndSelect")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -164,7 +181,6 @@ export function PatientSearch({
   const [results, setResults] = useState<Patient[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [verificationPatient, setVerificationPatient] = useState<Patient | null>(null);
-  const [verificationMethod, setVerificationMethod] = useState<PatientIdentityVerificationMethod | null>(null);
   const [verificationEvidence, setVerificationEvidence] = useState("");
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -197,7 +213,6 @@ export function PatientSearch({
   const selectPatient = (patient: Patient) => {
     if (patient.identityRisk === "ambiguous") {
       setVerificationPatient(patient);
-      setVerificationMethod(patient.availableVerificationMethods?.[0] ?? null);
       setVerificationEvidence("");
       setVerificationError(null);
       return;
@@ -208,20 +223,15 @@ export function PatientSearch({
   };
 
   const closeVerification = () => {
-    setVerificationPatient(null); setVerificationMethod(null); setVerificationEvidence(""); setVerificationError(null);
-  };
-
-  const selectVerificationMethod = (method: PatientIdentityVerificationMethod) => {
-    setVerificationMethod(method);
-    setVerificationEvidence("");
+    setVerificationPatient(null); setVerificationEvidence(""); setVerificationError(null);
   };
 
   const submitVerification = async () => {
-    if (!verificationPatient || !verificationMethod || !verificationEvidence.trim()) return;
+    if (!verificationPatient || !verificationPatient.availableVerificationMethods?.includes("primary_identifier") || !verificationEvidence.trim()) return;
     setVerifying(true); setVerificationError(null);
     try {
-      const result = await verifyV2AppointmentPatientIdentity(verificationPatient.id, verificationMethod, verificationEvidence);
-      onSelect({ ...verificationPatient, patientIdentityVerificationProof: result.proof, patientIdentityVerificationMethod: result.verificationMethod });
+      const result = await verifyV2AppointmentPatientIdentity(verificationPatient.id, "primary_identifier", verificationEvidence);
+      onSelect({ ...verificationPatient, patientIdentityVerificationProof: result.proof, patientIdentityVerificationMethod: "primary_identifier" });
       setQuery(""); setResults([]); closeVerification();
     } catch (error) {
       setVerificationError(error instanceof Error ? error.message : t(language, "appointments.identity.verificationFailed"));
@@ -282,7 +292,7 @@ export function PatientSearch({
             </span>
             <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>
           </div>
-          {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationMethod(selectedPatient.availableVerificationMethods?.[0] ?? null); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
+          {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
         </div>
         {!locked ? <button
           type="button"
@@ -299,7 +309,7 @@ export function PatientSearch({
           <X size={18} />
         </button> : null}
       </div>
-      <IdentityVerificationDialog language={language} patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
+      <IdentityVerificationDialog language={language} patient={verificationPatient} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
       </>
     );
   }
@@ -409,7 +419,7 @@ export function PatientSearch({
         </div>
       )}
     </div>
-    <IdentityVerificationDialog language={language} patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
+    <IdentityVerificationDialog language={language} patient={verificationPatient} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
     </>
   );
 }

@@ -296,7 +296,11 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const selected = rows.find((row) => Number(row.id) === similar.firstPatientId);
       assert.equal(selected?.identityRisk, "ambiguous");
       assert.equal(selected?.similarPatientCount, 1);
+      assert.equal(selected?.primaryIdentifierType, "national_id");
+      assert.equal(selected?.primaryIdentifierTypeLabelEn, "National ID");
+      assert.equal(selected?.primaryIdentifierTypeLabelAr, "الرقم الوطني");
       assert.equal(selected?.maskedPrimaryIdentifier, `••••${similar.firstIdentifier.slice(-4)}`);
+      assert.equal(selected?.primaryIdentifierValue, undefined);
       assert.equal(JSON.stringify(selected).includes(similar.firstIdentifier), false);
 
       const bookingPayload = {
@@ -310,6 +314,15 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const missingProof = await fetch("/api/v2/appointments", { method: "POST", body: bookingPayload });
       assert.equal(missingProof.status, 422);
       assert.match(JSON.stringify(missingProof.data), /patient_identity_verification_required/);
+
+      for (const method of ["exact_dob", "phone_suffix"]) {
+        const unavailable = await fetch(`/api/v2/appointments/patient-selection/${similar.firstPatientId}/verify`, {
+          method: "POST",
+          body: { method, evidence: method === "exact_dob" ? "1995-01-02" : "5678" },
+        });
+        assert.equal(unavailable.status, 422);
+        assert.match(JSON.stringify(unavailable.data), /patient_identity_verification_method_unavailable/);
+      }
 
       const verification = await fetch(`/api/v2/appointments/patient-selection/${similar.firstPatientId}/verify`, {
         method: "POST",

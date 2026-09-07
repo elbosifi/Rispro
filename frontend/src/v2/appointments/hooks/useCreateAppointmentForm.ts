@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { CapacityResolutionMode } from "../types";
+import type { CapacityResolutionMode, PatientIdentityVerificationMethod } from "../types";
 
 export interface SelectedPatient {
   id: number;
@@ -15,11 +15,14 @@ export interface SelectedPatient {
   demographicsEstimated?: boolean;
   phone1?: string | null;
   estimatedDateOfBirth?: string | null;
+  primaryIdentifierType?: string | null;
+  primaryIdentifierTypeLabelAr?: string | null;
+  primaryIdentifierTypeLabelEn?: string | null;
   identityRisk?: "none" | "ambiguous";
   similarPatientCount?: number;
-  availableVerificationMethods?: Array<"primary_identifier" | "exact_dob" | "phone_suffix">;
+  availableVerificationMethods?: PatientIdentityVerificationMethod[];
   patientIdentityVerificationProof?: string | null;
-  patientIdentityVerificationMethod?: "primary_identifier" | "exact_dob" | "phone_suffix" | null;
+  patientIdentityVerificationMethod?: PatientIdentityVerificationMethod | null;
   patientIdentitySelectionSource?: "search" | "url_preselect";
 }
 

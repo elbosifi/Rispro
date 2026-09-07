@@ -13,7 +13,7 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
-import { resolvePatientIdentityRisk, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
+import { PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import { canRoleAccessPage, readPageVisibilityMatrix } from "../../../../services/page-visibility-settings-service.js";
@@ -800,7 +800,7 @@ export async function createSchedulingOverrideRequest(
         entityType: "appointment_patient_identity",
         entityId: getNumber(payload.patientId) || null,
         actionType: "appointment_patient_identity_verification_rejected",
-        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_prefix_configurable_v2" },
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: PATIENT_IDENTITY_RULE_VERSION },
         changedByUserId: userId,
       }).catch(() => undefined);
     }
@@ -1054,7 +1054,7 @@ export async function approveSchedulingOverrideRequest(
         entityType: "appointment_patient_identity",
         entityId: Number(patient.rows[0]?.patient_id || 0) || null,
         actionType: "appointment_patient_identity_verification_rejected",
-        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_prefix_configurable_v2" },
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: PATIENT_IDENTITY_RULE_VERSION },
         changedByUserId: approverUserId,
       }).catch(() => undefined);
     }

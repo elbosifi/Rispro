@@ -144,11 +144,11 @@ describe("useCreateAppointmentForm", () => {
     act(() => {
       result.current.actions.initializeComplementaryRecall({ id: 9, arabicFullName: "Ambiguous", identityRisk: "ambiguous", patientIdentitySelectionSource: "url_preselect" }, 4, 12);
       result.current.actions.setAppointmentDate("2039-06-12", false);
-      result.current.actions.applyLockedPatientIdentityVerification({ id: 9, arabicFullName: "Ambiguous", patientIdentityVerificationProof: "verified-proof", patientIdentityVerificationMethod: "exact_dob" });
+      result.current.actions.applyLockedPatientIdentityVerification({ id: 9, arabicFullName: "Ambiguous", patientIdentityVerificationProof: "verified-proof", patientIdentityVerificationMethod: "primary_identifier" });
     });
     expect(result.current.form.patientId).toBe(9);
     expect(result.current.form.patient?.patientIdentityVerificationProof).toBe("verified-proof");
-    expect(result.current.form.patient?.patientIdentityVerificationMethod).toBe("exact_dob");
+    expect(result.current.form.patient?.patientIdentityVerificationMethod).toBe("primary_identifier");
     expect(result.current.form.modalityId).toBe(4);
     expect(result.current.form.examTypeId).toBe(12);
     expect(result.current.form.appointmentDate).toBe("2039-06-12");

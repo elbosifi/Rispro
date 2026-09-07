@@ -7,7 +7,7 @@ import { normalizeIdentifierValue } from "../utils/identifier.js";
 import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 import { HttpError } from "../utils/http-error.js";
 
-export const PATIENT_IDENTITY_RULE_VERSION = "name_prefix_configurable_v2";
+export const PATIENT_IDENTITY_RULE_VERSION = "name_prefix_configurable_primary_identifier_v3";
 export const PATIENT_IDENTITY_PROOF_PURPOSE = "patient_identity_verification";
 export const DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS = 3;
 export const PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY = "patient_identity_name_match_components";
@@ -15,7 +15,7 @@ export const PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY = "patient_ident
 export const PATIENT_IDENTIFIER_MASK_PREFIX = "••••";
 const PROOF_TTL_SECONDS = 12 * 60;
 
-export type PatientIdentityVerificationMethod = "primary_identifier" | "exact_dob" | "phone_suffix";
+export type PatientIdentityVerificationMethod = "primary_identifier";
 export type PatientIdentityRisk = "none" | "ambiguous";
 export type PatientIdentityNameMatchComponents = 2 | 3;
 
@@ -30,6 +30,8 @@ export interface PatientSelectionSafetyPatient {
   estimatedDateOfBirth: string | null;
   demographicsEstimated: boolean;
   primaryIdentifierType: string | null;
+  primaryIdentifierTypeLabelAr: string | null;
+  primaryIdentifierTypeLabelEn: string | null;
   primaryIdentifierValue: string | null;
   phone1: string | null;
 }
@@ -68,6 +70,8 @@ type PatientIdentityDbRow = {
   demographics_estimated: boolean | null;
   phone_1: string | null;
   identifier_type: string | null;
+  identifier_type_label_ar: string | null;
+  identifier_type_label_en: string | null;
   identifier_value: string | null;
 };
 
@@ -75,6 +79,19 @@ type DbExecutor = Pick<PoolClient, "query">;
 
 function normalizeEnglishName(value: string | null | undefined): string {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function fallbackPrimaryIdentifierTypeLabels(identifierType: string | null): { labelAr: string; labelEn: string } {
+  switch (String(identifierType || "").trim().toLowerCase()) {
+    case "national_id":
+      return { labelAr: "الرقم الوطني", labelEn: "National ID" };
+    case "passport":
+      return { labelAr: "جواز السفر", labelEn: "Passport" };
+    case "other":
+      return { labelAr: "معرّف آخر", labelEn: "Other identifier" };
+    default:
+      return { labelAr: "المعرّف الأساسي", labelEn: "Primary identifier" };
+  }
 }
 
 function nameKey(value: string, componentCount: PatientIdentityNameMatchComponents): string {
@@ -107,8 +124,8 @@ function rowsAreAmbiguous(a: PatientIdentityDbRow, b: PatientIdentityDbRow, comp
 
 export function patientNamesAreAmbiguous(input: { arabicA?: string | null; arabicB?: string | null; englishA?: string | null; englishB?: string | null }, componentCount: PatientIdentityNameMatchComponents = DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS): boolean {
   return rowsAreAmbiguous(
-    { id: 1, mrn: null, arabic_full_name: input.arabicA || "", english_full_name: input.englishA || null, normalized_arabic_name: input.arabicA || "", normalized_arabic_name_compact: input.arabicA || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_value: null },
-    { id: 2, mrn: null, arabic_full_name: input.arabicB || "", english_full_name: input.englishB || null, normalized_arabic_name: input.arabicB || "", normalized_arabic_name_compact: input.arabicB || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_value: null },
+    { id: 1, mrn: null, arabic_full_name: input.arabicA || "", english_full_name: input.englishA || null, normalized_arabic_name: input.arabicA || "", normalized_arabic_name_compact: input.arabicA || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_type_label_ar: null, identifier_type_label_en: null, identifier_value: null },
+    { id: 2, mrn: null, arabic_full_name: input.arabicB || "", english_full_name: input.englishB || null, normalized_arabic_name: input.arabicB || "", normalized_arabic_name_compact: input.arabicB || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_type_label_ar: null, identifier_type_label_en: null, identifier_value: null },
     componentCount,
   );
 }
@@ -147,23 +164,23 @@ export async function resolvePatientIdentityNameMatchComponents(executor: DbExec
 }
 
 function toPatient(row: PatientIdentityDbRow): PatientSelectionSafetyPatient {
+  const hasPrimaryIdentifier = Boolean(normalizeIdentifierValue(row.identifier_value || ""));
+  const fallbackLabels = fallbackPrimaryIdentifierTypeLabels(row.identifier_type);
   return {
     id: Number(row.id), mrn: row.mrn, arabicFullName: row.arabic_full_name,
     englishFullName: row.english_full_name, category: row.category, sex: row.sex, ageYears: row.age_years == null ? null : Number(row.age_years),
     estimatedDateOfBirth: row.estimated_date_of_birth ? String(row.estimated_date_of_birth).slice(0, 10) : null,
     demographicsEstimated: Boolean(row.demographics_estimated),
     primaryIdentifierType: row.identifier_type,
+    primaryIdentifierTypeLabelAr: hasPrimaryIdentifier ? row.identifier_type_label_ar || fallbackLabels.labelAr : null,
+    primaryIdentifierTypeLabelEn: hasPrimaryIdentifier ? row.identifier_type_label_en || fallbackLabels.labelEn : null,
     primaryIdentifierValue: row.identifier_value,
     phone1: row.phone_1,
   };
 }
 
 export function availablePatientIdentityVerificationMethods(patient: PatientSelectionSafetyPatient): PatientIdentityVerificationMethod[] {
-  const methods: PatientIdentityVerificationMethod[] = [];
-  if (normalizeIdentifierValue(patient.primaryIdentifierValue || "")) methods.push("primary_identifier");
-  if (!patient.demographicsEstimated && patient.estimatedDateOfBirth) methods.push("exact_dob");
-  if (String(patient.phone1 || "").replace(/\D/g, "").length >= 4) methods.push("phone_suffix");
-  return methods;
+  return normalizeIdentifierValue(patient.primaryIdentifierValue || "") ? ["primary_identifier"] : [];
 }
 
 export function calculatePatientIdentityFingerprint(patient: PatientSelectionSafetyPatient, componentCount: PatientIdentityNameMatchComponents = DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS): string {
@@ -187,13 +204,32 @@ const PATIENT_SELECTION_COLUMNS = `
   select p.id, p.mrn, p.arabic_full_name, p.english_full_name, p.normalized_arabic_name,
     p.normalized_arabic_name_compact, p.category, p.sex, p.age_years, p.estimated_date_of_birth::text,
     p.demographics_estimated, p.phone_1,
-    coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
-    coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id) as identifier_value
+    coalesce(
+      primary_identifier.identifier_type,
+      case when nullif(trim(p.identifier_value), '') is not null then nullif(lower(trim(p.identifier_type)), '') end,
+      case when nullif(trim(p.national_id), '') is not null then 'national_id' end
+    ) as identifier_type,
+    coalesce(
+      primary_identifier.identifier_type_label_ar,
+      case when nullif(trim(p.identifier_value), '') is not null then legacy_identifier_type.label_ar end
+    ) as identifier_type_label_ar,
+    coalesce(
+      primary_identifier.identifier_type_label_en,
+      case when nullif(trim(p.identifier_value), '') is not null then legacy_identifier_type.label_en end
+    ) as identifier_type_label_en,
+    coalesce(primary_identifier.identifier_value, nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as identifier_value
   from patients p
+  left join patient_identifier_types legacy_identifier_type on legacy_identifier_type.code = lower(trim(p.identifier_type))
   left join lateral (
-    select pit.code as identifier_type, pi.value as identifier_value
+    select pit.code as identifier_type,
+      pit.label_ar as identifier_type_label_ar,
+      pit.label_en as identifier_type_label_en,
+      pi.value as identifier_value
     from patient_identifiers pi join patient_identifier_types pit on pit.id = pi.identifier_type_id
-    where pi.patient_id = p.id order by pi.is_primary desc, pi.id asc limit 1
+     where pi.patient_id = p.id
+       and pi.is_primary = true
+       and nullif(trim(pi.value), '') is not null
+     order by pi.id asc limit 1
   ) primary_identifier on true
 `;
 
@@ -293,17 +329,13 @@ export async function resolvePatientIdentityRisk(patientId: number, executor: Db
 }
 
 function normalizeMethod(value: unknown): PatientIdentityVerificationMethod {
-  if (value === "primary_identifier" || value === "exact_dob" || value === "phone_suffix") return value;
+  if (value === "primary_identifier") return value;
   throw new HttpError(422, "Identity verification method is unavailable.", { code: "patient_identity_verification_method_unavailable" });
 }
 
-function evidenceMatches(patient: PatientSelectionSafetyPatient, method: PatientIdentityVerificationMethod, evidence: unknown): boolean {
+function evidenceMatches(patient: PatientSelectionSafetyPatient, evidence: unknown): boolean {
   const raw = String(evidence || "").trim();
-  if (method === "primary_identifier") return Boolean(raw) && normalizeIdentifierValue(raw) === normalizeIdentifierValue(patient.primaryIdentifierValue || "");
-  if (method === "exact_dob") return raw === patient.estimatedDateOfBirth && !patient.demographicsEstimated;
-  const phone = String(patient.phone1 || "").replace(/\D/g, "");
-  const suffix = raw.replace(/\D/g, "");
-  return suffix.length === 4 && phone.endsWith(suffix);
+  return Boolean(raw) && normalizeIdentifierValue(raw) === normalizeIdentifierValue(patient.primaryIdentifierValue || "");
 }
 
 export function issuePatientIdentityVerificationProof(assertion: PatientIdentityVerificationAssertion): string {
@@ -315,7 +347,7 @@ export async function verifyPatientIdentityEvidence(input: { patientId: number; 
   const method = normalizeMethod(input.method);
   if (risk.identityRisk !== "ambiguous") throw new HttpError(422, "Patient identity verification is not required.", { code: "patient_identity_verification_method_unavailable" });
   if (!risk.availableVerificationMethods.includes(method)) throw new HttpError(422, "Identity verification method is unavailable.", { code: "patient_identity_verification_method_unavailable" });
-  if (!evidenceMatches(risk.patient, method, input.evidence)) throw new HttpError(422, "Patient identity verification is incorrect.", { code: "patient_identity_verification_incorrect" });
+  if (!evidenceMatches(risk.patient, input.evidence)) throw new HttpError(422, "Patient identity verification is incorrect.", { code: "patient_identity_verification_incorrect" });
   const assertion: PatientIdentityVerificationAssertion = {
     patientId: input.patientId, verifierUserId: input.userId, verificationMethod: method,
     verifiedAt: new Date().toISOString(), identityFingerprint: risk.identityFingerprint,
@@ -345,6 +377,7 @@ export function revalidateStoredPatientIdentityAssertion(
     !assertion
     || assertion.patientId !== input.patientId
     || assertion.verifierUserId !== input.verifierUserId
+    || assertion.verificationMethod !== "primary_identifier"
     || assertion.ambiguityRuleVersion !== PATIENT_IDENTITY_RULE_VERSION
     || input.expectedIdentityFingerprint !== input.risk.identityFingerprint
   ) {

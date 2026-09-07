@@ -4,7 +4,7 @@ import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { searchPatients } from "../../../../services/patient-service.js";
-import { maskPatientIdentifier, maskPatientPhone, resolvePatientIdentityRisk, resolvePatientIdentityRisks, verifyPatientIdentityEvidence } from "../../../../services/patient-selection-safety-service.js";
+import { maskPatientIdentifier, maskPatientPhone, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityRisks, verifyPatientIdentityEvidence } from "../../../../services/patient-selection-safety-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
@@ -22,7 +22,7 @@ patientSelectionRouter.use(requireAuth, requirePageAccess("appointments"));
 
 function toSelectionRow(risk: Awaited<ReturnType<typeof resolvePatientIdentityRisk>>) {
   const { patient } = risk;
-  return { id: patient.id, arabicFullName: patient.arabicFullName, englishFullName: patient.englishFullName, mrn: patient.mrn, category: patient.category, sex: patient.sex, ageYears: patient.ageYears, estimatedDateOfBirth: patient.estimatedDateOfBirth, demographicsEstimated: patient.demographicsEstimated, primaryIdentifierType: patient.primaryIdentifierType, maskedPrimaryIdentifier: maskPatientIdentifier(patient.primaryIdentifierValue), maskedPhone1: maskPatientPhone(patient.phone1), identityRisk: risk.identityRisk, similarPatientCount: risk.similarPatientCount, availableVerificationMethods: risk.availableVerificationMethods, ambiguityRuleVersion: risk.ambiguityRuleVersion };
+  return { id: patient.id, arabicFullName: patient.arabicFullName, englishFullName: patient.englishFullName, mrn: patient.mrn, category: patient.category, sex: patient.sex, ageYears: patient.ageYears, estimatedDateOfBirth: patient.estimatedDateOfBirth, demographicsEstimated: patient.demographicsEstimated, primaryIdentifierType: patient.primaryIdentifierType, primaryIdentifierTypeLabelAr: patient.primaryIdentifierTypeLabelAr, primaryIdentifierTypeLabelEn: patient.primaryIdentifierTypeLabelEn, maskedPrimaryIdentifier: maskPatientIdentifier(patient.primaryIdentifierValue), maskedPhone1: maskPatientPhone(patient.phone1), identityRisk: risk.identityRisk, similarPatientCount: risk.similarPatientCount, availableVerificationMethods: risk.availableVerificationMethods, ambiguityRuleVersion: risk.ambiguityRuleVersion };
 }
 
 patientSelectionRouter.get("/search", asyncRoute(async (req: Request, res: Response) => {
@@ -51,7 +51,7 @@ patientSelectionRouter.post("/:patientId/verify", verificationRateLimiter, async
       entityType: "appointment_patient_identity",
       entityId: Number.isInteger(patientId) && patientId > 0 ? patientId : null,
       actionType: "appointment_patient_identity_verification_rejected",
-      newValues: { outcome: "rejected", code: details?.code ?? "patient_identity_verification_rejected", source: "verification_endpoint", ambiguityRuleVersion: "name_prefix_configurable_v2" },
+      newValues: { outcome: "rejected", code: details?.code ?? "patient_identity_verification_rejected", source: "verification_endpoint", ambiguityRuleVersion: PATIENT_IDENTITY_RULE_VERSION },
       changedByUserId: userId || null,
     }).catch(() => undefined);
     throw error;

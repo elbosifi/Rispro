@@ -51,7 +51,7 @@ import {
 import { HttpError } from "../../../../utils/http-error.js";
 import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
-import { resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
+import { PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
 import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
 import { generateComplementaryRecallRequestDocument, linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
@@ -85,7 +85,7 @@ export async function createBooking(
   } catch (error) {
     const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
     if (details?.code?.startsWith("patient_identity_")) {
-      await logAuditEntry({ entityType: "appointment_patient_identity", entityId: payload.patientId, actionType: "appointment_patient_identity_verification_rejected", newValues: { outcome: "rejected", code: details.code, source: identityVerificationOptions.selectionSource ?? "search", ambiguityRuleVersion: "name_prefix_configurable_v2" }, changedByUserId: userId }).catch(() => undefined);
+      await logAuditEntry({ entityType: "appointment_patient_identity", entityId: payload.patientId, actionType: "appointment_patient_identity_verification_rejected", newValues: { outcome: "rejected", code: details.code, source: identityVerificationOptions.selectionSource ?? "search", ambiguityRuleVersion: PATIENT_IDENTITY_RULE_VERSION }, changedByUserId: userId }).catch(() => undefined);
     }
     throw error;
   }
