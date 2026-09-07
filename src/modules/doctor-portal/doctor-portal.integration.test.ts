@@ -268,6 +268,7 @@ async function cleanupDoctorPortalTestData(extraUserIds: number[] = []) {
   await pool.query(`delete from doctor_portal.appointment_protocols where appointment_id = any($1::bigint[]) or assigned_by_doctor_id = any($2::bigint[]) or updated_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_workload_units where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.reporting_board_case_holds where appointment_id = any($1::bigint[]) or created_by_user_id = any($2::bigint[]) or created_by_doctor_id = any($3::bigint[])`, [bookingIds, userIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_members where doctor_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [doctorIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_weeks where id = any($1::bigint[])`, [weekIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_availability where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
@@ -541,6 +542,89 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       [appointmentId]
     );
     assert.equal(Number(activeRows.rows[0].count), 1);
+  });
+
+  it("does not automatically assign a completed case with an active Reporting Hold", async () => {
+    guard();
+    const heldAppointmentId = await createBooking(testData, today);
+    const normalAppointmentId = await createBooking(testData, today);
+    await pool.query(
+      `update appointments_v2.bookings set status = 'completed' where id = any($1::bigint[])`,
+      [[heldAppointmentId, normalAppointmentId]]
+    );
+
+    const roster = await pool.query<{ id: string }>(
+      `
+        select id::text as id
+        from doctor_portal.doctor_roster_assignments
+        where id = $1 and status = 'active'
+      `,
+      [rosterAssignmentId]
+    );
+    assert.equal(roster.rowCount, 1);
+
+    const hold = await pool.query<{ id: string; reason: string; clearedAt: string | null }>(
+      `
+        insert into doctor_portal.reporting_board_case_holds (
+          appointment_id, reason, created_by_user_id, created_by_doctor_id
+        )
+        values ($1, 'Integration test hold', $2, $3)
+        returning id::text as id, reason, cleared_at as "clearedAt"
+      `,
+      [heldAppointmentId, supervisor.id, supervisor.doctorId]
+    );
+    const holdBefore = hold.rows[0];
+    assert.ok(holdBefore);
+
+    const unassignedBefore = await pool.query<{ appointmentId: number; status: string; requiresReport: boolean; assignmentCount: string }>(
+      `
+        select
+          b.id as "appointmentId",
+          b.status,
+          b.requires_report as "requiresReport",
+          count(cta.id)::text as "assignmentCount"
+        from appointments_v2.bookings b
+        left join doctor_portal.case_team_assignments cta
+          on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+        where b.id = any($1::bigint[])
+        group by b.id
+        order by b.id
+      `,
+      [[heldAppointmentId, normalAppointmentId]]
+    );
+    assert.deepEqual(unassignedBefore.rows.map((row) => ({ status: row.status, requiresReport: row.requiresReport, assignmentCount: Number(row.assignmentCount) })), [
+      { status: "completed", requiresReport: true, assignmentCount: 0 },
+      { status: "completed", requiresReport: true, assignmentCount: 0 },
+    ]);
+
+    const assignRun = await api(supervisor.cookie, "/api/doctor/cases/assign", {
+      method: "POST",
+      body: { dateFrom: today, dateTo: today, modalityId: testData.modalityId },
+    });
+    assert.equal(assignRun.status, 200, JSON.stringify(assignRun.data));
+    assert.equal((assignRun.data as { summary: { assignedCount: number } }).summary.assignedCount, 1);
+
+    const activeAssignments = await pool.query<{ appointmentId: number; rosterAssignmentId: number }>(
+      `
+        select appointment_id::int as "appointmentId", roster_assignment_id::int as "rosterAssignmentId"
+        from doctor_portal.case_team_assignments
+        where appointment_id = any($1::bigint[])
+          and assignment_type = 'reporting'
+          and status = 'active'
+      `,
+      [[heldAppointmentId, normalAppointmentId]]
+    );
+    assert.equal(activeAssignments.rows.some((row) => row.appointmentId === heldAppointmentId), false);
+    assert.deepEqual(activeAssignments.rows.find((row) => row.appointmentId === normalAppointmentId), {
+      appointmentId: normalAppointmentId,
+      rosterAssignmentId,
+    });
+
+    const holdAfter = await pool.query<{ id: string; reason: string; clearedAt: string | null }>(
+      `select id::text as id, reason, cleared_at as "clearedAt" from doctor_portal.reporting_board_case_holds where id = $1`,
+      [holdBefore.id]
+    );
+    assert.deepEqual(holdAfter.rows[0], holdBefore);
   });
 
   it("allows an authorized Doctor Protocol user to enable a non-oncology report requirement", async () => {

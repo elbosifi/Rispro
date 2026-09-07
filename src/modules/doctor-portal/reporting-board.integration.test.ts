@@ -87,6 +87,40 @@ function installDefaultSonicDicomReadersForTest(): void {
   });
 }
 
+function installAutomaticAssignmentRaceHoldReader(reason: string): () => number | null {
+  let heldAppointmentId: number | null = null;
+  let holdInserted = false;
+  sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
+    checkStatusesBatch: async (contexts) => {
+      const first = contexts[0];
+      if (!holdInserted && first) {
+        heldAppointmentId = first.bookingId;
+        await pool.query(
+          `
+            insert into doctor_portal.reporting_board_case_holds (
+              appointment_id, reason, created_by_user_id, created_by_doctor_id
+            )
+            values ($1, $2, $3, $4)
+          `,
+          [heldAppointmentId, reason, supervisor.id, supervisor.doctorId]
+        );
+        holdInserted = true;
+      }
+      return new Map(contexts.map((context) => [context.bookingId, {
+        state: "draft" as const,
+        canViewReport: false,
+        source: "sonicdicom" as const,
+        reportFinalAt: null,
+        latestDocumentId: null,
+        finalizedByAccount: null,
+        correlationMethod: null,
+      }]));
+    },
+    fetchDocumentHistoriesBatch: async () => { throw new Error("history unavailable during automatic assignment race test"); },
+  });
+  return () => heldAppointmentId;
+}
+
 function uniq(label: string) {
   return `${TEST_PREFIX}${label}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
 }
@@ -973,6 +1007,72 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(draftBoard.data.cases.find((row) => row.appointmentId === manualFinalId)?.reportStatus, "final");
   });
 
+  it("attributes a SonicDICOM-finalized held case without changing its Reporting Hold", async () => {
+    guard();
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(121), patientName: uniq("held Sonic final") });
+    const doctorUsername = (await pool.query<{ username: string }>(`select username from users where id = $1`, [doctor.id])).rows[0]?.username;
+    assert.ok(doctorUsername);
+    const holdBefore = (await pool.query<{
+      id: string;
+      appointmentId: string;
+      reason: string;
+      createdByUserId: string;
+      createdByDoctorId: string;
+      createdAt: string;
+      clearedAt: string | null;
+      clearReason: string | null;
+    }>(`
+      insert into doctor_portal.reporting_board_case_holds (appointment_id, reason, created_by_user_id, created_by_doctor_id)
+      values ($1, 'Post-final attribution hold', $2, $3)
+      returning id::text as id, appointment_id::text as "appointmentId", reason,
+        created_by_user_id::text as "createdByUserId", created_by_doctor_id::text as "createdByDoctorId",
+        created_at::text as "createdAt", cleared_at::text as "clearedAt", clear_reason as "clearReason"
+    `, [appointmentId, supervisor.id, supervisor.doctorId])).rows[0];
+    assert.ok(holdBefore);
+
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      {
+        bookingId: appointmentId,
+        accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`,
+        studyInstanceUid: `1.2.840.178.held.${appointmentId}`,
+        requiresReport: true,
+        status: "completed",
+      },
+      {
+        state: "final",
+        canViewReport: true,
+        source: "sonicdicom",
+        reportFinalAt: "2026-09-01T10:00:00.000Z",
+        latestDocumentId: `held-final-${appointmentId}`,
+        finalizedByAccount: doctorUsername,
+        correlationMethod: "study_instance_uid",
+      }
+    );
+
+    const cache = (await pool.query<{ reportStatus: string; finalizedByDoctorId: string | null; finalizedByAccount: string | null }>(`
+      select report_status as "reportStatus", finalized_by_doctor_id::text as "finalizedByDoctorId", sonicdicom_finalized_by_account as "finalizedByAccount"
+      from doctor_portal.reporting_board_sonicdicom_cache
+      where appointment_id = $1
+    `, [appointmentId])).rows[0];
+    assert.deepEqual(cache, { reportStatus: "final", finalizedByDoctorId: String(doctor.doctorId), finalizedByAccount: doctorUsername });
+
+    const assignment = (await pool.query<{ assignedDoctorId: string; rosterAssignmentId: string | null; assignmentOrigin: string; status: string }>(`
+      select assigned_doctor_id::text as "assignedDoctorId", roster_assignment_id::text as "rosterAssignmentId", assignment_origin as "assignmentOrigin", status
+      from doctor_portal.case_team_assignments
+      where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+    `, [appointmentId])).rows[0];
+    assert.deepEqual(assignment, { assignedDoctorId: String(doctor.doctorId), rosterAssignmentId: null, assignmentOrigin: "sonic_auto", status: "active" });
+
+    const holdAfter = (await pool.query<typeof holdBefore>(`
+      select id::text as id, appointment_id::text as "appointmentId", reason,
+        created_by_user_id::text as "createdByUserId", created_by_doctor_id::text as "createdByDoctorId",
+        created_at::text as "createdAt", cleared_at::text as "clearedAt", clear_reason as "clearReason"
+      from doctor_portal.reporting_board_case_holds
+      where appointment_id = $1 and cleared_at is null
+    `, [appointmentId])).rows[0];
+    assert.deepEqual(holdAfter, holdBefore);
+  });
+
   it("lets an in-flight manual assignment win before Sonic auto-assignment rechecks the active row", async () => {
     guard();
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(88), patientName: "Manual race winner" });
@@ -1640,6 +1740,80 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${scheduledHeld}/resume`, { method: "POST" })).status, 200);
     assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_placed' and reason = any($1::text[])`, [["Needs administrative review", "Assigned case review", "Manual assignment allowed", "Hold after assignment", "Scheduled hold"]])).rows[0].count, 5);
     assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_released'`)).rows[0].count >= 5, true);
+  });
+
+  it("fills the requested automatic assignment count after a transactional Reporting Hold skip", async () => {
+    guard();
+    const date = addDays(119);
+    const label = uniq("automatic_hold_race");
+    const first = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T08:00:00.000Z", patientName: `${label} first` });
+    const second = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T09:00:00.000Z", patientName: `${label} second` });
+    const spare = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T10:00:00.000Z", patientName: `${label} spare` });
+    [first, second, spare].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await statusByAppointmentId.flush();
+    const heldDuringRevalidation = installAutomaticAssignmentRaceHoldReader("hold during automatic assignment revalidation");
+
+    try {
+      const response = await api<{
+        requestedCount: number;
+        assignedCount: number;
+        skippedCount: number;
+        assignedAppointmentIds: number[];
+        skipped: Array<{ appointmentId?: number; reason: string }>;
+      }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+        method: "POST",
+        body: { doctorId: targetDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date, q: label, pinUrgentToTop: false }, reason: "transactional hold refill" },
+      });
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+      assert.equal(heldDuringRevalidation(), first);
+      assert.equal(response.data.requestedCount, 2);
+      assert.equal(response.data.assignedCount, response.data.assignedAppointmentIds.length);
+      assert.equal(response.data.assignedCount, 2);
+      assert.deepEqual(response.data.assignedAppointmentIds, [second, spare]);
+      assert.equal(response.data.skippedCount, response.data.skipped.length);
+      assert.deepEqual(response.data.skipped, [{ appointmentId: first, reason: "reporting_hold" }]);
+      const reportedIds = [...response.data.assignedAppointmentIds, ...response.data.skipped.map((row) => row.appointmentId).filter((id): id is number => id !== undefined)];
+      assert.equal(new Set(reportedIds).size, reportedIds.length);
+      assert.equal((await pool.query<{ count: number }>(`select count(*)::int as count from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [first])).rows[0].count, 0);
+      assert.equal((await pool.query<{ count: number }>(`select count(*)::int as count from doctor_portal.reporting_board_case_holds where appointment_id = $1 and cleared_at is null`, [first])).rows[0].count, 1);
+    } finally {
+      sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest(null);
+    }
+  });
+
+  it("underfills safely when a transactional Reporting Hold leaves no spare automatic candidate", async () => {
+    guard();
+    const date = addDays(120);
+    const label = uniq("automatic_hold_no_spare");
+    const onlyCandidate = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T08:00:00.000Z", patientName: `${label} only` });
+    statusByAppointmentId.set(onlyCandidate, "draft");
+    await statusByAppointmentId.flush();
+    const heldDuringRevalidation = installAutomaticAssignmentRaceHoldReader("hold with no automatic assignment spare");
+
+    try {
+      const response = await api<{
+        requestedCount: number;
+        assignedCount: number;
+        skippedCount: number;
+        assignedAppointmentIds: number[];
+        skipped: Array<{ appointmentId?: number; reason: string }>;
+      }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+        method: "POST",
+        body: { doctorId: targetDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date, q: label, pinUrgentToTop: false }, reason: "transactional hold no spare" },
+      });
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+      assert.equal(heldDuringRevalidation(), onlyCandidate);
+      assert.equal(response.data.requestedCount, 2);
+      assert.equal(response.data.assignedCount, 0);
+      assert.deepEqual(response.data.assignedAppointmentIds, []);
+      assert.equal(response.data.assignedCount, response.data.assignedAppointmentIds.length);
+      assert.equal(response.data.skippedCount, response.data.skipped.length);
+      assert.deepEqual(response.data.skipped, [{ appointmentId: onlyCandidate, reason: "reporting_hold" }]);
+      assert.equal(new Set(response.data.skipped.map((row) => row.appointmentId)).size, response.data.skipped.length);
+      assert.equal((await pool.query<{ count: number }>(`select count(*)::int as count from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [onlyCandidate])).rows[0].count, 0);
+    } finally {
+      sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest(null);
+    }
   });
 
   it("keeps tombstoned comparison documents as history, selects replacements, and restores the distinct primary", async () => {

@@ -158,6 +158,11 @@ async function listAssignableBookings(input: AssignCasesInput): Promise<BookingR
         and b.booking_date <= $2::date
         and b.requires_report = true
         and b.status not in ('cancelled', 'discontinued', 'voided')
+        and not exists (
+          select 1
+          from doctor_portal.reporting_board_case_holds h
+          where h.appointment_id = b.id and h.cleared_at is null
+        )
         ${modalityFilter}
       order by b.booking_date asc, b.booking_time asc nulls first, b.id asc
     `,
@@ -236,8 +241,45 @@ export async function assignCases(input: AssignCasesInput, actor: AssignmentActo
       summary.unassignedNoRosterCount += 1;
       continue;
     }
+    const client = await pool.connect();
     try {
-      const result = await pool.query<{ id: number }>(
+      await client.query("begin");
+      const bookingResult = await client.query<{ status: string; requiresReport: boolean }>(
+        `
+          select status, requires_report as "requiresReport"
+          from appointments_v2.bookings
+          where id = $1
+          for update
+        `,
+        [booking.appointmentId]
+      );
+      const currentBooking = bookingResult.rows[0];
+      if (!currentBooking || !currentBooking.requiresReport) {
+        await client.query("commit");
+        continue;
+      }
+      if (["cancelled", "discontinued", "voided"].includes(currentBooking.status)) {
+        await client.query("commit");
+        summary.skippedCancelledCount += 1;
+        continue;
+      }
+
+      const holdResult = await client.query<{ id: number }>(
+        `
+          select id
+          from doctor_portal.reporting_board_case_holds
+          where appointment_id = $1 and cleared_at is null
+          limit 1
+          for update
+        `,
+        [booking.appointmentId]
+      );
+      if (holdResult.rows[0]) {
+        await client.query("commit");
+        continue;
+      }
+
+      const result = await client.query<{ id: number }>(
         `
           insert into doctor_portal.case_team_assignments (
             appointment_id, roster_assignment_id, modality_id, assignment_type, expected_reporting_date, status
@@ -250,8 +292,7 @@ export async function assignCases(input: AssignCasesInput, actor: AssignmentActo
         [booking.appointmentId, roster.id, booking.modalityId, rule.assignmentType, rule.expectedReportingDate]
       );
       if (result.rows[0]) {
-        summary.assignedCount += 1;
-        await insertDoctorAuditEvent(pool, {
+        await insertDoctorAuditEvent(client, {
           actorUserId: actor.userId,
           actorDoctorId: actor.doctorId,
           eventType: "case_assigned",
@@ -265,11 +306,17 @@ export async function assignCases(input: AssignCasesInput, actor: AssignmentActo
           },
           reason: null,
         });
+        await client.query("commit");
+        summary.assignedCount += 1;
       } else {
+        await client.query("commit");
         summary.alreadyAssignedCount += 1;
       }
     } catch (error) {
+      await client.query("rollback").catch(() => undefined);
       summary.errors.push({ appointmentId: booking.appointmentId, reason: error instanceof Error ? error.message : "assignment_failed" });
+    } finally {
+      client.release();
     }
   }
 

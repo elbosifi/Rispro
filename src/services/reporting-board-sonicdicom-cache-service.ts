@@ -89,6 +89,8 @@ export const FINAL_RECHECK_MS = 5 * 60 * 1000;
 
 async function tryCreateSonicAutoAssignment(row: PersistedCacheRow): Promise<boolean> {
   if (!row.successful || row.status !== "final" || !row.finalizedByDoctorId) return false;
+  // This is post-final attribution, not allocation of pending reporting work.
+  // Reporting Hold intentionally does not block factual attribution of an already-final report.
   const client = await pool.connect();
   try {
     await client.query("begin");

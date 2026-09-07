@@ -1994,6 +1994,7 @@ export async function bulkAssignReportingCases(input: {
   unassignedOnly: boolean;
   actor: AssignmentActor;
   respectReportingHold: boolean;
+  maxAssignedCount?: number;
   caseAuditEventType?: string;
   summaryAuditEventType?: string;
   restrictToDoctorReportPermissions?: boolean;
@@ -2049,6 +2050,7 @@ export async function bulkAssignReportingCases(input: {
       )).rows.map((row) => Number(row.modality_id)))
       : null;
     for (const appointmentId of input.candidateAppointmentIds) {
+      if (input.maxAssignedCount !== undefined && assignedAppointmentIds.length >= input.maxAssignedCount) break;
       if (!lockedIds.has(appointmentId)) {
         skipped.push({ appointmentId, reason: "appointment_not_found" });
         continue;
@@ -2103,6 +2105,7 @@ export async function bulkAssignReportingCases(input: {
         reason: input.reason,
       });
     }
+    const requestedCount = input.maxAssignedCount ?? input.candidateAppointmentIds.length;
     await insertDoctorAuditEvent(client, {
       actorUserId: input.actor.userId,
       actorDoctorId: input.actor.doctorId,
@@ -2111,7 +2114,7 @@ export async function bulkAssignReportingCases(input: {
       targetId: null,
         metadata: {
           doctorId: input.doctorId,
-          requestedCount: input.candidateAppointmentIds.length,
+          requestedCount,
           assignedCount: assignedAppointmentIds.length,
           skipped,
           noteForDoctor: input.reason,
@@ -2127,7 +2130,7 @@ export async function bulkAssignReportingCases(input: {
   }
 
   return {
-    requestedCount: input.candidateAppointmentIds.length,
+    requestedCount: input.maxAssignedCount ?? input.candidateAppointmentIds.length,
     assignedCount: assignedAppointmentIds.length,
     skippedCount: skipped.length,
     assignedAppointmentIds,

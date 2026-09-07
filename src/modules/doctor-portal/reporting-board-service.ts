@@ -2090,14 +2090,15 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   // stale cache finals be skipped while later eligible cases fill the request.
   const candidateWindow = eligible.slice(0, Math.min(eligible.length, Math.max(input.count * 3, input.count)));
   const verification = await directlyRevalidateReportingAssignmentCandidates(candidateWindow);
-  const selected = candidateWindow.filter((row) => verification.eligibleIds.has(row.appointmentId)).slice(0, input.count);
+  const verifiedCandidates = candidateWindow.filter((row) => verification.eligibleIds.has(row.appointmentId));
 
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
-    candidateAppointmentIds: selected.map((row) => row.appointmentId),
+    candidateAppointmentIds: verifiedCandidates.map((row) => row.appointmentId),
     reason: input.reason?.trim() || null,
     unassignedOnly: true,
     respectReportingHold: true,
+    maxAssignedCount: input.count,
     restrictToDoctorReportPermissions: true,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
   });
@@ -2106,16 +2107,30 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     appointmentIds: result.assignedAppointmentIds,
     appointmentNotes: Object.fromEntries(result.assignedAppointmentIds.map((id) => [id, input.reason ?? null])),
   });
-  const selectedIds = new Set(selected.map((row) => row.appointmentId));
+  const verifiedIds = new Set(verifiedCandidates.map((row) => row.appointmentId));
+  const reportedIds = new Set(result.assignedAppointmentIds);
+  for (const row of result.skipped) {
+    if (row.appointmentId !== undefined) {
+      reportedIds.add(row.appointmentId);
+    }
+  }
   const preSkipped = cases
-    .filter((row) => !selectedIds.has(row.appointmentId))
+    .filter((row) => !verifiedIds.has(row.appointmentId) && !reportedIds.has(row.appointmentId))
     .slice(0, Math.max(0, input.count - result.assignedCount))
     .map((row) => ({ appointmentId: row.appointmentId, reason: row.reportingHold ? "reporting_hold" : verification.finalIds.has(row.appointmentId) ? "report_final" : verification.unavailableIds.has(row.appointmentId) ? "report_status_unavailable" : row.exclusionReason ?? "not_selected" }));
+  const skippedAppointmentIds = new Set<number>();
+  const skipped = [...result.skipped, ...preSkipped].filter((row) => {
+    if (row.appointmentId === undefined) return true;
+    if (skippedAppointmentIds.has(row.appointmentId)) return false;
+    skippedAppointmentIds.add(row.appointmentId);
+    return !result.assignedAppointmentIds.includes(row.appointmentId);
+  });
   return {
     ...result,
     requestedCount: input.count,
-    skippedCount: result.skippedCount + preSkipped.length,
-    skipped: [...result.skipped, ...preSkipped],
+    assignedCount: result.assignedAppointmentIds.length,
+    skippedCount: skipped.length,
+    skipped,
   };
 }
 
