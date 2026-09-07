@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Textarea } from "@/components/shared";
 import { ProtocolingAppointmentWorkspace } from "@/pages/doctor/doctor-protocols-page";
 import {
   bulkAssignNextReportingCases,
@@ -36,6 +37,8 @@ import {
   returnComparisonToPreparation,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
+  placeReportingBoardCaseHold,
+  releaseReportingBoardCaseHold,
   launchReportingBoardCaseInOhif,
   resumeReportingBoardBulkAssignmentJob,
   revokeReportingBoardSavedView,
@@ -55,6 +58,7 @@ import type {
   ReportingBoardBulkAssignmentJob,
   ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
+  ReportingBoardCaseHoldSummary,
   ReportingBoardAssignmentMatch,
   ReportingBoardCaseSource,
   ReportingBoardDoctorStatsRow,
@@ -142,6 +146,9 @@ function assignmentMatchLabel(value: ReportingBoardFilters["assignmentMatch"]): 
 type ManualFinalMutationResult =
   | { ok: true; appointmentId: number; status: "manual_final" }
   | { ok: true; appointmentId: number; status: "manual_final_cleared" };
+type ReportingHoldMutationResult =
+  | { ok: true; appointmentId: number; status: "reporting_hold"; hold: ReportingBoardCaseHoldSummary }
+  | { ok: true; appointmentId: number; status: "reporting_hold_released"; hold: ReportingBoardCaseHoldSummary };
 
 
 const EMPTY_NOTIFICATIONS: ReportingBoardNotificationSettings = {
@@ -490,7 +497,7 @@ function requiredReportNotFinal(row: ReportingBoardCaseRow): boolean {
 }
 
 function overdue(row: ReportingBoardCaseRow): boolean {
-  return requiredReportNotFinal(row) && !row.workflowHold && row.bookingDate < new Date().toISOString().slice(0, 10);
+  return requiredReportNotFinal(row) && !row.workflowHold && !row.reportingHold && row.bookingDate < new Date().toISOString().slice(0, 10);
 }
 
 function rowPriorityTone(row: ReportingBoardCaseRow): "stat" | "urgent" | "normal" {
@@ -546,6 +553,7 @@ function rowStatusLabel(row: ReportingBoardCaseRow): string {
   }
   const labels = [
     abnormalPriorityLabel(row),
+    row.reportingHold ? "On hold" : null,
     overdue(row) ? "Overdue" : null,
     reportStatusDisplay(row),
     row.appointmentStatus !== "completed" ? `Appointment ${labelStatus(row.appointmentStatus)}` : null,
@@ -588,6 +596,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
     `First assigned at: ${formatTimestamp(row.firstAssignedAt)}`,
     `Report final at: ${formatTimestamp(row.reportFinalAt)}`,
     `Report status checked at: ${formatTimestamp(row.reportStatusCheckedAt)}`,
+    `Reporting Hold: ${row.reportingHold ? `${row.reportingHold.reason} (placed by ${row.reportingHold.createdByName ?? "Unknown user"} at ${formatTimestamp(row.reportingHold.createdAt)})` : "None"}`,
   ].join("\n");
 }
 
@@ -673,6 +682,7 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
 }
 
 function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
+  const [holdDetailsOpen, setHoldDetailsOpen] = useState(false);
   const view = reportStatusView(row);
   const Icon = view.icon;
   const finalizer = sonicFinalizerLabel(row);
@@ -683,6 +693,18 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
   return (
     <div className="flex max-w-40 flex-wrap items-center gap-1" title={rowStatusLabel(row)}>
       {row.workflowHold ? <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">{row.workflowHold === "waiting_for_additional_report" ? "Waiting for additional report" : row.workflowHold === "additional_imaging_ready_for_supplement" ? "Additional imaging ready for supplementation" : "Waiting for additional imaging"}</span> : null}
+      {row.reportingHold ? <>
+        <button type="button" className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100" onClick={() => setHoldDetailsOpen(true)} aria-label="Reporting hold" title="Reporting hold details">
+          Reporting hold
+        </button>
+        <Dialog open={holdDetailsOpen} onClose={() => setHoldDetailsOpen(false)}>
+          <DialogContent maxWidth="480px">
+            <DialogHeader><DialogTitle>Reporting hold</DialogTitle><DialogDescription>This administrative reporting state is separate from workflow hold and comparison status.</DialogDescription></DialogHeader>
+            <dl className="grid gap-3 text-sm"><div><dt className="font-semibold">Reason</dt><dd className="mt-1 whitespace-pre-wrap break-words">{row.reportingHold.reason}</dd></div><div><dt className="font-semibold">Placed by</dt><dd className="mt-1">{row.reportingHold.createdByName ?? "Unknown user"}</dd></div><div><dt className="font-semibold">Placed at</dt><dd className="mt-1">{formatTimestamp(row.reportingHold.createdAt)}</dd></div></dl>
+            <DialogFooter><Button variant="secondary" onClick={() => setHoldDetailsOpen(false)}>Close</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </> : null}
       <span aria-label={view.label} title={view.label} className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full border px-1.5 text-xs font-semibold ${view.className}`}>
         <Icon size={14} aria-hidden="true" />
         {view.text ? <span>{view.text}</span> : <span className="sr-only">{view.label}</span>}
@@ -712,6 +734,7 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
 }
 
 function agingTatLabel(row: ReportingBoardCaseRow): string {
+  if (row.reportingHold) return "On hold";
   if (row.dueAt && requiredReportNotFinal(row) && new Date(row.dueAt).getTime() < Date.now()) {
     const overdueMinutes = Math.floor((Date.now() - new Date(row.dueAt).getTime()) / 60000);
     return `Overdue ${formatDuration(overdueMinutes)}`;
@@ -757,6 +780,8 @@ function RowActionMenu({
   onClearManualFinal,
   onReconcileFinalizerAssignment,
   onDiscontinue,
+  onPlaceHold,
+  onResumeHold,
   onRefreshReportStatus,
   refreshingReportStatus,
   ohifAvailability,
@@ -771,6 +796,8 @@ function RowActionMenu({
   onClearManualFinal: (row: ReportingBoardCaseRow) => void;
   onReconcileFinalizerAssignment: (row: ReportingBoardCaseRow) => void;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
+  onPlaceHold: (row: ReportingBoardCaseRow) => void;
+  onResumeHold: (row: ReportingBoardCaseRow) => void;
   onRefreshReportStatus: (row: ReportingBoardCaseRow) => Promise<void>;
   refreshingReportStatus: boolean;
   ohifAvailability: OhifViewerAvailability | null;
@@ -950,6 +977,16 @@ function RowActionMenu({
           Clear manual final override
         </button>
       )}
+      {canManage && row.caseType === "appointment" && row.reportingHold ? (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onResumeHold(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+          Resume reporting
+        </button>
+      ) : null}
+      {canManage && row.caseType === "appointment" && !row.reportingHold && row.reportStatus !== "final" ? (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onPlaceHold(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+          Place on reporting hold
+        </button>
+      ) : null}
       {canReconcileFinalizerAssignment && (
         <button type="button" role="menuitem" onClick={() => { setOpen(false); onReconcileFinalizerAssignment(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
           Reconcile assignment to finalized doctor
@@ -1703,6 +1740,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [manualFinalMode, setManualFinalMode] = useState<"mark" | "clear">("mark");
   const [manualFinalReason, setManualFinalReason] = useState("");
+  const [reportingHoldTarget, setReportingHoldTarget] = useState<ReportingBoardCaseRow | null>(null);
+  const [reportingHoldMode, setReportingHoldMode] = useState<"place" | "resume">("place");
+  const [reportingHoldReason, setReportingHoldReason] = useState("");
   const [reconcileTarget, setReconcileTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
@@ -1974,6 +2014,27 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update manual final override." }),
+  });
+  const reportingHoldMutation = useMutation<ReportingHoldMutationResult>({
+    mutationFn: () => {
+      if (!reportingHoldTarget) throw new Error("Reporting Hold target is missing.");
+      return reportingHoldMode === "place"
+        ? placeReportingBoardCaseHold(reportingHoldTarget.appointmentId, { reason: reportingHoldReason.trim() })
+        : releaseReportingBoardCaseHold(reportingHoldTarget.appointmentId);
+    },
+    onSuccess: async () => {
+      const appointmentId = reportingHoldTarget?.appointmentId ?? null;
+      const mode = reportingHoldMode;
+      setReportingHoldTarget(null);
+      setReportingHoldReason("");
+      if (appointmentId !== null) setSelectedCaseKeys((current) => current.filter((key) => key !== `appointment:${appointmentId}`));
+      setBoardActionMessage({ tone: "success", text: mode === "place" ? "Reporting Hold placed." : "Reporting Hold resumed." });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update Reporting Hold." }),
   });
   const finalizeComparisonMutation = useMutation({
     mutationFn: (payload: { row: ReportingBoardCaseRow; finalText: string }) => {
@@ -2670,6 +2731,18 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                               setDiscontinueReason("");
                               setDiscontinueTarget(target);
                             }}
+                            onPlaceHold={(target) => {
+                              setBoardActionMessage(null);
+                              setReportingHoldMode("place");
+                              setReportingHoldReason("");
+                              setReportingHoldTarget(target);
+                            }}
+                            onResumeHold={(target) => {
+                              setBoardActionMessage(null);
+                              setReportingHoldMode("resume");
+                              setReportingHoldReason("");
+                              setReportingHoldTarget(target);
+                            }}
                             onRefreshReportStatus={refreshCaseReportStatus}
                             refreshingReportStatus={refreshingReportAppointmentId === row.appointmentId}
                           />
@@ -2870,6 +2943,28 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onUpdated={refreshReportingBoardAfterProtocolUpdate}
         onClose={() => setProtocolingAppointmentId(null)}
       />}
+      {reportingHoldTarget && (
+        <Dialog open onClose={() => !reportingHoldMutation.isPending && setReportingHoldTarget(null)}>
+          <DialogContent maxWidth="520px">
+            <DialogHeader>
+              <DialogTitle>{reportingHoldMode === "place" ? "Place on reporting hold" : "Resume reporting?"}</DialogTitle>
+              <DialogDescription>
+                {reportingHoldMode === "place"
+                  ? "The case stays visible and any current doctor assignment is preserved, but automatic assignment and self-claiming stop."
+                  : "This clears only the active Reporting Hold and preserves the assignment, report state, and timestamps."}
+              </DialogDescription>
+            </DialogHeader>
+            {reportingHoldMode === "place" ? <label className="grid gap-1 text-sm font-medium">Reason<Textarea aria-label="Reason" maxLength={1000} value={reportingHoldReason} onChange={(event) => setReportingHoldReason(event.target.value)} /></label> : <p className="text-sm text-foreground">Resume this case for normal Reporting Board assignment eligibility?</p>}
+            {reportingHoldMutation.isError ? <p role="alert" className="mt-3 text-sm text-red-700">{reportingHoldMutation.error instanceof Error ? reportingHoldMutation.error.message : "Could not update Reporting Hold."}</p> : null}
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setReportingHoldTarget(null)} disabled={reportingHoldMutation.isPending}>Cancel</Button>
+              <Button onClick={() => reportingHoldMutation.mutate()} disabled={reportingHoldMutation.isPending || (reportingHoldMode === "place" && (!reportingHoldReason.trim() || reportingHoldReason.length > 1000))}>
+                {reportingHoldMutation.isPending ? "Saving..." : reportingHoldMode === "place" ? "Place on hold" : "Resume reporting"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {manualFinalTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

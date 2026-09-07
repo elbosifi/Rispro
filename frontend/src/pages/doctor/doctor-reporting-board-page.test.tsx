@@ -43,6 +43,8 @@ const finalizeComparisonRequestMock = vi.fn();
 const markReportingBoardCaseDiscontinuedMock = vi.fn();
 const markReportingBoardCaseManualFinalMock = vi.fn();
 const clearReportingBoardCaseManualFinalMock = vi.fn();
+const placeReportingBoardCaseHoldMock = vi.fn();
+const releaseReportingBoardCaseHoldMock = vi.fn();
 const reconcileReportingBoardAssignmentToSonicFinalizerMock = vi.fn();
 const fetchOhifViewerAvailabilityMock = vi.fn();
 const launchReportingBoardCaseInOhifMock = vi.fn();
@@ -86,6 +88,8 @@ vi.mock("@/lib/api-hooks", () => ({
   markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
   markReportingBoardCaseManualFinal: (...args: unknown[]) => markReportingBoardCaseManualFinalMock(...args),
   clearReportingBoardCaseManualFinal: (...args: unknown[]) => clearReportingBoardCaseManualFinalMock(...args),
+  placeReportingBoardCaseHold: (...args: unknown[]) => placeReportingBoardCaseHoldMock(...args),
+  releaseReportingBoardCaseHold: (...args: unknown[]) => releaseReportingBoardCaseHoldMock(...args),
   reconcileReportingBoardAssignmentToSonicFinalizer: (...args: unknown[]) => reconcileReportingBoardAssignmentToSonicFinalizerMock(...args),
   fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
   launchReportingBoardCaseInOhif: (...args: unknown[]) => launchReportingBoardCaseInOhifMock(...args),
@@ -377,6 +381,8 @@ describe("DoctorReportingBoardPage", () => {
     markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
     markReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
     clearReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final_cleared" });
+    placeReportingBoardCaseHoldMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "reporting_hold", hold: { id: 1, reason: "Needs review", createdAt: "2026-08-23T10:00:00.000Z", createdByUserId: 10, createdByDoctorId: 1, createdByName: "Dr Manager" } });
+    releaseReportingBoardCaseHoldMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "reporting_hold_released", hold: { id: 1, reason: "Needs review", createdAt: "2026-08-23T10:00:00.000Z", createdByUserId: 10, createdByDoctorId: 1, createdByName: "Dr Manager" } });
     reconcileReportingBoardAssignmentToSonicFinalizerMock.mockResolvedValue({ previousAssignmentId: 1, newAssignmentId: 2, finalizedDoctorId: 8 });
     fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
     launchReportingBoardCaseInOhifMock.mockResolvedValue({
@@ -996,6 +1002,78 @@ describe("DoctorReportingBoardPage", () => {
 
     expect(screen.queryByRole("menuitem", { name: "Mark study as discontinued" })).toBeNull();
     expect(screen.getByText("View appointment")).toBeTruthy();
+  });
+
+  it("lets a manager place a hold with a trimmed reason and refreshes board queries", async () => {
+    renderPage();
+    await screen.findByText("V2-000042");
+    const casesCallsBefore = fetchReportingBoardCasesMock.mock.calls.length;
+    const statsCallsBefore = fetchReportingBoardStatsMock.mock.calls.length;
+    const row = screen.getByText("V2-000042").closest("tr")!;
+
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Place on reporting hold" }));
+
+    expect(screen.getByRole("heading", { name: "Place on reporting hold" })).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Place on hold" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason" }), { target: { value: "  Needs review  " } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(placeReportingBoardCaseHoldMock).toHaveBeenCalledWith(42, { reason: "Needs review" }));
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(casesCallsBefore));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(statsCallsBefore));
+  });
+
+  it("keeps Reporting Hold actions appointment-only and exposes held-case details and resume", async () => {
+    const heldRow = {
+      ...caseRow,
+      appointmentStatus: "completed" as const,
+      assignedDoctorId: 5,
+      assignedDoctorName: "Dr Target",
+      assignmentStatus: "assigned" as const,
+      currentAssignedAt: "2026-05-29T08:30:00.000Z",
+      reportingHold: { id: 12, reason: "Needs administrative review", createdAt: "2026-08-23T10:00:00.000Z", createdByUserId: 10, createdByDoctorId: 1, createdByName: "Dr Manager" },
+    };
+    fetchReportingBoardCasesMock.mockResolvedValueOnce({
+      cases: [heldRow],
+      totalCount: 1,
+      pagination: { limit: 100, offset: 0, hasMore: false, nextOffset: null },
+      filters: { dateFrom: "2026-05-15", dateTo: null, cutoffDate: "2026-05-15", assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, caseSource: "all", sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const row = await screen.findByText("V2-000042").then((value) => value.closest("tr")!);
+    expect(within(row).getByText("Dr Target")).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Reporting hold" }));
+    const details = screen.getByRole("dialog");
+    expect(within(details).getByText("Needs administrative review")).toBeTruthy();
+    expect(within(details).getByText("Dr Manager")).toBeTruthy();
+    expect(within(details).getByText(/2026/)).toBeTruthy();
+
+    fireEvent.click(within(details).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    expect(screen.queryByRole("menuitem", { name: "Place on reporting hold" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Resume reporting" }));
+    expect(screen.getByRole("heading", { name: "Resume reporting?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Resume reporting" }));
+    await waitFor(() => expect(releaseReportingBoardCaseHoldMock).toHaveBeenCalledWith(42));
+  });
+
+  it("does not offer Reporting Hold actions for comparison rows", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValueOnce({
+      cases: [comparisonRow],
+      totalCount: 1,
+      pagination: { limit: 100, offset: 0, hasMore: false, nextOffset: null },
+      filters: { dateFrom: "2026-05-15", dateTo: null, cutoffDate: "2026-05-15", assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, caseSource: "all", sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const row = await screen.findByText("CMP-000077").then((value) => value.closest("tr")!);
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for CMP-000077" }));
+    expect(screen.queryByRole("menuitem", { name: "Place on reporting hold" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Resume reporting" })).toBeNull();
   });
 
   it("uses a default board limit of 100", async () => {

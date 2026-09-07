@@ -91,6 +91,12 @@ describe("workflow timestamp mapping", () => {
       reporting_assignment_status: "assigned",
       report_status: "draft",
       report_status_checked_at: "2026-09-01T10:00:00Z",
+      reporting_hold_id: 15,
+      reporting_hold_reason: "Needs administrative review",
+      reporting_hold_created_at: "2026-09-01T09:00:00Z",
+      reporting_hold_created_by_user_id: 4,
+      reporting_hold_created_by_doctor_id: 9,
+      reporting_hold_created_by_name: "Dr Noor",
       complementary_imaging_relationship: "original_with_recall",
       complementary_recall_request_id: 12,
       complementary_recall_status: "scheduled",
@@ -107,10 +113,12 @@ describe("workflow timestamp mapping", () => {
     expect(mapped.assignedReportingDoctorName).toBe("Dr Noor");
     expect(mapped.reportingAssignmentStatus).toBe("assigned");
     expect(mapped.reportStatus).toBe("draft");
+    expect(mapped.reportingHold).toEqual({ id: 15, reason: "Needs administrative review", createdAt: "2026-09-01T09:00:00Z", createdByUserId: 4, createdByDoctorId: 9, createdByName: "Dr Noor" });
     expect(mapped.complementaryImagingContext).toMatchObject({ relationship: "original_with_recall", recallRequestId: 12, recallStatus: "scheduled", additionalAppointmentId: 77, additionalAccession: "V2-000077" });
     expect(unrelated.complementaryImagingContext?.relationship).toBeNull();
     expect(unrelated.assignedReportingDoctorId).toBeNull();
     expect(unrelated.reportingAssignmentStatus).toBe("unassigned");
+    expect(unrelated.reportingHold).toBeNull();
   });
 
   it("maps MRI safety fields without treating missing workflow data as standard acknowledgement", () => {

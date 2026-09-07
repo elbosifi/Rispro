@@ -316,6 +316,20 @@ describe("AppointmentManageModal", () => {
     expect(cluster.textContent).not.toContain("scheduled");
   });
 
+  it("shows the active Reporting Hold in the header and omits it when cleared", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({
+      ...appointment,
+      reportingHold: { id: 8, reason: "Needs administrative review", createdAt: "2026-07-26T10:30:00Z", createdByUserId: 4, createdByDoctorId: 9, createdByName: "Manager One" },
+    } as AppointmentWithDetails);
+    renderModal({ initialTab: "documents" });
+    expect((await screen.findByTestId("appointment-header-badge-cluster")).textContent).toContain("Reporting hold");
+
+    cleanup();
+    mocks.getAppointmentById.mockResolvedValueOnce(appointment);
+    renderModal({ initialTab: "documents" });
+    expect((await screen.findByTestId("appointment-header-badge-cluster")).textContent).not.toContain("Reporting hold");
+  });
+
   it("keeps the compact header focused on high-value reporting signals", async () => {
     const protocolAppointment = {
       ...appointment,

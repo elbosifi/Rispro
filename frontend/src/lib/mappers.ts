@@ -10,7 +10,8 @@ import type {
   AppointmentStatistics,
   DicomDevice,
   AuditEntry,
-  IdentifierType
+  IdentifierType,
+  ReportingBoardCaseHoldSummary
 } from "@/types/api";
 import type { PersistedDictionaryEntry } from "@/lib/name-generation";
 import type { ComplementaryRecallReasonCode } from "@/lib/api/complementary-recalls";
@@ -161,6 +162,7 @@ export interface AppointmentWithDetails extends Appointment {
   reportingAssignmentStatus?: "assigned" | "unassigned";
   reportStatus?: "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | null;
   reportStatusCheckedAt?: string | null;
+  reportingHold?: ReportingBoardCaseHoldSummary | null;
   complementaryImagingContext?: {
     relationship: "original_with_recall" | "additional_imaging" | null;
     recallRequestId: number | null;
@@ -469,6 +471,17 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
       return value === "final" || value === "draft" || value === "no_report" || value === "study_not_found" || value === "unavailable" ? value : null;
     })(),
     reportStatusCheckedAt: strOrNull(raw, "report_status_checked_at") ?? strOrNull(raw, "reportStatusCheckedAt"),
+    reportingHold: (() => {
+      const id = numOrNull(raw, "reporting_hold_id") ?? numOrNull(raw, "reportingHoldId");
+      return id == null ? null : {
+        id,
+        reason: str(raw, "reporting_hold_reason") || str(raw, "reportingHoldReason"),
+        createdAt: str(raw, "reporting_hold_created_at") || str(raw, "reportingHoldCreatedAt"),
+        createdByUserId: numOrNull(raw, "reporting_hold_created_by_user_id") ?? numOrNull(raw, "reportingHoldCreatedByUserId"),
+        createdByDoctorId: numOrNull(raw, "reporting_hold_created_by_doctor_id") ?? numOrNull(raw, "reportingHoldCreatedByDoctorId"),
+        createdByName: strOrNull(raw, "reporting_hold_created_by_name") ?? strOrNull(raw, "reportingHoldCreatedByName"),
+      };
+    })(),
     complementaryImagingContext: {
       relationship: (() => {
         const value = strOrNull(raw, "complementary_imaging_relationship") ?? strOrNull(raw, "complementaryImagingRelationship");

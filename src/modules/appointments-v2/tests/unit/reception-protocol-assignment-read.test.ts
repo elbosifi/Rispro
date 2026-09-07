@@ -56,6 +56,19 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(detailRoute, /reporting_cache\.last_success_at as report_status_checked_at/);
   });
 
+  it("returns only the active Reporting Hold in the single appointment detail read", () => {
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
+    const detailRoute = routes.match(/router\.get\(\s*"\/appointments\/:id"[\s\S]*?\n\);/)?.[0] ?? "";
+
+    assert.match(detailRoute, /reporting_hold\.id as reporting_hold_id/);
+    assert.match(detailRoute, /reporting_hold\.reason as reporting_hold_reason/);
+    assert.match(detailRoute, /reporting_hold\.created_at as reporting_hold_created_at/);
+    assert.match(detailRoute, /reporting_hold\.created_by_user_id as reporting_hold_created_by_user_id/);
+    assert.match(detailRoute, /reporting_hold\.created_by_doctor_id as reporting_hold_created_by_doctor_id/);
+    assert.match(detailRoute, /coalesce\(reporting_hold_creator_doctor\.display_name, reporting_hold_creator_user\.full_name, reporting_hold_creator_user\.username\) as reporting_hold_created_by_name/);
+    assert.match(detailRoute, /left join doctor_portal\.reporting_board_case_holds reporting_hold on reporting_hold\.appointment_id = b\.id and reporting_hold\.cleared_at is null/);
+  });
+
   it("includes complementary linkage fields in the Registration appointment list read", () => {
     const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
     const listRoute = routes.match(/router\.get\(\s*"\/appointments"[\s\S]*?\n\);/)?.[0] ?? "";

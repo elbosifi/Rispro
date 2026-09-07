@@ -111,6 +111,24 @@ describe("AppointmentInformationView", () => {
     expect(screen.getByTestId("report-status-badge").textContent).toContain("Final");
   });
 
+  it("shows Reporting Hold details while preserving the assigned doctor and report status", () => {
+    renderInformation({
+      ...appointment,
+      requiresReport: true,
+      assignedReportingDoctorName: "Dr Noor",
+      reportStatus: "draft",
+      reportingHold: { id: 8, reason: "Needs administrative review", createdAt: "2026-07-26T10:30:00Z", createdByUserId: 4, createdByDoctorId: 9, createdByName: "Manager One" },
+    } as AppointmentWithDetails, { reportStatus: { state: "draft" } });
+
+    expect(screen.getByTestId("appointment-reporting-card")).toBeTruthy();
+    expect(screen.getByTestId("reporting-hold-badge").textContent).toContain("On hold");
+    expect(screen.getByText("Needs administrative review")).toBeTruthy();
+    expect(screen.getByText("Manager One")).toBeTruthy();
+    expect(screen.getAllByText(/26\/07\/2026/).length).toBeGreaterThan(1);
+    expect(screen.getByText("Dr Noor")).toBeTruthy();
+    expect(screen.getByTestId("report-status-badge").textContent).toContain("Draft");
+  });
+
   it("renders only real recall context and opens its linked appointment", () => {
     const onOpenAppointment = vi.fn();
     renderInformation({ ...appointment, complementaryImagingContext: { relationship: "original_with_recall", recallRequestId: 9, recallStatus: "scheduled", reasonCode: "missing_sequence_phase", originalAppointmentId: 42, originalAccession: "ACC-42", additionalAppointmentId: 88, additionalAccession: "ACC-88", additionalAppointmentDate: null, additionalAppointmentTime: null, additionalAppointmentStatus: "scheduled" } } as AppointmentWithDetails, { recallContext: { id: 9, originalAppointmentId: 42, recallAppointmentId: 88, receptionInstruction: "Call before booking", technologistInstruction: "Use repeat sequence", status: "scheduled", requestedByUserId: 4, requestedAt: "2026-07-25T08:00:00Z", receptionSeenAt: null, receptionAcknowledgedAt: null, receptionAcknowledgedByUserId: null, scheduledAt: null, completedAt: null, cancelledAt: null, reasonCode: "missing_sequence_phase", qaClassification: null, urgency: null, dueAt: null, reportingDisposition: null, contactAttempts: [], requesterDisplayName: "Dr Noor", recallAppointmentAccession: "ACC-88" }, onOpenAppointment });

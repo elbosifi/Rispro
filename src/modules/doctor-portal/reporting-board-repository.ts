@@ -15,6 +15,7 @@ import type {
   CreateReportingBoardBulkAssignmentJobInput,
   BulkUnassignSelectedCasesResult,
   ReportingBoardBulkAssignmentJob,
+  ReportingBoardCaseHoldSummary,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardStatsBaseRow,
@@ -92,6 +93,20 @@ export interface ReportingBoardManualFinalOverride {
   clearReason: string | null;
 }
 
+interface ReportingBoardCaseHoldRecord {
+  id: number;
+  appointmentId: number;
+  reason: string;
+  createdByUserId: number | null;
+  createdByDoctorId: number | null;
+  createdAt: string | Date;
+  createdByName: string | null;
+  clearedByUserId?: number | null;
+  clearedByDoctorId?: number | null;
+  clearedAt?: string | Date | null;
+  clearReason?: string | null;
+}
+
 interface NotificationTargetRow {
   savedViewId: number;
   token: string;
@@ -111,6 +126,15 @@ interface PushDeliveryResult {
   attempted: number;
   sent: number;
   failed: number;
+}
+
+interface ReportingBoardCaseHoldSqlFields {
+  reportingHoldId?: number | null;
+  reportingHoldReason?: string | null;
+  reportingHoldCreatedAt?: string | Date | null;
+  reportingHoldCreatedByUserId?: number | null;
+  reportingHoldCreatedByDoctorId?: number | null;
+  reportingHoldCreatedByName?: string | null;
 }
 
 function nullableNumber(value: unknown): number | null {
@@ -1100,6 +1124,12 @@ export async function listReportingBoardCaseCandidates(
           when active_recall.id is not null and active_recall.reporting_disposition = 'separate_report' and active_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
           else null
         end as "workflowHold",
+        reporting_hold.id as "reportingHoldId",
+        reporting_hold.reason as "reportingHoldReason",
+        reporting_hold.created_at as "reportingHoldCreatedAt",
+        reporting_hold.created_by_user_id as "reportingHoldCreatedByUserId",
+        reporting_hold.created_by_doctor_id as "reportingHoldCreatedByDoctorId",
+        coalesce(reporting_hold_creator_doctor.display_name, reporting_hold_creator_user.full_name, reporting_hold_creator_user.username) as "reportingHoldCreatedByName",
         b.requires_report as "requiresReport",
         b.reporting_priority_id as "reportingPriorityId",
         rp.code as "reportingPriorityCode",
@@ -1190,6 +1220,9 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
+      left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
+      left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
@@ -1209,9 +1242,18 @@ export async function listReportingBoardCaseCandidates(
   return result.rows.map(reportingBoardCaseRow);
 }
 
-function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
+function reportingBoardCaseRow(row: ReportingBoardCaseRow & ReportingBoardCaseHoldSqlFields): ReportingBoardCaseRow {
+  const {
+    reportingHoldId,
+    reportingHoldReason,
+    reportingHoldCreatedAt,
+    reportingHoldCreatedByUserId,
+    reportingHoldCreatedByDoctorId,
+    reportingHoldCreatedByName,
+    ...caseRow
+  } = row;
   return {
-    ...row,
+    ...caseRow,
     caseType: row.caseType ?? "appointment",
     caseKey: row.caseKey ?? `appointment:${row.appointmentId}`,
     appointmentId: Number(row.appointmentId),
@@ -1223,6 +1265,14 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     activeComplementaryRecallStatus: row.activeComplementaryRecallStatus ?? null,
     latestComplementaryRecallStatus: row.latestComplementaryRecallStatus ?? null,
     workflowHold: row.workflowHold ?? null,
+    reportingHold: reportingBoardCaseHold({
+      reportingHoldId,
+      reportingHoldReason,
+      reportingHoldCreatedAt,
+      reportingHoldCreatedByUserId,
+      reportingHoldCreatedByDoctorId,
+      reportingHoldCreatedByName,
+    }),
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
@@ -1256,9 +1306,18 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
   };
 }
 
-function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardStatsBaseRow {
+function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow & ReportingBoardCaseHoldSqlFields): ReportingBoardStatsBaseRow {
+  const {
+    reportingHoldId,
+    reportingHoldReason,
+    reportingHoldCreatedAt,
+    reportingHoldCreatedByUserId,
+    reportingHoldCreatedByDoctorId,
+    reportingHoldCreatedByName,
+    ...statsRow
+  } = row;
   return {
-    ...row,
+    ...statsRow,
     caseType: row.caseType ?? "appointment",
     appointmentId: Number(row.appointmentId),
     comparisonRequestId: nullableNumber(row.comparisonRequestId),
@@ -1270,6 +1329,14 @@ function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoard
     reportFinalAt: nullableIsoString(row.reportFinalAt),
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: nullableNumber(row.manualFinalOverrideId),
+    reportingHold: reportingBoardCaseHold({
+      reportingHoldId,
+      reportingHoldReason,
+      reportingHoldCreatedAt,
+      reportingHoldCreatedByUserId,
+      reportingHoldCreatedByDoctorId,
+      reportingHoldCreatedByName,
+    }),
   };
 }
 
@@ -1307,7 +1374,13 @@ export async function listReportingBoardStatsRows(
           when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'imaging_completed' then 'waiting_for_additional_imaging'
           when unresolved_recall.id is not null and unresolved_recall.original_report_dependency = 'report_finalized' then 'waiting_for_additional_report'
           else null
-        end as "workflowHold"
+        end as "workflowHold",
+        reporting_hold.id as "reportingHoldId",
+        reporting_hold.reason as "reportingHoldReason",
+        reporting_hold.created_at as "reportingHoldCreatedAt",
+        reporting_hold.created_by_user_id as "reportingHoldCreatedByUserId",
+        reporting_hold.created_by_doctor_id as "reportingHoldCreatedByDoctorId",
+        coalesce(reporting_hold_creator_doctor.display_name, reporting_hold_creator_user.full_name, reporting_hold_creator_user.username) as "reportingHoldCreatedByName"
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -1316,6 +1389,9 @@ export async function listReportingBoardStatsRows(
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
+      left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
+      left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join lateral (
         select recall.id, recall.reporting_disposition, recall.original_report_dependency
@@ -1378,6 +1454,12 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         null::text as "linkedPreviousAccessionNumber",
         b.case_category as "caseCategory",
         b.status as "appointmentStatus",
+        reporting_hold.id as "reportingHoldId",
+        reporting_hold.reason as "reportingHoldReason",
+        reporting_hold.created_at as "reportingHoldCreatedAt",
+        reporting_hold.created_by_user_id as "reportingHoldCreatedByUserId",
+        reporting_hold.created_by_doctor_id as "reportingHoldCreatedByDoctorId",
+        coalesce(reporting_hold_creator_doctor.display_name, reporting_hold_creator_user.full_name, reporting_hold_creator_user.username) as "reportingHoldCreatedByName",
         b.requires_report as "requiresReport",
         b.reporting_priority_id as "reportingPriorityId",
         rp.code as "reportingPriorityCode",
@@ -1442,6 +1524,9 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
+      left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
+      left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
@@ -1480,6 +1565,190 @@ export async function findActiveManualFinalOverride(appointmentId: number): Prom
     [appointmentId]
   );
   return result.rows[0] ? manualFinalOverride(result.rows[0]) : null;
+}
+
+export async function findActiveReportingBoardCaseHold(appointmentId: number): Promise<ReportingBoardCaseHoldSummary | null> {
+  const result = await pool.query<ReportingBoardCaseHoldRecord>(
+    `
+      select
+        hold.id,
+        hold.appointment_id as "appointmentId",
+        hold.reason,
+        hold.created_by_user_id as "createdByUserId",
+        hold.created_by_doctor_id as "createdByDoctorId",
+        hold.created_at as "createdAt",
+        coalesce(creator_doctor.display_name, creator_user.full_name, creator_user.username) as "createdByName"
+      from doctor_portal.reporting_board_case_holds hold
+      left join users creator_user on creator_user.id = hold.created_by_user_id
+      left join doctor_portal.doctor_profiles creator_doctor on creator_doctor.id = hold.created_by_doctor_id
+      where hold.appointment_id = $1 and hold.cleared_at is null
+      limit 1
+    `,
+    [appointmentId]
+  );
+  return result.rows[0] ? reportingBoardCaseHoldRecord(result.rows[0]) : null;
+}
+
+export async function placeReportingBoardCaseHold(input: {
+  appointmentId: number;
+  reason: string;
+  actor: AssignmentActor;
+}): Promise<ReportingBoardCaseHoldSummary> {
+  const reason = input.reason.trim();
+  if (!reason) throw new HttpError(400, "A reason is required to place a Reporting Hold.");
+  if (reason.length > 1000) throw new HttpError(400, "Reporting Hold reason must be 1000 characters or fewer.");
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const booking = await client.query<{ id: number; status: string; requiresReport: boolean }>(
+      `
+        select id, status, requires_report as "requiresReport"
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const row = booking.rows[0];
+    if (!row) throw new HttpError(404, "Case not found.");
+    if (row.status !== "completed" || !row.requiresReport) {
+      throw new HttpError(409, "Only completed Reporting Board cases that require reports can be placed on Reporting Hold.");
+    }
+
+    const existing = await client.query<{ id: number }>(
+      `
+        select id
+        from doctor_portal.reporting_board_case_holds
+        where appointment_id = $1 and cleared_at is null
+        limit 1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    if (existing.rows[0]) throw new HttpError(409, "This Reporting Board case already has an active Reporting Hold.");
+
+    const inserted = await client.query<{ id: number }>(
+      `
+        insert into doctor_portal.reporting_board_case_holds (
+          appointment_id, reason, created_by_user_id, created_by_doctor_id
+        )
+        values ($1, $2, $3, $4)
+        returning id
+      `,
+      [input.appointmentId, reason, input.actor.userId, input.actor.doctorId]
+    );
+    const holdId = Number(inserted.rows[0]!.id);
+    const holdResult = await client.query<ReportingBoardCaseHoldRecord>(
+      `
+        select
+          hold.id,
+          hold.appointment_id as "appointmentId",
+          hold.reason,
+          hold.created_by_user_id as "createdByUserId",
+          hold.created_by_doctor_id as "createdByDoctorId",
+          hold.created_at as "createdAt",
+          coalesce(creator_doctor.display_name, creator_user.full_name, creator_user.username) as "createdByName"
+        from doctor_portal.reporting_board_case_holds hold
+        left join users creator_user on creator_user.id = hold.created_by_user_id
+        left join doctor_portal.doctor_profiles creator_doctor on creator_doctor.id = hold.created_by_doctor_id
+        where hold.id = $1
+      `,
+      [holdId]
+    );
+    const hold = reportingBoardCaseHoldRecord(holdResult.rows[0]!);
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_case_hold_placed",
+      targetType: "appointment",
+      targetId: input.appointmentId,
+      metadata: {
+        appointmentId: input.appointmentId,
+        holdId: hold.id,
+        createdByUserId: hold.createdByUserId,
+        createdByDoctorId: hold.createdByDoctorId,
+      },
+      reason,
+    });
+    await client.query("commit");
+    return hold;
+  } catch (error) {
+    await client.query("rollback");
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "23505") {
+      throw new HttpError(409, "This Reporting Board case already has an active Reporting Hold.");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function releaseReportingBoardCaseHold(input: {
+  appointmentId: number;
+  actor: AssignmentActor;
+}): Promise<ReportingBoardCaseHoldSummary> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const booking = await client.query<{ id: number }>(
+      `select id from appointments_v2.bookings where id = $1 for update`,
+      [input.appointmentId]
+    );
+    if (!booking.rows[0]) throw new HttpError(404, "Case not found.");
+
+    const existing = await client.query<ReportingBoardCaseHoldRecord>(
+      `
+        select
+          hold.id,
+          hold.appointment_id as "appointmentId",
+          hold.reason,
+          hold.created_by_user_id as "createdByUserId",
+          hold.created_by_doctor_id as "createdByDoctorId",
+          hold.created_at as "createdAt",
+          coalesce(creator_doctor.display_name, creator_user.full_name, creator_user.username) as "createdByName"
+        from doctor_portal.reporting_board_case_holds hold
+        left join users creator_user on creator_user.id = hold.created_by_user_id
+        left join doctor_portal.doctor_profiles creator_doctor on creator_doctor.id = hold.created_by_doctor_id
+        where hold.appointment_id = $1 and hold.cleared_at is null
+        limit 1
+        for update of hold
+      `,
+      [input.appointmentId]
+    );
+    const current = existing.rows[0];
+    if (!current) throw new HttpError(409, "This Reporting Board case has no active Reporting Hold.");
+
+    await client.query(
+      `
+        update doctor_portal.reporting_board_case_holds
+        set cleared_by_user_id = $2, cleared_by_doctor_id = $3, cleared_at = now()
+        where id = $1
+      `,
+      [current.id, input.actor.userId, input.actor.doctorId]
+    );
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_case_hold_released",
+      targetType: "appointment",
+      targetId: input.appointmentId,
+      metadata: {
+        appointmentId: input.appointmentId,
+        holdId: Number(current.id),
+        clearedByUserId: input.actor.userId,
+        clearedByDoctorId: input.actor.doctorId,
+      },
+      reason: null,
+    });
+    await client.query("commit");
+    return reportingBoardCaseHoldRecord(current);
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listActiveManualFinalOverridesByAppointmentIds(appointmentIds: number[]): Promise<ReportingBoardManualFinalOverride[]> {
@@ -1724,6 +1993,7 @@ export async function bulkAssignReportingCases(input: {
   reason: string | null;
   unassignedOnly: boolean;
   actor: AssignmentActor;
+  respectReportingHold: boolean;
   caseAuditEventType?: string;
   summaryAuditEventType?: string;
   restrictToDoctorReportPermissions?: boolean;
@@ -1762,6 +2032,16 @@ export async function bulkAssignReportingCases(input: {
     );
     const existingActiveIds = new Set(activeAssignments.rows.map((row) => Number(row.appointment_id)));
     const modalityByAppointmentId = new Map(locked.rows.map((row) => [Number(row.appointmentId), Number(row.modalityId)]));
+    const reportingHoldIds = input.respectReportingHold
+      ? new Set((await client.query<{ appointment_id: number }>(
+        `
+          select appointment_id
+          from doctor_portal.reporting_board_case_holds
+          where appointment_id = any($1::bigint[]) and cleared_at is null
+        `,
+        [input.candidateAppointmentIds]
+      )).rows.map((row) => Number(row.appointment_id)))
+      : new Set<number>();
     const reportableModalityIds = input.restrictToDoctorReportPermissions
       ? new Set((await client.query<{ modality_id: number }>(
         `select modality_id from doctor_portal.doctor_modality_permissions where doctor_id = $1 and can_report = true and active = true`,
@@ -1771,6 +2051,10 @@ export async function bulkAssignReportingCases(input: {
     for (const appointmentId of input.candidateAppointmentIds) {
       if (!lockedIds.has(appointmentId)) {
         skipped.push({ appointmentId, reason: "appointment_not_found" });
+        continue;
+      }
+      if (reportingHoldIds.has(appointmentId)) {
+        skipped.push({ appointmentId, reason: "reporting_hold" });
         continue;
       }
       if (input.unassignedOnly && existingActiveIds.has(appointmentId)) {
@@ -2619,6 +2903,30 @@ export async function createAssignedToMeNotifications(input: {
   }
   await Promise.all(pushNotifications.map((notification) => sendSavedViewPushNotifications(notification)));
   return created;
+}
+
+function reportingBoardCaseHold(row: ReportingBoardCaseHoldSqlFields): ReportingBoardCaseHoldSummary | null {
+  const id = nullableNumber(row.reportingHoldId);
+  if (id === null) return null;
+  return {
+    id,
+    reason: String(row.reportingHoldReason ?? ""),
+    createdAt: nullableIsoString(row.reportingHoldCreatedAt)!,
+    createdByUserId: nullableNumber(row.reportingHoldCreatedByUserId),
+    createdByDoctorId: nullableNumber(row.reportingHoldCreatedByDoctorId),
+    createdByName: row.reportingHoldCreatedByName ?? null,
+  };
+}
+
+function reportingBoardCaseHoldRecord(row: ReportingBoardCaseHoldRecord): ReportingBoardCaseHoldSummary {
+  return {
+    id: Number(row.id),
+    reason: row.reason,
+    createdAt: nullableIsoString(row.createdAt)!,
+    createdByUserId: nullableNumber(row.createdByUserId),
+    createdByDoctorId: nullableNumber(row.createdByDoctorId),
+    createdByName: row.createdByName ?? null,
+  };
 }
 
 /** Additional-imaging events share the Reporting Board feed and its saved-view Web Push delivery. */

@@ -36,6 +36,8 @@ import {
   clearReportingBoardCaseManualFinal,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
+  placeReportingBoardCaseHold,
+  releaseReportingBoardCaseHold,
   requireOwnAssignedPersonalReportingBoardAppointment,
   requirePersonalReportingBoardAppointment,
   requirePersonalReportingBoardAppointmentRead,
@@ -479,6 +481,28 @@ router.get(
     const appointmentId = requiredPositiveInteger(req.params.appointmentId, "appointmentId");
     await requirePersonalReportingBoardAppointmentRead(actor(req), appointmentId);
     res.json(await getProtocolingHistoricalPacsCandidates(appointmentId));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/hold",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await placeReportingBoardCaseHold(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      asString(body.reason)
+    ));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/resume",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await releaseReportingBoardCaseHold(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId")
+    ));
   })
 );
 

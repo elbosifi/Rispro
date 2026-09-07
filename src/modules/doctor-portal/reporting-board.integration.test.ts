@@ -1533,6 +1533,115 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual({ appointmentId: restoredCase?.appointmentId, reportStatus: restoredCase?.reportStatus, reportStatusSource: restoredCase?.reportStatusSource }, { appointmentId, reportStatus: "draft", reportStatusSource: "sonicdicom" });
   });
 
+  it("keeps Reporting Holds visible, manager-controlled, and outside automatic/self assignment", async () => {
+    guard();
+    const date = addDays(118);
+    const label = uniq("reporting_hold");
+    const heldUnassigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} unassigned` });
+    const heldAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} assigned` });
+    const automaticCandidate = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} candidate` });
+    for (const appointmentId of [heldUnassigned, heldAssigned, automaticCandidate]) statusByAppointmentId.set(appointmentId, "draft");
+    await statusByAppointmentId.flush();
+    await assignDirectly(heldAssigned, otherDoctor.doctorId);
+    const assignedBeforeHold = (await pool.query<{ id: string; assigned_doctor_id: string; assigned_at: string }>(`select id::text, assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [heldAssigned])).rows[0];
+
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "doctor cannot place hold" } })).status, 403);
+    assert.equal((await api(receptionistCookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "reception cannot place hold" } })).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/resume`, { method: "POST" })).status, 403);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "" } })).status, 400);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: " " } })).status, 400);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "x".repeat(1001) } })).status, 400);
+    const placed = await api<{ ok: true; appointmentId: number; status: string; hold: { id: number; reason: string; createdByUserId: number; createdByDoctorId: number } }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "Needs administrative review" } });
+    assert.equal(placed.status, 200, JSON.stringify(placed.data));
+    assert.deepEqual({ appointmentId: placed.data.appointmentId, status: placed.data.status, reason: placed.data.hold.reason, userId: placed.data.hold.createdByUserId, doctorId: placed.data.hold.createdByDoctorId }, { appointmentId: heldUnassigned, status: "reporting_hold", reason: "Needs administrative review", userId: supervisor.id, doctorId: supervisor.doctorId });
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/hold`, { method: "POST", body: { reason: "replace reason" } })).status, 409);
+
+    const assignedPlaced = await api<{ hold: { id: number } }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldAssigned}/hold`, { method: "POST", body: { reason: "Assigned case review" } });
+    assert.equal(assignedPlaced.status, 200, JSON.stringify(assignedPlaced.data));
+    const assignedAfterHold = (await pool.query<{ id: string; assigned_doctor_id: string; assigned_at: string }>(`select id::text, assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [heldAssigned])).rows[0];
+    assert.deepEqual(assignedAfterHold, assignedBeforeHold);
+
+    const heldManual = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} manual held` });
+    statusByAppointmentId.set(heldManual, "draft");
+    await statusByAppointmentId.flush();
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldManual}/hold`, { method: "POST", body: { reason: "Manual assignment allowed" } })).status, 200);
+    const manuallyAssigned = await api<{ appointmentId: number }>(supervisor.cookie, `/api/doctor/reporting-board/${heldManual}/assign-doctor`, { method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "Assign held case" } });
+    assert.equal(manuallyAssigned.status, 200, JSON.stringify(manuallyAssigned.data));
+    const manualHeldRow = await api<{ cases: Array<{ appointmentId: number; reportingHold: { reason: string } | null; assignedDoctorId: number | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?q=${encodeURIComponent(`${label} manual held`)}&caseSource=appointments&reportStatus=all&limit=1`);
+    assert.deepEqual({ hold: manualHeldRow.data.cases[0]?.reportingHold?.reason, assignedDoctorId: manualHeldRow.data.cases[0]?.assignedDoctorId }, { hold: "Manual assignment allowed", assignedDoctorId: targetDoctor.doctorId });
+    const board = await api<{ cases: Array<{ appointmentId: number; reportingHold: { reason: string } | null; assignmentStatus: string; assignedDoctorId: number | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?q=${encodeURIComponent(label)}&caseSource=appointments&reportStatus=all&limit=20`);
+    assert.equal(board.status, 200, JSON.stringify(board.data));
+    assert.deepEqual(board.data.cases.find((row) => row.appointmentId === heldUnassigned) && { hold: board.data.cases.find((row) => row.appointmentId === heldUnassigned)!.reportingHold?.reason, assignmentStatus: board.data.cases.find((row) => row.appointmentId === heldUnassigned)!.assignmentStatus }, { hold: "Needs administrative review", assignmentStatus: "unassigned" });
+    assert.deepEqual(board.data.cases.find((row) => row.appointmentId === heldAssigned) && { hold: board.data.cases.find((row) => row.appointmentId === heldAssigned)!.reportingHold?.reason, assignmentStatus: board.data.cases.find((row) => row.appointmentId === heldAssigned)!.assignmentStatus, assignedDoctorId: board.data.cases.find((row) => row.appointmentId === heldAssigned)!.assignedDoctorId }, { hold: "Assigned case review", assignmentStatus: "assigned", assignedDoctorId: otherDoctor.doctorId });
+
+    const stats = await api<{ summary: { unassigned: number; assigned: number; overdue: number; longestActiveAssignmentAgeMinutes: number | null } }>(supervisor.cookie, `/api/doctor/reporting-board/stats?q=${encodeURIComponent(label)}&caseSource=appointments&reportStatus=all&limit=20`);
+    assert.equal(stats.status, 200, JSON.stringify(stats.data));
+    assert.deepEqual({ unassigned: stats.data.summary.unassigned, assigned: stats.data.summary.assigned, overdue: stats.data.summary.overdue }, { unassigned: 2, assigned: 2, overdue: 0 });
+
+    const worklist = await getDoctorWorklist(targetDoctor, false);
+    const available = await api<{ counters: { unassigned: number }; cases: Array<{ appointmentId: number; reportingHold?: unknown; canAssignToMe: boolean }> }>(targetDoctor.cookie, `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(`${label} unassigned`)}&mobileQuickTab=available&limit=20`);
+    assert.equal(available.status, 200, JSON.stringify(available.data));
+    assert.equal(available.data.counters.unassigned, 0);
+    assert.equal(available.data.cases.some((row) => row.appointmentId === heldUnassigned), false);
+    const claim = await api<{ error: string }>(targetDoctor.cookie, `/api/reporting/saved-views/public/${worklist.token}/mobile/assign-to-me`, { method: "POST", body: { caseType: "appointment", appointmentId: heldUnassigned } });
+    assert.equal(claim.status, 409, JSON.stringify(claim.data));
+    assert.equal(claim.data.error, "This case is on Reporting Hold and cannot be claimed until reporting is resumed.");
+
+    const automatic = await api<{ assignedCount: number; assignedAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: targetDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date, q: label }, reason: "hold-aware automatic assignment" } });
+    assert.equal(automatic.status, 200, JSON.stringify(automatic.data));
+    assert.deepEqual(automatic.data.assignedAppointmentIds, [automaticCandidate]);
+    assert.equal(automatic.data.skipped.some((row) => row.appointmentId === heldUnassigned && row.reason === "reporting_hold"), true);
+
+    const automaticAssignmentBeforeHold = (await pool.query<{ assigned_doctor_id: string; assigned_at: string }>(`select assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [automaticCandidate])).rows[0];
+    const heldAfterAutomatic = await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${automaticCandidate}/hold`, { method: "POST", body: { reason: "Hold after assignment" } });
+    assert.equal(heldAfterAutomatic.status, 200, JSON.stringify(heldAfterAutomatic.data));
+    const automaticAssignmentAfterHold = (await pool.query<{ assigned_doctor_id: string; assigned_at: string }>(`select assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [automaticCandidate])).rows[0];
+    assert.deepEqual(automaticAssignmentAfterHold, automaticAssignmentBeforeHold);
+
+    const reassignedHeld = await api<{ assignedAppointmentIds: number[] }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-reassign-selected", { method: "POST", body: { appointmentIds: [heldAssigned], doctorId: targetDoctor.doctorId, reason: "Reassign held case" } });
+    assert.equal(reassignedHeld.status, 200, JSON.stringify(reassignedHeld.data));
+    assert.deepEqual(reassignedHeld.data.assignedAppointmentIds, [heldAssigned]);
+    const reassignedHoldRow = await api<{ cases: Array<{ appointmentId: number; reportingHold: { reason: string } | null; assignedDoctorId: number | null; currentAssignedAt: string | null; completedAt: string | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?q=${encodeURIComponent(`${label} assigned`)}&caseSource=appointments&reportStatus=all&limit=1`);
+    assert.deepEqual({ hold: reassignedHoldRow.data.cases[0]?.reportingHold?.reason, assignedDoctorId: reassignedHoldRow.data.cases[0]?.assignedDoctorId }, { hold: "Assigned case review", assignedDoctorId: targetDoctor.doctorId });
+    const assignedBeforeResume = (await pool.query<{ assigned_doctor_id: string; assigned_at: string }>(`select assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [heldAssigned])).rows[0];
+
+    const resumed = await api<{ status: string; hold: { reason: string } }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/resume`, { method: "POST" });
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.data));
+    assert.equal(resumed.data.status, "reporting_hold_released");
+    assert.equal(resumed.data.hold.reason, "Needs administrative review");
+    const claimedAfterResume = await api<{ assignmentId: number }>(targetDoctor.cookie, `/api/reporting/saved-views/public/${worklist.token}/mobile/assign-to-me`, { method: "POST", body: { caseType: "appointment", appointmentId: heldUnassigned } });
+    assert.equal(claimedAfterResume.status, 200, JSON.stringify(claimedAfterResume.data));
+    assert.equal(Number((await pool.query(`select assigned_doctor_id from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [heldUnassigned])).rows[0].assigned_doctor_id), targetDoctor.doctorId);
+
+    const releasedAssigned = await api<{ status: string }>(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldAssigned}/resume`, { method: "POST" });
+    assert.equal(releasedAssigned.status, 200, JSON.stringify(releasedAssigned.data));
+    const assignedAfterResume = (await pool.query<{ assigned_doctor_id: string; assigned_at: string }>(`select assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [heldAssigned])).rows[0];
+    assert.deepEqual(assignedAfterResume, assignedBeforeResume);
+    const reassignedHoldRowAfterResume = await api<{ cases: Array<{ currentAssignedAt: string | null; completedAt: string | null }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?q=${encodeURIComponent(`${label} assigned`)}&caseSource=appointments&reportStatus=all&limit=1`);
+    assert.equal(reassignedHoldRowAfterResume.data.cases[0]?.currentAssignedAt, reassignedHoldRow.data.cases[0]?.currentAssignedAt);
+    assert.equal(reassignedHoldRowAfterResume.data.cases[0]?.completedAt, reassignedHoldRow.data.cases[0]?.completedAt);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldUnassigned}/resume`, { method: "POST" })).status, 409);
+
+    const scheduledHeld = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} scheduled` });
+    statusByAppointmentId.set(scheduledHeld, "draft");
+    await statusByAppointmentId.flush();
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${scheduledHeld}/hold`, { method: "POST", body: { reason: "Scheduled hold" } })).status, 200);
+    const scheduled = await api<{ job: { id: number } }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assignment-jobs", { method: "POST", body: { scheduledFor: new Date().toISOString(), doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date, q: `${label} scheduled` }, reason: "scheduled hold test" } });
+    assert.equal(scheduled.status, 201, JSON.stringify(scheduled.data));
+    const scheduledRun = await api<{ job: { status: string; result: { assignedCount: number; skipped: Array<{ appointmentId: number; reason: string }> } } }>(supervisor.cookie, `/api/doctor/reporting-board/bulk-assignment-jobs/${scheduled.data.job.id}/run-now`, { method: "POST" });
+    assert.equal(scheduledRun.status, 200, JSON.stringify(scheduledRun.data));
+    assert.equal(scheduledRun.data.job.status, "partial");
+    assert.equal(scheduledRun.data.job.result.assignedCount, 0);
+    assert.equal(scheduledRun.data.job.result.skipped.some((row) => row.appointmentId === scheduledHeld && row.reason === "reporting_hold"), true);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [scheduledHeld])).rows[0].count, 0);
+
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${automaticCandidate}/resume`, { method: "POST" })).status, 200);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${heldManual}/resume`, { method: "POST" })).status, 200);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/cases/${scheduledHeld}/resume`, { method: "POST" })).status, 200);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_placed' and reason = any($1::text[])`, [["Needs administrative review", "Assigned case review", "Manual assignment allowed", "Hold after assignment", "Scheduled hold"]])).rows[0].count, 5);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_released'`)).rows[0].count >= 5, true);
+  });
+
   it("keeps tombstoned comparison documents as history, selects replacements, and restores the distinct primary", async () => {
     guard();
     const date = addDays(86);

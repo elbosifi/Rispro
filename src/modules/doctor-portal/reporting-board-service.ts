@@ -40,6 +40,8 @@ import {
   listReportingBoardNotifications,
   listReportingBoardStatsRows,
   markReportingBoardCaseManualFinal as markReportingBoardCaseManualFinalRecord,
+  placeReportingBoardCaseHold as placeReportingBoardCaseHoldRecord,
+  releaseReportingBoardCaseHold as releaseReportingBoardCaseHoldRecord,
   listSavedViews,
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
@@ -67,6 +69,7 @@ import type {
   BulkUnassignSelectedCasesResult,
   ReportingBoardBulkAssignmentJob,
   ReportingBoardCaseRow,
+  ReportingBoardCaseHoldSummary,
   ReportingBoardFilters,
   ReportingBoardDoctorStatsRow,
   ReportingBoardModalityStatsRow,
@@ -134,6 +137,7 @@ function isPersonalDeskOverdue(row: ReportingBoardCaseRow, doctorId: number): bo
     row.requiresReport &&
     row.reportStatus !== "final" &&
     !row.workflowHold &&
+    !row.reportingHold &&
     row.dueAt &&
     row.dueAt < todayIso()
   );
@@ -248,6 +252,13 @@ function derivedAssignmentMatch(row: ReportingBoardCaseRow): ReportingBoardCaseR
 
 function withProtectedTimelineMetrics(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
   const resolved = withTimelineMetrics({ ...row, assignmentMatch: derivedAssignmentMatch(row) });
+  if (resolved.reportingHold) {
+    return {
+      ...resolved,
+      currentAssignmentAgeMinutes: null,
+      completedUnassignedAgeMinutes: null,
+    };
+  }
   if (resolved.assignmentOrigin === "sonic_auto" || resolved.assignmentOrigin === "sonic_reconciled") {
     return { ...resolved, completedToAssignedMinutes: null, assignedToFinalMinutes: null };
   }
@@ -447,7 +458,7 @@ async function listUnifiedReportingBoardCases(
     const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
     return resolved
       .filter((row) => matchesAssignmentFilters(row, filters))
-      .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && row.bookingDate < todayIso()))
+      .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && !row.reportingHold && row.bookingDate < todayIso()))
       .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()))
       .sort(compareReportingBoardRows(filters));
   }
@@ -461,7 +472,7 @@ async function listUnifiedReportingBoardCases(
   ]);
   const resolved = (await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus))
     .filter((row) => matchesAssignmentFilters(row, filters))
-    .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && row.bookingDate < todayIso()))
+    .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && !row.workflowHold && !row.reportingHold && row.bookingDate < todayIso()))
     .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
   const visibleRows = resolved
     .sort(compareReportingBoardRows(filters))
@@ -556,7 +567,7 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     if (priorityCode === "urgent") summary.urgent += 1;
     if (statOrUrgent) summary.statOrUrgent += 1;
     if (requiredNotFinal) summary.requiredNotFinal += 1;
-    if (requiredNotFinal && !row.workflowHold && row.bookingDate < today) summary.overdue += 1;
+    if (requiredNotFinal && !row.workflowHold && !row.reportingHold && row.bookingDate < today) summary.overdue += 1;
     if (modalityCode === "CT") summary.ct += 1;
     if (modalityCode === "MR") summary.mr += 1;
     if (status === "final") summary.final += 1;
@@ -570,7 +581,7 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     if (completedToAssignedMinutes !== null) completedToAssignedValues.push(completedToAssignedMinutes);
     const assignedToFinalMinutes = postHocAssignment || !row.reportFinalAt ? null : minutesBetween(row.currentAssignedAt, row.reportFinalAt);
     if (assignedToFinalMinutes !== null) assignedToFinalValues.push(assignedToFinalMinutes);
-    const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" && !row.workflowHold ? minutesSince(row.currentAssignedAt, nowMs) : null;
+    const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" && !row.workflowHold && !row.reportingHold ? minutesSince(row.currentAssignedAt, nowMs) : null;
     if (activeAssignmentAge !== null) activeAssignmentAges.push(activeAssignmentAge);
     if (row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && row.completedAt) summary.completedUnassigned += 1;
 
@@ -1198,9 +1209,46 @@ export async function clearReportingBoardCaseManualFinal(
   return { ok: true, appointmentId, status: "manual_final_cleared", override };
 }
 
+export async function placeReportingBoardCaseHold(
+  actor: Actor,
+  appointmentId: number,
+  reasonInput: string
+): Promise<{ ok: true; appointmentId: number; status: "reporting_hold"; hold: ReportingBoardCaseHoldSummary }> {
+  const manager = await requireRosterManager(actor);
+  const reason = String(reasonInput || "").trim();
+  if (!reason) throw new HttpError(400, "A reason is required to place a Reporting Hold.");
+  if (reason.length > 1000) throw new HttpError(400, "Reporting Hold reason must be 1000 characters or fewer.");
+  const row = await requireVisibleReportingBoardAppointment(appointmentId);
+  if (row.appointmentStatus !== "completed" || !row.requiresReport) {
+    throw new HttpError(409, "Only completed Reporting Board cases that require reports can be placed on Reporting Hold.");
+  }
+  if (row.reportStatus === "final" || row.manualFinalOverrideId) {
+    throw new HttpError(409, "Final Reporting Board cases cannot be placed on Reporting Hold.");
+  }
+  const hold = await placeReportingBoardCaseHoldRecord({
+    appointmentId,
+    reason,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
+  return { ok: true, appointmentId, status: "reporting_hold", hold };
+}
+
+export async function releaseReportingBoardCaseHold(
+  actor: Actor,
+  appointmentId: number
+): Promise<{ ok: true; appointmentId: number; status: "reporting_hold_released"; hold: ReportingBoardCaseHoldSummary }> {
+  const manager = await requireRosterManager(actor);
+  await requireVisibleReportingBoardAppointment(appointmentId);
+  const hold = await releaseReportingBoardCaseHoldRecord({
+    appointmentId,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
+  return { ok: true, appointmentId, status: "reporting_hold_released", hold };
+}
+
 function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, personalDeskDoctorId: number | null = null) {
   const overdue = personalDeskDoctorId === null
-    ? row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()
+    ? row.requiresReport && row.reportStatus !== "final" && !row.reportingHold && row.bookingDate < todayIso()
     : isPersonalDeskOverdue(row, personalDeskDoctorId);
   return {
     caseType: row.caseType,
@@ -1232,6 +1280,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     activeComplementaryRecallStatus: row.caseType === "appointment" ? row.activeComplementaryRecallStatus ?? null : null,
     latestComplementaryRecallStatus: row.caseType === "appointment" ? row.latestComplementaryRecallStatus ?? null : null,
     workflowHold: row.caseType === "appointment" ? row.workflowHold ?? null : null,
+    reportingHold: row.caseType === "appointment" ? row.reportingHold ?? null : null,
     reportStatusSource: row.reportStatusSource ?? null,
     manualFinalOverrideId: row.manualFinalOverrideId ?? null,
     manualFinalByDoctorId: row.manualFinalByDoctorId ?? null,
@@ -1246,7 +1295,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     completedToAssignedMinutes: row.completedToAssignedMinutes,
     currentAssignmentAgeMinutes: row.currentAssignmentAgeMinutes,
     completedUnassignedAgeMinutes: row.completedUnassignedAgeMinutes,
-    completedAgeMinutes: minutesSince(row.completedAt, Date.now()),
+    completedAgeMinutes: row.reportingHold ? null : minutesSince(row.completedAt, Date.now()),
     overdue,
     linkedPreviousStudyDate: row.linkedPreviousStudyDate,
     linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber,
@@ -1260,7 +1309,9 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
 
 function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canClaimToSelf = false) {
   const isFinal = row.reportStatus === "final";
-  const actionDisabledReason = !canManage && !canClaimToSelf
+  const actionDisabledReason = row.reportingHold && !canManage
+    ? "This case is on Reporting Hold and cannot be claimed until reporting is resumed."
+    : !canManage && !canClaimToSelf
     ? "Sign in with the doctor profile linked to this worklist to claim eligible cases."
     : !canManage && canClaimToSelf && isFinal && !row.manualFinalOverrideId
       ? "Report is final; self-claim is closed."
@@ -1268,7 +1319,7 @@ function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canCl
       ? row.exclusionReason ?? "This case is not eligible for assignment changes."
       : null;
   return {
-    canAssignToMe: canClaimToSelf && row.canAssign && !isFinal && row.assignmentStatus === "unassigned",
+    canAssignToMe: canClaimToSelf && row.canAssign && !row.reportingHold && !isFinal && row.assignmentStatus === "unassigned",
     canReassign: canManage && row.canAssign,
     canUnassign: canManage && row.canAssign && !isFinal && row.assignmentStatus === "assigned",
     actionDisabledReason,
@@ -1298,11 +1349,11 @@ function mobileCounters(
   return {
     total: cases.length,
     assignedToMe: assignedDoctorId ? mine.filter(isActive).length : null,
-    unassigned: cases.filter((row) => row.assignmentStatus === "unassigned").length,
+    unassigned: cases.filter((row) => row.assignmentStatus === "unassigned" && !row.reportingHold).length,
     urgent: cases.filter((row) => isActive(row) && isUrgent(row)).length,
     requiredNotFinal: cases.filter((row) => row.requiresReport && row.reportStatus !== "final").length,
     overdue: personalDeskDoctorId === null
-      ? mine.filter((row) => isActive(row) && row.bookingDate < today).length
+      ? mine.filter((row) => isActive(row) && !row.reportingHold && row.bookingDate < today).length
       : cases.filter((row) => isPersonalDeskOverdue(row, personalDeskDoctorId)).length,
   };
 }
@@ -1341,12 +1392,12 @@ function applyMobileQuickTab(
     case "my_cases":
       return cases.filter((row) => row.assignmentStatus === "assigned" && row.assignedDoctorId === input.assignedDoctorId);
     case "available":
-      return cases.filter((row) => row.assignmentStatus === "unassigned");
+      return cases.filter((row) => row.assignmentStatus === "unassigned" && !row.reportingHold);
     case "urgent":
       return cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
     case "overdue":
       return personalDeskDoctorId === null
-        ? cases.filter((row) => row.assignedDoctorId === input.assignedDoctorId && row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso())
+        ? cases.filter((row) => row.assignedDoctorId === input.assignedDoctorId && row.requiresReport && row.reportStatus !== "final" && !row.reportingHold && row.bookingDate < todayIso())
         : cases.filter((row) => isPersonalDeskOverdue(row, personalDeskDoctorId));
     default:
       return cases;
@@ -1688,6 +1739,9 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
   const eligible = scope.cases.find((row) => identity.caseType === "appointment"
     ? row.caseType === "appointment" && row.appointmentId === identity.appointmentId
     : row.caseType === "comparison" && row.comparisonRequestId === identity.comparisonRequestId);
+  if (eligible?.reportingHold) {
+    throw new HttpError(409, "This case is on Reporting Hold and cannot be claimed until reporting is resumed.");
+  }
   if (!eligible || !eligible.canAssign || eligible.assignmentStatus !== "unassigned" || eligible.reportStatus === "final") {
     throw new HttpError(409, "Case is no longer eligible to claim.");
   }
@@ -1718,6 +1772,9 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
       reason,
     });
   if (!result) throw new HttpError(409, "Another doctor claimed this case first.");
+  if ("outcome" in result && result.outcome === "reporting_hold") {
+    throw new HttpError(409, "This case is on Reporting Hold and cannot be claimed until reporting is resumed.");
+  }
   await createAssignedToMeNotifications({
     doctorId: me.profile!.id,
     appointmentIds: identity.caseType === "appointment" ? [identity.appointmentId] : [],
@@ -1849,7 +1906,7 @@ async function summarizeDoctorWorklist(
     ...view,
     effectiveModalityCodes: scope.effectiveModalityCodes,
     assignedPendingCount: scope.cases.filter((row) => row.assignedDoctorId === view.targetDoctorId).length,
-    eligibleUnassignedCount: scope.cases.filter((row) => row.assignmentStatus === "unassigned").length,
+    eligibleUnassignedCount: scope.cases.filter((row) => row.assignmentStatus === "unassigned" && !row.reportingHold).length,
     scopeMessage: scope.scopeMessage,
   };
 }
@@ -1886,6 +1943,7 @@ export async function listDoctorReportingWorklists(actor: Actor): Promise<Doctor
   }
   const unassignedByModality = new Map<string, number>();
   for (const row of unassigned) {
+    if (row.reportingHold) continue;
     const code = row.modalityCode.toUpperCase();
     unassignedByModality.set(code, (unassignedByModality.get(code) ?? 0) + 1);
   }
@@ -2026,7 +2084,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   // automatic ordering; no visible table sort or pagination may choose cases.
   const cases = await listUnifiedReportingBoardCases(filters, { fullScope: true });
   const eligible = cases
-    .filter((row) => row.caseType === "appointment" && row.canAssign && row.assignmentStatus === "unassigned" && row.requiresReport && row.appointmentStatus === "completed" && row.reportStatus !== "final")
+    .filter((row) => row.caseType === "appointment" && row.canAssign && !row.reportingHold && row.assignmentStatus === "unassigned" && row.requiresReport && row.appointmentStatus === "completed" && row.reportStatus !== "final")
     .sort(compareAutomaticAssignmentCandidates(filters.pinUrgentToTop));
   // Revalidate a bounded window before the assignment transaction. This lets
   // stale cache finals be skipped while later eligible cases fill the request.
@@ -2039,6 +2097,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     candidateAppointmentIds: selected.map((row) => row.appointmentId),
     reason: input.reason?.trim() || null,
     unassignedOnly: true,
+    respectReportingHold: true,
     restrictToDoctorReportPermissions: true,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
   });
@@ -2051,7 +2110,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   const preSkipped = cases
     .filter((row) => !selectedIds.has(row.appointmentId))
     .slice(0, Math.max(0, input.count - result.assignedCount))
-    .map((row) => ({ appointmentId: row.appointmentId, reason: verification.finalIds.has(row.appointmentId) ? "report_final" : verification.unavailableIds.has(row.appointmentId) ? "report_status_unavailable" : row.exclusionReason ?? "not_selected" }));
+    .map((row) => ({ appointmentId: row.appointmentId, reason: row.reportingHold ? "reporting_hold" : verification.finalIds.has(row.appointmentId) ? "report_final" : verification.unavailableIds.has(row.appointmentId) ? "report_status_unavailable" : row.exclusionReason ?? "not_selected" }));
   return {
     ...result,
     requestedCount: input.count,
@@ -2358,6 +2417,7 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     candidateAppointmentIds: eligibleIds,
     reason: input.reason?.trim() || null,
     unassignedOnly: false,
+    respectReportingHold: false,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
     caseAuditEventType: "reporting_board_bulk_selected_case_reassigned",
     summaryAuditEventType: "reporting_board_bulk_selected_reassign_completed",

@@ -281,6 +281,12 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
       {appointment.requiresReport ? <CompactCard title={text(language, "التقرير", "Reporting")} testId="appointment-reporting-card"><DefinitionGrid rows={[
         { label: text(language, "الطبيب المعين", "Assigned doctor"), value: appointment.assignedReportingDoctorName || text(language, "غير معين", "Unassigned"), emphasis: true },
         { label: text(language, "حالة التقرير", "Report status"), value: <Badge data-testid="report-status-badge" size="sm" variant={reportVariant(reportState)}>{reportLabel(language, reportState)}</Badge> },
+        ...(appointment.reportingHold ? [
+          { label: text(language, "حالة التعليق", "Reporting Hold"), value: <Badge data-testid="reporting-hold-badge" size="sm" variant="warning">{text(language, "موقوف", "On hold")}</Badge> },
+          { label: text(language, "سبب التعليق", "Hold reason"), value: appointment.reportingHold.reason },
+          { label: text(language, "أُوقف بواسطة", "Placed by"), value: appointment.reportingHold.createdByName || text(language, "مستخدم غير معروف", "Unknown user") },
+          { label: text(language, "تاريخ التعليق", "Placed at"), value: formatDateTimeLy(appointment.reportingHold.createdAt), dir: "ltr" as const },
+        ] : []),
         ...(appointment.reportStatusCheckedAt ? [{ label: text(language, "آخر فحص", "Status checked"), value: formatDateTimeLy(appointment.reportStatusCheckedAt), dir: "ltr" as const }] : []),
       ]} />{!readOnly && reportStatus?.canViewReport ? <Button type="button" size="sm" className="mt-3" onClick={onOpenReport}><ExternalLink size={14} className="me-1.5" aria-hidden="true" />{reportStatus.viewButtonLabel || text(language, "فتح التقرير", "Open report")}</Button> : null}</CompactCard> : null}
     </div>

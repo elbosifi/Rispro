@@ -172,10 +172,44 @@ export async function claimAppointmentToDoctor(input: {
   actorUserId: UserId;
   allowedModalityCodes: string[];
   reason?: string | null;
-}): Promise<{ assignmentId: number } | null> {
+}): Promise<{ assignmentId: number } | { outcome: "reporting_hold" } | null> {
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const booking = await client.query<{ id: number; modalityId: number; modalityCode: string }>(
+      `
+        select b.id, b.modality_id as "modalityId", upper(m.code) as "modalityCode"
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        where b.id = $1
+          and b.status = 'completed'
+          and b.requires_report = true
+          and upper(m.code) = any($2::text[])
+          and not exists (
+            select 1 from doctor_portal.reporting_board_manual_final_overrides mf
+            where mf.appointment_id = b.id and mf.cleared_at is null
+          )
+        for update of b
+      `,
+      [input.appointmentId, input.allowedModalityCodes.map((code) => code.toUpperCase())]
+    );
+    if (!booking.rows[0]) {
+      await client.query("rollback");
+      return null;
+    }
+    const reportingHold = await client.query<{ id: number }>(
+      `
+        select id
+        from doctor_portal.reporting_board_case_holds
+        where appointment_id = $1 and cleared_at is null
+        limit 1
+      `,
+      [input.appointmentId]
+    );
+    if (reportingHold.rows[0]) {
+      await client.query("rollback");
+      return { outcome: "reporting_hold" };
+    }
     const inserted = await client.query<{ id: number }>(
       `
         insert into doctor_portal.case_team_assignments (
@@ -185,18 +219,11 @@ export async function claimAppointmentToDoctor(input: {
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
         where b.id = $1
-          and b.status = 'completed'
-          and b.requires_report = true
-          and upper(m.code) = any($3::text[])
-          and not exists (
-            select 1 from doctor_portal.reporting_board_manual_final_overrides mf
-            where mf.appointment_id = b.id and mf.cleared_at is null
-          )
         on conflict (appointment_id, assignment_type) where status = 'active'
         do nothing
         returning id
       `,
-      [input.appointmentId, input.doctorId, input.allowedModalityCodes]
+      [input.appointmentId, input.doctorId]
     );
     const assignmentId = Number(inserted.rows[0]?.id ?? 0);
     if (!assignmentId) {

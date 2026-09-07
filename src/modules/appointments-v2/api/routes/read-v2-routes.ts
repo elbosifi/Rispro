@@ -596,6 +596,12 @@ router.get(
           assigned_reporting_doctor.id as assigned_reporting_doctor_id,
           assigned_reporting_doctor.display_name as assigned_reporting_doctor_name,
           case when reporting_assignment.id is null then 'unassigned' else 'assigned' end as reporting_assignment_status,
+          reporting_hold.id as reporting_hold_id,
+          reporting_hold.reason as reporting_hold_reason,
+          reporting_hold.created_at as reporting_hold_created_at,
+          reporting_hold.created_by_user_id as reporting_hold_created_by_user_id,
+          reporting_hold.created_by_doctor_id as reporting_hold_created_by_doctor_id,
+          coalesce(reporting_hold_creator_doctor.display_name, reporting_hold_creator_user.full_name, reporting_hold_creator_user.username) as reporting_hold_created_by_name,
           case when manual_final.id is not null then 'final' else reporting_cache.report_status end as report_status,
           reporting_cache.last_success_at as report_status_checked_at,
           (complementary_return.id is not null) as is_additional_imaging,
@@ -637,6 +643,9 @@ router.get(
         left join doctor_portal.case_team_assignments reporting_assignment on reporting_assignment.appointment_id = b.id and reporting_assignment.assignment_type = 'reporting' and reporting_assignment.status = 'active'
         left join doctor_portal.doctor_profiles assigned_reporting_doctor on assigned_reporting_doctor.id = reporting_assignment.assigned_doctor_id
         left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+        left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
+        left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
+        left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
         left join doctor_portal.reporting_board_sonicdicom_cache reporting_cache on reporting_cache.appointment_id = b.id
         left join appointments_v2.complementary_recall_requests complementary_return on complementary_return.recall_appointment_id = b.id
         left join appointments_v2.bookings original_booking on original_booking.id = complementary_return.original_appointment_id

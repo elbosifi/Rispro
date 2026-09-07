@@ -1135,6 +1135,7 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     comparisonReason: row.comparisonReason == null ? null : String(row.comparisonReason),
     comparisonPreparationNote: row.comparisonPreparationNote == null ? null : String(row.comparisonPreparationNote),
     caseCategory: "comparison",
+    reportingHold: null,
     appointmentStatus: status,
     requiresReport: true,
     reportingPriorityId: null,

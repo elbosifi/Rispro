@@ -11,7 +11,7 @@ import type {
   ReportingBoardBulkUnassignSelectedPayload, OhifViewerAvailability, OhifViewerLaunchResponse,
   ReportingBoardCasesResponse, ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
   ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, DoctorReportingWorklistEmailQueueResult, ReportingBoardSettings,
-  ReportingBoardStatsResponse, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
+  ReportingBoardStatsResponse, ReportingBoardCaseHoldSummary, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
   RosterXmlImportPreview, RosterXmlImportResult, AppointmentProtocol, ProtocolAuditTimelineEvent, ProtocolAnatomyRegion,
   ProtocolLibraryProtocol, ProtocolLibraryVersion, ProtocolLibraryVersionDetail, ProtocolLibraryCtPhaseRow,
   ProtocolLibraryMriSequenceRow, ProtocolDetails, ProtocolFilters, ProtocolPayload, DoctorProtocolingAppointment,
@@ -886,6 +886,24 @@ export async function clearReportingBoardCaseManualFinal(
   return api<{ ok: true; appointmentId: number; status: "manual_final_cleared" }>(`/doctor/reporting-board/cases/${appointmentId}/clear-manual-final`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function placeReportingBoardCaseHold(
+  appointmentId: number,
+  payload: { reason: string }
+): Promise<{ ok: true; appointmentId: number; status: "reporting_hold"; hold: ReportingBoardCaseHoldSummary }> {
+  return api<{ ok: true; appointmentId: number; status: "reporting_hold"; hold: ReportingBoardCaseHoldSummary }>(`/doctor/reporting-board/cases/${appointmentId}/hold`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function releaseReportingBoardCaseHold(
+  appointmentId: number
+): Promise<{ ok: true; appointmentId: number; status: "reporting_hold_released"; hold: ReportingBoardCaseHoldSummary }> {
+  return api<{ ok: true; appointmentId: number; status: "reporting_hold_released"; hold: ReportingBoardCaseHoldSummary }>(`/doctor/reporting-board/cases/${appointmentId}/resume`, {
+    method: "POST",
   });
 }
 

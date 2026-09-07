@@ -490,6 +490,15 @@ export interface DoctorReportingWorklistEmailQueueResult {
   recipientEmail: string;
 }
 
+export interface ReportingBoardCaseHoldSummary {
+  id: number;
+  reason: string;
+  createdAt: string;
+  createdByUserId: number | null;
+  createdByDoctorId: number | null;
+  createdByName: string | null;
+}
+
 export interface ReportingBoardCaseRow {
   caseType: "appointment" | "comparison";
   caseKey: string;
@@ -519,6 +528,7 @@ export interface ReportingBoardCaseRow {
   activeComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus?: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
   workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | "additional_imaging_ready_for_supplement" | null;
+  reportingHold?: ReportingBoardCaseHoldSummary | null;
   requiresReport: boolean;
   reportingPriorityId: number | null;
   reportingPriorityCode: string | null;
@@ -846,6 +856,7 @@ export interface ReportingBoardMobileCase {
   activeComplementaryRecallStatus: "pending_scheduling" | "scheduled" | null;
   latestComplementaryRecallStatus: "pending_scheduling" | "scheduled" | "completed" | "cancelled" | null;
   workflowHold?: "waiting_for_additional_imaging" | "waiting_for_additional_report" | "additional_imaging_ready_for_supplement" | null;
+  reportingHold?: ReportingBoardCaseHoldSummary | null;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
   manualFinalOverrideId?: number | null;
   manualFinalByDoctorId?: number | null;

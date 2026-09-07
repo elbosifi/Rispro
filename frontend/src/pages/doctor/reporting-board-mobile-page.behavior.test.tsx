@@ -444,8 +444,64 @@ describe("Personal Reporting Desk case presentation", () => {
     expect(screen.getByText("Routine")).toBeTruthy();
     expect(screen.getByText("Assigned 2 h 15 min")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
+
+
     expect(screen.queryByText(/clinical indication/i)).toBeNull();
     expect(screen.queryByText("MR · MR")).toBeNull();
+  });
+
+  it("keeps an assigned held case in My Cases and exposes hold details", async () => {
+    const row = makeCase({
+      reportingHold: { id: 4, reason: "Needs administrative review", createdAt: "2026-09-02T08:00:00.000Z", createdByUserId: 501, createdByDoctorId: 7, createdByName: "Dr Reader" },
+      currentAssignmentAgeMinutes: null,
+      completedAgeMinutes: null,
+      overdue: false,
+    });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [row] });
+    renderPage();
+
+    const card = (await screen.findByText("Patient One")).closest<HTMLElement>("article")!;
+    expect(within(card).getByText("Reporting Hold")).toBeTruthy();
+    expect(within(card).getByText("On hold")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Reporting Hold" }));
+
+    const details = screen.getByRole("dialog");
+    expect(within(details).getByText("Needs administrative review")).toBeTruthy();
+    expect(within(details).getByText("Dr Reader")).toBeTruthy();
+    expect(within(details).getByText("2026-09-02T08:00:00.000Z")).toBeTruthy();
+  });
+
+  it("does not offer an unassigned held case in Available", async () => {
+    const row = makeCase({
+      assignedDoctor: null,
+      assignedDoctorId: null,
+      assignmentStatus: "unassigned",
+      canAssignToMe: false,
+      reportingHold: { id: 5, reason: "Awaiting review", createdAt: "2026-09-02T08:00:00.000Z", createdByUserId: 501, createdByDoctorId: 7, createdByName: "Dr Reader" },
+    });
+    testState.fetchView.mockImplementation(async (_token, filters) => filters?.mobileQuickTab === "available"
+      ? { ...viewData(), counters: { ...viewData().counters, unassigned: 0 }, cases: [] }
+      : { ...viewData(), cases: [row] });
+    renderPage();
+
+    await screen.findByText("Patient One");
+    fireEvent.click(screen.getByRole("button", { name: /Available/ }));
+    await waitFor(() => expect(testState.fetchView).toHaveBeenCalledWith("token", expect.objectContaining({ mobileQuickTab: "available" })));
+    await waitFor(() => expect(screen.queryByText("Patient One")).toBeNull());
+    expect(screen.getByRole("button", { name: /Available 0/ })).toBeTruthy();
+  });
+
+  it("shows Reporting Hold alongside an existing additional-imaging badge", async () => {
+    const row = makeCase({
+      activeComplementaryRecallStatus: "scheduled",
+      latestComplementaryRecallStatus: "scheduled",
+      reportingHold: { id: 6, reason: "Review before completion", createdAt: "2026-09-02T08:00:00.000Z", createdByUserId: 501, createdByDoctorId: 7, createdByName: "Dr Reader" },
+    });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [row] });
+    renderPage();
+
+    expect(await screen.findByText("Reporting Hold")).toBeTruthy();
+    expect(screen.getByText(/Additional imaging .*Scheduled/)).toBeTruthy();
   });
 
   it("shows the primary identifier and compact study metadata on the card and in details", async () => {
