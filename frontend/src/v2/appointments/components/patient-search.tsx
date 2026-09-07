@@ -231,7 +231,7 @@ export function PatientSearch({
     setVerifying(true); setVerificationError(null);
     try {
       const result = await verifyV2AppointmentPatientIdentity(verificationPatient.id, "primary_identifier", verificationEvidence);
-      onSelect({ ...verificationPatient, patientIdentityVerificationProof: result.proof, patientIdentityVerificationMethod: "primary_identifier" });
+      onSelect({ ...verificationPatient, patientIdentitySelectionSource: "search", patientIdentityVerificationProof: result.proof, patientIdentityVerificationMethod: "primary_identifier" });
       setQuery(""); setResults([]); closeVerification();
     } catch (error) {
       setVerificationError(error instanceof Error ? error.message : t(language, "appointments.identity.verificationFailed"));
@@ -246,6 +246,11 @@ export function PatientSearch({
 
   if (selectedPatient) {
     const primaryIdentifier = getPrimaryIdentifier(selectedPatient, language);
+    const primaryIdentifierDisplayLabel = selectedPatient.primaryIdentifierType
+      && primaryIdentifier.label === t(language, "appointments.create.primaryId")
+      && primaryIdentifier.value
+      ? getPrimaryIdentifierTypeLabel(selectedPatient, language)
+      : primaryIdentifier.label;
     const mrn = selectedPatient.mrn || selectedPatient.medicalRecordNo || null;
     const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
     const displayName = transliterateMissingEnglish
@@ -281,7 +286,7 @@ export function PatientSearch({
               : (selectedPatient.arabicFullName || selectedPatient.englishFullName)}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>
-            {primaryIdentifier.value ? `${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : `${t(language, "appointments.create.primaryId")}: —`}
+            {primaryIdentifier.value ? `${primaryIdentifierDisplayLabel}: ${primaryIdentifier.value}` : `${t(language, "appointments.create.primaryId")}: —`}
             {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 6 }}>
@@ -345,6 +350,11 @@ export function PatientSearch({
         >
           {results.map((patient) => {
             const primaryIdentifier = getPrimaryIdentifier(patient, language);
+            const primaryIdentifierDisplayLabel = patient.primaryIdentifierType
+              && primaryIdentifier.label === t(language, "appointments.create.primaryId")
+              && (patient.maskedPrimaryIdentifier || primaryIdentifier.value)
+              ? getPrimaryIdentifierTypeLabel(patient, language)
+              : primaryIdentifier.label;
             const mrn = patient.mrn || patient.medicalRecordNo || null;
             const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
             const displayName = transliterateMissingEnglish
@@ -381,7 +391,7 @@ export function PatientSearch({
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
                     {language === "ar" ? (patient.englishFullName || patient.arabicFullName) : patient.arabicFullName}
-                    {(patient.maskedPrimaryIdentifier || primaryIdentifier.value) ? ` · ${t(language, "appointments.create.primaryId")}: ${patient.maskedPrimaryIdentifier || primaryIdentifier.value}` : ""}
+                    {(patient.maskedPrimaryIdentifier || primaryIdentifier.value) ? ` · ${primaryIdentifierDisplayLabel}: ${patient.maskedPrimaryIdentifier || primaryIdentifier.value}` : ""}
                     {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
                     {patient.estimatedDateOfBirth && !patient.demographicsEstimated
                       ? ` · ${t(language, "appointments.identity.exactDob")}: ${patient.estimatedDateOfBirth}`

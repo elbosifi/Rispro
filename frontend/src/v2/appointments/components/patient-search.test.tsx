@@ -64,6 +64,8 @@ describe("PatientSearch", () => {
     render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={onSelect} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Similar" } });
     await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Similar"));
+    expect(screen.getByText(/National ID: .*1234/)).toBeTruthy();
+    expect(screen.queryByText("100000000001")).toBeNull();
     fireEvent.click(await screen.findByText("Similar Patient One"));
 
     expect(onSelect).not.toHaveBeenCalled();
@@ -80,7 +82,22 @@ describe("PatientSearch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify and select" }));
 
     await waitFor(() => expect(verifyPatientIdentity).toHaveBeenCalledWith(7, "primary_identifier", "100000000001"));
-    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 7, patientIdentityVerificationProof: "signed-proof", patientIdentityVerificationMethod: "primary_identifier" })));
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 7, patientIdentitySelectionSource: "search", patientIdentityVerificationProof: "signed-proof", patientIdentityVerificationMethod: "primary_identifier" })));
+  });
+
+  it("uses the primary identifier type in the selected-patient summary", () => {
+    render(<LanguageProvider><PatientSearch selectedPatient={{
+      id: 13,
+      arabicFullName: "مريض بطاقة وطنية",
+      englishFullName: "Selected National ID Patient",
+      primaryIdentifierType: "national_id",
+      primaryIdentifierTypeLabelAr: "الرقم الوطني",
+      primaryIdentifierTypeLabelEn: "National ID",
+      maskedPrimaryIdentifier: "••••1234",
+    }} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
+
+    expect(screen.getByText(/National ID: .*1234/)).toBeTruthy();
+    expect(screen.queryByText("100000000001")).toBeNull();
   });
 
   it("displays the server-provided Passport identifier type without prefilling its value", async () => {
@@ -99,6 +116,7 @@ describe("PatientSearch", () => {
     render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Passport" } });
     await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Passport"));
+    expect(screen.getByText(/Passport: .*4321/)).toBeTruthy();
     fireEvent.click(await screen.findByText("Passport Patient"));
 
     expect(screen.getByText("Passport")).toBeTruthy();
@@ -116,11 +134,13 @@ describe("PatientSearch", () => {
       primaryIdentifierType: "other",
       primaryIdentifierTypeLabelAr: "بطاقة المستشفى",
       primaryIdentifierTypeLabelEn: "Hospital card number",
+      maskedPrimaryIdentifier: "••••9876",
     }]);
 
     render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Custom" } });
     await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Custom"));
+    expect(screen.getByText(/Hospital card number: .*9876/)).toBeTruthy();
     fireEvent.click(await screen.findByText("Custom Identifier Patient"));
 
     expect(screen.getByText("Hospital card number")).toBeTruthy();
@@ -138,11 +158,13 @@ describe("PatientSearch", () => {
       primaryIdentifierType: "passport",
       primaryIdentifierTypeLabelAr: "جواز السفر",
       primaryIdentifierTypeLabelEn: "Passport",
+      maskedPrimaryIdentifier: "••••4321",
     }]);
 
     render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Arabic" } });
     await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Arabic"));
+    expect(screen.getByText(/جواز السفر: .*4321/)).toBeTruthy();
     fireEvent.click(await screen.findByText("مريض جواز سفر متشابه"));
 
     expect(screen.getByText("جواز السفر")).toBeTruthy();
