@@ -122,6 +122,7 @@ describe("AppointmentInformationView", () => {
 
     expect(screen.getByTestId("appointment-reporting-card")).toBeTruthy();
     expect(screen.getByTestId("reporting-hold-badge").textContent).toContain("On hold");
+    expect(screen.getByTestId("appointment-reporting-hold-pause-icon")).toBeTruthy();
     expect(screen.getByText("Needs administrative review")).toBeTruthy();
     expect(screen.getByText("Manager One")).toBeTruthy();
     expect(screen.getAllByText(/26\/07\/2026/).length).toBeGreaterThan(1);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Printer, Tags, Upload, UserRound, X } from "lucide-react";
+import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Pause, Printer, Tags, Upload, UserRound, X } from "lucide-react";
 import {
   cancelAppointment,
   deleteAppointment,
@@ -12,7 +12,7 @@ import {
   type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { formatDateLy } from "@/lib/date-format";
+import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { normalizeAppointmentId } from "@/lib/appointment-id";
@@ -152,20 +152,37 @@ function additionalImagingBadge(language: "ar" | "en", status: NonNullable<Appoi
 }
 
 function AppointmentHeaderBadgeCluster({ appointment, language, compact = false }: { appointment: AppointmentWithDetails; language: "ar" | "en"; compact?: boolean }) {
+  const [holdDetailsOpen, setHoldDetailsOpen] = useState(false);
   const reportingStatus = reportingStatusBadge(language, appointment.reportStatus);
   const complementary = appointment.complementaryImagingContext ?? { relationship: null, recallStatus: null };
   const additionalImaging = complementary.relationship !== null
     ? additionalImagingBadge(language, complementary.recallStatus)
     : null;
-  return <div data-testid="appointment-header-badge-cluster" className={`flex min-w-0 flex-wrap items-center ${compact ? "gap-1.5" : "gap-2"}`}>
+  return <>
+    <div data-testid="appointment-header-badge-cluster" className={`flex min-w-0 flex-wrap items-center ${compact ? "gap-1.5" : "gap-2"}`}>
     <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset size={compact ? "sm" : "default"} />
     <Badge size={compact ? "sm" : "default"} variant={appointmentStatusVariant(appointment.status)} className="whitespace-nowrap">{statusLabel(language, appointment.status)}</Badge>
     {appointment.requiresReport ? <Badge size={compact ? "sm" : "default"} variant={appointment.reportingAssignmentStatus === "assigned" ? "info" : "neutral"} className="whitespace-nowrap">{appointment.reportingAssignmentStatus === "assigned" && appointment.assignedReportingDoctorName ? chooseLocalized(language, `الطبيب: ${appointment.assignedReportingDoctorName}`, `Assigned: ${appointment.assignedReportingDoctorName}`) : chooseLocalized(language, "لم يخصص", "Unassigned")}</Badge> : null}
     {appointment.requiresReport && reportingStatus ? <Badge size={compact ? "sm" : "default"} variant={reportingStatus.variant} className="whitespace-nowrap">{reportingStatus.label}</Badge> : null}
-    {appointment.reportingHold ? <Badge size={compact ? "sm" : "default"} variant="warning" className="whitespace-nowrap">{chooseLocalized(language, "التقرير معلق.. انقر لمعرفة السبب", "Reporting hold")}</Badge> : null}
+    {appointment.reportingHold ? <button type="button" className={`state-chip state-chip--warning cursor-pointer whitespace-nowrap hover:brightness-95 ${compact ? "text-[0.72rem]" : "text-[0.8rem]"}`} onClick={() => setHoldDetailsOpen(true)} aria-label={chooseLocalized(language, "تعليق التقارير", "Reporting hold")} title={chooseLocalized(language, "عرض سبب تعليق التقارير", "Show Reporting Hold reason")}>
+      <Pause data-testid="reporting-hold-pause-icon" size={compact ? 11 : 13} strokeWidth={2.5} aria-hidden="true" />
+      {chooseLocalized(language, "التقرير معلق.. انقر لمعرفة السبب", "Reporting hold")}
+    </button> : null}
     {additionalImaging ? <Badge size={compact ? "sm" : "default"} variant={additionalImaging.variant} className="whitespace-nowrap !border-violet-200 !bg-violet-50 !text-violet-700">{additionalImaging.label}</Badge> : null}
     {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact /> : null}
-  </div>;
+    </div>
+    {appointment.reportingHold ? <Dialog open={holdDetailsOpen} onClose={() => setHoldDetailsOpen(false)}>
+      <DialogContent maxWidth="480px" dir={language === "ar" ? "rtl" : "ltr"}>
+        <DialogHeader><DialogTitle>{chooseLocalized(language, "تعليق التقارير", "Reporting hold")}</DialogTitle><DialogDescription>{chooseLocalized(language, "هذه الحالة الإدارية منفصلة عن حالة سير العمل وحالة التقرير.", "This administrative reporting state is separate from workflow and report status.")}</DialogDescription></DialogHeader>
+        <dl className="grid gap-3 text-sm">
+          <div><dt className="font-semibold">{chooseLocalized(language, "السبب", "Reason")}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{appointment.reportingHold.reason}</dd></div>
+          <div><dt className="font-semibold">{chooseLocalized(language, "أُوقف بواسطة", "Placed by")}</dt><dd className="mt-1">{appointment.reportingHold.createdByName || chooseLocalized(language, "مستخدم غير معروف", "Unknown user")}</dd></div>
+          <div><dt className="font-semibold">{chooseLocalized(language, "تاريخ التعليق", "Placed at")}</dt><dd dir="ltr" className="mt-1">{formatDateTimeLy(appointment.reportingHold.createdAt)}</dd></div>
+        </dl>
+        <DialogFooter><Button variant="secondary" onClick={() => setHoldDetailsOpen(false)}>{chooseLocalized(language, "إغلاق", "Close")}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog> : null}
+  </>;
 }
 
 export function AppointmentManageModal({

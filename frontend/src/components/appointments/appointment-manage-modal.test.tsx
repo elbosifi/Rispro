@@ -316,13 +316,18 @@ describe("AppointmentManageModal", () => {
     expect(cluster.textContent).not.toContain("scheduled");
   });
 
-  it("shows the active Reporting Hold in the header and omits it when cleared", async () => {
+  it("shows the active Reporting Hold reason from the header and omits it when cleared", async () => {
     mocks.getAppointmentById.mockResolvedValueOnce({
       ...appointment,
       reportingHold: { id: 8, reason: "Needs administrative review", createdAt: "2026-07-26T10:30:00Z", createdByUserId: 4, createdByDoctorId: 9, createdByName: "Manager One" },
     } as AppointmentWithDetails);
     renderModal({ initialTab: "documents" });
     expect((await screen.findByTestId("appointment-header-badge-cluster")).textContent).toContain("Reporting hold");
+    expect(screen.getByTestId("reporting-hold-pause-icon")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Reporting hold" }));
+    expect(screen.getByRole("heading", { name: "Reporting hold" })).toBeTruthy();
+    expect(screen.getByText("Needs administrative review")).toBeTruthy();
+    expect(screen.getByText("Manager One")).toBeTruthy();
 
     cleanup();
     mocks.getAppointmentById.mockResolvedValueOnce(appointment);

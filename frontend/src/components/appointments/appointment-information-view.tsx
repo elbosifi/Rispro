@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarClock, Check, ChevronLeft, ChevronRight, Copy, Edit3, ExternalLink } from "lucide-react";
+import { CalendarClock, Check, ChevronLeft, ChevronRight, Copy, Edit3, ExternalLink, Pause } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
@@ -282,7 +282,7 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
         { label: text(language, "الطبيب المعين", "Assigned doctor"), value: appointment.assignedReportingDoctorName || text(language, "غير معين", "Unassigned"), emphasis: true },
         { label: text(language, "حالة التقرير", "Report status"), value: <Badge data-testid="report-status-badge" size="sm" variant={reportVariant(reportState)}>{reportLabel(language, reportState)}</Badge> },
         ...(appointment.reportingHold ? [
-          { label: text(language, "حالة التعليق", "Reporting Hold"), value: <Badge data-testid="reporting-hold-badge" size="sm" variant="warning">{text(language, "موقوف", "On hold")}</Badge> },
+          { label: text(language, "حالة التعليق", "Reporting Hold"), value: <Badge data-testid="reporting-hold-badge" size="sm" variant="warning" className="inline-flex items-center gap-1"><Pause data-testid="appointment-reporting-hold-pause-icon" size={13} strokeWidth={2.5} aria-hidden="true" />{text(language, "موقوف", "On hold")}</Badge> },
           { label: text(language, "سبب التعليق", "Hold reason"), value: appointment.reportingHold.reason },
           { label: text(language, "أُوقف بواسطة", "Placed by"), value: appointment.reportingHold.createdByName || text(language, "مستخدم غير معروف", "Unknown user") },
           { label: text(language, "تاريخ التعليق", "Placed at"), value: formatDateTimeLy(appointment.reportingHold.createdAt), dir: "ltr" as const },
