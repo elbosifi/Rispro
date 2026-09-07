@@ -101,6 +101,16 @@ function settingScalar(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+export function validatePatientRegistrationSettings(entries: Array<{ key: string; value?: unknown }>): void {
+  const matchDepth = entries.find((entry) => entry.key === "patient_identity_name_match_components");
+  const value = matchDepth?.value && typeof matchDepth.value === "object" && !Array.isArray(matchDepth.value) && "value" in matchDepth.value
+    ? (matchDepth.value as { value?: unknown }).value
+    : matchDepth?.value;
+  if (matchDepth && value !== "2" && value !== "3") {
+    throw new HttpError(400, "patient_identity_name_match_components must be 2 or 3.");
+  }
+}
+
 function validateNoShowSettings(entries: Array<{ key: string; value?: unknown }>): void {
   const values = new Map(entries.map((entry) => [entry.key, String(entry.value ?? "").trim().toLowerCase()]));
   const manual = values.get("no_show_confirmation_required");
@@ -846,6 +856,10 @@ settingsRouter.put(
     if (category === "orthanc_mwl_sync") {
       entries = normalizeOrthancSettingsEntries(entries);
       validateOrthancSettingsEntries(entries);
+    }
+
+    if (category === "patient_registration") {
+      validatePatientRegistrationSettings(entries);
     }
 
     if (category === SANTE_HL7_CATEGORY) {

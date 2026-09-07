@@ -687,7 +687,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(rejectionValues.outcome, "rejected");
     assert.equal(rejectionValues.code, "patient_identity_reverification_required");
     assert.equal(rejectionValues.source, "deferred_override");
-    assert.equal(rejectionValues.ambiguityRuleVersion, "name_first_three_v1");
+    assert.equal(rejectionValues.ambiguityRuleVersion, "name_prefix_configurable_v2");
 
     const auditJson = JSON.stringify(audit.rows);
     for (const secret of [patient.firstIdentifier, patient.dateOfBirth, patient.phoneSuffix, proof, tamperedProof, "identityFingerprint"]) {

@@ -85,7 +85,7 @@ export async function createBooking(
   } catch (error) {
     const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
     if (details?.code?.startsWith("patient_identity_")) {
-      await logAuditEntry({ entityType: "appointment_patient_identity", entityId: payload.patientId, actionType: "appointment_patient_identity_verification_rejected", newValues: { outcome: "rejected", code: details.code, source: identityVerificationOptions.selectionSource ?? "search", ambiguityRuleVersion: "name_first_three_v1" }, changedByUserId: userId }).catch(() => undefined);
+      await logAuditEntry({ entityType: "appointment_patient_identity", entityId: payload.patientId, actionType: "appointment_patient_identity_verification_rejected", newValues: { outcome: "rejected", code: details.code, source: identityVerificationOptions.selectionSource ?? "search", ambiguityRuleVersion: "name_prefix_configurable_v2" }, changedByUserId: userId }).catch(() => undefined);
     }
     throw error;
   }

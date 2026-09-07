@@ -13,8 +13,25 @@ function createPatient(id = 1) {
 
 function createRisk(patient = createPatient()) {
   const identityFingerprint = service.calculatePatientIdentityFingerprint(patient);
-  return { patient, identityRisk: "ambiguous" as const, similarPatientCount: 1, availableVerificationMethods: ["primary_identifier" as const], identityFingerprint, ambiguityRuleVersion: "name_first_three_v1" as const };
+  return { patient, identityRisk: "ambiguous" as const, similarPatientCount: 1, availableVerificationMethods: ["primary_identifier" as const], identityFingerprint, ambiguityRuleVersion: "name_prefix_configurable_v2" as const };
 }
+
+test("patient identity ambiguity supports two or three positional name components", () => {
+  assert.equal(service.patientNamesAreAmbiguous({ englishA: "Mohamed Ali Salem", englishB: "Mohamed Ali Hassan" }, 3), false);
+  assert.equal(service.patientNamesAreAmbiguous({ englishA: "Mohamed Ali Salem", englishB: "Mohamed Ali Salem" }, 3), true);
+  assert.equal(service.patientNamesAreAmbiguous({ englishA: "Mohamed Ali Salem", englishB: "Mohamed Ali Hassan" }, 2), true);
+  assert.equal(service.patientNamesAreAmbiguous({ englishA: "Mohamed Ali Salem", englishB: "Mohamed Ahmed Salem" }, 2), false);
+  assert.equal(service.patientNamesAreAmbiguous({ englishA: "Mohamed Ali", englishB: "Ali Mohamed" }, 2), false);
+  assert.equal(service.patientNamesAreAmbiguous({ arabicA: "\u0645\u062d\u0645\u062f \u0639\u0644\u064a \u0633\u0627\u0644\u0645", arabicB: "\u0645\u062d\u0645\u062f \u0639\u0644\u064a \u062d\u0633\u0646" }, 3), false);
+  assert.equal(service.patientNamesAreAmbiguous({ arabicA: "\u0645\u062d\u0645\u062f \u0639\u0644\u064a \u0633\u0627\u0644\u0645", arabicB: "\u0645\u062d\u0645\u062f \u0639\u0644\u064a \u062d\u0633\u0646" }, 2), true);
+});
+
+test("patient identity Arabic compact-spacing matching follows the configured depth", () => {
+  const arabicA = "\u0639\u0628\u062f \u0627\u0644\u0644\u0647 \u0645\u062d\u0645\u062f \u0633\u0627\u0644\u0645";
+  const arabicB = "\u0639\u0628\u062f\u0627\u0644\u0644\u0647 \u0645\u062d\u0645\u062f \u0633\u0627\u0644\u0645";
+  assert.equal(service.patientNamesAreAmbiguous({ arabicA, arabicB }, 3), true);
+  assert.equal(service.patientNamesAreAmbiguous({ arabicA, arabicB }, 2), true);
+});
 
 test("patient identity ambiguity uses normalized first three Arabic tokens and compact spacing", () => {
   assert.equal(service.patientNamesAreAmbiguous({ arabicA: "محمد علي سالم إبراهيم", arabicB: "محمد علي سالم أحمد" }), true);
@@ -26,6 +43,18 @@ test("patient identity ambiguity uses complete names when either name has fewer 
   assert.equal(service.patientNamesAreAmbiguous({ englishA: "Jane Doe", englishB: "Jane Doe" }), true);
   assert.equal(service.patientNamesAreAmbiguous({ englishA: "Jane Doe", englishB: "Jane Roe" }), false);
   assert.equal(service.patientNamesAreAmbiguous({ englishA: "Jane Doe Smith One", englishB: "Jane Doe Smith Two" }), true);
+});
+
+test("patient identity name-match setting defaults safely to three components", async () => {
+  const read = (settingValue?: unknown) => service.resolvePatientIdentityNameMatchComponents({
+    query: async () => ({ rows: settingValue === undefined ? [] : [{ setting_value: settingValue }] }),
+  } as never);
+
+  assert.equal(await read(), 3);
+  assert.equal(await read({ value: "malformed" }), 3);
+  assert.equal(await read({ value: "4" }), 3);
+  assert.equal(await read('{"value":"2"}'), 2);
+  assert.equal(await read({ value: "2" }), 2);
 });
 
 test("verification methods and fingerprints preserve exact-DOB safety", () => {
@@ -50,31 +79,39 @@ test("targeted ambiguity lookup compares requested patients with matching record
   const outsideVisibleResults = {
     ...requested, id: 8, mrn: "MRN-8", arabic_full_name: "اختبار تشابه مريض اثنان", english_full_name: "Similar Patient Two", normalized_arabic_name: "اختبار تشابه مريض اثنان", normalized_arabic_name_compact: "اختبارتشابهمريضاثنان", identifier_value: "100000000002",
   };
+  Object.assign(requested, { arabic_full_name: "", normalized_arabic_name: null, normalized_arabic_name_compact: null, english_full_name: "Mohamed Ali Salem" });
+  Object.assign(outsideVisibleResults, { arabic_full_name: "", normalized_arabic_name: null, normalized_arabic_name_compact: null, english_full_name: "Mohamed Ali Hassan" });
   const calls: Array<{ sql: string; values: unknown[] | undefined }> = [];
   const executor = {
     query: async <T>(sql: string, values?: unknown[]) => {
       calls.push({ sql, values });
-      return { rows: (calls.length === 1 ? [requested] : [requested, outsideVisibleResults]) as T[] };
+      return { rows: (calls.length === 1 ? [{ setting_value: { value: "2" } }] : calls.length === 2 ? [requested] : [requested, outsideVisibleResults]) as T[] };
     },
   };
 
   const risk = (await service.resolvePatientIdentityRisks([7], executor as never)).get(7);
   assert.equal(risk?.identityRisk, "ambiguous");
   assert.equal(risk?.similarPatientCount, 1);
-  assert.equal(calls.length, 2);
-  assert.match(calls[0].sql, /where p\.id = any\(\$1::bigint\[\]\)/);
-  assert.match(calls[1].sql, /where p\.id = any\(\$1::bigint\[\]\) or \(/);
-  assert.deepEqual(calls[0].values, [[7]]);
-  assert.ok(!calls[1].sql.includes("where true"));
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].sql, /where p\.id = any\(\$1::bigint\[\]\)/);
+  assert.match(calls[2].sql, /where p\.id = any\(\$1::bigint\[\]\) or \(/);
+  assert.deepEqual(calls[0].values, [service.PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY]);
+  assert.deepEqual(calls[1].values, [[7]]);
+  assert.ok(calls[2].values?.includes("mohamed ali"));
+  assert.ok(!calls[2].sql.includes("where true"));
 });
 
 test("signed proofs are bound to the patient, verifier, and current identity fingerprint", () => {
   const patient = { ...createPatient(3), arabicFullName: "مريض اختبار تشابه", englishFullName: "Similar Patient Three", sex: "F", ageYears: 36, estimatedDateOfBirth: "1990-03-04", primaryIdentifierValue: "100000000003" };
   const fingerprint = service.calculatePatientIdentityFingerprint(patient);
-  const assertion = { patientId: patient.id, verifierUserId: 11, verificationMethod: "primary_identifier" as const, verifiedAt: new Date().toISOString(), identityFingerprint: fingerprint, ambiguityRuleVersion: "name_first_three_v1" as const };
-  const risk = { patient, identityRisk: "ambiguous" as const, similarPatientCount: 1, availableVerificationMethods: ["primary_identifier" as const], identityFingerprint: fingerprint, ambiguityRuleVersion: "name_first_three_v1" as const };
+  const twoComponentFingerprint = service.calculatePatientIdentityFingerprint(patient, 2);
+  assert.notEqual(fingerprint, twoComponentFingerprint);
+  const assertion = { patientId: patient.id, verifierUserId: 11, verificationMethod: "primary_identifier" as const, verifiedAt: new Date().toISOString(), identityFingerprint: fingerprint, ambiguityRuleVersion: "name_prefix_configurable_v2" as const };
+  const risk = { patient, identityRisk: "ambiguous" as const, similarPatientCount: 1, availableVerificationMethods: ["primary_identifier" as const], identityFingerprint: fingerprint, ambiguityRuleVersion: "name_prefix_configurable_v2" as const };
   const proof = service.issuePatientIdentityVerificationProof(assertion);
   assert.deepEqual(service.validatePatientIdentityVerificationProof(proof, { patientId: patient.id, userId: 11, risk }), assertion);
+  const twoComponentProof = service.issuePatientIdentityVerificationProof({ ...assertion, identityFingerprint: twoComponentFingerprint });
+  assert.throws(() => service.validatePatientIdentityVerificationProof(twoComponentProof, { patientId: patient.id, userId: 11, risk }), /required again/);
   assert.throws(() => service.validatePatientIdentityVerificationProof(proof, { patientId: patient.id, userId: 12, risk }), /required again/);
   assert.throws(() => service.validatePatientIdentityVerificationProof(proof, { patientId: patient.id + 1, userId: 11, risk }), /required again/);
   assert.throws(() => service.validatePatientIdentityVerificationProof(`${proof}tampered`, { patientId: patient.id, userId: 11, risk }), /required again/);
@@ -86,7 +123,7 @@ test("signed proofs are bound to the patient, verifier, and current identity fin
 test("deferred assertions revalidate the stored verifier and current identity fingerprint without persisting secrets in JSON", () => {
   const patient = createPatient(9);
   const risk = createRisk(patient);
-  const assertion = { patientId: 9, verifierUserId: 21, verificationMethod: "primary_identifier" as const, verifiedAt: "2026-01-02T03:04:05.000Z", ambiguityRuleVersion: "name_first_three_v1" as const };
+  const assertion = { patientId: 9, verifierUserId: 21, verificationMethod: "primary_identifier" as const, verifiedAt: "2026-01-02T03:04:05.000Z", ambiguityRuleVersion: "name_prefix_configurable_v2" as const };
   const validated = service.revalidateStoredPatientIdentityAssertion(assertion, { patientId: 9, verifierUserId: 21, expectedIdentityFingerprint: risk.identityFingerprint, risk });
   assert.equal(validated.identityFingerprint, risk.identityFingerprint);
   assert.throws(() => service.revalidateStoredPatientIdentityAssertion(assertion, { patientId: 9, verifierUserId: 22, expectedIdentityFingerprint: risk.identityFingerprint, risk }), /required again/);

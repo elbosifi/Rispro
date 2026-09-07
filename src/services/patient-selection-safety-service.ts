@@ -7,14 +7,17 @@ import { normalizeIdentifierValue } from "../utils/identifier.js";
 import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 import { HttpError } from "../utils/http-error.js";
 
-export const PATIENT_IDENTITY_RULE_VERSION = "name_first_three_v1";
+export const PATIENT_IDENTITY_RULE_VERSION = "name_prefix_configurable_v2";
 export const PATIENT_IDENTITY_PROOF_PURPOSE = "patient_identity_verification";
+export const DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS = 3;
+export const PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY = "patient_identity_name_match_components";
 /** Fixed-width safe display prefix for primary identifiers. */
 export const PATIENT_IDENTIFIER_MASK_PREFIX = "••••";
 const PROOF_TTL_SECONDS = 12 * 60;
 
 export type PatientIdentityVerificationMethod = "primary_identifier" | "exact_dob" | "phone_suffix";
 export type PatientIdentityRisk = "none" | "ambiguous";
+export type PatientIdentityNameMatchComponents = 2 | 3;
 
 export interface PatientSelectionSafetyPatient {
   id: number;
@@ -74,39 +77,73 @@ function normalizeEnglishName(value: string | null | undefined): string {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function nameKey(value: string): string {
+function nameKey(value: string, componentCount: PatientIdentityNameMatchComponents): string {
   const tokens = value.split(" ").filter(Boolean);
-  return tokens.length < 3 ? value : tokens.slice(0, 3).join(" ");
+  return tokens.length < componentCount ? value : tokens.slice(0, componentCount).join(" ");
 }
 
-function compactNameKey(value: string): string {
-  return nameKey(value).replace(/\s+/g, "");
+function compactNameKey(value: string, componentCount: PatientIdentityNameMatchComponents): string {
+  return nameKey(value, componentCount).replace(/\s+/g, "");
 }
 
 function normalizedArabic(row: PatientIdentityDbRow): string {
   return normalizeArabicName(row.normalized_arabic_name || row.arabic_full_name || "");
 }
 
-function rowsAreAmbiguous(a: PatientIdentityDbRow, b: PatientIdentityDbRow): boolean {
+function rowsAreAmbiguous(a: PatientIdentityDbRow, b: PatientIdentityDbRow, componentCount: PatientIdentityNameMatchComponents): boolean {
   const arabicA = normalizedArabic(a);
   const arabicB = normalizedArabic(b);
   const englishA = normalizeEnglishName(a.english_full_name);
   const englishB = normalizeEnglishName(b.english_full_name);
   const arabicTokensA = arabicA.split(" ").filter(Boolean);
   const arabicTokensB = arabicB.split(" ").filter(Boolean);
-  const compactA = compactNameKey(arabicA);
-  const compactB = compactNameKey(arabicB);
-  const compactSpacingMatch = arabicTokensA.length >= 3 && arabicTokensB.length >= 3 && (compactA === compactB || compactA.startsWith(compactB) || compactB.startsWith(compactA));
-  const arabicMatch = Boolean(arabicA && arabicB && (nameKey(arabicA) === nameKey(arabicB) || compactSpacingMatch));
-  const englishMatch = Boolean(englishA && englishB && nameKey(englishA) === nameKey(englishB));
+  const compactA = compactNameKey(arabicA, componentCount);
+  const compactB = compactNameKey(arabicB, componentCount);
+  const compactSpacingMatch = arabicTokensA.length >= componentCount && arabicTokensB.length >= componentCount && (compactA === compactB || compactA.startsWith(compactB) || compactB.startsWith(compactA));
+  const arabicMatch = Boolean(arabicA && arabicB && (nameKey(arabicA, componentCount) === nameKey(arabicB, componentCount) || compactSpacingMatch));
+  const englishMatch = Boolean(englishA && englishB && nameKey(englishA, componentCount) === nameKey(englishB, componentCount));
   return arabicMatch || englishMatch;
 }
 
-export function patientNamesAreAmbiguous(input: { arabicA?: string | null; arabicB?: string | null; englishA?: string | null; englishB?: string | null }): boolean {
+export function patientNamesAreAmbiguous(input: { arabicA?: string | null; arabicB?: string | null; englishA?: string | null; englishB?: string | null }, componentCount: PatientIdentityNameMatchComponents = DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS): boolean {
   return rowsAreAmbiguous(
     { id: 1, mrn: null, arabic_full_name: input.arabicA || "", english_full_name: input.englishA || null, normalized_arabic_name: input.arabicA || "", normalized_arabic_name_compact: input.arabicA || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_value: null },
     { id: 2, mrn: null, arabic_full_name: input.arabicB || "", english_full_name: input.englishB || null, normalized_arabic_name: input.arabicB || "", normalized_arabic_name_compact: input.arabicB || "", category: null, sex: null, age_years: null, estimated_date_of_birth: null, demographics_estimated: false, phone_1: null, identifier_type: null, identifier_value: null },
+    componentCount,
   );
+}
+
+function parsePatientIdentityNameMatchComponents(value: unknown): PatientIdentityNameMatchComponents {
+  if (value === "2") return 2;
+  if (value === "3") return 3;
+  return DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS;
+}
+
+export async function resolvePatientIdentityNameMatchComponents(executor: DbExecutor = pool): Promise<PatientIdentityNameMatchComponents> {
+  const { rows } = await executor.query<{ setting_value: unknown }>(
+    `
+      select setting_value
+      from system_settings
+      where category = 'patient_registration'
+        and setting_key = $1
+      limit 1
+    `,
+    [PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY],
+  );
+  const settingValue = rows[0]?.setting_value;
+  const parsedValue = typeof settingValue === "string"
+    ? (() => {
+      try {
+        return JSON.parse(settingValue) as unknown;
+      } catch {
+        return null;
+      }
+    })()
+    : settingValue;
+  const value = parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+    ? (parsedValue as { value?: unknown }).value
+    : undefined;
+  return parsePatientIdentityNameMatchComponents(value);
 }
 
 function toPatient(row: PatientIdentityDbRow): PatientSelectionSafetyPatient {
@@ -129,9 +166,10 @@ export function availablePatientIdentityVerificationMethods(patient: PatientSele
   return methods;
 }
 
-export function calculatePatientIdentityFingerprint(patient: PatientSelectionSafetyPatient): string {
+export function calculatePatientIdentityFingerprint(patient: PatientSelectionSafetyPatient, componentCount: PatientIdentityNameMatchComponents = DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS): string {
   const canonical = JSON.stringify({
     patientId: patient.id,
+    nameMatchComponents: componentCount,
     arabicName: normalizeArabicName(patient.arabicFullName),
     compactArabicName: normalizeArabicNameCompact(patient.arabicFullName),
     englishName: normalizeEnglishName(patient.englishFullName),
@@ -168,7 +206,7 @@ async function loadRequestedRows(executor: DbExecutor, patientIds: number[]): Pr
   return rows;
 }
 
-function buildCandidatePredicate(targets: PatientIdentityDbRow[]): { sql: string; values: string[] } {
+function buildCandidatePredicate(targets: PatientIdentityDbRow[], componentCount: PatientIdentityNameMatchComponents): { sql: string; values: string[] } {
   const values: string[] = [];
   const bind = (value: string) => {
     values.push(value);
@@ -186,14 +224,14 @@ function buildCandidatePredicate(targets: PatientIdentityDbRow[]): { sql: string
     const targetClauses: string[] = [];
 
     if (arabic) {
-      const arabicKey = nameKey(arabic);
-      if (arabicTokens.length < 3) {
+      const arabicKey = nameKey(arabic, componentCount);
+      if (arabicTokens.length < componentCount) {
         targetClauses.push(`${arabicExpression} = ${bind(arabicKey)}`);
       } else {
         targetClauses.push(`(${arabicExpression} = ${bind(arabicKey)} or ${arabicExpression} like ${bind(`${arabicKey} %`)})`);
-        const compactKey = compactNameKey(arabic);
+        const compactKey = compactNameKey(arabic, componentCount);
         targetClauses.push(`(
-          cardinality(regexp_split_to_array(trim(${arabicExpression}), '\\s+')) >= 3
+          cardinality(regexp_split_to_array(trim(${arabicExpression}), '\\s+')) >= ${componentCount}
           and (${compactArabicExpression} = ${bind(compactKey)} or ${compactArabicExpression} like ${bind(`${compactKey}%`)} or ${bind(compactKey)} like ${compactArabicExpression} || '%')
         )`);
       }
@@ -201,8 +239,8 @@ function buildCandidatePredicate(targets: PatientIdentityDbRow[]): { sql: string
 
     if (english) {
       const englishTokens = english.split(" ").filter(Boolean);
-      const englishKey = nameKey(english);
-      targetClauses.push(englishTokens.length < 3
+      const englishKey = nameKey(english, componentCount);
+      targetClauses.push(englishTokens.length < componentCount
         ? `${englishExpression} = ${bind(englishKey)}`
         : `(${englishExpression} = ${bind(englishKey)} or ${englishExpression} like ${bind(`${englishKey} %`)})`);
     }
@@ -213,8 +251,8 @@ function buildCandidatePredicate(targets: PatientIdentityDbRow[]): { sql: string
   return { sql: clauses.length > 0 ? clauses.join(" or ") : "false", values };
 }
 
-async function loadAmbiguityCandidateRows(executor: DbExecutor, patientIds: number[], targets: PatientIdentityDbRow[]): Promise<PatientIdentityDbRow[]> {
-  const predicate = buildCandidatePredicate(targets);
+async function loadAmbiguityCandidateRows(executor: DbExecutor, patientIds: number[], targets: PatientIdentityDbRow[], componentCount: PatientIdentityNameMatchComponents): Promise<PatientIdentityDbRow[]> {
+  const predicate = buildCandidatePredicate(targets, componentCount);
   const { rows } = await executor.query<PatientIdentityDbRow>(`
     ${PATIENT_SELECTION_COLUMNS}
     where p.id = any($1::bigint[]) or (${predicate.sql})
@@ -223,17 +261,17 @@ async function loadAmbiguityCandidateRows(executor: DbExecutor, patientIds: numb
   return rows;
 }
 
-function resolvePatientIdentityRiskFromRows(patientId: number, rows: PatientIdentityDbRow[]): PatientIdentityRiskResult {
+function resolvePatientIdentityRiskFromRows(patientId: number, rows: PatientIdentityDbRow[], componentCount: PatientIdentityNameMatchComponents): PatientIdentityRiskResult {
   const target = rows.find((row) => Number(row.id) === patientId);
   if (!target) throw new HttpError(404, "Patient not found.", { code: "patient_not_found" });
   const patient = toPatient(target);
-  const similarPatientCount = rows.filter((row) => Number(row.id) !== patientId && rowsAreAmbiguous(target, row)).length;
+  const similarPatientCount = rows.filter((row) => Number(row.id) !== patientId && rowsAreAmbiguous(target, row, componentCount)).length;
   return {
     patient,
     identityRisk: similarPatientCount > 0 ? "ambiguous" : "none",
     similarPatientCount,
     availableVerificationMethods: availablePatientIdentityVerificationMethods(patient),
-    identityFingerprint: calculatePatientIdentityFingerprint(patient),
+    identityFingerprint: calculatePatientIdentityFingerprint(patient, componentCount),
     ambiguityRuleVersion: PATIENT_IDENTITY_RULE_VERSION,
   };
 }
@@ -241,9 +279,10 @@ function resolvePatientIdentityRiskFromRows(patientId: number, rows: PatientIden
 export async function resolvePatientIdentityRisks(patientIds: number[], executor: DbExecutor = pool): Promise<Map<number, PatientIdentityRiskResult>> {
   const uniquePatientIds = [...new Set(patientIds.filter((patientId) => Number.isInteger(patientId) && patientId > 0))];
   if (uniquePatientIds.length === 0) return new Map();
+  const componentCount = await resolvePatientIdentityNameMatchComponents(executor);
   const targets = await loadRequestedRows(executor, uniquePatientIds);
-  const candidates = await loadAmbiguityCandidateRows(executor, uniquePatientIds, targets);
-  return new Map(uniquePatientIds.map((patientId) => [patientId, resolvePatientIdentityRiskFromRows(patientId, candidates)]));
+  const candidates = await loadAmbiguityCandidateRows(executor, uniquePatientIds, targets, componentCount);
+  return new Map(uniquePatientIds.map((patientId) => [patientId, resolvePatientIdentityRiskFromRows(patientId, candidates, componentCount)]));
 }
 
 export async function resolvePatientIdentityRisk(patientId: number, executor: DbExecutor = pool): Promise<PatientIdentityRiskResult> {

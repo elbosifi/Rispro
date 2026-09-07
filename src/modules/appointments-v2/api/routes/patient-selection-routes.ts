@@ -51,7 +51,7 @@ patientSelectionRouter.post("/:patientId/verify", verificationRateLimiter, async
       entityType: "appointment_patient_identity",
       entityId: Number.isInteger(patientId) && patientId > 0 ? patientId : null,
       actionType: "appointment_patient_identity_verification_rejected",
-      newValues: { outcome: "rejected", code: details?.code ?? "patient_identity_verification_rejected", source: "verification_endpoint", ambiguityRuleVersion: "name_first_three_v1" },
+      newValues: { outcome: "rejected", code: details?.code ?? "patient_identity_verification_rejected", source: "verification_endpoint", ambiguityRuleVersion: "name_prefix_configurable_v2" },
       changedByUserId: userId || null,
     }).catch(() => undefined);
     throw error;

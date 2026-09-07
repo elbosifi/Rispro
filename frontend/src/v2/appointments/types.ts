@@ -52,7 +52,7 @@ export interface AppointmentPatientSelection {
   identityRisk: PatientIdentityRisk;
   similarPatientCount: number;
   availableVerificationMethods: PatientIdentityVerificationMethod[];
-  ambiguityRuleVersion: "name_first_three_v1";
+  ambiguityRuleVersion: "name_prefix_configurable_v2";
 }
 
 /**

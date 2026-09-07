@@ -60,7 +60,7 @@ export interface CreateBookingPayload {
     verifierUserId: number;
     verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
     verifiedAt: string;
-    ambiguityRuleVersion: "name_first_three_v1";
+    ambiguityRuleVersion: "name_prefix_configurable_v2";
   } | null;
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: MriPrimaryScreeningInput | null;

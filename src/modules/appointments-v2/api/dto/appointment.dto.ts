@@ -34,7 +34,7 @@ export interface CreateAppointmentDto {
     verifierUserId: number;
     verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
     verifiedAt: string;
-    ambiguityRuleVersion: "name_first_three_v1";
+    ambiguityRuleVersion: "name_prefix_configurable_v2";
   } | null;
   modalitySafetyAcknowledged?: boolean;
   mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;

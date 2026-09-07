@@ -10,6 +10,7 @@ import { mutationErrorMessage } from "./settings-section-utils";
 // -- Settings Catalog: known keys → display labels, control types, and dropdown options --
 interface SettingControl {
   label: string;
+  description?: string;
   type: "dropdown" | "number" | "time" | "text";
   options?: { value: string; label: string }[];
   min?: string;
@@ -19,6 +20,15 @@ interface SettingControl {
 
 const SETTINGS_CATALOG: Record<string, SettingControl> = {
   // Patient Registration
+  patient_identity_name_match_components: {
+    label: "Similar-name matching depth / عمق مطابقة الأسماء المتشابهة",
+    description: "Number of leading name components that must match by position before RISpro requires identity confirmation. / عدد مقاطع الاسم الأولى التي يجب أن تتطابق حسب الترتيب قبل أن يطلب RISpro تأكيد الهوية.",
+    type: "dropdown",
+    options: [
+      { value: "2", label: "First 2 names / أول اسمين" },
+      { value: "3", label: "First 3 names / أول ثلاثة أسماء" },
+    ],
+  },
   phone1_required: { label: "", type: "dropdown", options: [
     { value: "required", label: "مطلوب" },
     { value: "optional", label: "اختياري" }
@@ -238,7 +248,10 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
         return (
           <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
-            <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{label}</span>
+            <div>
+              <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{label}</span>
+              {control.description && <p className="text-stone-500 dark:text-stone-400 text-xs mt-1 max-w-2xl">{control.description}</p>}
+            </div>
             <div className="flex items-center gap-2">
               {control.type === "dropdown" && control.options && (
                 <select

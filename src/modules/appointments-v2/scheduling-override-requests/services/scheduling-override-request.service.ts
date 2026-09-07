@@ -800,7 +800,7 @@ export async function createSchedulingOverrideRequest(
         entityType: "appointment_patient_identity",
         entityId: getNumber(payload.patientId) || null,
         actionType: "appointment_patient_identity_verification_rejected",
-        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_first_three_v1" },
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_prefix_configurable_v2" },
         changedByUserId: userId,
       }).catch(() => undefined);
     }
@@ -1054,7 +1054,7 @@ export async function approveSchedulingOverrideRequest(
         entityType: "appointment_patient_identity",
         entityId: Number(patient.rows[0]?.patient_id || 0) || null,
         actionType: "appointment_patient_identity_verification_rejected",
-        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_first_three_v1" },
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_prefix_configurable_v2" },
         changedByUserId: approverUserId,
       }).catch(() => undefined);
     }
