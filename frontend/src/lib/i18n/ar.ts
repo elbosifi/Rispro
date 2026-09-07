@@ -1683,6 +1683,11 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "calendar.capacityBookedOf": "{booked} من {capacity} محجوز",
   "calendar.capacitySummary": "السعة الإجمالية {capacity} · المحجوز {booked}",
   "calendar.capacityRestrictedPolicy": "مقيّد بسبب سياسة الجدولة",
+  "calendar.fillRate": "نسبة إشغال السعة",
+  "calendar.fillRateHelp": "المواعيد المحجوزة كنسبة من السعة الإجمالية للجهاز المحدد، وقد تستمر قيود الفئات في التطبيق.",
+  "calendar.fillRateAria": "نسبة الإشغال: {percent}%، تم حجز {booked} من أصل {capacity}",
+  "calendar.fillRateOverAria": "نسبة الإشغال: {percent}%، تم حجز {booked} من أصل {capacity}، وتجاوز السعة بمقدار {count}",
+  "calendar.overCapacity": "+{count} فوق السعة",
 
   "modality.title": "لوحة الأجهزة",
   "modality.refresh": "تحديث",

@@ -155,6 +155,10 @@ function findCalendarDayButton(dateLabel: string) {
   return screen.getAllByRole("button").find((button) => (button.getAttribute("aria-label") || "").includes(dateLabel));
 }
 
+function getUtilizationBar(context: "cell" | "inspector") {
+  return screen.getAllByTestId("calendar-utilization-bar").find((bar) => bar.getAttribute("data-context") === context);
+}
+
 describe("CalendarPage registration drilldown", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -432,6 +436,7 @@ describe("CalendarPage registration drilldown", () => {
     await screen.findByTestId("modality-summary-modality:1");
     expect(useV2AvailabilityMock.mock.calls.every(([params]) => params === undefined)).toBe(true);
     expect(screen.getByText("Select a modality to view capacity availability.")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.getByTestId("modality-summary-modality:1")).toBeTruthy();
   });
 
@@ -486,6 +491,138 @@ describe("CalendarPage registration drilldown", () => {
     expect(within(capacityDetails).getByText("Available")).toBeTruthy();
     expect(screen.getAllByText("4 of 20 remaining").length).toBeGreaterThan(0);
     expect(dayButton!.getAttribute("aria-label")).toContain("Capacity availability: Oncology: Available, 4 of 20 remaining");
+  });
+
+  it("uses whole-day bookedTotal for fill rate instead of category fills", async () => {
+    const totalDay = makeAvailabilityDay({
+      modalityTotalCapacity: 25,
+      bookedTotal: 14,
+      bookedCount: 14,
+      remainingCapacity: 11,
+      oncology: { reserved: 15, filled: 12, remaining: 3 },
+      nonOncology: { reserved: 10, filled: 2, remaining: 8 },
+    });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    const cellBar = getUtilizationBar("cell")!;
+    expect(cellBar.textContent).toContain("56%");
+    expect(cellBar.getAttribute("aria-valuetext")).toContain("Fill rate: 56%, 14 of 25 booked");
+    expect(screen.getByText("Fill rate")).toBeTruthy();
+    expect(screen.getByText("Booked appointments as a percentage of total capacity for the selected modality. Category restrictions may still apply.")).toBeTruthy();
+  });
+
+  it("keeps whole-day fill rate unchanged when Oncology is selected", async () => {
+    const totalDay = makeAvailabilityDay({
+      modalityTotalCapacity: 25,
+      bookedTotal: 14,
+      bookedCount: 14,
+      remainingCapacity: 11,
+      oncology: { reserved: 15, filled: 12, remaining: 3 },
+      nonOncology: { reserved: 10, filled: 2, remaining: 8 },
+    });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectCategory("oncology");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    expect(getUtilizationBar("cell")!.textContent).toContain("56%");
+  });
+
+  it("marks 80 percent utilization as warning", async () => {
+    const totalDay = makeAvailabilityDay({ modalityTotalCapacity: 25, bookedTotal: 20, bookedCount: 20 });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    expect(getUtilizationBar("cell")!.textContent).toContain("80%");
+    expect(getUtilizationBar("cell")!.getAttribute("data-utilization-state")).toBe("warning");
+  });
+
+  it("marks exact capacity as full with a capped visual value", async () => {
+    const totalDay = makeAvailabilityDay({ modalityTotalCapacity: 25, bookedTotal: 25, bookedCount: 25, remainingCapacity: 0 });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    const cellBar = getUtilizationBar("cell")!;
+    expect(cellBar.textContent).toContain("100%");
+    expect(cellBar.getAttribute("data-utilization-state")).toBe("full");
+    expect(cellBar.getAttribute("aria-valuenow")).toBe("100");
+  });
+
+  it("shows overcapacity without widening the visual bar", async () => {
+    const totalDay = makeAvailabilityDay({ modalityTotalCapacity: 25, bookedTotal: 27, bookedCount: 27, remainingCapacity: 0 });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    const cellBar = getUtilizationBar("cell")!;
+    expect(cellBar.textContent).toContain("108%");
+    expect(cellBar.textContent).toContain("+2 over capacity");
+    expect(cellBar.getAttribute("data-utilization-state")).toBe("full");
+    expect(cellBar.getAttribute("aria-valuenow")).toBe("100");
+    expect(cellBar.getAttribute("aria-valuetext")).toContain("Fill rate: 108%, 27 of 25 booked, 2 over capacity");
+    expect((cellBar.querySelector("[style]") as HTMLElement).style.width).toBe("100%");
+  });
+
+  it("shows zero-capacity overcapacity without Infinity or NaN", async () => {
+    const totalDay = makeAvailabilityDay({ modalityTotalCapacity: 0, bookedTotal: 3, bookedCount: 3, remainingCapacity: 0 });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    await waitFor(() => expect(getUtilizationBar("cell")).toBeTruthy());
+
+    const cellBar = getUtilizationBar("cell")!;
+    expect(cellBar.textContent).toContain("+3 over capacity");
+    expect(cellBar.textContent).not.toMatch(/Infinity|NaN/);
+    expect(cellBar.getAttribute("data-utilization-state")).toBe("full");
+    expect(cellBar.getAttribute("aria-valuenow")).toBe("100");
+    expect((cellBar.querySelector("[style]") as HTMLElement).style.width).toBe("100%");
+  });
+
+  it("shows the whole-day utilization bar above inspector category rows", async () => {
+    const totalDay = makeAvailabilityDay({
+      modalityTotalCapacity: 25,
+      bookedTotal: 14,
+      bookedCount: 14,
+      remainingCapacity: 11,
+      oncology: { reserved: 15, filled: 12, remaining: 3 },
+      nonOncology: { reserved: 10, filled: 2, remaining: 8 },
+    });
+    setAvailability({ items: [totalDay] }, { items: [totalDay] });
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality();
+    const dayButton = await waitFor(() => findCalendarDayButton("May 20, 2026"));
+    fireEvent.click(dayButton!);
+
+    expect(screen.getByText("25 total capacity · 14 booked")).toBeTruthy();
+    const inspectorBar = getUtilizationBar("inspector")!;
+    expect(inspectorBar.getAttribute("data-context")).toBe("inspector");
+    expect(inspectorBar.textContent).toContain("56%");
+    const details = screen.getByTestId("calendar-capacity-details-2026-05-20");
+    expect(within(details).getByText("Oncology")).toBeTruthy();
+    expect(within(details).getByText("Non-oncology")).toBeTruthy();
   });
 
   it("shows the authoritative total capacity summary in the inspector", async () => {
@@ -670,6 +807,7 @@ describe("CalendarPage registration drilldown", () => {
     selectModality();
 
     expect(await screen.findByText("No published scheduling policy is active.")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -681,6 +819,7 @@ describe("CalendarPage registration drilldown", () => {
     selectModality();
 
     expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Open day registrations" }));
     expect(navigateMock).toHaveBeenCalledWith("/registrations?date=2026-05-02");
@@ -699,6 +838,7 @@ describe("CalendarPage registration drilldown", () => {
 
     expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
     expect(screen.queryByTestId("calendar-capacity-cell")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     const dayButton = findCalendarDayButton("May 20, 2026");
     expect(dayButton?.getAttribute("aria-label")).not.toContain("Capacity availability");
     expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
@@ -715,6 +855,7 @@ describe("CalendarPage registration drilldown", () => {
 
     expect(await screen.findByText("Capacity availability could not be loaded.")).toBeTruthy();
     expect(screen.queryByTestId("calendar-capacity-cell")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect((screen.getByRole("button", { name: "Open day registrations" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

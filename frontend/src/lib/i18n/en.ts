@@ -1642,6 +1642,11 @@ export const en = {
   "calendar.capacityBookedOf": "{booked} of {capacity} booked",
   "calendar.capacitySummary": "{capacity} total capacity · {booked} booked",
   "calendar.capacityRestrictedPolicy": "Restricted by scheduling policy",
+  "calendar.fillRate": "Fill rate",
+  "calendar.fillRateHelp": "Booked appointments as a percentage of total capacity for the selected modality. Category restrictions may still apply.",
+  "calendar.fillRateAria": "Fill rate: {percent}%, {booked} of {capacity} booked",
+  "calendar.fillRateOverAria": "Fill rate: {percent}%, {booked} of {capacity} booked, {count} over capacity",
+  "calendar.overCapacity": "+{count} over capacity",
 
   "modality.title": "Modality Board",
   "modality.refresh": "Refresh",

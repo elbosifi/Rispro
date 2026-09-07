@@ -55,6 +55,15 @@ interface CalendarAvailability {
   nonOncology: AvailabilityEntry | null;
 }
 
+interface CalendarUtilization {
+  capacity: number;
+  booked: number;
+  percent: number | null;
+  visualPercent: number;
+  overBy: number;
+  state: "normal" | "warning" | "full";
+}
+
 type CapacityCategory = "oncology" | "non_oncology" | null;
 
 export default function CalendarPage() {
@@ -190,6 +199,29 @@ export default function CalendarPage() {
   const gridDays = useMemo(
     () => buildCalendarGrid(displayDate, effectiveSelectedDate, groupedByDate, language),
     [displayDate, effectiveSelectedDate, groupedByDate, language]
+  );
+  const hasCalendarUtilization = useMemo(
+    () => selectedModalityId != null && !availabilityError && !availabilityNoPublishedPolicy && gridDays.some((day) => {
+      const dayAvailability = getCalendarAvailability(
+        day.date,
+        day.isCurrentMonth,
+        categoryFilter,
+        oncologyAvailabilityByDate,
+        nonOncologyAvailabilityByDate,
+        selectedModalityId,
+        availabilityNoPublishedPolicy
+      );
+      return buildCalendarUtilization(dayAvailability) != null;
+    }),
+    [
+      availabilityError,
+      availabilityNoPublishedPolicy,
+      categoryFilter,
+      gridDays,
+      nonOncologyAvailabilityByDate,
+      oncologyAvailabilityByDate,
+      selectedModalityId,
+    ]
   );
 
   // Selected day appointments
@@ -424,6 +456,10 @@ export default function CalendarPage() {
                 const capacityAriaLabel = dayAvailability
                   ? buildCapacityAriaLabel(language, categoryFilter, dayAvailability)
                   : null;
+                const utilization = buildCalendarUtilization(dayAvailability);
+                const utilizationAriaLabel = utilization
+                  ? buildCalendarUtilizationAriaLabel(language, utilization)
+                  : null;
 
                 return (
                 <button
@@ -435,8 +471,11 @@ export default function CalendarPage() {
                     `${t(language, "calendar.oncologyLabel")}: ${day.oncology}`,
                     `${t(language, "calendar.nonOncologyLabel")}: ${day.nonOncology}`,
                     capacityAriaLabel,
+                    utilizationAriaLabel,
                   ].filter(Boolean).join(", ")}
                   className={`relative min-h-[76px] border-b border-e border-border p-1.5 text-right transition-all duration-200 hover:bg-muted/50 sm:min-h-[112px] sm:p-3 ${
+                    selectedModalityId ? "pb-6 sm:pb-7" : ""
+                  } ${
                     !day.isCurrentMonth ? "bg-muted/30" : ""
                   } ${day.isSelected ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
                 >
@@ -483,11 +522,13 @@ export default function CalendarPage() {
                   {selectedModalityId ? (
                     <CalendarCapacityCell language={language} categoryFilter={categoryFilter} availability={dayAvailability} />
                   ) : null}
+                  {utilization ? <CalendarUtilizationBar language={language} utilization={utilization} context="cell" /> : null}
                 </button>
                 );
               })
             )}
           </div>
+          {hasCalendarUtilization ? <CalendarUtilizationLegend language={language} /> : null}
         </Card>
 
         {/* Sidebar: Selected Day Registration Summary */}
@@ -721,6 +762,114 @@ function getCalendarAvailability(
     nonOncology: categoryFilter === "oncology" ? null : nonOncologyAvailabilityByDate.get(date) ?? null,
   };
   return availability.oncology || availability.nonOncology ? availability : null;
+}
+
+function normalizeUtilizationValue(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function buildCalendarUtilization(availability: CalendarAvailability | null): CalendarUtilization | null {
+  const entry = availability?.oncology ?? availability?.nonOncology;
+  if (!entry) return null;
+
+  const capacity = normalizeUtilizationValue(entry.raw.modalityTotalCapacity);
+  const booked = normalizeUtilizationValue(entry.raw.bookedTotal);
+  if (capacity <= 0 && booked === 0) return null;
+
+  const percent = capacity > 0 ? Math.round((booked / capacity) * 100) : null;
+  const overBy = Math.max(0, booked - capacity);
+  const state = percent == null || percent >= 100
+    ? "full"
+    : percent >= 80
+      ? "warning"
+      : "normal";
+
+  return {
+    capacity,
+    booked,
+    percent,
+    visualPercent: Math.min(100, Math.max(0, percent ?? 100)),
+    overBy,
+    state,
+  };
+}
+
+function buildCalendarUtilizationAriaLabel(language: "ar" | "en", utilization: CalendarUtilization): string {
+  if (utilization.percent == null) {
+    return `${t(language, "calendar.fillRate")}: ${t(language, "calendar.overCapacity", { count: utilization.overBy })}`;
+  }
+  return utilization.overBy > 0
+    ? t(language, "calendar.fillRateOverAria", {
+        percent: utilization.percent,
+        booked: utilization.booked,
+        capacity: utilization.capacity,
+        count: utilization.overBy,
+      })
+    : t(language, "calendar.fillRateAria", {
+        percent: utilization.percent,
+        booked: utilization.booked,
+        capacity: utilization.capacity,
+      });
+}
+
+function calendarUtilizationDisplayLabel(language: "ar" | "en", utilization: CalendarUtilization): string {
+  if (utilization.percent == null) {
+    return t(language, "calendar.overCapacity", { count: utilization.overBy });
+  }
+  return `${utilization.percent}%${utilization.overBy > 0 ? ` · ${t(language, "calendar.overCapacity", { count: utilization.overBy })}` : ""}`;
+}
+
+function CalendarUtilizationBar({
+  language,
+  utilization,
+  context,
+}: {
+  language: "ar" | "en";
+  utilization: CalendarUtilization;
+  context: "cell" | "inspector";
+}) {
+  const colorClass = utilization.state === "normal"
+    ? "bg-emerald-500"
+    : utilization.state === "warning"
+      ? "bg-amber-500"
+      : "bg-rose-500";
+  const displayLabel = calendarUtilizationDisplayLabel(language, utilization);
+
+  return (
+    <div
+      className={context === "cell"
+        ? "pointer-events-none absolute inset-x-2 bottom-1.5 hidden items-center gap-1 sm:flex"
+        : "mt-1 flex items-center gap-2"}
+      data-testid="calendar-utilization-bar"
+      data-context={context}
+      data-utilization-state={utilization.state}
+      role="progressbar"
+      aria-label={t(language, "calendar.fillRate")}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={utilization.visualPercent}
+      aria-valuetext={buildCalendarUtilizationAriaLabel(language, utilization)}
+    >
+      <div className={`${context === "cell" ? "h-1.5" : "h-2.5"} min-w-0 flex-1 overflow-hidden rounded-full bg-muted`}>
+        <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${utilization.visualPercent}%` }} />
+      </div>
+      <span className={`${context === "cell" ? "text-[9px]" : "text-xs"} shrink-0 whitespace-nowrap font-medium tabular-nums text-muted-foreground`}>
+        {displayLabel}
+      </span>
+    </div>
+  );
+}
+
+function CalendarUtilizationLegend({ language }: { language: "ar" | "en" }) {
+  return (
+    <div className="flex items-start gap-2 border-t border-border px-3 py-2 text-[10px] leading-snug text-muted-foreground sm:px-4">
+      <span className="mt-0.5 inline-flex h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted">
+        <span className="h-full w-full rounded-full bg-emerald-500" />
+      </span>
+      <span className="shrink-0 font-semibold text-foreground">{t(language, "calendar.fillRate")}</span>
+      <span>{t(language, "calendar.fillRateHelp")}</span>
+    </div>
+  );
 }
 
 const CAPACITY_STATUS_KEYS: Record<AvailabilityRowStatus, "calendar.capacityAvailable" | "calendar.capacityRestricted" | "calendar.capacityFull" | "calendar.capacityBlocked"> = {
@@ -977,29 +1126,43 @@ function CalendarCapacityDetails({
   availability: CalendarAvailability;
   selectedDate: string;
 }) {
+  const totalEntry = availability.oncology ?? availability.nonOncology;
+  const utilization = buildCalendarUtilization(availability);
+
   if (categoryFilter === "oncology" && availability.oncology) {
     return (
-      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+      <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <p className="text-xs text-muted-foreground">
+          {totalEntry ? t(language, "calendar.capacitySummary", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity }) : null}
+        </p>
+        {utilization ? <CalendarUtilizationBar language={language} utilization={utilization} context="inspector" /> : null}
         <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" context="inspector" includeCapacity />
       </div>
     );
   }
   if (categoryFilter === "non_oncology" && availability.nonOncology) {
     return (
-      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+      <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <p className="text-xs text-muted-foreground">
+          {totalEntry ? t(language, "calendar.capacitySummary", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity }) : null}
+        </p>
+        {utilization ? <CalendarUtilizationBar language={language} utilization={utilization} context="inspector" /> : null}
         <CapacityDetailRow language={language} label={t(language, "calendar.nonOncologyLabel")} entry={availability.nonOncology} category="non_oncology" context="inspector" includeCapacity />
       </div>
     );
   }
   if (availability.oncology && availability.nonOncology && areAvailabilityEntriesEffectivelyIdentical(availability.oncology, availability.nonOncology)) {
     return (
-      <div className="mt-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+      <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
+        <p className="text-xs text-muted-foreground">
+          {totalEntry ? t(language, "calendar.capacitySummary", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity }) : null}
+        </p>
+        {utilization ? <CalendarUtilizationBar language={language} utilization={utilization} context="inspector" /> : null}
         <CapacityDetailRow language={language} entry={availability.oncology} category={null} context="inspector" includeCapacity />
       </div>
     );
   }
 
-  const totalEntry = availability.oncology ?? availability.nonOncology;
   return (
     <div className="mt-2 space-y-2" data-testid={`calendar-capacity-details-${selectedDate}`}>
       {totalEntry ? (
@@ -1007,6 +1170,7 @@ function CalendarCapacityDetails({
           {t(language, "calendar.capacitySummary", { booked: totalEntry.raw.bookedTotal, capacity: totalEntry.raw.modalityTotalCapacity })}
         </p>
       ) : null}
+      {utilization ? <CalendarUtilizationBar language={language} utilization={utilization} context="inspector" /> : null}
       {availability.oncology ? (
         <CapacityDetailRow language={language} label={t(language, "calendar.oncologyLabel")} entry={availability.oncology} category="oncology" context="inspector" />
       ) : null}
