@@ -565,6 +565,49 @@ export interface PolicyVersionDto {
   publishedAt: string | null;
 }
 
+export type DayManagementRuleType =
+  | "block_modality"
+  | "restrict_exam_types"
+  | "set_exam_mix_quota";
+
+export interface DayManagementExamTypeDto {
+  id: number;
+  name: string | null;
+  nameAr: string | null;
+  nameEn: string | null;
+}
+
+export interface DayManagementContextDto {
+  date: string;
+  modality: { id: number; code: string; name: string; nameAr: string; nameEn: string; dailyCapacity: number | null; isActive: boolean };
+  bookingSummary: { bookedTotal: number; oncologyBooked: number; nonOncologyBooked: number };
+  policy: { policySetKey: string; published: PolicyVersionDto | null; draft: PolicyVersionDto | null };
+  effectiveRules: {
+    modalityBlocks: Array<{
+      id: number; ruleType: "specific_date" | "date_range" | "yearly_recurrence"; specificDate: string | null; startDate: string | null;
+      endDate: string | null; recurStartMonth: number | null; recurStartDay: number | null; recurEndMonth: number | null; recurEndDay: number | null;
+      isOverridable: boolean; title: string | null; notes: string | null;
+    }>;
+    examTypeRestrictions: Array<{
+      id: number; ruleType: "specific_date" | "date_range" | "weekly_recurrence"; effectMode: "hard_restriction" | "restriction_overridable";
+      specificDate: string | null; startDate: string | null; endDate: string | null; weekday: number | null; alternateWeeks: boolean;
+      recurrenceAnchorDate: string | null; title: string | null; notes: string | null; examTypes: DayManagementExamTypeDto[];
+    }>;
+    examMixQuotas: Array<{
+      id: number; ruleType: "specific_date" | "date_range" | "weekly_recurrence"; specificDate: string | null; startDate: string | null;
+      endDate: string | null; weekday: number | null; alternateWeeks: boolean; recurrenceAnchorDate: string | null; title: string | null;
+      dailyLimit: number; examTypes: DayManagementExamTypeDto[];
+    }>;
+  };
+  globalConstraints: {
+    categoryDailyLimits: Array<{ id: number; caseCategory: "oncology" | "non_oncology"; dailyLimit: number }>;
+    specialQuotas: Array<{ id: number; logicalKey: string; title: string | null; dailyExtraSlots: number; examTypes: DayManagementExamTypeDto[] }>;
+    closedWeekday: "friday" | "saturday" | null;
+  };
+  examTypeOptions: DayManagementExamTypeDto[];
+  supportedDayRuleTypes: DayManagementRuleType[];
+}
+
 export interface PolicyDisplayLookupsDto {
   modalities: Array<Pick<ModalityDto, "id" | "name" | "nameAr" | "nameEn" | "code" | "isActive">>;
   examTypes: Array<Pick<ExamTypeDto, "id" | "name" | "nameAr" | "nameEn" | "code" | "modalityId" | "isActive">>;

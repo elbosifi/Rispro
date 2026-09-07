@@ -30,6 +30,7 @@ import type {
   PolicyUserDto,
   SpecialReasonCodeDto,
   IntendedReportingDoctorOption,
+  DayManagementContextDto,
 } from "./types";
 
 export async function searchV2AppointmentPatients(query: string): Promise<AppointmentPatientSelection[]> {
@@ -287,6 +288,19 @@ export async function fetchV2PolicyStatus(policySetKey: string = "default"): Pro
   return api<PolicyStatusDto>(`/v2/scheduling/admin/policy?${searchParams.toString()}`);
 }
 
+export async function fetchV2DayManagementContext(params: {
+  modalityId: number;
+  date: string;
+  policySetKey?: string;
+}): Promise<DayManagementContextDto> {
+  const searchParams = new URLSearchParams({
+    modalityId: String(params.modalityId),
+    date: params.date,
+    policySetKey: params.policySetKey ?? "default",
+  });
+  return api<DayManagementContextDto>(`/v2/scheduling/admin/day-management/context?${searchParams.toString()}`);
+}
+
 export async function createV2PolicyDraft(params: { policySetKey?: string; changeNote?: string | null }) {
   return api<{ draft: { id: number; versionNo: number; status: string }; basedOnVersionId: number }>(
     "/v2/scheduling/admin/policy/draft",
@@ -380,6 +394,17 @@ export function useV2SpecialReasonCodes(enabled = true) {
     queryFn: fetchV2SpecialReasonCodes,
     enabled,
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useV2DayManagementContext(
+  params: Parameters<typeof fetchV2DayManagementContext>[0] | undefined
+) {
+  return useQuery({
+    queryKey: ["v2-day-management-context", params?.policySetKey ?? "default", params?.modalityId, params?.date] as const,
+    queryFn: () => fetchV2DayManagementContext(params as Parameters<typeof fetchV2DayManagementContext>[0]),
+    enabled: params != null,
+    staleTime: 15_000,
   });
 }
 

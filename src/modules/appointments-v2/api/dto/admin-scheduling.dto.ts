@@ -118,6 +118,53 @@ export interface PolicyVersionDto {
   publishedAt: string | null;
 }
 
+export type DayManagementRuleType =
+  | "block_modality"
+  | "restrict_exam_types"
+  | "set_exam_mix_quota";
+
+export interface DayManagementExamTypeDto {
+  id: number;
+  name: string | null;
+  nameAr: string | null;
+  nameEn: string | null;
+}
+
+export interface DayManagementContextDto {
+  date: string;
+  modality: {
+    id: number;
+    code: string;
+    name: string;
+    nameAr: string;
+    nameEn: string;
+    dailyCapacity: number | null;
+    isActive: boolean;
+  };
+  bookingSummary: {
+    bookedTotal: number;
+    oncologyBooked: number;
+    nonOncologyBooked: number;
+  };
+  policy: {
+    policySetKey: string;
+    published: PolicyVersionDto | null;
+    draft: PolicyVersionDto | null;
+  };
+  effectiveRules: {
+    modalityBlocks: Array<Omit<PolicyModalityBlockedRuleDto, "modalityId" | "isActive">>;
+    examTypeRestrictions: Array<Omit<PolicyExamTypeRuleDto, "modalityId" | "examTypeIds" | "isActive"> & { examTypes: DayManagementExamTypeDto[] }>;
+    examMixQuotas: Array<Omit<PolicyExamMixQuotaRuleDto, "modalityId" | "examTypeIds" | "isActive"> & { examTypes: DayManagementExamTypeDto[] }>;
+  };
+  globalConstraints: {
+    categoryDailyLimits: Array<Pick<PolicyCategoryDailyLimitDto, "id" | "caseCategory" | "dailyLimit">>;
+    specialQuotas: Array<Omit<PolicySpecialQuotaRuleDto, "modalityId" | "examTypeIds" | "allowedUserIds" | "isActive"> & { examTypes: DayManagementExamTypeDto[] }>;
+    closedWeekday: "friday" | "saturday" | null;
+  };
+  examTypeOptions: DayManagementExamTypeDto[];
+  supportedDayRuleTypes: DayManagementRuleType[];
+}
+
 export interface PolicySetDto {
   id: number;
   key: string;

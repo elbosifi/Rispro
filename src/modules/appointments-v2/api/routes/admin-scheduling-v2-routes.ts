@@ -6,14 +6,16 @@
  */
 
 import { Router, Request, Response } from "express";
-import { requireAuth, requireSupervisor } from "../../../../middleware/auth.js";
+import { requireAnyRole, requireAuth, requireSupervisor } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
+import { validateIsoDate } from "../../../../utils/date.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { createPolicyDraft } from "../../admin/services/create-policy-draft.service.js";
 import { savePolicyDraft } from "../../admin/services/save-policy-draft.service.js";
 import { publishPolicy } from "../../admin/services/publish-policy.service.js";
 import { previewPolicyImpact } from "../../admin/services/preview-policy-impact.service.js";
 import { getPolicyStatus } from "../../admin/services/get-policy-status.service.js";
+import { getDayManagementContext } from "../../admin/services/get-day-management-context.service.js";
 import { listUsers } from "../../../../services/user-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import type {
@@ -31,6 +33,41 @@ router.use(requireSupervisor);
 interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
+
+/**
+ * GET /api/v2/scheduling/admin/day-management/context
+ * Return the read-only, authoritative scheduling-policy context for one day.
+ */
+router.get(
+  "/day-management/context",
+  requireAnyRole(["super_admin"]),
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const modalityId = Number(req.query.modalityId);
+    if (!Number.isInteger(modalityId) || modalityId <= 0) {
+      throwValidationError([
+        { field: "modalityId", code: "invalid_positive_integer", message: "modalityId must be a positive integer" },
+      ]);
+    }
+
+    let date: string;
+    try {
+      date = validateIsoDate(req.query.date);
+    } catch (error) {
+      throwValidationError([
+        { field: "date", code: "invalid_date", message: error instanceof Error ? error.message : "Invalid date" },
+      ]);
+    }
+
+    const policySetKey = String(req.query.policySetKey ?? "default").trim();
+    if (!policySetKey) {
+      throwValidationError([
+        { field: "policySetKey", code: "required", message: "policySetKey is required" },
+      ]);
+    }
+
+    res.json(await getDayManagementContext({ modalityId, date, policySetKey }));
+  })
+);
 
 /**
  * GET /api/v2/scheduling/admin/users

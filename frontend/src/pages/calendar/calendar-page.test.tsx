@@ -12,6 +12,8 @@ const printAppointmentSlipByIdMock = vi.fn();
 const printDayListFromRouteMock = vi.fn();
 const navigateMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
+const useV2DayManagementContextMock = vi.fn();
+let currentRole = "super_admin";
 
 type AvailabilityParams = {
   modalityId: number;
@@ -37,6 +39,11 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/v2/appointments/api", () => ({
   useV2Availability: (params: AvailabilityParams | undefined) => useV2AvailabilityMock(params),
+  useV2DayManagementContext: (params: unknown) => useV2DayManagementContextMock(params),
+}));
+
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { role: currentRole } }),
 }));
 
 vi.mock("@/providers/language-provider", () => ({
@@ -164,6 +171,7 @@ describe("CalendarPage registration drilldown", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
     vi.clearAllMocks();
+    currentRole = "super_admin";
     availabilityIsLoading = false;
     availabilityErrorByCategory = { oncology: false, non_oncology: false };
     setAvailability();
@@ -172,6 +180,7 @@ describe("CalendarPage registration drilldown", () => {
       isLoading: params != null && availabilityIsLoading,
       isError: params != null && availabilityErrorByCategory[params.caseCategory],
     }));
+    useV2DayManagementContextMock.mockReturnValue({ data: undefined, isLoading: false, isError: false });
     fetchPatientDirectorySummaryMock.mockResolvedValue({
       demographics: {
         id: 11,
@@ -428,6 +437,42 @@ describe("CalendarPage registration drilldown", () => {
       sort: "time-asc",
     }));
     expect(navigateMock).not.toHaveBeenCalledWith(expect.stringContaining("/print"));
+  });
+
+  it("does not show Manage day while All Modalities is selected", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    expect(screen.queryByRole("button", { name: "Manage day" })).toBeNull();
+  });
+
+  it("shows Manage day for a super admin with one selected modality", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality("1");
+    expect(await screen.findByRole("button", { name: "Manage day" })).toBeTruthy();
+  });
+
+  it("does not show Manage day to a supervisor", async () => {
+    currentRole = "supervisor";
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality("1");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Manage day" })).toBeNull());
+  });
+
+  it("opens Manage day for the selected date and modality", async () => {
+    renderPage();
+
+    await screen.findByTestId("modality-summary-modality:1");
+    selectModality("1");
+    fireEvent.click(await screen.findByRole("button", { name: "Manage day" }));
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(/May 2, 2026.*CT/)).toBeTruthy();
+    expect(useV2DayManagementContextMock).toHaveBeenLastCalledWith({ modalityId: 1, date: "2026-05-02", policySetKey: "default" });
   });
 
   it("does not enable availability for All Modalities and explains the inspector", async () => {

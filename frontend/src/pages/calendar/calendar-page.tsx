@@ -9,6 +9,7 @@ import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { useLanguage } from "@/providers/language-provider";
+import { useAuth } from "@/providers/auth-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { printDayListFromRoute } from "@/lib/day-list-printing";
@@ -17,6 +18,7 @@ import { filterVisibleAppointments } from "@/lib/print-utils";
 import { useV2Availability } from "@/v2/appointments/api";
 import type { AvailabilityDayDto } from "@/v2/appointments/types";
 import { mapAvailabilityRow, type AvailabilityRowStatus, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/availability-row-mapper";
+import { ManageDayDialog } from "./manage-day-dialog";
 
 interface CalendarDay {
   date: string;
@@ -68,6 +70,7 @@ type CapacityCategory = "oncology" | "non_oncology" | null;
 
 export default function CalendarPage() {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const today = new Date();
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
@@ -78,6 +81,7 @@ export default function CalendarPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedModalitySummaryKey, setSelectedModalitySummaryKey] = useState<string | null>(null);
   const [isModalityModalOpen, setIsModalityModalOpen] = useState(false);
+  const [isManageDayOpen, setIsManageDayOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const navigate = useNavigate();
 
@@ -170,6 +174,7 @@ export default function CalendarPage() {
   const selectedModalityLabel = selectedModality
     ? chooseLocalized(language, selectedModality.nameAr, selectedModality.nameEn)
     : modalityFilter;
+  const canManageDay = user?.role === "super_admin" && selectedModalityId != null && Number.isFinite(selectedModalityId);
 
   // Group appointments by date
   const groupedByDate = useMemo(() => filteredAppointments.reduce((acc, apt) => {
@@ -266,6 +271,7 @@ export default function CalendarPage() {
     setUserSelectedDate(true);
     setSelectedModalitySummaryKey(null);
     setIsModalityModalOpen(false);
+    setIsManageDayOpen(false);
   };
 
   const openModalitySummary = (summary: ModalitySummary) => {
@@ -569,6 +575,11 @@ export default function CalendarPage() {
                 noPublishedPolicy={availabilityNoPublishedPolicy}
               />
               <div className="mt-4 flex flex-col gap-2">
+                {canManageDay ? (
+                  <Button size="sm" variant="secondary" className="w-full justify-center" onClick={() => setIsManageDayOpen(true)}>
+                    {t(language, "calendar.manageDay")}
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   className="w-full justify-center"
@@ -713,6 +724,15 @@ export default function CalendarPage() {
           )}
         </DialogContent>
       </Dialog>
+      <ManageDayDialog
+        open={isManageDayOpen}
+        onClose={() => setIsManageDayOpen(false)}
+        language={language}
+        modalityId={selectedModalityId}
+        modalityLabel={selectedModalityLabel}
+        date={effectiveSelectedDate}
+        dateLabel={formatSelectedDateDisplay(effectiveSelectedDate, language)}
+      />
       {selectedPatientId ? (
         <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
       ) : null}
