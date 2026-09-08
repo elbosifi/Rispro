@@ -94,6 +94,18 @@ describe("action PIN route enforcement wiring", () => {
     assert.ok(appointments.includes("body.override"), "supervisor override payload remains handled by appointment services after Action PIN middleware");
   });
 
+  it("protects every Manage Day mutation after super-admin authorization and leaves context reads PIN-free", async () => {
+    const routes = await readFile("src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts", "utf-8");
+    const actionKey = "scheduling_day_policy_change";
+
+    for (const path of ["/day-management/block-modality", "/day-management/exam-restriction", "/day-management/exam-mix-quota", "/day-management/rules/:family/:ruleId/remove"]) {
+      const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      assert.match(routes, new RegExp(`router\\.post\\(\\s*"${escapedPath}",\\s*requireAnyRole\\(\\["super_admin"\\]\\),\\s*requireActionPin\\("${actionKey}"\\),\\s*asyncRoute`, "s"));
+    }
+    const contextRoute = routes.slice(routes.indexOf('router.get(\n  "/day-management/context"'), routes.indexOf('router.post("/day-management/block-modality"'));
+    assert.doesNotMatch(contextRoute, /requireActionPin/);
+  });
+
   it("protects selected queue mutations and leaves scan unprotected", async () => {
     const queue = await readFile("src/routes/queue.ts", "utf-8");
     const readV2 = await readFile("src/modules/appointments-v2/api/routes/read-v2-routes.ts", "utf-8");

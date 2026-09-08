@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { pool } from "../../../../db/pool.js";
+import { DEFAULT_ACTION_PIN_POLICY } from "../../../../services/action-pin-policy-service.js";
 import type { DayManagementContextDto } from "../../api/dto/admin-scheduling.dto.js";
 import { canReachDatabase, createTestApp, createTestAuthCookie, fetchJson, isDatabaseAvailable, seedTestData, setupTestDatabase, type TestData } from "./helpers.js";
 
@@ -18,6 +19,8 @@ const RESTRICTION_DUPLICATE_DATE = "2034-06-11";
 const RESTRICTION_SCOPE_CONFLICT_DATE = "2034-06-12";
 const QUOTA_DUPLICATE_DATE = "2034-06-13";
 const QUOTA_SCOPE_CONFLICT_DATE = "2034-06-14";
+const ACTION_PIN_CREATE_DATE = "2035-06-11";
+const ACTION_PIN_REMOVE_DATE = "2035-06-12";
 const available = isDatabaseAvailable();
 
 type ErrorResponse = { error?: { reasonCodes?: string[] } };
@@ -147,6 +150,52 @@ async function setAuditTrailForTest(value: "enabled" | "disabled", userId: numbe
   };
 }
 
+async function setActionPinPolicyForTest(value: unknown, userId: number): Promise<() => Promise<void>> {
+  const existing = await pool.query<{ setting_value: unknown; updated_by_user_id: number | string | null }>(
+    `select setting_value, updated_by_user_id
+       from system_settings
+      where category = 'users_and_roles' and setting_key = 'action_pin_policy'
+      limit 1`
+  );
+  await pool.query(
+    `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+     values ('users_and_roles', 'action_pin_policy', $1::jsonb, $2)
+     on conflict (category, setting_key) do update set
+       setting_value = excluded.setting_value,
+       updated_by_user_id = excluded.updated_by_user_id,
+       updated_at = now()`,
+    [JSON.stringify({ value }), userId]
+  );
+  return async () => {
+    if (existing.rows[0]) {
+      await pool.query(
+        `update system_settings
+            set setting_value = $1::jsonb,
+                updated_by_user_id = $2,
+                updated_at = now()
+          where category = 'users_and_roles' and setting_key = 'action_pin_policy'`,
+        [JSON.stringify(existing.rows[0].setting_value), existing.rows[0].updated_by_user_id]
+      );
+    } else {
+      await pool.query(`delete from system_settings where category = 'users_and_roles' and setting_key = 'action_pin_policy'`);
+    }
+  };
+}
+
+function enabledActionPinPolicy() {
+  return {
+    ...DEFAULT_ACTION_PIN_POLICY,
+    enabled: true,
+    actionModes: {
+      ...DEFAULT_ACTION_PIN_POLICY.actionModes,
+      scheduling_day_policy_change: {
+        ...DEFAULT_ACTION_PIN_POLICY.actionModes.scheduling_day_policy_change,
+        super_admin: "required_every_time",
+      },
+    },
+  };
+}
+
 async function matchingSpecificDateRestrictions(policyVersionId: number, modalityId: number, date: string, examTypeId: number) {
   return pool.query<{ id: number; effectMode: string }>(
     `select rule.id, rule.effect_mode as "effectMode"
@@ -193,6 +242,87 @@ describe("day management mutations integration", { skip: !available ? "Database 
     const audit = await pool.query<{ action_type: string; new_values: { date: string; reason: string; bookedTotal: number } }>("select action_type, new_values from audit_log where entity_type = 'scheduling_policy_day' and changed_by_user_id = $1 order by id desc limit 1", [data.userId]); assert.equal(audit.rows[0]?.action_type, "modality_day_block_created"); assert.equal(audit.rows[0]?.new_values.date, DATE); assert.equal(audit.rows[0]?.new_values.reason, "Scanner maintenance");
     const removed = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${rule!.id}/remove`, { method: "POST", cookie: cookie(), body: body(afterCreate.data.policy.published!.id, "Maintenance complete") }); assert.equal(removed.status, 200);
     const afterRemove = await context(); assert.equal(afterRemove.data.effectiveRules.modalityBlocks.some((item) => item.id === rule!.id), false);
+  });
+
+  it("requires Action PIN before creating a Manage Day policy change", async () => {
+    if (!reachable) return;
+    const reason = "Action PIN create challenge 2035";
+    const before = await policySafetyState(data, ACTION_PIN_CREATE_DATE, reason);
+    const restore = await setActionPinPolicyForTest(enabledActionPinPolicy(), data.userId);
+    try {
+      const rejected = await fetchJson<{ error?: string; actionKey?: string; requiresReason?: boolean }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/block-modality", {
+        method: "POST", cookie: cookie(), body: { ...body(before.publishedVersionId, reason, ACTION_PIN_CREATE_DATE), isOverridable: false },
+      });
+      assert.equal(rejected.status, 403);
+      assert.equal(rejected.data.error, "action_pin_required");
+      assert.equal(rejected.data.actionKey, "scheduling_day_policy_change");
+      assert.equal(rejected.data.requiresReason, false);
+
+      const after = await policySafetyState(data, ACTION_PIN_CREATE_DATE, reason);
+      assert.equal(after.publishedVersionId, before.publishedVersionId);
+      assert.equal(after.publishedConfigHash, before.publishedConfigHash);
+      assert.equal(after.totalVersionCount, before.totalVersionCount);
+      assert.equal(after.draftCount, 0);
+      assert.equal(after.matchingDayRuleCount, 0);
+      assert.equal(after.matchingAuditCount, 0);
+    } finally {
+      await restore();
+    }
+  });
+
+  it("requires Action PIN before removing a Manage Day rule", async () => {
+    if (!reachable) return;
+    const createReason = "Action PIN removal setup 2035";
+    const removalReason = "Action PIN removal challenge 2035";
+    let ruleId = 0;
+    let cleanupComplete = false;
+    try {
+      const beforeCreate = await policySafetyState(data, ACTION_PIN_REMOVE_DATE, createReason);
+      const created = await fetchJson<{ published?: { id: number } }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/block-modality", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.publishedVersionId, createReason, ACTION_PIN_REMOVE_DATE), isOverridable: false },
+      });
+      assert.equal(created.status, 201);
+      const afterCreate = await context(ACTION_PIN_REMOVE_DATE);
+      const createdRule = afterCreate.data.effectiveRules.modalityBlocks.find((rule) => rule.ruleType === "specific_date" && rule.specificDate === ACTION_PIN_REMOVE_DATE);
+      assert.ok(createdRule);
+      ruleId = Number(createdRule.id);
+
+      const beforeRemoval = await policySafetyState(data, ACTION_PIN_REMOVE_DATE, removalReason);
+      const restore = await setActionPinPolicyForTest(enabledActionPinPolicy(), data.userId);
+      try {
+        const rejected = await fetchJson<{ error?: string; actionKey?: string; requiresReason?: boolean }>(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(beforeRemoval.publishedVersionId, removalReason, ACTION_PIN_REMOVE_DATE),
+        });
+        assert.equal(rejected.status, 403);
+        assert.equal(rejected.data.error, "action_pin_required");
+        assert.equal(rejected.data.actionKey, "scheduling_day_policy_change");
+        assert.equal(rejected.data.requiresReason, false);
+
+        const afterRemoval = await policySafetyState(data, ACTION_PIN_REMOVE_DATE, removalReason);
+        assert.equal(afterRemoval.publishedVersionId, beforeRemoval.publishedVersionId);
+        assert.equal(afterRemoval.publishedConfigHash, beforeRemoval.publishedConfigHash);
+        assert.equal(afterRemoval.totalVersionCount, beforeRemoval.totalVersionCount);
+        assert.equal(afterRemoval.draftCount, 0);
+        assert.equal(afterRemoval.matchingDayRuleCount, 1);
+        assert.equal(afterRemoval.matchingAuditCount, 0);
+      } finally {
+        await restore();
+      }
+
+      const cleanupState = await policySafetyState(data, ACTION_PIN_REMOVE_DATE, "Action PIN removal cleanup 2035");
+      const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+        method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Action PIN removal cleanup 2035", ACTION_PIN_REMOVE_DATE),
+      });
+      assert.equal(cleanup.status, 200);
+      cleanupComplete = true;
+    } finally {
+      if (ruleId > 0 && !cleanupComplete) {
+        const cleanupState = await policySafetyState(data, ACTION_PIN_REMOVE_DATE, "Action PIN removal cleanup fallback 2035");
+        await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Action PIN removal cleanup fallback 2035", ACTION_PIN_REMOVE_DATE),
+        });
+      }
+    }
   });
 
   it("validates dates, reasons, restriction/quota inputs, stale versions, and super-admin authorization", async () => {

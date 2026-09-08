@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from "express";
 import { requireAnyRole, requireAuth, requireSupervisor } from "../../../../middleware/auth.js";
+import { requireActionPin } from "../../../../middleware/action-pin.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { validateIsoDate } from "../../../../utils/date.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
@@ -80,27 +81,27 @@ router.get(
   })
 );
 
-router.post("/day-management/block-modality", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+router.post("/day-management/block-modality", requireAnyRole(["super_admin"]), requireActionPin("scheduling_day_policy_change"), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
   const body = req.body as CreateDayModalityBlockDto;
   requireDayMutationShape(body);
   res.status(201).json(await createDayModalityBlock(body, Number(req.user?.sub ?? 0)));
 }));
 
-router.post("/day-management/exam-restriction", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+router.post("/day-management/exam-restriction", requireAnyRole(["super_admin"]), requireActionPin("scheduling_day_policy_change"), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
   const body = req.body as CreateDayExamRestrictionDto;
   requireDayMutationShape(body);
   if (!Array.isArray(body.examTypeIds)) throwValidationError([{ field: "examTypeIds", code: "invalid_type", message: "examTypeIds must be an array" }]);
   res.status(201).json(await createDayExamRestriction(body, Number(req.user?.sub ?? 0)));
 }));
 
-router.post("/day-management/exam-mix-quota", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+router.post("/day-management/exam-mix-quota", requireAnyRole(["super_admin"]), requireActionPin("scheduling_day_policy_change"), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
   const body = req.body as CreateDayExamMixQuotaDto;
   requireDayMutationShape(body);
   if (!Array.isArray(body.examTypeIds)) throwValidationError([{ field: "examTypeIds", code: "invalid_type", message: "examTypeIds must be an array" }]);
   res.status(201).json(await createDayExamMixQuota(body, Number(req.user?.sub ?? 0)));
 }));
 
-router.post("/day-management/rules/:family/:ruleId/remove", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+router.post("/day-management/rules/:family/:ruleId/remove", requireAnyRole(["super_admin"]), requireActionPin("scheduling_day_policy_change"), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
   const family = String(req.params.family) as DayManagementRemovableRuleFamily;
   const ruleId = Number(req.params.ruleId);
   if (!["block_modality", "restrict_exam_types", "set_exam_mix_quota"].includes(family)) {

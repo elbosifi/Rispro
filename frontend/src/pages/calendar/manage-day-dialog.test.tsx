@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ManageDayDialog } from "./manage-day-dialog";
 import type { DayManagementContextDto } from "@/v2/appointments/types";
+import { ApiError } from "@/lib/api-client";
 
 const useV2DayManagementContextMock = vi.fn();
 const useCreateV2DayModalityBlockMock = vi.fn();
@@ -53,10 +54,10 @@ const context: DayManagementContextDto = {
   supportedDayRuleTypes: ["block_modality", "restrict_exam_types", "set_exam_mix_quota"],
 };
 
-type DialogOptions = { open?: boolean; onClose?: () => void; modalityId?: number | null; modalityLabel?: string; date?: string; dateLabel?: string };
+type DialogOptions = { open?: boolean; onClose?: () => void; language?: "ar" | "en"; modalityId?: number | null; modalityLabel?: string; date?: string; dateLabel?: string };
 
-function dialogElement({ open = true, onClose = vi.fn(), modalityId = 1, modalityLabel = "CT", date = "2026-05-20", dateLabel = "Wednesday, May 20, 2026" }: DialogOptions = {}) {
-  return <ManageDayDialog open={open} onClose={onClose} language="en" modalityId={modalityId} modalityLabel={modalityLabel} date={date} dateLabel={dateLabel} />;
+function dialogElement({ open = true, onClose = vi.fn(), language = "en", modalityId = 1, modalityLabel = "CT", date = "2026-05-20", dateLabel = "Wednesday, May 20, 2026" }: DialogOptions = {}) {
+  return <ManageDayDialog open={open} onClose={onClose} language={language} modalityId={modalityId} modalityLabel={modalityLabel} date={date} dateLabel={dateLabel} />;
 }
 
 function renderDialog(options: DialogOptions = {}) {
@@ -81,13 +82,11 @@ describe("ManageDayDialog", () => {
     expect(screen.getByText("Scanner maintenance")).toBeTruthy();
     expect(screen.getByText("CT Head")).toBeTruthy();
     expect(screen.getByText(/Daily limit: 2/)).toBeTruthy();
-    expect(screen.getByText("Global modality policy")).toBeTruthy();
+    expect(screen.getByText("Global policy affecting this modality")).toBeTruthy();
     expect(screen.getByText("Urgent reserve")).toBeTruthy();
     expect(screen.getByText(/Appointments are disabled for this weekday/)).toBeTruthy();
-    expect(screen.getByText(/unpublished scheduling policy draft exists/)).toBeTruthy();
-    expect(screen.getByText("Block modality")).toBeTruthy();
-    expect(screen.getByText("Restrict exam types")).toBeTruthy();
-    expect(screen.getByText("Set exam-mix quota")).toBeTruthy();
+    expect(screen.getByText("Unpublished scheduling draft")).toBeTruthy();
+    expect(screen.getByText(/Manage Day changes are unavailable while scheduling policy draft v5 exists/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Block modality" }).getAttribute("disabled")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Restrict exam types" }).getAttribute("disabled")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Set exam-mix quota" }).getAttribute("disabled")).not.toBeNull();
@@ -103,7 +102,7 @@ describe("ManageDayDialog", () => {
     useV2DayManagementContextMock.mockReturnValue({ data: { ...context, policy: { ...context.policy, draft: null } }, isLoading: false, isError: false, refetch: vi.fn() });
     renderDialog();
 
-    expect(screen.queryByText(/unpublished scheduling policy draft exists/)).toBeNull();
+    expect(screen.queryByText("Unpublished scheduling draft")).toBeNull();
     expect(screen.getByRole("button", { name: "Block modality" }).getAttribute("disabled")).toBeNull();
   });
 
@@ -130,7 +129,7 @@ describe("ManageDayDialog", () => {
     expect(screen.getByText("Existing bookings are not cancelled or rescheduled by day policy rules.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
-    expect(screen.getByRole("alert").textContent).toContain("Reason");
+    expect(screen.getByRole("alert").textContent).toContain("Enter a reason between 3 and 500 characters.");
     expect(mutateAsync).not.toHaveBeenCalled();
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Scanner maintenance" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
@@ -172,7 +171,7 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(screen.getAllByText("CT Head").length).toBeGreaterThan(1);
-    expect(screen.getByText("Hard restriction")).toBeTruthy();
+    expect(screen.getAllByText("Hard restriction").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, examTypeIds: [3], effectMode: "hard_restriction", reason: "Contrast safety restriction" });
@@ -237,7 +236,7 @@ describe("ManageDayDialog", () => {
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Exam mix capacity limit" } });
     fireEvent.click(screen.getByRole("button", { name: "Set quota" }));
     expect(mutateAsync).not.toHaveBeenCalled();
-    expect(screen.getByText("10")).toBeTruthy();
+    expect(screen.getAllByText("10").length).toBeGreaterThan(0);
     expect(screen.getAllByText("7").length).toBeGreaterThan(1);
     fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
@@ -517,7 +516,7 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
     fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Request failed"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Day-specific change could not be published."));
     expect(screen.getByText("Review and publish change")).toBeTruthy();
     expect(screen.getByText("Keep this after failure")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Back to edit" }).getAttribute("disabled")).toBeNull();
@@ -608,5 +607,85 @@ describe("ManageDayDialog", () => {
     expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).not.toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows each day-summary metric once and makes restriction modes visible", () => {
+    const contextWithOverridable = {
+      ...availableContext(),
+      effectiveRules: {
+        ...context.effectiveRules,
+        examTypeRestrictions: [...context.effectiveRules.examTypeRestrictions, { ...context.effectiveRules.examTypeRestrictions[0]!, id: 16, title: "Supervisor review", effectMode: "restriction_overridable" as const }],
+      },
+    };
+    useV2DayManagementContextMock.mockReturnValue({ data: contextWithOverridable, isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    ["Daily capacity", "Active bookings", "Oncology", "Non-oncology"].forEach((label) => expect(screen.getAllByText(label)).toHaveLength(1));
+    expect(screen.getByText("Hard restriction")).toBeTruthy();
+    expect(screen.getByText("Supervisor-overridable restriction")).toBeTruthy();
+  });
+
+  it("uses the localized special-quota fallback without exposing an internal key", () => {
+    const internalKey = "8a8d65d9-7412-4eea-a93c-0c8a6b953ca4";
+    const contextWithFallbackQuota = {
+      ...availableContext(),
+      globalConstraints: { ...context.globalConstraints, specialQuotas: [{ ...context.globalConstraints.specialQuotas[0]!, title: null, logicalKey: internalKey }] },
+    };
+    useV2DayManagementContextMock.mockReturnValue({ data: contextWithFallbackQuota, isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    expect(screen.getByText("Special quota")).toBeTruthy();
+    expect(screen.queryByText(internalKey)).toBeNull();
+  });
+
+  it("maps known API reason codes to user-facing errors", async () => {
+    const mutateAsync = vi.fn()
+      .mockRejectedValueOnce(new ApiError("raw stale message", 409, undefined, ["day_management_context_stale"]))
+      .mockRejectedValueOnce(new ApiError("raw draft message", 409, undefined, ["day_management_draft_conflict"]))
+      .mockRejectedValueOnce(new ApiError("raw scope message", 409, undefined, ["day_management_rule_scope_conflict"]))
+      .mockRejectedValueOnce(new ApiError("raw audit message", 503, undefined, ["day_management_audit_required"]));
+    useCreateV2DayModalityBlockMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Mapped API error" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    for (const expected of [
+      "Scheduling policy changed while this day was open.",
+      "An unpublished scheduling policy draft now exists.",
+      "A day-specific rule already exists for the same exam group.",
+      "This change cannot be published because the audit trail is unavailable.",
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(expected));
+    }
+    expect(screen.queryByText("raw stale message")).toBeNull();
+    expect(screen.queryByText("raw audit message")).toBeNull();
+  });
+
+  it("uses professional local reason and quota validation messages", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "no" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    expect(screen.getByRole("alert").textContent).toBe("Enter a reason between 3 and 500 characters.");
+    fireEvent.click(screen.getByRole("button", { name: "Set exam-mix quota" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Quota validation" } });
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set quota" }));
+    expect(screen.getByRole("alert").textContent).toBe("Enter a whole-number daily limit from 1 to 25.");
+  });
+
+  it("sets an Arabic content direction without exposing internal rule identifiers", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog({ language: "ar" });
+
+    expect(document.querySelector('[dir="rtl"]')).toBeTruthy();
+    expect(screen.queryByText("quota-key")).toBeNull();
+    expect(screen.queryByText("10")).toBeTruthy();
   });
 });

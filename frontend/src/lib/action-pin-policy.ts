@@ -40,6 +40,7 @@ export const ACTION_PIN_ACTION_KEYS = [
   "patient_import_confirm",
   "pacs_patient_remap",
   "session_unlock",
+  "scheduling_day_policy_change",
 ] as const;
 
 export type ActionPinRole = (typeof ACTION_PIN_ROLES)[number];
@@ -114,6 +115,7 @@ export const ACTION_PIN_ACTION_LABELS: Record<ActionPinActionKey, string> = {
   patient_import_confirm: "Patient import confirmation",
   pacs_patient_remap: "PACS patient remap",
   session_unlock: "Session unlock",
+  scheduling_day_policy_change: "Manage day scheduling policy",
 };
 
 export const ACTION_PIN_GROUPS: Array<{ label: string; actions: ActionPinActionKey[] }> = [
@@ -159,6 +161,7 @@ export const ACTION_PIN_GROUPS: Array<{ label: string; actions: ActionPinActionK
       "patient_import_confirm",
       "pacs_patient_remap",
       "session_unlock",
+      "scheduling_day_policy_change",
     ],
   },
 ];
@@ -188,6 +191,7 @@ function buildDefaultActionModes(): ActionPinPolicy["actionModes"] {
   for (const actionKey of ACTION_PIN_ACTION_KEYS) {
     matrix[actionKey].super_admin = "not_required";
   }
+  matrix.scheduling_day_policy_change.super_admin = "required_every_time";
   return matrix;
 }
 

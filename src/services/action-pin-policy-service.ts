@@ -33,6 +33,7 @@ export const ACTION_PIN_ACTION_KEYS = [
   "patient_import_confirm",
   "pacs_patient_remap",
   "session_unlock",
+  "scheduling_day_policy_change",
 ] as const;
 
 export const ACTION_PIN_MODES = [
@@ -131,6 +132,7 @@ function defaultActionModes(): ActionPinRoleMatrix {
   for (const actionKey of ACTION_PIN_ACTION_KEYS) {
     matrix[actionKey].super_admin = "not_required";
   }
+  matrix.scheduling_day_policy_change.super_admin = "required_every_time";
 
   return matrix;
 }

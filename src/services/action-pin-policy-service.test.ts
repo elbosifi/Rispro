@@ -53,6 +53,7 @@ describe("action PIN policy", () => {
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("duplicate_patient_safe_delete"));
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("pacs_patient_remap"));
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("session_unlock"));
+    assert.ok(ACTION_PIN_ACTION_KEYS.includes("scheduling_day_policy_change"));
   });
 
   it("resolves disabled global policy as not required", async () => {
@@ -78,6 +79,29 @@ describe("action PIN policy", () => {
     assert.equal(result.mode, "required_every_time_with_reason");
     assert.equal(result.required, true);
     assert.equal(result.requiresReason, true);
+  });
+
+  it("requires a PIN every time for Manage Day policy changes when enabled", async () => {
+    const { DEFAULT_ACTION_PIN_POLICY, resolveActionPinRequirement } = await import("./action-pin-policy-service.js");
+    const result = resolveActionPinRequirement(
+      { ...DEFAULT_ACTION_PIN_POLICY, enabled: true },
+      "super_admin",
+      "scheduling_day_policy_change"
+    );
+
+    assert.equal(result.mode, "required_every_time");
+    assert.equal(result.required, true);
+    assert.equal(result.requiresReason, false);
+    assert.equal(result.disabledForRole, false);
+  });
+
+  it("supplies the new Manage Day default to older policies while preserving an explicit override", async () => {
+    const { normalizeActionPinPolicy } = await import("./action-pin-policy-service.js");
+    const oldPolicy = normalizeActionPinPolicy({ enabled: true, actionModes: { patient_create: { receptionist: "required_every_time" } } });
+    const overriddenPolicy = normalizeActionPinPolicy({ enabled: true, actionModes: { scheduling_day_policy_change: { super_admin: "not_required" } } });
+
+    assert.equal(oldPolicy.actionModes.scheduling_day_policy_change.super_admin, "required_every_time");
+    assert.equal(overriddenPolicy.actionModes.scheduling_day_policy_change.super_admin, "not_required");
   });
 
   it("normalizes idle-lock role and user eligibility settings", async () => {
