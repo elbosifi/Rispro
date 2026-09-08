@@ -419,15 +419,17 @@ export function useV2DayManagementContext(
   });
 }
 
-function invalidateDayManagement(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: ["v2-day-management-context"] });
-  queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
-  queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] });
+async function invalidateDayManagement(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["v2-day-management-context"] }),
+    queryClient.invalidateQueries({ queryKey: ["v2-availability"] }),
+    queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] }),
+  ]);
 }
-export function useCreateV2DayModalityBlock() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayModalityBlock, onSuccess: () => invalidateDayManagement(queryClient) }); }
-export function useCreateV2DayExamRestriction() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamRestriction, onSuccess: () => invalidateDayManagement(queryClient) }); }
-export function useCreateV2DayExamMixQuota() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamMixQuota, onSuccess: () => invalidateDayManagement(queryClient) }); }
-export function useRemoveV2DayManagementRule() { const queryClient = useQueryClient(); return useMutation({ mutationFn: removeV2DayManagementRule, onSuccess: () => invalidateDayManagement(queryClient) }); }
+export function useCreateV2DayModalityBlock() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayModalityBlock, onSuccess: async () => { await invalidateDayManagement(queryClient); } }); }
+export function useCreateV2DayExamRestriction() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamRestriction, onSuccess: async () => { await invalidateDayManagement(queryClient); } }); }
+export function useCreateV2DayExamMixQuota() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamMixQuota, onSuccess: async () => { await invalidateDayManagement(queryClient); } }); }
+export function useRemoveV2DayManagementRule() { const queryClient = useQueryClient(); return useMutation({ mutationFn: removeV2DayManagementRule, onSuccess: async () => { await invalidateDayManagement(queryClient); } }); }
 
 export function useV2Priorities() {
   return useQuery({
