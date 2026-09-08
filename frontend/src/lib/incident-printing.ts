@@ -61,7 +61,7 @@ const reviewRow = (label: string, value: unknown, isolate = false) =>
   `<tr><th scope="row">${label}</th><td${isolate ? ' class="isolate"' : ""}>${escapeHtml(value)}</td></tr>`;
 
 const reportSection = (title: string, content: string, className = "") =>
-  `<section class="report-section ${className}"><h2 class="section-heading">${title}</h2>${content}</section>`;
+  `<section class="report-section print-group ${className}"><h2 class="section-heading">${title}</h2>${content}</section>`;
 
 const narrativeSection = (title: string, value: unknown) =>
   reportSection(title, `<div class="narrative-content">${escapeHtml(value)}</div>`, "narrative-section");
@@ -211,8 +211,7 @@ body[dir="rtl"] { font-family: "Noto Sans Arabic", Tahoma, Arial, sans-serif; }
 .data-table tr:last-child th, .data-table tr:last-child td { border-bottom: 0; }
 .data-table th { width: 32%; color: #46515b; font-weight: 700; }
 .data-table td { min-width: 0; }
-.narrative-section { break-inside: auto; }
-.narrative-content { min-height: 13mm; padding: 3mm; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.narrative-content { min-height: 13mm; padding: 3mm; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; orphans: 3; widows: 3; }
 .review-meta th, .review-meta td { padding-top: 2mm; padding-bottom: 2mm; }
 .subsection-label { padding: 2.5mm 3mm 0; color: #46515b; font-size: 8.5pt; font-weight: 700; }
 .review-content { min-height: 12mm; padding-top: 1.5mm; }
@@ -222,7 +221,7 @@ body[dir="rtl"] .attachment-register { padding: 2mm 10mm 2mm 8mm; }
 .attachment-register li:last-child { border-bottom: 0; }
 .filename { overflow-wrap: anywhere; word-break: break-word; }
 .empty-content { padding: 4mm 3mm; color: #46515b; }
-.official-use-section { break-inside: avoid; }
+.official-use-section { break-inside: avoid-page; page-break-inside: avoid; }
 .signature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5mm; padding: 4mm 3mm 5mm; }
 .signature-block, .stamp-block { min-width: 0; }
 .signature-block h3, .stamp-block h3 { margin: 0 0 2.5mm; font-size: 9.5pt; font-weight: 800; }
@@ -234,11 +233,11 @@ body[dir="rtl"] .attachment-register { padding: 2mm 10mm 2mm 8mm; }
 .report-footer > span { min-width: 0; overflow-wrap: anywhere; }
 .isolate { direction: ltr; text-align: left; unicode-bidi: isolate; }
 @media screen and (max-width: 720px) { .identity-table, .identity-table tbody, .identity-table tr, .identity-cell { display: block; width: 100%; } .identity-cell { border-inline-start: 0; border-top: 0.2mm solid #aeb6bd; } .identity-cell:first-child { border-top: 0; } .signature-grid { grid-template-columns: 1fr; } .stamp-box { min-height: 22mm; } }
-@media print { .toolbar { display: none; } .report { max-width: none; } .institutional-header, .report-footer { display: none; } .print-running-logo { display: block; position: fixed; left: 50%; top: -28mm; width: 21mm; height: 21mm; transform: translateX(-50%); object-fit: contain; z-index: 20; } .section-heading { break-after: avoid; } a { color: inherit; text-decoration: none; } .title-block, .identity-strip, .structured-section, .attachments-section { break-inside: avoid; } }
+@media print { .toolbar { display: none; } .report { max-width: none; } .institutional-header, .report-footer { display: none; } .print-running-logo { display: block; position: fixed; left: 50%; top: -28mm; width: 21mm; height: 21mm; transform: translateX(-50%); object-fit: contain; z-index: 20; } .section-heading { break-after: avoid-page; page-break-after: avoid; } .print-group { break-inside: avoid-page; page-break-inside: avoid; } .report-intro-group { break-inside: avoid-page; page-break-inside: avoid; } .data-table tr { break-inside: avoid; page-break-inside: avoid; } .attachment-register li { break-inside: avoid; page-break-inside: avoid; } a { color: inherit; text-decoration: none; } }
 </style><script>function printReportWhenReady(){const logo=document.querySelector(".institutional-logo");if(!logo||logo.complete){window.print();return;}const print=()=>window.print();logo.addEventListener("load",print,{once:true});logo.addEventListener("error",print,{once:true});}</script></head><body><div class="toolbar"><button type="button" onclick="printReportWhenReady()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report">
   <img class="print-running-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"><header class="institutional-header"><div class="institutional-english" dir="ltr"><p class="hospital-en">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-en">${escapeHtml(printCopy.en.department)}</p></div><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"></div><div class="institutional-arabic" dir="rtl"><p class="hospital-ar">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="department-ar">${escapeHtml(printCopy.ar.department)}</p></div></header>
-  <div class="title-block"><p class="title-ar" dir="rtl">تقرير حادث</p><p class="title-en" dir="ltr">Incident Report</p></div>
-  ${identityStrip}
+  <div class="report-intro-group"><div class="title-block"><p class="title-ar" dir="rtl">تقرير حادث</p><p class="title-en" dir="ltr">Incident Report</p></div>
+  ${identityStrip}</div>
   ${incidentDetails}
   ${narrativeSection(incidentLabel(language, "description"), incident.description)}
   ${narrativeSection(incidentLabel(language, "immediateAction"), incident.immediate_action)}
