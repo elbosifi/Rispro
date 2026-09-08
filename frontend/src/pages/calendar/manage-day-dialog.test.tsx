@@ -53,8 +53,14 @@ const context: DayManagementContextDto = {
   supportedDayRuleTypes: ["block_modality", "restrict_exam_types", "set_exam_mix_quota"],
 };
 
-function renderDialog({ open = true, onClose = vi.fn(), modalityId = 1, modalityLabel = "CT", date = "2026-05-20", dateLabel = "Wednesday, May 20, 2026" }: { open?: boolean; onClose?: () => void; modalityId?: number | null; modalityLabel?: string; date?: string; dateLabel?: string } = {}) {
-  return render(<ManageDayDialog open={open} onClose={onClose} language="en" modalityId={modalityId} modalityLabel={modalityLabel} date={date} dateLabel={dateLabel} />);
+type DialogOptions = { open?: boolean; onClose?: () => void; modalityId?: number | null; modalityLabel?: string; date?: string; dateLabel?: string };
+
+function dialogElement({ open = true, onClose = vi.fn(), modalityId = 1, modalityLabel = "CT", date = "2026-05-20", dateLabel = "Wednesday, May 20, 2026" }: DialogOptions = {}) {
+  return <ManageDayDialog open={open} onClose={onClose} language="en" modalityId={modalityId} modalityLabel={modalityLabel} date={date} dateLabel={dateLabel} />;
+}
+
+function renderDialog(options: DialogOptions = {}) {
+  return render(dialogElement(options));
 }
 
 function availableContext() {
@@ -346,5 +352,156 @@ describe("ManageDayDialog", () => {
 
     expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("blocks close paths while a mutation is pending", () => {
+    const onClose = vi.fn();
+    const blockMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayModalityBlockMock.mockReturnValue(blockMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    blockMutation.isPending = true;
+    view.rerender(dialogElement({ onClose }));
+
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(screen.getByRole("dialog").firstElementChild!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("locks action and removal entry points while a mutation is pending", () => {
+    const blockMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayModalityBlockMock.mockReturnValue(blockMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    blockMutation.isPending = true;
+    view.rerender(dialogElement());
+
+    const blockButtons = screen.getAllByRole("button", { name: "Block modality" });
+    expect(blockButtons[0]!.getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Restrict exam types" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Set exam-mix quota" }).getAttribute("disabled")).not.toBeNull();
+    screen.getAllByRole("button", { name: "Remove" }).forEach((button) => expect(button.getAttribute("disabled")).not.toBeNull());
+    fireEvent.click(blockButtons[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    expect(screen.getByRole("checkbox", { name: "Allow supervisor override" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove rule" })).toBeNull();
+  });
+
+  it("freezes the block modality form while its mutation is pending", () => {
+    const blockMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayModalityBlockMock.mockReturnValue(blockMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Allow supervisor override" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Block pending" } });
+    blockMutation.isPending = true;
+    view.rerender(dialogElement());
+
+    expect(screen.getByRole("checkbox", { name: "Allow supervisor override" }).getAttribute("disabled")).not.toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Allow supervisor override" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).not.toBeNull();
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("Block pending");
+    expect(screen.getByRole("button", { name: "Cancel" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Block modality" })[1]!.getAttribute("disabled")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("checkbox", { name: "Allow supervisor override" })).toBeTruthy();
+  });
+
+  it("freezes the exam restriction form while its mutation is pending", () => {
+    const restrictionMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayExamRestrictionMock.mockReturnValue(restrictionMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    restrictionMutation.isPending = true;
+    view.rerender(dialogElement());
+
+    screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox.getAttribute("disabled")).not.toBeNull());
+    expect(screen.getByRole("combobox").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Apply restriction" }).getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("freezes the exam-mix quota form while its mutation is pending", () => {
+    const quotaMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayExamMixQuotaMock.mockReturnValue(quotaMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set exam-mix quota" }));
+    quotaMutation.isPending = true;
+    view.rerender(dialogElement());
+
+    screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox.getAttribute("disabled")).not.toBeNull());
+    expect(screen.getByRole("spinbutton").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Set quota" }).getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("freezes removal confirmation and keeps the dialog open while removal is pending", () => {
+    const onClose = vi.fn();
+    const removeMutation = { isPending: false, mutateAsync: vi.fn() };
+    useRemoveV2DayManagementRuleMock.mockReturnValue(removeMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Remove pending" } });
+    removeMutation.isPending = true;
+    view.rerender(dialogElement({ onClose }));
+
+    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).not.toBeNull();
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("Remove pending");
+    expect(screen.getByRole("button", { name: "Cancel" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Remove rule" }).getAttribute("disabled")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not submit a second mutation while the first is pending", async () => {
+    let resolveMutation: (() => void) | undefined;
+    const blockMutation = { isPending: false, mutateAsync: vi.fn(() => new Promise<void>((resolve) => { resolveMutation = resolve; })) };
+    useCreateV2DayModalityBlockMock.mockReturnValue(blockMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Submit once" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    await waitFor(() => expect(blockMutation.mutateAsync).toHaveBeenCalledTimes(1));
+    blockMutation.isPending = true;
+    view.rerender(dialogElement());
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    expect(blockMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    resolveMutation?.();
+  });
+
+  it("keeps failed mutation input and re-enables the editor", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new Error("Request failed"));
+    useCreateV2DayExamRestrictionMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Keep this after failure" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Request failed"));
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("Keep this after failure");
+    expect(screen.getByRole("checkbox", { name: "CT Head" }).getAttribute("disabled")).toBeNull();
+    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply restriction" }).getAttribute("disabled")).toBeNull();
   });
 });
