@@ -24,6 +24,7 @@ export interface Incident {
   immediate_action: string | null;
   review_notes: string | null;
   reporter_name: string | null;
+  reviewer_name: string | null;
   equipment_name: string | null;
   equipment_type: string | null;
   location: string | null;
