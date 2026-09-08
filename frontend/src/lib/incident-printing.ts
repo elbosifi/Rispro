@@ -71,6 +71,9 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const generatedAt = formatDateTime(new Date().toISOString(), language);
   const status = incidentText(language, incident.status);
   const title = incidentLabel(language, "printTitle");
+  const pageNumberRule = rtl
+    ? `@page { @bottom-left { content: "الصفحة " counter(page) " من " counter(pages); font: normal 8pt "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #46515b; } }`
+    : `@page { @bottom-right { content: "Page " counter(page) " of " counter(pages); font: normal 8pt Arial, Helvetica, sans-serif; color: #46515b; } }`;
 
   const identityStrip = `<div class="identity-strip">
     <table class="identity-table" aria-label="${title}"><tbody><tr>
@@ -133,7 +136,8 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   );
 
   const html = `<!doctype html><html lang="${language}" dir="${rtl ? "rtl" : "ltr"}"><head><meta charset="utf-8"><title>${title}</title><style>
-@page { size: A4 portrait; margin: 14mm 15mm 15mm; }
+@page { size: A4 portrait; margin: 32mm 15mm 20mm; }
+${pageNumberRule}
 * { box-sizing: border-box; }
 html { background: #fff; }
 body { margin: 0; color: #18212b; background: #fff; font: 10.5pt/1.45 Arial, Helvetica, sans-serif; }
@@ -190,8 +194,8 @@ body[dir="rtl"] .attachment-register { padding: 2mm 10mm 2mm 8mm; }
 .report-footer > span { min-width: 0; overflow-wrap: anywhere; }
 .isolate { direction: ltr; text-align: left; unicode-bidi: isolate; }
 @media screen and (max-width: 720px) { .identity-table, .identity-table tbody, .identity-table tr, .identity-cell { display: block; width: 100%; } .identity-cell { border-inline-start: 0; border-top: 0.2mm solid #aeb6bd; } .identity-cell:first-child { border-top: 0; } .signature-grid { grid-template-columns: 1fr; } .stamp-box { min-height: 22mm; } }
-@media print { .toolbar { display: none; } .report { max-width: none; } a { color: inherit; text-decoration: none; } .institutional-header, .title-block, .identity-strip, .structured-section, .attachments-section { break-inside: avoid; } }
-</style></head><body><div class="toolbar"><button type="button" onclick="window.print()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report">
+@media print { .toolbar { display: none; } .report { max-width: none; } .institutional-header { position: fixed; top: -27mm; left: 0; right: 0; width: 100%; max-width: 180mm; height: 24mm; margin: 0 auto; background: #fff; z-index: 10; } .report-footer { position: fixed; bottom: -14mm; left: 0; right: 0; width: 100%; max-width: 180mm; height: 9mm; margin: 0 auto; padding-top: 2.5mm; background: #fff; z-index: 10; justify-content: center; gap: 10mm; } .section-heading { break-after: avoid; } a { color: inherit; text-decoration: none; } .institutional-header, .title-block, .identity-strip, .structured-section, .attachments-section { break-inside: avoid; } }
+</style><script>function printReportWhenReady(){const logo=document.querySelector(".institutional-logo");if(!logo||logo.complete){window.print();return;}const print=()=>window.print();logo.addEventListener("load",print,{once:true});logo.addEventListener("error",print,{once:true});}</script></head><body><div class="toolbar"><button type="button" onclick="printReportWhenReady()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report">
   <header class="institutional-header"><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"></div><div class="institutional-copy"><p class="hospital-ar" dir="rtl">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="hospital-en" dir="ltr">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-ar" dir="rtl">${escapeHtml(printCopy.ar.department)}</p><p class="department-en" dir="ltr">${escapeHtml(printCopy.en.department)}</p></div></header>
   <div class="title-block"><p class="title-ar" dir="rtl">تقرير حادث</p><p class="title-en" dir="ltr">Incident Report</p></div>
   ${identityStrip}
