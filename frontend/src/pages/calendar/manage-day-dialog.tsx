@@ -55,6 +55,7 @@ type ConfirmationState =
   | { kind: "create"; action: Exclude<Action, null> }
   | { kind: "remove" }
   | null;
+type InteractionWarning = { title?: string; description: string };
 
 const scopeKey = {
   specific_date: "calendar.manageDaySpecificDate",
@@ -68,15 +69,16 @@ const familyTitleKey = {
   set_exam_mix_quota: "calendar.manageDayExamMixQuota",
 } as const;
 
+function examTypeName(language: "ar" | "en", item: DayManagementExamTypeDto) {
+  return (
+    chooseLocalized(language, item.nameAr, item.nameEn) ||
+    item.name ||
+    t(language, "common.na")
+  );
+}
+
 function examTypeNames(language: "ar" | "en", items: DayManagementExamTypeDto[]) {
-  return items
-    .map(
-      (item) =>
-        chooseLocalized(language, item.nameAr, item.nameEn) ||
-        item.name ||
-        t(language, "common.na"),
-    )
-    .join(", ");
+  return items.map((item) => examTypeName(language, item)).join(", ");
 }
 
 function capability(language: "ar" | "en", type: DayManagementRuleType) {
@@ -115,6 +117,119 @@ function semanticRuleTitle(
   return title && title !== generatedTitle
     ? title
     : t(language, familyTitleKey[family]);
+}
+
+function buildInteractionWarnings({
+  language,
+  action,
+  isOverridable,
+  effectMode,
+  examTypeIds,
+  context,
+}: {
+  language: "ar" | "en";
+  action: DayManagementRuleType;
+  isOverridable: boolean;
+  effectMode: "hard_restriction" | "restriction_overridable";
+  examTypeIds: number[];
+  context: DayManagementContextDto;
+}): InteractionWarning[] {
+  const warnings: InteractionWarning[] = [];
+  const hasHardInheritedModalityBlock = context.effectiveRules.modalityBlocks.some(
+    (rule) => rule.ruleType !== "specific_date" && !rule.isOverridable,
+  );
+
+  if (hasHardInheritedModalityBlock && action === "block_modality") {
+    warnings.push(
+      isOverridable
+        ? {
+            title: t(language, "calendar.manageDayInheritedHardBlockTitle"),
+            description: t(
+              language,
+              "calendar.manageDayInheritedHardBlockOverrideWarning",
+            ),
+          }
+        : {
+            description: t(
+              language,
+              "calendar.manageDayInheritedHardBlockRedundantWarning",
+            ),
+          },
+    );
+  }
+
+  if (
+    hasHardInheritedModalityBlock &&
+    (action === "restrict_exam_types" || action === "set_exam_mix_quota")
+  ) {
+    warnings.push({
+      description: t(
+        language,
+        "calendar.manageDayInheritedBlockStillBlocksWarning",
+      ),
+    });
+  }
+
+  const selectedExamIds = new Set(examTypeIds);
+  if (action === "restrict_exam_types") {
+    const inheritedHardRestrictions = context.effectiveRules.examTypeRestrictions.filter(
+      (rule) =>
+        rule.ruleType !== "specific_date" &&
+        rule.effectMode === "hard_restriction",
+    );
+    const overlappingExamTypes = context.examTypeOptions.filter((exam) =>
+      selectedExamIds.has(exam.id) &&
+      inheritedHardRestrictions.some((rule) =>
+        rule.examTypes.some((ruleExam) => ruleExam.id === exam.id),
+      ),
+    );
+    const overlappingExamNames = examTypeNames(language, overlappingExamTypes);
+
+    if (overlappingExamNames) {
+      warnings.push(
+        effectMode === "restriction_overridable"
+          ? {
+              title: t(language, "calendar.manageDayInheritedHardExamTitle"),
+              description: t(
+                language,
+                "calendar.manageDayInheritedHardExamOverridableWarning",
+                { exams: overlappingExamNames },
+              ),
+            }
+          : {
+              description: t(
+                language,
+                "calendar.manageDayInheritedHardExamRedundantWarning",
+                { exams: overlappingExamNames },
+              ),
+            },
+      );
+    }
+  }
+
+  if (action === "set_exam_mix_quota") {
+    const inheritedQuotas = context.effectiveRules.examMixQuotas.filter(
+      (rule) => rule.ruleType !== "specific_date",
+    );
+    const overlappingExamTypes = context.examTypeOptions.filter((exam) =>
+      selectedExamIds.has(exam.id) &&
+      inheritedQuotas.some((rule) =>
+        rule.examTypes.some((ruleExam) => ruleExam.id === exam.id),
+      ),
+    );
+    const overlappingExamNames = examTypeNames(language, overlappingExamTypes);
+
+    if (overlappingExamNames) {
+      warnings.push({
+        title: t(language, "calendar.manageDayInheritedQuotaTitle"),
+        description: t(language, "calendar.manageDayInheritedQuotaWarning", {
+          exams: overlappingExamNames,
+        }),
+      });
+    }
+  }
+
+  return warnings;
 }
 
 export function ManageDayDialog({
@@ -165,6 +280,17 @@ export function ManageDayDialog({
     context?.modality.isActive === false;
   const interactionLocked =
     mutationPending || contextRefreshing || writeUnavailable;
+  const interactionWarnings =
+    context && action && confirmation?.kind !== "remove"
+      ? buildInteractionWarnings({
+          language,
+          action,
+          isOverridable,
+          effectMode,
+          examTypeIds,
+          context,
+        })
+      : [];
 
   const resetEditorState = () => {
     setAction(null);
@@ -839,6 +965,7 @@ export function ManageDayDialog({
                 effectMode={effectMode}
                 dailyLimit={dailyLimit}
                 removeTarget={removeTarget}
+                interactionWarnings={interactionWarnings}
                 mutationPending={mutationPending}
                 interactionLocked={interactionLocked}
                 onBack={() => {
@@ -870,6 +997,7 @@ export function ManageDayDialog({
                     setDailyLimit={setDailyLimit}
                     pending={mutationPending}
                     interactionLocked={interactionLocked}
+                    interactionWarnings={interactionWarnings}
                     onCancel={cancelEditor}
                     onSubmit={submit}
                   />
@@ -945,6 +1073,7 @@ function Form({
   setDailyLimit,
   pending,
   interactionLocked,
+  interactionWarnings,
   onCancel,
   onSubmit,
 }: {
@@ -970,6 +1099,7 @@ function Form({
   setDailyLimit: (value: string) => void;
   pending: boolean;
   interactionLocked: boolean;
+  interactionWarnings: InteractionWarning[];
   onCancel: () => void;
   onSubmit: () => void;
 }) {
@@ -1142,6 +1272,7 @@ function Form({
         </>
       )}
 
+      <InteractionWarnings warnings={interactionWarnings} />
       <Reason
         language={language}
         value={reason}
@@ -1181,6 +1312,7 @@ function Review({
   effectMode,
   dailyLimit,
   removeTarget,
+  interactionWarnings,
   mutationPending,
   interactionLocked,
   onBack,
@@ -1197,6 +1329,7 @@ function Review({
   effectMode: "hard_restriction" | "restriction_overridable";
   dailyLimit: string;
   removeTarget: RemoveTarget;
+  interactionWarnings: InteractionWarning[];
   mutationPending: boolean;
   interactionLocked: boolean;
   onBack: () => void;
@@ -1299,6 +1432,7 @@ function Review({
           </>
         )}
       </dl>
+      <InteractionWarnings warnings={interactionWarnings} />
       <DialogFooter>
         <Button
           type="button"
@@ -1337,6 +1471,21 @@ function ReviewField({
     <div>
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function InteractionWarnings({ warnings }: { warnings: InteractionWarning[] }) {
+  if (!warnings.length) return null;
+
+  return (
+    <div className="space-y-2">
+      {warnings.map((warning, index) => (
+        <Alert key={`${warning.description}-${index}`} variant="warning">
+          {warning.title ? <AlertTitle>{warning.title}</AlertTitle> : null}
+          <AlertDescription>{warning.description}</AlertDescription>
+        </Alert>
+      ))}
     </div>
   );
 }

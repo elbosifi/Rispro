@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ManageDayDialog } from "./manage-day-dialog";
 import type { DayManagementContextDto } from "@/v2/appointments/types";
 import { ApiError } from "@/lib/api-client";
+import { t } from "@/lib/i18n";
 
 const useV2DayManagementContextMock = vi.fn();
 const useCreateV2DayModalityBlockMock = vi.fn();
@@ -88,6 +89,62 @@ function selectorContext() {
       { id: 5, name: "CT Abdomen", nameAr: "تصوير البطن", nameEn: "CT Abdomen" },
       { id: 6, name: "CT Angiography", nameAr: "تصوير الأوعية", nameEn: "CT Angiography" },
     ],
+  };
+}
+
+function inheritedHardModalityContext() {
+  const base = selectorContext();
+  return {
+    ...base,
+    effectiveRules: {
+      ...base.effectiveRules,
+      modalityBlocks: [
+        {
+          ...context.effectiveRules.modalityBlocks[0]!,
+          ruleType: "date_range" as const,
+          specificDate: null,
+          startDate: "2026-01-01",
+          endDate: "2036-12-31",
+          isOverridable: false,
+        },
+      ],
+    },
+  };
+}
+
+function inheritedHardRestrictionContext() {
+  const base = selectorContext();
+  return {
+    ...base,
+    effectiveRules: {
+      ...base.effectiveRules,
+      examTypeRestrictions: [
+        {
+          ...context.effectiveRules.examTypeRestrictions[0]!,
+          ruleType: "weekly_recurrence" as const,
+          specificDate: null,
+          examTypes: [context.effectiveRules.examTypeRestrictions[0]!.examTypes[0]!],
+        },
+      ],
+    },
+  };
+}
+
+function inheritedQuotaContext() {
+  const base = selectorContext();
+  return {
+    ...base,
+    effectiveRules: {
+      ...base.effectiveRules,
+      examMixQuotas: [
+        {
+          ...context.effectiveRules.examMixQuotas[0]!,
+          ruleType: "weekly_recurrence" as const,
+          specificDate: null,
+          examTypes: [selectorContext().examTypeOptions[1]!],
+        },
+      ],
+    },
   };
 }
 
@@ -1094,6 +1151,202 @@ describe("ManageDayDialog", () => {
     queryState = { ...queryState, isFetching: true };
     view.rerender(dialogElement());
     expect(screen.getByRole("button", { name: "Try again" }).getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("warns that an overridable day block cannot relax an inherited hard block", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardModalityContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Allow supervisor override" }));
+    expect(screen.getByText("Hard inherited block remains active")).toBeTruthy();
+    expect(screen.getByText(/Allowing supervisor override on the new day rule/)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Inherited block warning" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    expect(screen.getByText("Hard inherited block remains active")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("warns when a new hard modality block is redundant with an inherited hard block", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardModalityContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    expect(screen.getByText(/Adding another hard day-specific block will not change/)).toBeTruthy();
+  });
+
+  it("warns that an inherited hard modality block still blocks exam actions", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardModalityContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    expect(screen.getByText(/This modality is already hard-blocked by an inherited rule/)).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Exam action warning" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    expect(screen.getByText(/This modality is already hard-blocked by an inherited rule/)).toBeTruthy();
+  });
+
+  it("warns only for the selected exams that overlap an inherited hard restriction", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardRestrictionContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Chest" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
+
+    expect(screen.getByText("Some exams remain hard-restricted")).toBeTruthy();
+    expect(screen.getByText(/The inherited hard restriction remains authoritative for: CT Head\./)).toBeTruthy();
+    expect(screen.queryByText(/The inherited hard restriction remains authoritative for: CT Head, CT Chest/)).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Partial inherited restriction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    expect(screen.getByText("Some exams remain hard-restricted")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("warns when a new hard exam restriction is redundant for inherited exams", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardRestrictionContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    expect(screen.getByText(/These exams are already hard-restricted by an inherited rule: CT Head\./)).toBeTruthy();
+  });
+
+  it("does not warn for a hard inherited restriction when there is no selected overlap", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardRestrictionContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Chest" }));
+    expect(screen.queryByText("Some exams remain hard-restricted")).toBeNull();
+    expect(screen.queryByText(/These exams are already hard-restricted by an inherited rule/)).toBeNull();
+  });
+
+  it("does not classify a specific-date restriction as inherited", () => {
+    const specificDateContext = selectorContext();
+    useV2DayManagementContextMock.mockReturnValue({
+      data: {
+        ...specificDateContext,
+        effectiveRules: {
+          ...specificDateContext.effectiveRules,
+          examTypeRestrictions: [
+            {
+              ...context.effectiveRules.examTypeRestrictions[0]!,
+              ruleType: "specific_date" as const,
+              specificDate: "2035-01-01",
+            },
+          ],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    expect(screen.queryByText("Some exams remain hard-restricted")).toBeNull();
+    expect(screen.queryByText(/already hard-restricted by an inherited rule/)).toBeNull();
+  });
+
+  it("warns when selected exams overlap an inherited exam-mix quota", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedQuotaContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set exam-mix quota" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Chest" }));
+    expect(screen.getByText("Inherited exam quota also applies")).toBeTruthy();
+    expect(screen.getByText(/The new day-specific quota does not replace it/)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Inherited quota warning" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    expect(screen.getByText("Inherited exam quota also applies")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("does not warn for an inherited quota without selected overlap", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedQuotaContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set exam-mix quota" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    expect(screen.queryByText("Inherited exam quota also applies")).toBeNull();
+  });
+
+  it("does not show inherited interaction warnings during removal", () => {
+    const base = availableContext();
+    useV2DayManagementContextMock.mockReturnValue({
+      data: {
+        ...base,
+        effectiveRules: {
+          ...base.effectiveRules,
+          modalityBlocks: [
+            ...base.effectiveRules.modalityBlocks,
+            { ...base.effectiveRules.modalityBlocks[0]!, id: 20, ruleType: "date_range" as const, specificDate: null, isOverridable: false },
+          ],
+          examTypeRestrictions: [
+            ...base.effectiveRules.examTypeRestrictions,
+            { ...base.effectiveRules.examTypeRestrictions[0]!, id: 21, ruleType: "weekly_recurrence" as const, specificDate: null },
+          ],
+          examMixQuotas: [
+            ...base.effectiveRules.examMixQuotas,
+            { ...base.effectiveRules.examMixQuotas[0]!, id: 22, ruleType: "weekly_recurrence" as const, specificDate: null },
+          ],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    expect(screen.getByText("Remove day rule")).toBeTruthy();
+    expect(screen.queryByText("Hard inherited block remains active")).toBeNull();
+    expect(screen.queryByText("Inherited exam quota also applies")).toBeNull();
+    expect(screen.queryByText("Some exams remain hard-restricted")).toBeNull();
+  });
+
+  it("shows inherited hard-restriction warnings in Arabic", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardRestrictionContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog({ language: "ar" });
+
+    fireEvent.click(screen.getByRole("button", { name: t("ar", "calendar.manageDayRestrictExamTypes") }));
+    fireEvent.click(screen.getAllByRole("checkbox")[0]!);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
+
+    expect(screen.getByText(t("ar", "calendar.manageDayInheritedHardExamTitle"))).toBeTruthy();
+    expect(screen.queryByText("Some exams remain hard-restricted")).toBeNull();
+    expect(screen.queryByText(/The inherited hard restriction remains authoritative/)).toBeNull();
+  });
+
+  it("preserves the exact restriction payload when publishing with an interaction warning", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({});
+    useCreateV2DayExamRestrictionMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: inheritedHardRestrictionContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Payload warning regression" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({
+      policySetKey: "default",
+      modalityId: 1,
+      date: "2035-01-01",
+      expectedPublishedVersionId: 1,
+      reason: "Payload warning regression",
+      examTypeIds: [3],
+      effectMode: "restriction_overridable",
+    }));
   });
 
   it("sets an Arabic content direction without exposing internal rule identifiers", () => {
