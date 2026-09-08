@@ -76,14 +76,15 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const generatedAt = formatDateTime(new Date().toISOString(), language);
   const status = incidentText(language, incident.status);
   const title = incidentLabel(language, "printTitle");
-  const institutionalIdentity = [
-    "المركز الوطني للأورام بنغازي",
+  const englishInstitutionalIdentity = [
     "National Cancer Center Benghazi",
-    "قسم الأشعة التشخيصية والتداخلية",
     "Diagnostic & Interventional Radiology Department",
   ].map(escapeCssContent).join("\\A ");
+  const arabicInstitutionalIdentity = [
+    "المركز الوطني للأورام بنغازي",
+    "قسم الأشعة التشخيصية والتداخلية",
+  ].map(escapeCssContent).join("\\A ");
   const continuationIdentity = [
-    institutionalIdentity,
     escapeCssContent("استكمال تقرير الحادث"),
     escapeCssContent("Incident Report - Continued"),
   ].join("\\A ");
@@ -91,24 +92,26 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const footerGenerated = escapeCssContent(rtl ? `RISpro · تاريخ الإنشاء: ${generatedAt}` : `RISpro · Generated: ${generatedAt}`);
   const pageFurnitureRules = rtl
     ? `@page {
-  @top-right { content: ""; background-image: url("${escapeCssContent(logoUrl)}"); background-repeat: no-repeat; background-position: center; background-size: 24mm 24mm; }
-  @top-center { content: "${continuationIdentity}"; white-space: pre-line; text-align: center; font: normal 8pt/1.2 "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #18212b; border-bottom: 0.25mm solid #68727c; padding-bottom: 1mm; }
+  @top-left { content: "${englishInstitutionalIdentity}"; white-space: pre-line; text-align: center; direction: ltr; vertical-align: middle; font: normal 8pt/1.25 Arial, Helvetica, sans-serif; color: #18212b; }
+  @top-center { content: "${continuationIdentity}"; white-space: pre-line; text-align: center; vertical-align: bottom; font: normal 8pt/1.2 "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #18212b; }
+  @top-right { content: "${arabicInstitutionalIdentity}"; white-space: pre-line; text-align: center; direction: rtl; vertical-align: middle; font: normal 8pt/1.25 "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #18212b; }
   @bottom-right { content: "${footerIncidentNumber}"; font: normal 8pt "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #46515b; }
   @bottom-center { content: "${footerGenerated}"; font: normal 8pt "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #46515b; }
   @bottom-left { content: "الصفحة " counter(page) " من " counter(pages); font: normal 8pt "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #46515b; }
 }
 @page :first {
-  @top-center { content: "${institutionalIdentity}"; white-space: pre-line; text-align: center; font: normal 8pt/1.2 "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #18212b; border-bottom: 0.25mm solid #68727c; padding-bottom: 1mm; }
+  @top-center { content: ""; }
 }`
     : `@page {
-  @top-left { content: ""; background-image: url("${escapeCssContent(logoUrl)}"); background-repeat: no-repeat; background-position: center; background-size: 24mm 24mm; }
-  @top-center { content: "${continuationIdentity}"; white-space: pre-line; text-align: center; font: normal 8pt/1.2 Arial, Helvetica, sans-serif; color: #18212b; border-bottom: 0.25mm solid #68727c; padding-bottom: 1mm; }
+  @top-left { content: "${englishInstitutionalIdentity}"; white-space: pre-line; text-align: center; direction: ltr; vertical-align: middle; font: normal 8pt/1.25 Arial, Helvetica, sans-serif; color: #18212b; }
+  @top-center { content: "${continuationIdentity}"; white-space: pre-line; text-align: center; vertical-align: bottom; font: normal 8pt/1.2 Arial, Helvetica, sans-serif; color: #18212b; }
+  @top-right { content: "${arabicInstitutionalIdentity}"; white-space: pre-line; text-align: center; direction: rtl; vertical-align: middle; font: normal 8pt/1.25 "Noto Sans Arabic", Tahoma, Arial, sans-serif; color: #18212b; }
   @bottom-left { content: "${footerIncidentNumber}"; font: normal 8pt Arial, Helvetica, sans-serif; color: #46515b; }
   @bottom-center { content: "${footerGenerated}"; font: normal 8pt Arial, Helvetica, sans-serif; color: #46515b; }
   @bottom-right { content: "Page " counter(page) " of " counter(pages); font: normal 8pt Arial, Helvetica, sans-serif; color: #46515b; }
 }
 @page :first {
-  @top-center { content: "${institutionalIdentity}"; white-space: pre-line; text-align: center; font: normal 8pt/1.2 Arial, Helvetica, sans-serif; color: #18212b; border-bottom: 0.25mm solid #68727c; padding-bottom: 1mm; }
+  @top-center { content: ""; }
 }`;
 
   const identityStrip = `<div class="identity-strip">
@@ -181,15 +184,16 @@ body[dir="rtl"] { font-family: "Noto Sans Arabic", Tahoma, Arial, sans-serif; }
 .toolbar { display: flex; gap: 2mm; max-width: 180mm; margin: 0 auto 7mm; }
 .toolbar button { border: 1px solid #68727c; border-radius: 0; background: #fff; color: #18212b; padding: 2mm 4mm; font: inherit; cursor: pointer; }
 .report { width: 100%; max-width: 180mm; margin: 0 auto; }
-.institutional-header { display: grid; grid-template-columns: 25mm minmax(0, 1fr) 25mm; align-items: center; gap: 4mm; padding-bottom: 4mm; border-bottom: 0.45mm solid #18212b; }
-.logo-cell { grid-column: 1; display: flex; align-items: center; justify-content: flex-start; }
-body[dir="rtl"] .logo-cell { grid-column: 3; justify-content: flex-end; }
-.institutional-logo { display: block; width: 24mm; height: 24mm; object-fit: contain; }
-.institutional-copy { grid-column: 2; min-width: 0; text-align: center; }
+.institutional-header { display: grid; direction: ltr; grid-template-columns: minmax(0, 1fr) 24mm minmax(0, 1fr); align-items: center; gap: 4mm; padding-bottom: 4mm; border-bottom: 0.45mm solid #18212b; }
+.institutional-english { grid-column: 1; min-width: 0; text-align: center; direction: ltr; }
+.logo-cell { grid-column: 2; display: flex; align-items: center; justify-content: center; }
+.institutional-logo { display: block; width: 21mm; height: 21mm; object-fit: contain; }
+.institutional-arabic { grid-column: 3; min-width: 0; text-align: center; direction: rtl; }
 .hospital-ar { margin: 0; font-size: 15pt; font-weight: 800; line-height: 1.35; }
 .hospital-en { margin: 0.5mm 0 0; font-size: 12pt; font-weight: 700; line-height: 1.25; }
 .department-ar { margin: 2.2mm 0 0; font-size: 10.5pt; font-weight: 700; line-height: 1.35; }
 .department-en { margin: 0.5mm 0 0; font-size: 9.5pt; line-height: 1.25; }
+.print-running-logo { display: none; }
 .title-block { padding: 4mm 0 3.5mm; text-align: center; border-bottom: 0.8mm solid #18212b; }
 .title-ar { margin: 0; font-size: 14pt; font-weight: 800; line-height: 1.35; }
 .title-en { margin: 0.7mm 0 0; font-size: 12pt; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
@@ -230,9 +234,9 @@ body[dir="rtl"] .attachment-register { padding: 2mm 10mm 2mm 8mm; }
 .report-footer > span { min-width: 0; overflow-wrap: anywhere; }
 .isolate { direction: ltr; text-align: left; unicode-bidi: isolate; }
 @media screen and (max-width: 720px) { .identity-table, .identity-table tbody, .identity-table tr, .identity-cell { display: block; width: 100%; } .identity-cell { border-inline-start: 0; border-top: 0.2mm solid #aeb6bd; } .identity-cell:first-child { border-top: 0; } .signature-grid { grid-template-columns: 1fr; } .stamp-box { min-height: 22mm; } }
-@media print { .toolbar { display: none; } .report { max-width: none; } .institutional-header, .report-footer { display: none; } .section-heading { break-after: avoid; } a { color: inherit; text-decoration: none; } .title-block, .identity-strip, .structured-section, .attachments-section { break-inside: avoid; } }
+@media print { .toolbar { display: none; } .report { max-width: none; } .institutional-header, .report-footer { display: none; } .print-running-logo { display: block; position: fixed; left: 50%; top: -28mm; width: 21mm; height: 21mm; transform: translateX(-50%); object-fit: contain; z-index: 20; } .section-heading { break-after: avoid; } a { color: inherit; text-decoration: none; } .title-block, .identity-strip, .structured-section, .attachments-section { break-inside: avoid; } }
 </style><script>function printReportWhenReady(){const logo=document.querySelector(".institutional-logo");if(!logo||logo.complete){window.print();return;}const print=()=>window.print();logo.addEventListener("load",print,{once:true});logo.addEventListener("error",print,{once:true});}</script></head><body><div class="toolbar"><button type="button" onclick="printReportWhenReady()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report">
-  <header class="institutional-header"><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"></div><div class="institutional-copy"><p class="hospital-ar" dir="rtl">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="hospital-en" dir="ltr">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-ar" dir="rtl">${escapeHtml(printCopy.ar.department)}</p><p class="department-en" dir="ltr">${escapeHtml(printCopy.en.department)}</p></div></header>
+  <img class="print-running-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"><header class="institutional-header"><div class="institutional-english" dir="ltr"><p class="hospital-en">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-en">${escapeHtml(printCopy.en.department)}</p></div><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"></div><div class="institutional-arabic" dir="rtl"><p class="hospital-ar">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="department-ar">${escapeHtml(printCopy.ar.department)}</p></div></header>
   <div class="title-block"><p class="title-ar" dir="rtl">تقرير حادث</p><p class="title-en" dir="ltr">Incident Report</p></div>
   ${identityStrip}
   ${incidentDetails}
