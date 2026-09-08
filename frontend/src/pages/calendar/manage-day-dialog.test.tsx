@@ -134,6 +134,10 @@ describe("ManageDayDialog", () => {
     expect(mutateAsync).not.toHaveBeenCalled();
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Scanner maintenance" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText("Review and publish change")).toBeTruthy();
+    expect(screen.getByText("Not allowed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, reason: "Scanner maintenance", isOverridable: false });
     expect(screen.getByText("Existing bookings are not cancelled or rescheduled by day policy rules.")).toBeTruthy();
@@ -142,6 +146,8 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByLabelText("Allow supervisor override"));
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Scanner maintenance with override" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    expect(screen.getByText("Allowed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
     expect(mutateAsync).toHaveBeenLastCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, reason: "Scanner maintenance with override", isOverridable: true });
   });
@@ -164,6 +170,10 @@ describe("ManageDayDialog", () => {
     expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("hard_restriction");
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Contrast safety restriction" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getAllByText("CT Head").length).toBeGreaterThan(1);
+    expect(screen.getByText("Hard restriction")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, examTypeIds: [3], effectMode: "hard_restriction", reason: "Contrast safety restriction" });
   });
@@ -179,6 +189,9 @@ describe("ManageDayDialog", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Supervisor review restriction" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText("Supervisor-overridable restriction")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, examTypeIds: [4], effectMode: "restriction_overridable", reason: "Supervisor review restriction" });
   });
@@ -223,6 +236,10 @@ describe("ManageDayDialog", () => {
     fireEvent.change(dailyLimit, { target: { value: "10" } });
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Exam mix capacity limit" } });
     fireEvent.click(screen.getByRole("button", { name: "Set quota" }));
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText("10")).toBeTruthy();
+    expect(screen.getAllByText("7").length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, examTypeIds: [4], dailyLimit: 10, reason: "Exam mix capacity limit" });
   });
@@ -329,6 +346,7 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Successful update" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("status").textContent).toContain("Day-specific rule saved.");
     expect(screen.queryByRole("button", { name: "Block modality" })).toBeTruthy();
@@ -478,15 +496,16 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Submit once" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     await waitFor(() => expect(blockMutation.mutateAsync).toHaveBeenCalledTimes(1));
     blockMutation.isPending = true;
     view.rerender(dialogElement());
-    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
     expect(blockMutation.mutateAsync).toHaveBeenCalledTimes(1);
     resolveMutation?.();
   });
 
-  it("keeps failed mutation input and re-enables the editor", async () => {
+  it("keeps a failed mutation in review and allows retry or editing", async () => {
     const mutateAsync = vi.fn().mockRejectedValue(new Error("Request failed"));
     useCreateV2DayExamRestrictionMock.mockReturnValue({ isPending: false, mutateAsync });
     useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
@@ -496,12 +515,98 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
     fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Keep this after failure" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Request failed"));
+    expect(screen.getByText("Review and publish change")).toBeTruthy();
+    expect(screen.getByText("Keep this after failure")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to edit" }).getAttribute("disabled")).toBeNull();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("reviews removal before publishing the exact existing removal payload", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({});
+    useRemoveV2DayManagementRuleMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Remove scanner maintenance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove rule" }));
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText("Review and publish change")).toBeTruthy();
+    expect(screen.getAllByText("Scanner maintenance").length).toBeGreaterThan(1);
+    expect(screen.getByText("This change takes effect immediately for new booking decisions.")).toBeTruthy();
+    expect(screen.getByText("Existing bookings are not cancelled or rescheduled.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove and publish" }));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ family: "block_modality", ruleId: 10, input: { policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, reason: "Remove scanner maintenance" } }));
+  });
+
+  it("returns from review to the populated editor without mutating", () => {
+    const mutateAsync = vi.fn();
+    useCreateV2DayExamRestrictionMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Preserve this review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply restriction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to edit" }));
+
+    expect(mutateAsync).not.toHaveBeenCalled();
     expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("Keep this after failure");
-    expect(screen.getByRole("checkbox", { name: "CT Head" }).getAttribute("disabled")).toBeNull();
-    expect(screen.getByPlaceholderText("Enter a reason").getAttribute("disabled")).toBeNull();
-    expect(screen.getByRole("button", { name: "Apply restriction" }).getAttribute("disabled")).toBeNull();
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("restriction_overridable");
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("Preserve this review");
+  });
+
+  it("clears review state when closed or when its context changes", () => {
+    const onClose = vi.fn();
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Close review state" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    expect(screen.getByText("Review and publish change")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    view.rerender(dialogElement({ open: false, onClose }));
+    view.rerender(dialogElement({ onClose }));
+    expect(screen.queryByText("Review and publish change")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Date review state" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    view.rerender(dialogElement({ onClose, date: "2026-05-21", dateLabel: "Thursday, May 21, 2026" }));
+    expect(screen.queryByText("Review and publish change")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Modality review state" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    view.rerender(dialogElement({ onClose, modalityId: 2, modalityLabel: "MR", date: "2026-05-21", dateLabel: "Thursday, May 21, 2026" }));
+    expect(screen.queryByText("Review and publish change")).toBeNull();
+  });
+
+  it("locks final review controls while publishing is pending", () => {
+    const onClose = vi.fn();
+    const blockMutation = { isPending: false, mutateAsync: vi.fn() };
+    useCreateV2DayModalityBlockMock.mockReturnValue(blockMutation);
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Pending review" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    blockMutation.isPending = true;
+    view.rerender(dialogElement({ onClose }));
+
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to edit" }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
