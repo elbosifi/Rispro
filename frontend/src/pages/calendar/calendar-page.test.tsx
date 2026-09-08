@@ -13,6 +13,10 @@ const printDayListFromRouteMock = vi.fn();
 const navigateMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
 const useV2DayManagementContextMock = vi.fn();
+const createDayModalityBlockMock = vi.fn();
+const createDayExamRestrictionMock = vi.fn();
+const createDayExamMixQuotaMock = vi.fn();
+const removeDayManagementRuleMock = vi.fn();
 let currentRole = "super_admin";
 
 type AvailabilityParams = {
@@ -40,6 +44,10 @@ vi.mock("@/lib/api-hooks", () => ({
 vi.mock("@/v2/appointments/api", () => ({
   useV2Availability: (params: AvailabilityParams | undefined) => useV2AvailabilityMock(params),
   useV2DayManagementContext: (params: unknown) => useV2DayManagementContextMock(params),
+  useCreateV2DayModalityBlock: () => ({ mutateAsync: createDayModalityBlockMock, isPending: false }),
+  useCreateV2DayExamRestriction: () => ({ mutateAsync: createDayExamRestrictionMock, isPending: false }),
+  useCreateV2DayExamMixQuota: () => ({ mutateAsync: createDayExamMixQuotaMock, isPending: false }),
+  useRemoveV2DayManagementRule: () => ({ mutateAsync: removeDayManagementRuleMock, isPending: false }),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({

@@ -29,13 +29,13 @@ export async function validatePolicyDraft(
 ): Promise<PolicyValidationResult> {
   const client = await pool.connect();
   try {
-    return validatePolicyDraftInternal(client, policyVersionId);
+    return validatePolicyDraftWithClient(client, policyVersionId);
   } finally {
     client.release();
   }
 }
 
-async function validatePolicyDraftInternal(
+export async function validatePolicyDraftWithClient(
   client: PoolClient,
   policyVersionId: number
 ): Promise<PolicyValidationResult> {

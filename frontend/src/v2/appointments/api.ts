@@ -31,6 +31,12 @@ import type {
   SpecialReasonCodeDto,
   IntendedReportingDoctorOption,
   DayManagementContextDto,
+  CreateDayExamMixQuotaDto,
+  CreateDayExamRestrictionDto,
+  CreateDayModalityBlockDto,
+  DayManagementMutationResultDto,
+  DayManagementRemovableRuleFamily,
+  RemoveDayManagementRuleDto,
 } from "./types";
 
 export async function searchV2AppointmentPatients(query: string): Promise<AppointmentPatientSelection[]> {
@@ -301,6 +307,11 @@ export async function fetchV2DayManagementContext(params: {
   return api<DayManagementContextDto>(`/v2/scheduling/admin/day-management/context?${searchParams.toString()}`);
 }
 
+export async function createV2DayModalityBlock(input: CreateDayModalityBlockDto): Promise<DayManagementMutationResultDto> { return api("/v2/scheduling/admin/day-management/block-modality", { method: "POST", body: JSON.stringify(input) }); }
+export async function createV2DayExamRestriction(input: CreateDayExamRestrictionDto): Promise<DayManagementMutationResultDto> { return api("/v2/scheduling/admin/day-management/exam-restriction", { method: "POST", body: JSON.stringify(input) }); }
+export async function createV2DayExamMixQuota(input: CreateDayExamMixQuotaDto): Promise<DayManagementMutationResultDto> { return api("/v2/scheduling/admin/day-management/exam-mix-quota", { method: "POST", body: JSON.stringify(input) }); }
+export async function removeV2DayManagementRule(params: { family: DayManagementRemovableRuleFamily; ruleId: number; input: RemoveDayManagementRuleDto }): Promise<DayManagementMutationResultDto> { return api(`/v2/scheduling/admin/day-management/rules/${params.family}/${params.ruleId}/remove`, { method: "POST", body: JSON.stringify(params.input) }); }
+
 export async function createV2PolicyDraft(params: { policySetKey?: string; changeNote?: string | null }) {
   return api<{ draft: { id: number; versionNo: number; status: string }; basedOnVersionId: number }>(
     "/v2/scheduling/admin/policy/draft",
@@ -407,6 +418,16 @@ export function useV2DayManagementContext(
     staleTime: 15_000,
   });
 }
+
+function invalidateDayManagement(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["v2-day-management-context"] });
+  queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+  queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] });
+}
+export function useCreateV2DayModalityBlock() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayModalityBlock, onSuccess: () => invalidateDayManagement(queryClient) }); }
+export function useCreateV2DayExamRestriction() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamRestriction, onSuccess: () => invalidateDayManagement(queryClient) }); }
+export function useCreateV2DayExamMixQuota() { const queryClient = useQueryClient(); return useMutation({ mutationFn: createV2DayExamMixQuota, onSuccess: () => invalidateDayManagement(queryClient) }); }
+export function useRemoveV2DayManagementRule() { const queryClient = useQueryClient(); return useMutation({ mutationFn: removeV2DayManagementRule, onSuccess: () => invalidateDayManagement(queryClient) }); }
 
 export function useV2Priorities() {
   return useQuery({

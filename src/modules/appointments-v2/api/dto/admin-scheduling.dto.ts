@@ -165,6 +165,41 @@ export interface DayManagementContextDto {
   supportedDayRuleTypes: DayManagementRuleType[];
 }
 
+export interface DayManagementMutationBaseDto {
+  policySetKey?: string;
+  modalityId: number;
+  date: string;
+  expectedPublishedVersionId: number;
+  reason: string;
+}
+
+export interface CreateDayModalityBlockDto extends DayManagementMutationBaseDto {
+  isOverridable: boolean;
+}
+
+export interface CreateDayExamRestrictionDto extends DayManagementMutationBaseDto {
+  examTypeIds: number[];
+  effectMode: "hard_restriction" | "restriction_overridable";
+}
+
+export interface CreateDayExamMixQuotaDto extends DayManagementMutationBaseDto {
+  examTypeIds: number[];
+  dailyLimit: number;
+}
+
+export type DayManagementRemovableRuleFamily = DayManagementRuleType;
+
+export interface RemoveDayManagementRuleDto extends DayManagementMutationBaseDto {}
+
+export interface DayManagementMutationResultDto {
+  action: "created" | "removed";
+  ruleType: DayManagementRuleType;
+  modalityId: number;
+  date: string;
+  previousPublishedVersionId: number;
+  published: PolicyVersionDto;
+}
+
 export interface PolicySetDto {
   id: number;
   key: string;

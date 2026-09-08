@@ -16,6 +16,12 @@ import { publishPolicy } from "../../admin/services/publish-policy.service.js";
 import { previewPolicyImpact } from "../../admin/services/preview-policy-impact.service.js";
 import { getPolicyStatus } from "../../admin/services/get-policy-status.service.js";
 import { getDayManagementContext } from "../../admin/services/get-day-management-context.service.js";
+import {
+  createDayExamMixQuota,
+  createDayExamRestriction,
+  createDayModalityBlock,
+  removeDayManagementRule,
+} from "../../admin/services/day-management-command.service.js";
 import { listUsers } from "../../../../services/user-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import type {
@@ -23,6 +29,11 @@ import type {
   FieldValidationErrorDto,
   PublishPolicyDto,
   SavePolicyDraftDto,
+  CreateDayExamMixQuotaDto,
+  CreateDayExamRestrictionDto,
+  CreateDayModalityBlockDto,
+  DayManagementRemovableRuleFamily,
+  RemoveDayManagementRuleDto,
 } from "../dto/admin-scheduling.dto.js";
 
 const router = Router();
@@ -68,6 +79,38 @@ router.get(
     res.json(await getDayManagementContext({ modalityId, date, policySetKey }));
   })
 );
+
+router.post("/day-management/block-modality", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body as CreateDayModalityBlockDto;
+  requireDayMutationShape(body);
+  res.status(201).json(await createDayModalityBlock(body, Number(req.user?.sub ?? 0)));
+}));
+
+router.post("/day-management/exam-restriction", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body as CreateDayExamRestrictionDto;
+  requireDayMutationShape(body);
+  if (!Array.isArray(body.examTypeIds)) throwValidationError([{ field: "examTypeIds", code: "invalid_type", message: "examTypeIds must be an array" }]);
+  res.status(201).json(await createDayExamRestriction(body, Number(req.user?.sub ?? 0)));
+}));
+
+router.post("/day-management/exam-mix-quota", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body as CreateDayExamMixQuotaDto;
+  requireDayMutationShape(body);
+  if (!Array.isArray(body.examTypeIds)) throwValidationError([{ field: "examTypeIds", code: "invalid_type", message: "examTypeIds must be an array" }]);
+  res.status(201).json(await createDayExamMixQuota(body, Number(req.user?.sub ?? 0)));
+}));
+
+router.post("/day-management/rules/:family/:ruleId/remove", requireAnyRole(["super_admin"]), asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+  const family = String(req.params.family) as DayManagementRemovableRuleFamily;
+  const ruleId = Number(req.params.ruleId);
+  if (!["block_modality", "restrict_exam_types", "set_exam_mix_quota"].includes(family)) {
+    throwValidationError([{ field: "family", code: "invalid_value", message: "Unsupported day management rule family" }]);
+  }
+  if (!Number.isInteger(ruleId) || ruleId <= 0) throwValidationError([{ field: "ruleId", code: "invalid_positive_integer", message: "ruleId must be a positive integer" }]);
+  const body = req.body as RemoveDayManagementRuleDto;
+  requireDayMutationShape(body);
+  res.json(await removeDayManagementRule(family, ruleId, body, Number(req.user?.sub ?? 0)));
+}));
 
 /**
  * GET /api/v2/scheduling/admin/users
@@ -259,6 +302,16 @@ function throwValidationError(fieldErrors: FieldValidationErrorDto[]): never {
     ["validation_failed"],
     { fieldErrors }
   );
+}
+
+function requireDayMutationShape(body: { modalityId?: unknown; expectedPublishedVersionId?: unknown; date?: unknown; reason?: unknown } | null | undefined): void {
+  const errors: FieldValidationErrorDto[] = [];
+  if (!body || typeof body !== "object") errors.push({ field: "body", code: "required", message: "Request body is required" });
+  if (!Number.isInteger(Number(body?.modalityId)) || Number(body?.modalityId) <= 0) errors.push({ field: "modalityId", code: "invalid_positive_integer", message: "modalityId must be a positive integer" });
+  if (!Number.isInteger(Number(body?.expectedPublishedVersionId)) || Number(body?.expectedPublishedVersionId) <= 0) errors.push({ field: "expectedPublishedVersionId", code: "invalid_positive_integer", message: "expectedPublishedVersionId must be a positive integer" });
+  if (typeof body?.date !== "string") errors.push({ field: "date", code: "required", message: "date is required" });
+  if (typeof body?.reason !== "string") errors.push({ field: "reason", code: "required", message: "reason is required" });
+  if (errors.length) throwValidationError(errors);
 }
 
 export { router as adminSchedulingV2Router };
