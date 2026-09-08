@@ -1775,6 +1775,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "calendar.manageDayMutationSuccess": "تم حفظ قاعدة اليوم الخاصة.",
   "calendar.manageDayRemovalSuccess": "تمت إزالة قاعدة اليوم الخاصة.",
   "calendar.manageDayMutationError": "تعذر نشر تغيير اليوم الخاص.",
+  "calendar.manageDayActionPinCancelled": "تم إلغاء التحقق من رمز PIN لإجراء الأمان. لم يتم نشر أي تغيير.",
   "calendar.manageDayStaleContext": "تغيرت سياسة الجدولة أثناء فتح هذا اليوم. أُعيد تحميل أحدث سياسة لليوم. راجع التغيير وحاول مرة أخرى.",
   "calendar.manageDayDraftConflictError": "توجد الآن مسودة غير منشورة لسياسة الجدولة. قم بحلها قبل إجراء تغيير في إدارة اليوم.",
   "calendar.manageDayRuleScopeConflictError": "توجد قاعدة خاصة باليوم بالفعل لمجموعة الفحوصات نفسها. أزل القاعدة الحالية قبل تغيير الوضع أو الحد.",

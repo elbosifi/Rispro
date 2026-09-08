@@ -206,8 +206,10 @@ export function ManageDayDialog({
 
   const handleMutationError = async (caught: unknown) => {
     const codes = caught instanceof ApiError ? caught.reasonCodes : [];
-    const errorMessage = codes.includes("day_management_context_stale")
-      ? t(language, "calendar.manageDayStaleContext")
+    const errorMessage = codes.includes("action_pin_cancelled")
+      ? t(language, "calendar.manageDayActionPinCancelled")
+      : codes.includes("day_management_context_stale")
+        ? t(language, "calendar.manageDayStaleContext")
       : codes.includes("day_management_draft_conflict")
         ? t(language, "calendar.manageDayDraftConflictError")
         : codes.includes("day_management_rule_scope_conflict")

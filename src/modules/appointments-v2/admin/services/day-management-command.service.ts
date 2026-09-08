@@ -53,6 +53,41 @@ type MutationMetadata = {
   ruleValues: Record<string, unknown>;
 };
 
+type RemovedRuleAuditInput =
+  | { family: "block_modality"; rule: PolicySnapshotDto["modalityBlockedRules"][number] }
+  | { family: "restrict_exam_types"; rule: PolicySnapshotDto["examTypeRules"][number] }
+  | { family: "set_exam_mix_quota"; rule: NonNullable<PolicySnapshotDto["examMixQuotaRules"]>[number] };
+
+function buildRemovedRuleAuditValues(input: RemovedRuleAuditInput): Record<string, unknown> {
+  const common = {
+    ruleId: Number(input.rule.id),
+    ruleType: input.family,
+    title: input.rule.title ?? null,
+    specificDate: input.rule.specificDate,
+  };
+  switch (input.family) {
+    case "block_modality":
+      return {
+        ...common,
+        isOverridable: Boolean(input.rule.isOverridable),
+        notes: input.rule.notes ?? null,
+      };
+    case "restrict_exam_types":
+      return {
+        ...common,
+        effectMode: input.rule.effectMode,
+        examTypeIds: [...input.rule.examTypeIds].map(Number).sort((left, right) => left - right),
+        notes: input.rule.notes ?? null,
+      };
+    case "set_exam_mix_quota":
+      return {
+        ...common,
+        dailyLimit: Number(input.rule.dailyLimit),
+        examTypeIds: [...input.rule.examTypeIds].map(Number).sort((left, right) => left - right),
+      };
+  }
+}
+
 export async function createDayModalityBlock(input: CreateDayModalityBlockDto, userId: number): Promise<DayManagementMutationResultDto> {
   const base = normalizeBase(input);
   if (typeof input.isOverridable !== "boolean") throw invalid("isOverridable must be a boolean.", "day_management_invalid_input");
@@ -122,10 +157,15 @@ export async function removeDayManagementRule(family: DayManagementRemovableRule
       if (rule.ruleType !== "specific_date") throw conflict("Only specific-date rules can be removed from Manage Day.", "day_management_rule_not_day_specific");
       throw new SchedulingError(404, "Day management rule was not found.", ["day_management_rule_not_found"]);
     }
+    const oldValues = family === "block_modality"
+      ? buildRemovedRuleAuditValues({ family, rule: snapshot.modalityBlockedRules[index]! })
+      : family === "restrict_exam_types"
+        ? buildRemovedRuleAuditValues({ family, rule: snapshot.examTypeRules[index]! })
+        : buildRemovedRuleAuditValues({ family, rule: snapshot.examMixQuotaRules![index]! });
     rules.splice(index, 1);
     return {
       action: "removed", ruleType: family, actionType: "modality_day_rule_removed",
-      oldValues: { ruleId, ruleType: family, title: rule.title, specificDate: rule.specificDate }, ruleValues: { ruleId },
+      oldValues, ruleValues: { ruleId },
     };
   });
 }

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { createPatient, addWalkIn } from "@/lib/api-hooks";
-import { api, setActionPinChallengeHandler } from "@/lib/api-client";
+import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { AuthProvider } from "@/providers/auth-provider-component";
 import { LanguageProvider } from "@/providers/language-provider-component";
@@ -76,6 +76,22 @@ function TestRealApiButton({
       </button>
       <div>{result}</div>
     </>
+  );
+}
+
+function TestActionPinRequest({ onError }: { onError: (error: unknown) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void api("/scheduling/day-policy", {
+          method: "POST",
+          body: JSON.stringify({ date: "2035-01-01" }),
+        }).catch(onError);
+      }}
+    >
+      Trigger Manage Day Action PIN
+    </button>
   );
 }
 
@@ -207,6 +223,69 @@ describe("ActionPinProvider", () => {
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(screen.getByLabelText("Security Action PIN")).toBeTruthy();
+  });
+
+  it("uses the canonical English Manage Day action label", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(403, { error: "action_pin_required", actionKey: "scheduling_day_policy_change", requiresReason: false })
+    );
+
+    renderWithActionPin(<TestMutationButton />);
+    await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
+
+    expect(await screen.findByText("Manage day scheduling policy")).toBeTruthy();
+    expect(screen.queryByText("scheduling_day_policy_change")).toBeNull();
+    expect(screen.queryByText("scheduling day policy change")).toBeNull();
+  });
+
+  it("uses the Arabic Manage Day action label", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(403, { error: "action_pin_required", actionKey: "scheduling_day_policy_change", requiresReason: false })
+    );
+
+    renderWithActionPin(<TestMutationButton />);
+    await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
+
+    expect(await screen.findByText("تغيير سياسة جدولة اليوم")).toBeTruthy();
+    expect(screen.queryByText("scheduling_day_policy_change")).toBeNull();
+    expect(screen.queryByText("scheduling day policy change")).toBeNull();
+  });
+
+  it("rejects explicit cancellation with a semantic error", async () => {
+    let capturedError: unknown;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(403, { error: "action_pin_required", actionKey: "scheduling_day_policy_change", requiresReason: false })
+    );
+
+    renderWithActionPin(<TestActionPinRequest onError={(error) => { capturedError = error; }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Trigger Manage Day Action PIN" }));
+    await screen.findByRole("dialog");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(capturedError).toBeInstanceOf(ApiError));
+    const error = capturedError as ApiError;
+    expect(error.status).toBe(403);
+    expect(error.reasonCodes).toContain("action_pin_cancelled");
+    expect((error.details as { actionKey?: string }).actionKey).toBe("scheduling_day_policy_change");
+  });
+
+  it("uses the same semantic cancellation for the allowed backdrop click", async () => {
+    let capturedError: unknown;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(403, { error: "action_pin_required", actionKey: "scheduling_day_policy_change", requiresReason: false })
+    );
+
+    renderWithActionPin(<TestActionPinRequest onError={(error) => { capturedError = error; }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Trigger Manage Day Action PIN" }));
+    const backdrop = await screen.findByRole("presentation");
+    fireEvent.click(backdrop);
+
+    await waitFor(() => expect(capturedError).toBeInstanceOf(ApiError));
+    const error = capturedError as ApiError;
+    expect(error.status).toBe(403);
+    expect(error.reasonCodes).toContain("action_pin_cancelled");
+    expect((error.details as { actionKey?: string }).actionKey).toBe("scheduling_day_policy_change");
   });
 
   it("verifies the PIN then retries the original mutation without sending the raw PIN", async () => {

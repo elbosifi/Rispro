@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
+import { Button } from "@/components/shared";
 import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
 import { fetchActionPinStatus, lockActionPinIdleSession, logout as logoutApi } from "@/lib/api-hooks";
+import {
+  ACTION_PIN_ACTION_KEYS,
+  ACTION_PIN_ACTION_LABELS,
+  ACTION_PIN_ACTION_LABELS_AR,
+  type ActionPinActionKey,
+} from "@/lib/action-pin-policy";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 
@@ -16,7 +23,13 @@ interface PendingChallenge extends ActionPinChallenge {
   reject: (error: Error) => void;
 }
 
-function actionLabel(actionKey: string) {
+function actionLabel(actionKey: string, language: "ar" | "en") {
+  if (ACTION_PIN_ACTION_KEYS.includes(actionKey as ActionPinActionKey)) {
+    const key = actionKey as ActionPinActionKey;
+    return language === "ar"
+      ? ACTION_PIN_ACTION_LABELS_AR[key] ?? ACTION_PIN_ACTION_LABELS[key]
+      : ACTION_PIN_ACTION_LABELS[key];
+  }
   return actionKey.replace(/_/g, " ");
 }
 
@@ -40,6 +53,7 @@ function ActionPinDialog({
   const [isPending, setIsPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const isArabic = language === "ar";
+  const resolvedActionLabel = actionLabel(challenge.actionKey, isArabic ? "ar" : "en");
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -92,15 +106,20 @@ function ActionPinDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-6 shadow-xl dark:border-stone-700 dark:bg-stone-800"
+        className="card-shell w-full max-w-sm"
       >
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
           {isArabic ? "تأكيد إجراء مقيد" : "Confirm Restricted Action"}
         </h3>
         <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">
-          {isArabic
-            ? `أدخل PIN إجراء الأمان لتأكيد ${actionLabel(challenge.actionKey)}.`
-            : `Enter your Security Action PIN to confirm ${actionLabel(challenge.actionKey)}.`}
+          <span className="block">
+            {isArabic
+              ? "أدخل رمز PIN لإجراء الأمان لتأكيد:"
+              : "Enter your Security Action PIN to confirm:"}
+          </span>
+          <span className="mt-1 block font-semibold text-stone-900 dark:text-white">
+            {resolvedActionLabel}
+          </span>
         </p>
 
         <form onSubmit={submit} className="mt-4 space-y-4">
@@ -118,7 +137,7 @@ function ActionPinDialog({
             }}
             autoComplete="off"
             disabled={isPending}
-            className="w-full rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-stone-900 outline-none focus:ring-2 focus:ring-teal-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+            className="input-premium w-full"
           />
 
           {challenge.requiresReason && (
@@ -131,28 +150,32 @@ function ActionPinDialog({
               }}
               disabled={isPending}
               rows={3}
-              className="w-full resize-none rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-teal-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+              className="input-premium min-h-20 resize-none text-sm"
             />
           )}
 
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
           <div className="flex gap-3">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={onCancel}
               disabled={isPending}
-              className="flex-1 rounded-lg bg-stone-100 px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 disabled:opacity-50 dark:bg-stone-700 dark:text-stone-300 dark:hover:bg-stone-600"
+              className="flex-1"
             >
               {isArabic ? "إلغاء" : "Cancel"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              variant="primary"
+              size="sm"
               disabled={isPending}
-              className="flex-1 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:bg-teal-400"
+              className="flex-1"
             >
               {isPending ? (isArabic ? "جار التحقق..." : "Verifying...") : (isArabic ? "تأكيد" : "Verify")}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
@@ -340,7 +363,16 @@ export function ActionPinProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancel = () => {
-    challenge?.reject(new ApiError("Action PIN verification cancelled.", 403));
+    if (challenge) {
+      challenge.reject(
+        new ApiError(
+          "Action PIN verification cancelled.",
+          403,
+          { actionKey: challenge.actionKey },
+          ["action_pin_cancelled"],
+        ),
+      );
+    }
     setChallenge(null);
   };
 

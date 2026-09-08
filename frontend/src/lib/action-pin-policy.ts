@@ -118,6 +118,10 @@ export const ACTION_PIN_ACTION_LABELS: Record<ActionPinActionKey, string> = {
   scheduling_day_policy_change: "Manage day scheduling policy",
 };
 
+export const ACTION_PIN_ACTION_LABELS_AR: Partial<Record<ActionPinActionKey, string>> = {
+  scheduling_day_policy_change: "تغيير سياسة جدولة اليوم",
+};
+
 export const ACTION_PIN_GROUPS: Array<{ label: string; actions: ActionPinActionKey[] }> = [
   {
     label: "Patient identity",

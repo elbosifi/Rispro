@@ -1734,6 +1734,7 @@ export const en = {
   "calendar.manageDayMutationSuccess": "Day-specific rule saved.",
   "calendar.manageDayRemovalSuccess": "Day-specific rule removed.",
   "calendar.manageDayMutationError": "Day-specific change could not be published.",
+  "calendar.manageDayActionPinCancelled": "Security Action PIN verification was cancelled. No change was published.",
   "calendar.manageDayStaleContext": "Scheduling policy changed while this day was open. The latest day policy has been reloaded. Review the change and try again.",
   "calendar.manageDayDraftConflictError": "An unpublished scheduling policy draft now exists. Resolve it before making a Manage Day change.",
   "calendar.manageDayRuleScopeConflictError": "A day-specific rule already exists for the same exam group. Remove the existing rule before changing its mode or limit.",

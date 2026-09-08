@@ -224,6 +224,30 @@ async function matchingSpecificDateExamMixQuotas(policyVersionId: number, modali
   );
 }
 
+async function latestRemovedDayAudit(userId: number, removalReason: string): Promise<{
+  action_type: string;
+  old_values: Record<string, unknown>;
+  new_values: Record<string, unknown>;
+}> {
+  const result = await pool.query<{
+    action_type: string;
+    old_values: Record<string, unknown>;
+    new_values: Record<string, unknown>;
+  }>(
+    `select action_type, old_values, new_values
+       from audit_log
+      where entity_type = 'scheduling_policy_day'
+        and changed_by_user_id = $1
+        and action_type = 'modality_day_rule_removed'
+        and new_values ->> 'reason' = $2
+      order by id desc
+      limit 1`,
+    [userId, removalReason]
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!;
+}
+
 describe("day management mutations integration", { skip: !available ? "Database URL not set" : false }, () => {
   let reachable = false; let testDb: Awaited<ReturnType<typeof setupTestDatabase>>; let data: TestData; let app: Awaited<ReturnType<typeof createTestApp>>;
   const cookie = () => createTestAuthCookie(data.userId, "super_admin");
@@ -242,6 +266,102 @@ describe("day management mutations integration", { skip: !available ? "Database 
     const audit = await pool.query<{ action_type: string; new_values: { date: string; reason: string; bookedTotal: number } }>("select action_type, new_values from audit_log where entity_type = 'scheduling_policy_day' and changed_by_user_id = $1 order by id desc limit 1", [data.userId]); assert.equal(audit.rows[0]?.action_type, "modality_day_block_created"); assert.equal(audit.rows[0]?.new_values.date, DATE); assert.equal(audit.rows[0]?.new_values.reason, "Scanner maintenance");
     const removed = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${rule!.id}/remove`, { method: "POST", cookie: cookie(), body: body(afterCreate.data.policy.published!.id, "Maintenance complete") }); assert.equal(removed.status, 200);
     const afterRemove = await context(); assert.equal(afterRemove.data.effectiveRules.modalityBlocks.some((item) => item.id === rule!.id), false);
+  });
+
+  it("records the complete block configuration when removing a day rule", async () => {
+    if (!reachable) return;
+    const date = "2036-06-11";
+    const createReason = "Audit block original reason";
+    const removalReason = "Audit block removal reason";
+    const beforeCreate = await context(date);
+    const created = await fetchJson<{ published?: { id: number } }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/block-modality", {
+      method: "POST", cookie: cookie(), body: { ...body(beforeCreate.data.policy.published!.id, createReason, date), isOverridable: true },
+    });
+    assert.equal(created.status, 201);
+
+    const beforeRemoval = await context(date);
+    const rule = beforeRemoval.data.effectiveRules.modalityBlocks.find((item) => item.ruleType === "specific_date" && item.specificDate === date);
+    assert.ok(rule);
+    const removed = await fetchJson<{ published?: { id: number } }>(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${rule.id}/remove`, {
+      method: "POST", cookie: cookie(), body: body(beforeRemoval.data.policy.published!.id, removalReason, date),
+    });
+    assert.equal(removed.status, 200);
+
+    const audit = await latestRemovedDayAudit(data.userId, removalReason);
+    assert.equal(audit.action_type, "modality_day_rule_removed");
+    assert.equal(audit.old_values.ruleId, Number(rule.id));
+    assert.equal(audit.old_values.ruleType, "block_modality");
+    assert.equal(audit.old_values.title, rule.title);
+    assert.equal(audit.old_values.specificDate, date);
+    assert.equal(audit.old_values.isOverridable, true);
+    assert.equal(audit.old_values.notes, createReason);
+    assert.equal(audit.new_values.modalityId, data.modalityId);
+    assert.equal(typeof audit.new_values.modalityCode, "string");
+    assert.equal(audit.new_values.date, date);
+    assert.equal(audit.new_values.reason, removalReason);
+    assert.equal(audit.new_values.previousPublishedVersionId, String(beforeRemoval.data.policy.published!.id));
+    assert.equal(audit.new_values.newPublishedVersionId, String(removed.data.published!.id));
+  });
+
+  it("records the complete exam restriction configuration when removing a day rule", async () => {
+    if (!reachable) return;
+    const date = "2036-06-12";
+    const createReason = "Audit restriction original reason";
+    const removalReason = "Audit restriction removal reason";
+    const beforeCreate = await context(date);
+    const created = await fetchJson<{ published?: { id: number } }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-restriction", {
+      method: "POST", cookie: cookie(), body: { ...body(beforeCreate.data.policy.published!.id, createReason, date), examTypeIds: [data.examTypeId], effectMode: "restriction_overridable" },
+    });
+    assert.equal(created.status, 201);
+
+    const beforeRemoval = await context(date);
+    const rule = beforeRemoval.data.effectiveRules.examTypeRestrictions.find((item) => item.ruleType === "specific_date" && item.specificDate === date);
+    assert.ok(rule);
+    const removed = await fetchJson<{ published?: { id: number } }>(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/restrict_exam_types/${rule.id}/remove`, {
+      method: "POST", cookie: cookie(), body: body(beforeRemoval.data.policy.published!.id, removalReason, date),
+    });
+    assert.equal(removed.status, 200);
+
+    const audit = await latestRemovedDayAudit(data.userId, removalReason);
+    assert.equal(audit.action_type, "modality_day_rule_removed");
+    assert.equal(audit.old_values.ruleId, Number(rule.id));
+    assert.equal(audit.old_values.ruleType, "restrict_exam_types");
+    assert.equal(audit.old_values.title, rule.title);
+    assert.equal(audit.old_values.specificDate, date);
+    assert.equal(audit.old_values.effectMode, "restriction_overridable");
+    assert.deepEqual(audit.old_values.examTypeIds, [data.examTypeId]);
+    assert.equal(audit.old_values.notes, createReason);
+    assert.equal(audit.new_values.reason, removalReason);
+  });
+
+  it("records the complete exam-mix quota configuration when removing a day rule", async () => {
+    if (!reachable) return;
+    const date = "2036-06-13";
+    const removalReason = "Audit quota removal reason";
+    const beforeCreate = await context(date);
+    const created = await fetchJson<{ published?: { id: number } }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-mix-quota", {
+      method: "POST", cookie: cookie(), body: { ...body(beforeCreate.data.policy.published!.id, "Audit quota original reason", date), examTypeIds: [data.examTypeId], dailyLimit: 2 },
+    });
+    assert.equal(created.status, 201);
+
+    const beforeRemoval = await context(date);
+    const rule = beforeRemoval.data.effectiveRules.examMixQuotas.find((item) => item.ruleType === "specific_date" && item.specificDate === date);
+    assert.ok(rule);
+    const removed = await fetchJson<{ published?: { id: number } }>(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/set_exam_mix_quota/${rule.id}/remove`, {
+      method: "POST", cookie: cookie(), body: body(beforeRemoval.data.policy.published!.id, removalReason, date),
+    });
+    assert.equal(removed.status, 200);
+
+    const audit = await latestRemovedDayAudit(data.userId, removalReason);
+    assert.equal(audit.action_type, "modality_day_rule_removed");
+    assert.equal(audit.old_values.ruleId, Number(rule.id));
+    assert.equal(audit.old_values.ruleType, "set_exam_mix_quota");
+    assert.equal(audit.old_values.title, rule.title);
+    assert.equal(audit.old_values.specificDate, date);
+    assert.equal(audit.old_values.dailyLimit, 2);
+    assert.deepEqual(audit.old_values.examTypeIds, [data.examTypeId]);
+    assert.equal(Object.prototype.hasOwnProperty.call(audit.old_values, "notes"), false);
+    assert.equal(audit.new_values.reason, removalReason);
   });
 
   it("requires Action PIN before creating a Manage Day policy change", async () => {

@@ -710,6 +710,54 @@ describe("ManageDayDialog", () => {
     expect(mutateAsync).toHaveBeenCalledTimes(1);
   });
 
+  it("maps Action PIN cancellation without refetching or leaving review", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new ApiError(
+      "Action PIN verification cancelled.",
+      403,
+      { actionKey: "scheduling_day_policy_change" },
+      ["action_pin_cancelled"],
+    ));
+    const refetch = vi.fn();
+    useCreateV2DayModalityBlockMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, isFetching: false, refetch });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "PIN cancellation review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish change" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Security Action PIN verification was cancelled. No change was published."));
+    expect(screen.queryByText("Day-specific change could not be published.")).toBeNull();
+    expect(screen.getByText("Review and publish change")).toBeTruthy();
+    expect(screen.getByText("PIN cancellation review")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish change" }).getAttribute("disabled")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(refetch).not.toHaveBeenCalled();
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Action PIN cancellation review message localized in Arabic", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new ApiError(
+      "Action PIN verification cancelled.",
+      403,
+      { actionKey: "scheduling_day_policy_change" },
+      ["action_pin_cancelled"],
+    ));
+    useCreateV2DayModalityBlockMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, isFetching: false, refetch: vi.fn() });
+    renderDialog({ language: "ar" });
+
+    fireEvent.click(screen.getByRole("button", { name: "حظر الجهاز" }));
+    fireEvent.change(screen.getByPlaceholderText("أدخل السبب"), { target: { value: "مراجعة إلغاء الرمز" } });
+    fireEvent.click(screen.getByRole("button", { name: "مراجعة التغيير" }));
+    fireEvent.click(screen.getByRole("button", { name: "نشر التغيير" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("تم إلغاء التحقق من رمز PIN لإجراء الأمان. لم يتم نشر أي تغيير."));
+    expect(screen.getByText("مراجعة التغيير ونشره")).toBeTruthy();
+    expect(screen.getByText("مراجعة إلغاء الرمز")).toBeTruthy();
+  });
+
   it("reviews removal before publishing the exact existing removal payload", async () => {
     const mutateAsync = vi.fn().mockResolvedValue({});
     useRemoveV2DayManagementRuleMock.mockReturnValue({ isPending: false, mutateAsync });
