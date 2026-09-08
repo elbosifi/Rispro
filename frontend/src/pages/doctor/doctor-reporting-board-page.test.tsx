@@ -1633,13 +1633,59 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
     fireEvent.click(screen.getByRole("button", { name: "Place selected on hold" }));
     expect(await screen.findByText("Selected appointments: 1")).toBeTruthy();
-    expect(screen.getAllByText(/1 selected comparison request is not affected/i)).toHaveLength(2);
+    expect(within(screen.getByRole("dialog")).getByText(/1 selected comparison request is not affected/i)).toBeTruthy();
     const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Place selected on hold" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "Bulk Reporting Hold reason" }), { target: { value: "  review batch  " } });
     fireEvent.click(confirm);
     await waitFor(() => expect(bulkPlaceSelectedReportingCasesOnHoldMock).toHaveBeenCalledWith({ appointmentIds: [42], reason: "review batch" }));
     expect(await screen.findByText("Bulk hold result: 1/1 held, 0 skipped.")).toBeTruthy();
+  });
+
+  it("resumes selected Reporting Holds through the bulk endpoint and clears successful selection", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportingHold: { id: 12, reason: "Needs review", createdAt: "2026-08-23T10:00:00.000Z", createdByUserId: 10, createdByDoctorId: 1, createdByName: "Dr Manager" }}],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await screen.findByText("V2-000042");
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.click(screen.getByRole("button", { name: "Resume held" }));
+    expect(await screen.findByRole("heading", { name: "Resume selected Reporting Holds" })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resume held" }));
+    await waitFor(() => expect(bulkResumeSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42] }));
+    expect(await screen.findByText("Bulk resume result: 1/1 resumed, 0 skipped.")).toBeTruthy();
+    expect(screen.queryByText("1 selected")).toBeNull();
+  });
+
+  it("does not show Reporting Hold actions for a comparison-only selection", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [comparisonRow],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await screen.findByText("CMP-000077");
+    fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
+    expect(screen.queryByRole("button", { name: "Place selected on hold" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume held" })).toBeNull();
+  });
+
+  it("renders skipped comparison requests with their comparison identifier", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [caseRow, comparisonRow],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    bulkReassignSelectedReportingCasesMock.mockResolvedValue({
+      requestedCount: 2, assignedCount: 1, skippedCount: 1, assignedAppointmentIds: [42], assignedComparisonRequestIds: [],
+      skipped: [{ comparisonRequestId: 77, reason: "comparison_not_found" }],
+    });
+    renderPage();
+    await screen.findByText("CMP-000077");
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
+    fireEvent.change(screen.getByLabelText("Reassign to"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    expect(await screen.findByText("Skipped: comparison 77 comparison_not_found")).toBeTruthy();
   });
 
   it("keeps selection and reassignment inputs visible after a bulk reassignment error", async () => {

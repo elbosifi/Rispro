@@ -2120,7 +2120,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onSuccess: async (result) => {
       setBulkResult(result);
       const succeeded = "heldCount" in result ? result.heldCount : result.resumedCount;
-      const action = "heldCount" in result ? "appointments placed on Reporting Hold" : "Reporting Holds resumed";
+      const action = "heldCount" in result
+        ? `${succeeded === 1 ? "appointment" : "appointments"} placed on Reporting Hold`
+        : `${succeeded === 1 ? "Reporting Hold" : "Reporting Holds"} resumed`;
       if (succeeded > 0) setSelectedCaseKeys([]);
       setSelectedHoldMode(null);
       setSelectedHoldReason("");
@@ -2683,7 +2685,6 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedCaseKeys.length > selectedAppointmentIds.length && (
               <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Print handoff includes appointment cases only; comparison requests are excluded from print.</p>
             )}
-            {selectedComparisonRequestIds.length > 0 && selectedAppointmentIds.length > 0 && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{selectedComparisonRequestIds.length} selected comparison request{selectedComparisonRequestIds.length === 1 ? " is" : "s are"} not affected because Reporting Hold applies to appointments only.</p>}
             {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
             {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
@@ -2834,7 +2835,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   {bulkResult.assignedComparisonRequestIds?.length ? <p className="mt-1">Assigned comparison request IDs: {bulkResult.assignedComparisonRequestIds.join(", ")}</p> : null}
                 </>
               )}
-              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `appointment ${item.appointmentId ?? ("comparisonRequestId" in item ? item.comparisonRequestId : "-")} ${item.reason}`).join("; ")}</p>}
+              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => (
+                "comparisonRequestId" in item && item.comparisonRequestId != null
+                  ? `comparison ${item.comparisonRequestId} ${item.reason}`
+                  : `appointment ${item.appointmentId} ${item.reason}`
+              )).join("; ")}</p>}
             </div>
           )}
         </section>
