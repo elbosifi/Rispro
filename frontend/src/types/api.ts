@@ -808,6 +808,31 @@ export interface ReportingBoardBulkUnassignSelectedPayload {
   allowFinal?: boolean;
 }
 
+export interface ReportingBoardBulkPlaceHoldSelectedPayload {
+  appointmentIds: number[];
+  reason: string;
+}
+
+export interface ReportingBoardBulkPlaceHoldResult {
+  requestedCount: number;
+  heldCount: number;
+  skippedCount: number;
+  heldAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
+export interface ReportingBoardBulkResumeHoldSelectedPayload {
+  appointmentIds: number[];
+}
+
+export interface ReportingBoardBulkResumeHoldResult {
+  requestedCount: number;
+  resumedCount: number;
+  skippedCount: number;
+  resumedAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
 export interface ReportingBoardNotificationEvent {
   id: number;
   eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";

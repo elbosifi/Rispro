@@ -8,7 +8,8 @@ import type {
   RosterNotificationSummary, RosterTemplateCopyMode, RosterTemplateType, DoctorCase, DoctorCaseAssignmentSummary,
   DoctorCaseFilters, CreateReportingBoardBulkAssignmentJobPayload, ReportingBoardBulkAssignResult,
   ReportingBoardBulkAssignmentJob, ReportingBoardBulkReassignSelectedPayload, ReportingBoardBulkUnassignResult,
-  ReportingBoardBulkUnassignSelectedPayload, OhifViewerAvailability, OhifViewerLaunchResponse,
+  ReportingBoardBulkUnassignSelectedPayload, ReportingBoardBulkPlaceHoldSelectedPayload, ReportingBoardBulkPlaceHoldResult,
+  ReportingBoardBulkResumeHoldSelectedPayload, ReportingBoardBulkResumeHoldResult, OhifViewerAvailability, OhifViewerLaunchResponse,
   ReportingBoardCasesResponse, ReportingBoardFilters, ReportingBoardNotificationSettings, ReportingBoardNotificationEvent, ReportingBoardMobileResponse,
   ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, DoctorReportingWorklistEmailQueueResult, ReportingBoardSettings,
   ReportingBoardStatsResponse, ReportingBoardCaseHoldSummary, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
@@ -884,6 +885,20 @@ export async function clearReportingBoardCaseManualFinal(
   payload: { reason: string }
 ): Promise<{ ok: true; appointmentId: number; status: "manual_final_cleared" }> {
   return api<{ ok: true; appointmentId: number; status: "manual_final_cleared" }>(`/doctor/reporting-board/cases/${appointmentId}/clear-manual-final`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function bulkPlaceSelectedReportingCasesOnHold(payload: ReportingBoardBulkPlaceHoldSelectedPayload): Promise<ReportingBoardBulkPlaceHoldResult> {
+  return api<ReportingBoardBulkPlaceHoldResult>("/doctor/reporting-board/bulk-hold-selected", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function bulkResumeSelectedReportingCases(payload: ReportingBoardBulkResumeHoldSelectedPayload): Promise<ReportingBoardBulkResumeHoldResult> {
+  return api<ReportingBoardBulkResumeHoldResult>("/doctor/reporting-board/bulk-resume-selected", {
     method: "POST",
     body: JSON.stringify(payload),
   });

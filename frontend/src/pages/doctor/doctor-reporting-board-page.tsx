@@ -9,7 +9,9 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 import { ProtocolingAppointmentWorkspace } from "@/pages/doctor/doctor-protocols-page";
 import {
   bulkAssignNextReportingCases,
+  bulkPlaceSelectedReportingCasesOnHold,
   bulkReassignSelectedReportingCases,
+  bulkResumeSelectedReportingCases,
   bulkUnassignSelectedReportingCases,
   cancelReportingBoardBulkAssignmentJob,
   clearReportingBoardCaseManualFinal,
@@ -56,6 +58,8 @@ import type {
   CreateReportingBoardBulkAssignmentJobPayload,
   ReportingBoardBulkAssignResult,
   ReportingBoardBulkAssignmentJob,
+  ReportingBoardBulkPlaceHoldResult,
+  ReportingBoardBulkResumeHoldResult,
   ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
   ReportingBoardCaseHoldSummary,
@@ -1712,12 +1716,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [scheduleBulkOpen, setScheduleBulkOpen] = useState(false);
-  const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | ReportingBoardBulkUnassignResult | null>(null);
+  const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | ReportingBoardBulkUnassignResult | ReportingBoardBulkPlaceHoldResult | ReportingBoardBulkResumeHoldResult | null>(null);
   const [busyScheduledJobId, setBusyScheduledJobId] = useState<number | null>(null);
   const [selectedReassignDoctorId, setSelectedReassignDoctorId] = useState("");
   const [selectedReassignReason, setSelectedReassignReason] = useState("");
   const [selectedUnassignReason, setSelectedUnassignReason] = useState("");
   const [selectedUnassignConfirmOpen, setSelectedUnassignConfirmOpen] = useState(false);
+  const [selectedHoldMode, setSelectedHoldMode] = useState<"place" | "resume" | null>(null);
+  const [selectedHoldReason, setSelectedHoldReason] = useState("");
   const [priorityShortcutOpen, setPriorityShortcutOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2106,6 +2112,25 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
   });
+  const selectedHoldMutation = useMutation<ReportingBoardBulkPlaceHoldResult | ReportingBoardBulkResumeHoldResult>({
+    mutationFn: () => {
+      if (selectedHoldMode === "place") return bulkPlaceSelectedReportingCasesOnHold({ appointmentIds: selectedAppointmentIds, reason: selectedHoldReason.trim() });
+      return bulkResumeSelectedReportingCases({ appointmentIds: selectedAppointmentIds });
+    },
+    onSuccess: async (result) => {
+      setBulkResult(result);
+      const succeeded = "heldCount" in result ? result.heldCount : result.resumedCount;
+      const action = "heldCount" in result ? "appointments placed on Reporting Hold" : "Reporting Holds resumed";
+      if (succeeded > 0) setSelectedCaseKeys([]);
+      setSelectedHoldMode(null);
+      setSelectedHoldReason("");
+      setBoardActionMessage({ tone: "success", text: `${succeeded} ${action}; ${result.skippedCount} skipped.` });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+  });
 
   const cases = casesQuery.data?.cases ?? [];
   const selectedRows = cases.filter((row) => selectedCaseKeys.includes(row.caseKey));
@@ -2113,6 +2138,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const selectedComparisonRequestIds = selectedRows
     .filter((row) => row.caseType === "comparison" && row.comparisonRequestId != null)
     .map((row) => row.comparisonRequestId!);
+  const selectedHeldAppointmentRows = selectedRows.filter((row) => row.caseType === "appointment" && Boolean(row.reportingHold));
+  const selectedUnheldAppointmentRows = selectedRows.filter((row) => row.caseType === "appointment" && !row.reportingHold);
   const effectiveFilters = casesQuery.data?.filters ?? filters;
   const statsSummary = statsQuery.data?.summary;
   const doctorStats = statsQuery.data?.byDoctor ?? [];
@@ -2145,6 +2172,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
   const selectedReassignDisabled = !canManage || selectedCaseKeys.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
   const selectedUnassignDisabled = !canManage || selectedCaseKeys.length === 0 || selectedUnassignMutation.isPending;
+  const selectedHoldDisabled = !canManage || selectedAppointmentIds.length === 0 || selectedHoldMutation.isPending;
   const visibleCategoryCount = new Set(cases.map((row) => row.caseCategory).filter(Boolean)).size;
   const showCategoryMarker = visibleCategoryCount > 1;
   const activeAssignedDoctorId = filters.assignedDoctorId ?? effectiveFilters.assignedDoctorId ?? null;
@@ -2630,6 +2658,24 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               >
                 Return selected to waiting pool
               </button>
+              {canManage && selectedUnheldAppointmentRows.length > 0 && <button
+                type="button"
+                disabled={selectedHoldDisabled}
+                onClick={() => setSelectedHoldMode("place")}
+                className="h-10 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                style={{ borderColor: "#d97706", backgroundColor: "#fffbeb" }}
+              >
+                Place selected on hold
+              </button>}
+              {canManage && selectedHeldAppointmentRows.length > 0 && <button
+                type="button"
+                disabled={selectedHoldDisabled}
+                onClick={() => setSelectedHoldMode("resume")}
+                className="h-10 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                style={{ borderColor: "#d97706" }}
+              >
+                Resume held
+              </button>}
               <button type="button" onClick={() => { setSelectedCaseKeys([]); setSelectedReassignDoctorId(""); setSelectedReassignReason(""); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                 Clear
               </button>
@@ -2637,9 +2683,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedCaseKeys.length > selectedAppointmentIds.length && (
               <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Print handoff includes appointment cases only; comparison requests are excluded from print.</p>
             )}
+            {selectedComparisonRequestIds.length > 0 && selectedAppointmentIds.length > 0 && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{selectedComparisonRequestIds.length} selected comparison request{selectedComparisonRequestIds.length === 1 ? " is" : "s are"} not affected because Reporting Hold applies to appointments only.</p>}
             {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
             {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
+            {selectedHoldMutation.error && <p className="mt-2 text-sm text-red-600">{selectedHoldMutation.error instanceof Error ? selectedHoldMutation.error.message : "Selected Reporting Hold action failed."}</p>}
           </div>
           )}
           <div className="rounded-lg border lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" style={{ borderColor: "var(--border)" }}>
@@ -2763,7 +2811,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           </div>
           {bulkResult && (
             <div className="rounded-lg border p-4 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-              {"unassignedCount" in bulkResult ? (
+              {"heldCount" in bulkResult ? (
+                <>
+                  <p className="font-semibold">Bulk hold result: {bulkResult.heldCount}/{bulkResult.requestedCount} held, {bulkResult.skippedCount} skipped.</p>
+                  <p className="mt-1">Held appointment IDs: {bulkResult.heldAppointmentIds.join(", ") || "-"}</p>
+                </>
+              ) : "resumedCount" in bulkResult ? (
+                <>
+                  <p className="font-semibold">Bulk resume result: {bulkResult.resumedCount}/{bulkResult.requestedCount} resumed, {bulkResult.skippedCount} skipped.</p>
+                  <p className="mt-1">Resumed appointment IDs: {bulkResult.resumedAppointmentIds.join(", ") || "-"}</p>
+                </>
+              ) : "unassignedCount" in bulkResult ? (
                 <>
                   <p className="font-semibold">Bulk return result: {bulkResult.unassignedCount}/{bulkResult.requestedCount} returned, {bulkResult.skippedCount} skipped.</p>
                   <p className="mt-1">Returned appointment IDs: {bulkResult.unassignedAppointmentIds.join(", ") || "-"}</p>
@@ -2776,7 +2834,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   {bulkResult.assignedComparisonRequestIds?.length ? <p className="mt-1">Assigned comparison request IDs: {bulkResult.assignedComparisonRequestIds.join(", ")}</p> : null}
                 </>
               )}
-              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `${item.appointmentId ? `appointment ${item.appointmentId}` : `comparison ${item.comparisonRequestId}`} ${item.reason}`).join("; ")}</p>}
+              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `appointment ${item.appointmentId ?? ("comparisonRequestId" in item ? item.comparisonRequestId : "-")} ${item.reason}`).join("; ")}</p>}
             </div>
           )}
         </section>
@@ -2960,6 +3018,28 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               <Button variant="secondary" onClick={() => setReportingHoldTarget(null)} disabled={reportingHoldMutation.isPending}>Cancel</Button>
               <Button onClick={() => reportingHoldMutation.mutate()} disabled={reportingHoldMutation.isPending || (reportingHoldMode === "place" && (!reportingHoldReason.trim() || reportingHoldReason.length > 1000))}>
                 {reportingHoldMutation.isPending ? "Saving..." : reportingHoldMode === "place" ? "Place on hold" : "Resume reporting"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {selectedHoldMode && (
+        <Dialog open onClose={() => !selectedHoldMutation.isPending && setSelectedHoldMode(null)}>
+          <DialogContent maxWidth="520px">
+            <DialogHeader>
+              <DialogTitle>{selectedHoldMode === "place" ? "Place selected appointments on Reporting Hold" : "Resume selected Reporting Holds"}</DialogTitle>
+              <DialogDescription>{selectedHoldMode === "place"
+                ? "Automatic assignment and doctor self-claim will stop for eligible appointments. Existing doctor assignments will remain unchanged."
+                : "This clears Reporting Hold only. Doctor assignments, report state, and timestamps are unchanged."}</DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-foreground">Selected appointments: {selectedAppointmentIds.length}</p>
+            {selectedComparisonRequestIds.length > 0 && <p className="text-sm" style={{ color: "var(--text-muted)" }}>{selectedComparisonRequestIds.length} selected comparison request{selectedComparisonRequestIds.length === 1 ? " is" : "s are"} not affected because Reporting Hold applies to appointments only.</p>}
+            {selectedHoldMode === "place" && <label className="grid gap-1 text-sm font-medium">Reason<Textarea aria-label="Bulk Reporting Hold reason" maxLength={1000} value={selectedHoldReason} onChange={(event) => setSelectedHoldReason(event.target.value)} /></label>}
+            {selectedHoldMutation.isError ? <p role="alert" className="text-sm text-red-700">{selectedHoldMutation.error instanceof Error ? selectedHoldMutation.error.message : "Could not update selected Reporting Holds."}</p> : null}
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setSelectedHoldMode(null)} disabled={selectedHoldMutation.isPending}>Cancel</Button>
+              <Button onClick={() => selectedHoldMutation.mutate()} disabled={selectedHoldMutation.isPending || (selectedHoldMode === "place" && (!selectedHoldReason.trim() || selectedHoldReason.length > 1000))}>
+                {selectedHoldMutation.isPending ? "Saving..." : selectedHoldMode === "place" ? "Place selected on hold" : "Resume held"}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -12,7 +12,9 @@ import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "
 import {
   assignReportingBoardCaseToDoctor,
   bulkAssignNextReportingBoardCases,
+  bulkPlaceSelectedReportingBoardCaseHolds,
   bulkReassignSelectedReportingBoardCases,
+  bulkResumeSelectedReportingBoardCaseHolds,
   bulkUnassignSelectedReportingBoardCases,
   cancelScheduledReportingBoardBulkAssignmentJob,
   createScheduledReportingBoardBulkAssignmentJob,
@@ -754,6 +756,27 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const result = await undoScheduledReportingBoardBulkAssignmentJob(actor(req), requiredPositiveInteger(req.params.id, "id"));
     res.json(result);
+  })
+);
+
+router.post(
+  "/bulk-hold-selected",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await bulkPlaceSelectedReportingBoardCaseHolds(actor(req), {
+      appointmentIds: optionalPositiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      reason: asString(body.reason),
+    }));
+  })
+);
+
+router.post(
+  "/bulk-resume-selected",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await bulkResumeSelectedReportingBoardCaseHolds(actor(req), {
+      appointmentIds: optionalPositiveIntegerArray(body.appointmentIds, "appointmentIds"),
+    }));
   })
 );
 

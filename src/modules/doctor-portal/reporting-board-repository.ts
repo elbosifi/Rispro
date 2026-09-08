@@ -12,6 +12,8 @@ import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesResult,
+  BulkPlaceReportingHoldSelectedCasesResult,
+  BulkResumeReportingHoldSelectedCasesResult,
   CreateReportingBoardBulkAssignmentJobInput,
   BulkUnassignSelectedCasesResult,
   ReportingBoardBulkAssignmentJob,
@@ -1749,6 +1751,112 @@ export async function releaseReportingBoardCaseHold(input: {
   } finally {
     client.release();
   }
+}
+
+export async function bulkPlaceReportingBoardCaseHolds(input: {
+  candidateAppointmentIds: number[];
+  reason: string;
+  actor: AssignmentActor;
+}): Promise<BulkPlaceReportingHoldSelectedCasesResult> {
+  const appointmentIds = [...new Set(input.candidateAppointmentIds)].sort((left, right) => left - right);
+  if (appointmentIds.length === 0) return { requestedCount: 0, heldCount: 0, skippedCount: 0, heldAppointmentIds: [], skipped: [] };
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const bookings = await client.query<{ id: number; status: string; requiresReport: boolean; manualFinalOverrideId: number | null; cachedReportStatus: string | null }>(
+      `
+        select b.id, b.status, b.requires_report as "requiresReport",
+          manual_final.id as "manualFinalOverrideId", cache.report_status as "cachedReportStatus"
+        from appointments_v2.bookings b
+        left join doctor_portal.reporting_board_manual_final_overrides manual_final
+          on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+        left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+        where b.id = any($1::bigint[])
+        order by b.id
+        for update of b
+      `,
+      [appointmentIds]
+    );
+    const holds = await client.query<{ id: number; appointmentId: number }>(
+      `select id, appointment_id as "appointmentId" from doctor_portal.reporting_board_case_holds
+       where appointment_id = any($1::bigint[]) and cleared_at is null for update`,
+      [appointmentIds]
+    );
+    const bookingsById = new Map(bookings.rows.map((booking) => [Number(booking.id), booking]));
+    const holdsByAppointmentId = new Map(holds.rows.map((hold) => [Number(hold.appointmentId), Number(hold.id)]));
+    const heldAppointmentIds: number[] = [];
+    const skipped: Array<{ appointmentId: number; reason: string }> = [];
+    for (const appointmentId of appointmentIds) {
+      const booking = bookingsById.get(appointmentId);
+      if (!booking) { skipped.push({ appointmentId, reason: "appointment_not_found" }); continue; }
+      if (booking.status !== "completed") { skipped.push({ appointmentId, reason: "study_not_completed" }); continue; }
+      if (!booking.requiresReport) { skipped.push({ appointmentId, reason: "report_not_required" }); continue; }
+      if (booking.manualFinalOverrideId || booking.cachedReportStatus === "final") { skipped.push({ appointmentId, reason: "report_final" }); continue; }
+      if (holdsByAppointmentId.has(appointmentId)) { skipped.push({ appointmentId, reason: "already_on_reporting_hold" }); continue; }
+      const inserted = await client.query<{ id: number }>(
+        `insert into doctor_portal.reporting_board_case_holds (appointment_id, reason, created_by_user_id, created_by_doctor_id)
+         values ($1, $2, $3, $4) returning id`,
+        [appointmentId, input.reason, input.actor.userId, input.actor.doctorId]
+      );
+      const holdId = Number(inserted.rows[0]!.id);
+      await insertDoctorAuditEvent(client, {
+        actorUserId: input.actor.userId, actorDoctorId: input.actor.doctorId,
+        eventType: "reporting_board_case_hold_placed", targetType: "appointment", targetId: appointmentId,
+        metadata: { appointmentId, holdId, bulk: true }, reason: input.reason,
+      });
+      heldAppointmentIds.push(appointmentId);
+    }
+    await client.query("commit");
+    return { requestedCount: appointmentIds.length, heldCount: heldAppointmentIds.length, skippedCount: skipped.length, heldAppointmentIds, skipped };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function bulkReleaseReportingBoardCaseHolds(input: {
+  candidateAppointmentIds: number[];
+  actor: AssignmentActor;
+}): Promise<BulkResumeReportingHoldSelectedCasesResult> {
+  const appointmentIds = [...new Set(input.candidateAppointmentIds)].sort((left, right) => left - right);
+  if (appointmentIds.length === 0) return { requestedCount: 0, resumedCount: 0, skippedCount: 0, resumedAppointmentIds: [], skipped: [] };
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const bookings = await client.query<{ id: number }>(
+      `select id from appointments_v2.bookings where id = any($1::bigint[]) order by id for update`, [appointmentIds]
+    );
+    const holds = await client.query<{ id: number; appointmentId: number }>(
+      `select id, appointment_id as "appointmentId" from doctor_portal.reporting_board_case_holds
+       where appointment_id = any($1::bigint[]) and cleared_at is null for update`, [appointmentIds]
+    );
+    const bookingIds = new Set(bookings.rows.map((booking) => Number(booking.id)));
+    const holdsByAppointmentId = new Map(holds.rows.map((hold) => [Number(hold.appointmentId), Number(hold.id)]));
+    const resumedAppointmentIds: number[] = [];
+    const skipped: Array<{ appointmentId: number; reason: string }> = [];
+    for (const appointmentId of appointmentIds) {
+      if (!bookingIds.has(appointmentId)) { skipped.push({ appointmentId, reason: "appointment_not_found" }); continue; }
+      const holdId = holdsByAppointmentId.get(appointmentId);
+      if (!holdId) { skipped.push({ appointmentId, reason: "not_on_reporting_hold" }); continue; }
+      await client.query(
+        `update doctor_portal.reporting_board_case_holds set cleared_by_user_id = $2, cleared_by_doctor_id = $3, cleared_at = now() where id = $1`,
+        [holdId, input.actor.userId, input.actor.doctorId]
+      );
+      await insertDoctorAuditEvent(client, {
+        actorUserId: input.actor.userId, actorDoctorId: input.actor.doctorId,
+        eventType: "reporting_board_case_hold_released", targetType: "appointment", targetId: appointmentId,
+        metadata: { appointmentId, holdId, bulk: true }, reason: null,
+      });
+      resumedAppointmentIds.push(appointmentId);
+    }
+    await client.query("commit");
+    return { requestedCount: appointmentIds.length, resumedCount: resumedAppointmentIds.length, skippedCount: skipped.length, resumedAppointmentIds, skipped };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function listActiveManualFinalOverridesByAppointmentIds(appointmentIds: number[]): Promise<ReportingBoardManualFinalOverride[]> {

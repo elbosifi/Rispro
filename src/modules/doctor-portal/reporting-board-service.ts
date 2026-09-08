@@ -14,6 +14,8 @@ import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import {
   bulkAssignReportingCases,
+  bulkPlaceReportingBoardCaseHolds,
+  bulkReleaseReportingBoardCaseHolds,
   bulkUnassignReportingCases,
   cancelReportingBoardBulkAssignmentJob,
   claimReportingBoardBulkAssignmentJobForRunNow,
@@ -62,6 +64,10 @@ import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesInput,
   BulkAssignNextCasesResult,
+  BulkPlaceReportingHoldSelectedCasesInput,
+  BulkPlaceReportingHoldSelectedCasesResult,
+  BulkResumeReportingHoldSelectedCasesInput,
+  BulkResumeReportingHoldSelectedCasesResult,
   CreateReportingBoardBulkAssignmentJobInput,
   CreateReportingBoardBulkAssignmentJobsInput,
   BulkReassignSelectedCasesInput,
@@ -1244,6 +1250,56 @@ export async function releaseReportingBoardCaseHold(
     actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
   });
   return { ok: true, appointmentId, status: "reporting_hold_released", hold };
+}
+
+export async function bulkPlaceSelectedReportingBoardCaseHolds(
+  actor: Actor,
+  input: BulkPlaceReportingHoldSelectedCasesInput
+): Promise<BulkPlaceReportingHoldSelectedCasesResult> {
+  const manager = await requireRosterManager(actor);
+  const appointmentIds = uniquePositiveIds(input.appointmentIds, "appointmentIds");
+  if (appointmentIds.length === 0) throw new HttpError(400, "At least one selected appointment is required.");
+  const reason = String(input.reason || "").trim();
+  if (!reason) throw new HttpError(400, "A reason is required to place a Reporting Hold.");
+  if (reason.length > 1000) throw new HttpError(400, "Reporting Hold reason must be 1000 characters or fewer.");
+
+  const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds(appointmentIds), "all");
+  const rowsById = new Map(rows.map((row) => [row.appointmentId, row]));
+  const skipped: Array<{ appointmentId: number; reason: string }> = [];
+  const eligibleIds: number[] = [];
+  for (const appointmentId of appointmentIds) {
+    const row = rowsById.get(appointmentId);
+    if (!row) { skipped.push({ appointmentId, reason: "appointment_not_found" }); continue; }
+    if (!row.requiresReport) { skipped.push({ appointmentId, reason: "report_not_required" }); continue; }
+    if (row.appointmentStatus !== "completed") { skipped.push({ appointmentId, reason: "study_not_completed" }); continue; }
+    if (row.reportStatus === "final" || row.manualFinalOverrideId) { skipped.push({ appointmentId, reason: "report_final" }); continue; }
+    if (row.reportingHold) { skipped.push({ appointmentId, reason: "already_on_reporting_hold" }); continue; }
+    eligibleIds.push(appointmentId);
+  }
+  const result = await bulkPlaceReportingBoardCaseHolds({
+    candidateAppointmentIds: eligibleIds, reason,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
+  return {
+    requestedCount: appointmentIds.length,
+    heldCount: result.heldCount,
+    skippedCount: skipped.length + result.skippedCount,
+    heldAppointmentIds: result.heldAppointmentIds,
+    skipped: [...skipped, ...result.skipped],
+  };
+}
+
+export async function bulkResumeSelectedReportingBoardCaseHolds(
+  actor: Actor,
+  input: BulkResumeReportingHoldSelectedCasesInput
+): Promise<BulkResumeReportingHoldSelectedCasesResult> {
+  const manager = await requireRosterManager(actor);
+  const appointmentIds = uniquePositiveIds(input.appointmentIds, "appointmentIds");
+  if (appointmentIds.length === 0) throw new HttpError(400, "At least one selected appointment is required.");
+  return bulkReleaseReportingBoardCaseHolds({
+    candidateAppointmentIds: appointmentIds,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
 }
 
 function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, personalDeskDoctorId: number | null = null) {

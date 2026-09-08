@@ -1742,6 +1742,37 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_released'`)).rows[0].count >= 5, true);
   });
 
+  it("bulk places and resumes Reporting Holds transactionally with per-case skips and audits", async () => {
+    guard();
+    const date = addDays(119);
+    const held = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: uniq("bulk hold") });
+    const assigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: uniq("bulk hold assigned") });
+    const finalCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: uniq("bulk hold final") });
+    const notCompleted = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, status: "scheduled", patientName: uniq("bulk hold scheduled") });
+    const noReport = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, requiresReport: false, patientName: uniq("bulk hold no report") });
+    [held, assigned, notCompleted, noReport].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    statusByAppointmentId.set(finalCase, "final");
+    await statusByAppointmentId.flush();
+    await assignDirectly(assigned, targetDoctor.doctorId);
+    const assignmentBefore = (await pool.query(`select id::text, assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [assigned])).rows[0];
+    assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/bulk-hold-selected", { method: "POST", body: { appointmentIds: [held], reason: "no access" } })).status, 403);
+    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-hold-selected", { method: "POST", body: { appointmentIds: [held], reason: " " } })).status, 400);
+    const placed = await api<{ requestedCount: number; heldCount: number; heldAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-hold-selected", { method: "POST", body: { appointmentIds: [held, assigned, held, finalCase, notCompleted, noReport, 999999999], reason: "bulk review" } });
+    assert.equal(placed.status, 200, JSON.stringify(placed.data));
+    assert.equal(placed.data.requestedCount, 6);
+    assert.deepEqual(placed.data.heldAppointmentIds, [held, assigned]);
+    assert.deepEqual(placed.data.skipped.map((row) => [row.appointmentId, row.reason]), [[finalCase, "report_final"], [notCompleted, "study_not_completed"], [noReport, "report_not_required"], [999999999, "appointment_not_found"]]);
+    assert.deepEqual((await pool.query(`select id::text, assigned_doctor_id::text, assigned_at::text from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [assigned])).rows[0], assignmentBefore);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.reporting_board_case_holds where appointment_id = any($1::bigint[]) and cleared_at is null and reason = 'bulk review'`, [[held, assigned]])).rows[0].count, 2);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_placed' and metadata_json->>'bulk' = 'true' and target_id = any($1::bigint[])`, [[held, assigned]])).rows[0].count, 2);
+    const resumed = await api<{ resumedCount: number; resumedAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-resume-selected", { method: "POST", body: { appointmentIds: [held, assigned, finalCase, 999999999] } });
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.data));
+    assert.deepEqual(resumed.data.resumedAppointmentIds, [held, assigned]);
+    assert.deepEqual(resumed.data.skipped.map((row) => [row.appointmentId, row.reason]), [[finalCase, "not_on_reporting_hold"], [999999999, "appointment_not_found"]]);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.reporting_board_case_holds where appointment_id = any($1::bigint[]) and cleared_at is not null`, [[held, assigned]])).rows[0].count, 2);
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_hold_released' and metadata_json->>'bulk' = 'true' and target_id = any($1::bigint[])`, [[held, assigned]])).rows[0].count, 2);
+  });
+
   it("fills the requested automatic assignment count after a transactional Reporting Hold skip", async () => {
     guard();
     const date = addDays(119);

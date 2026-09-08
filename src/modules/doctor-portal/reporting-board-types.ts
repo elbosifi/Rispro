@@ -373,6 +373,31 @@ export interface BulkUnassignSelectedCasesResult {
   skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
+export interface BulkPlaceReportingHoldSelectedCasesInput {
+  appointmentIds: number[];
+  reason: string;
+}
+
+export interface BulkPlaceReportingHoldSelectedCasesResult {
+  requestedCount: number;
+  heldCount: number;
+  skippedCount: number;
+  heldAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
+export interface BulkResumeReportingHoldSelectedCasesInput {
+  appointmentIds: number[];
+}
+
+export interface BulkResumeReportingHoldSelectedCasesResult {
+  requestedCount: number;
+  resumedCount: number;
+  skippedCount: number;
+  resumedAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
 export interface ReportingBoardNotificationEvent {
   id: number;
   eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";

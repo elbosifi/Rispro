@@ -33,6 +33,8 @@ const undoReportingBoardBulkAssignmentJobMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const bulkReassignSelectedReportingCasesMock = vi.fn();
 const bulkUnassignSelectedReportingCasesMock = vi.fn();
+const bulkPlaceSelectedReportingCasesOnHoldMock = vi.fn();
+const bulkResumeSelectedReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const assignReportingBoardCaseMock = vi.fn();
@@ -78,6 +80,8 @@ vi.mock("@/lib/api-hooks", () => ({
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   bulkReassignSelectedReportingCases: (...args: unknown[]) => bulkReassignSelectedReportingCasesMock(...args),
   bulkUnassignSelectedReportingCases: (...args: unknown[]) => bulkUnassignSelectedReportingCasesMock(...args),
+  bulkPlaceSelectedReportingCasesOnHold: (...args: unknown[]) => bulkPlaceSelectedReportingCasesOnHoldMock(...args),
+  bulkResumeSelectedReportingCases: (...args: unknown[]) => bulkResumeSelectedReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
@@ -367,6 +371,8 @@ describe("DoctorReportingBoardPage", () => {
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
     bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], assignedComparisonRequestIds: [], skipped: [] });
     bulkUnassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, unassignedCount: 1, skippedCount: 0, unassignedAppointmentIds: [42], unassignedComparisonRequestIds: [], skipped: [] });
+    bulkPlaceSelectedReportingCasesOnHoldMock.mockResolvedValue({ requestedCount: 1, heldCount: 1, skippedCount: 0, heldAppointmentIds: [42], skipped: [] });
+    bulkResumeSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, resumedCount: 1, skippedCount: 0, resumedAppointmentIds: [42], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
       modalities: [{ id: 1, code: "CT", nameEn: "CT", nameAr: "CT" }],
@@ -1614,6 +1620,26 @@ describe("DoctorReportingBoardPage", () => {
       reason: "mixed reporting queue",
     }));
     expect(screen.queryByRole("button", { name: "Confirm reassignment" })).toBeNull();
+  });
+
+  it("places selected appointments on hold through one bulk request and excludes comparisons", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [caseRow, comparisonRow],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await screen.findByText("CMP-000077");
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
+    fireEvent.click(screen.getByRole("button", { name: "Place selected on hold" }));
+    expect(await screen.findByText("Selected appointments: 1")).toBeTruthy();
+    expect(screen.getAllByText(/1 selected comparison request is not affected/i)).toHaveLength(2);
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Place selected on hold" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Bulk Reporting Hold reason" }), { target: { value: "  review batch  " } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(bulkPlaceSelectedReportingCasesOnHoldMock).toHaveBeenCalledWith({ appointmentIds: [42], reason: "review batch" }));
+    expect(await screen.findByText("Bulk hold result: 1/1 held, 0 skipped.")).toBeTruthy();
   });
 
   it("keeps selection and reassignment inputs visible after a bulk reassignment error", async () => {
