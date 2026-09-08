@@ -53,8 +53,12 @@ const context: DayManagementContextDto = {
   supportedDayRuleTypes: ["block_modality", "restrict_exam_types", "set_exam_mix_quota"],
 };
 
-function renderDialog() {
-  return render(<ManageDayDialog open onClose={vi.fn()} language="en" modalityId={1} modalityLabel="CT" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+function renderDialog({ open = true, onClose = vi.fn(), modalityId = 1, modalityLabel = "CT", date = "2026-05-20", dateLabel = "Wednesday, May 20, 2026" }: { open?: boolean; onClose?: () => void; modalityId?: number | null; modalityLabel?: string; date?: string; dateLabel?: string } = {}) {
+  return render(<ManageDayDialog open={open} onClose={onClose} language="en" modalityId={modalityId} modalityLabel={modalityLabel} date={date} dateLabel={dateLabel} />);
+}
+
+function availableContext() {
+  return { ...context, policy: { ...context.policy, draft: null } };
 }
 
 afterEach(() => { vi.clearAllMocks(); resetMutationHooks(); });
@@ -215,5 +219,132 @@ describe("ManageDayDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set quota" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     expect(mutateAsync).toHaveBeenCalledWith({ policySetKey: "default", modalityId: 1, date: "2026-05-20", expectedPublishedVersionId: 1, examTypeIds: [4], dailyLimit: 10, reason: "Exam mix capacity limit" });
+  });
+
+  it("clears create state when closed and reopened", () => {
+    const onClose = vi.fn();
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Temporary restriction" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restriction_overridable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    view.rerender(<ManageDayDialog open={false} onClose={onClose} language="en" modalityId={1} modalityLabel="CT" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+    view.rerender(<ManageDayDialog open onClose={onClose} language="en" modalityId={1} modalityLabel="CT" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("hard_restriction");
+  });
+
+  it("clears editor fields when switching create actions", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Temporary restriction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set exam-mix quota" }));
+
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    expect((screen.getByRole("checkbox", { name: "Allow supervisor override" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("does not carry a create reason into removal", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "This reason must not carry" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+
+    expect(screen.getByRole("button", { name: "Remove rule" })).toBeTruthy();
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("does not carry a removal reason into a create action", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Removal reason" } });
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("clears the active editor when the selected date changes", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ date: "2030-01-10", dateLabel: "Thursday, January 10, 2030" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Date-specific restriction" } });
+    view.rerender(<ManageDayDialog open onClose={vi.fn()} language="en" modalityId={1} modalityLabel="CT" date="2030-01-11" dateLabel="Friday, January 11, 2030" />);
+
+    expect(screen.queryByRole("button", { name: "Apply restriction" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("clears the active editor when the selected modality changes", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Modality-specific restriction" } });
+    view.rerender(<ManageDayDialog open onClose={vi.fn()} language="en" modalityId={2} modalityLabel="MR" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+
+    expect(screen.queryByRole("button", { name: "Apply restriction" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("keeps success feedback after a mutation but clears it after reopening", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({});
+    const onClose = vi.fn();
+    useCreateV2DayModalityBlockMock.mockReturnValue({ isPending: false, mutateAsync });
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    const view = renderDialog({ onClose });
+
+    fireEvent.click(screen.getByRole("button", { name: "Block modality" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Successful update" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Block modality" })[1]!);
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("status").textContent).toContain("Day-specific rule saved.");
+    expect(screen.queryByRole("button", { name: "Block modality" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Block modality" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    view.rerender(<ManageDayDialog open={false} onClose={onClose} language="en" modalityId={1} modalityLabel="CT" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+    view.rerender(<ManageDayDialog open onClose={onClose} language="en" modalityId={1} modalityLabel="CT" date="2026-05-20" dateLabel="Wednesday, May 20, 2026" />);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("clears the current editor when cancelled", () => {
+    useV2DayManagementContextMock.mockReturnValue({ data: availableContext(), isLoading: false, isError: false, refetch: vi.fn() });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "CT Head" }));
+    fireEvent.change(screen.getByPlaceholderText("Enter a reason"), { target: { value: "Cancel this editor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restrict exam types" }));
+
+    expect((screen.getByRole("checkbox", { name: "CT Head" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByPlaceholderText("Enter a reason") as HTMLTextAreaElement).value).toBe("");
   });
 });

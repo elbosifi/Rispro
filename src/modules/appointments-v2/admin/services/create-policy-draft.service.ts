@@ -63,7 +63,10 @@ async function createPolicyDraftInternal(
     );
   }
 
-  // 2. Check if a draft already exists
+  // 2. Serialize all policy-version creation decisions for this policy set.
+  await client.query("select id from appointments_v2.policy_sets where id = $1 for update", [policySet.id]);
+
+  // 3. Check if a draft already exists
   const existingDraft = await findDraftVersion(client, policySetKey);
   if (existingDraft) {
     throw new SchedulingError(
@@ -73,7 +76,7 @@ async function createPolicyDraftInternal(
     );
   }
 
-  // 3. Find the published version to base the draft on
+  // 4. Find the published version to base the draft on
   const published = await findPublishedVersion(client, policySetKey);
   if (!published) {
     // No published version — create a draft with empty config
@@ -107,10 +110,10 @@ async function createPolicyDraftInternal(
     return { draft: refreshedDraft, basedOnVersionId: 0 };
   }
 
-  // 4. Load the published snapshot (rule rows from DB)
+  // 5. Load the published snapshot (rule rows from DB)
   const publishedSnapshot = await loadPolicySnapshot(client, published.id);
 
-  // 5. Create the draft version row
+  // 6. Create the draft version row
   const nextVersion = await getNextVersionNumber(client, policySet.id);
   const resolvedNote = changeNote ?? `Draft based on published version ${published.versionNo}`;
   const draft = await createDraftVersion(
@@ -122,17 +125,17 @@ async function createPolicyDraftInternal(
     resolvedNote
   );
 
-  // 6. Copy all versioned rule rows from the published snapshot into the draft version
+  // 7. Copy all versioned rule rows from the published snapshot into the draft version
   await copySnapshotIntoVersion(client, draft.id, publishedSnapshot);
 
-  // 7. Reload the authoritative persisted snapshot from DB
+  // 8. Reload the authoritative persisted snapshot from DB
   const persistedSnapshot = await loadPolicySnapshot(client, draft.id);
 
-  // 8. Recalculate hash from the reloaded DB snapshot (authoritative)
+  // 9. Recalculate hash from the reloaded DB snapshot (authoritative)
   const configHash = hashConfigSnapshot(persistedSnapshot);
   await updateDraftConfig(client, draft.id, configHash, resolvedNote);
 
-  // 9. Refresh and return
+  // 10. Refresh and return
   const refreshedDraft = await findVersionById(client, draft.id);
   if (!refreshedDraft) {
     throw new SchedulingError(

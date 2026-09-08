@@ -12,9 +12,16 @@ const DATE_RANGE_START = "2030-02-19";
 const DATE_RANGE_END = "2030-02-21";
 const RECURRING_DATE = "2030-03-04";
 const EVALUATOR_DATE = "2032-04-15";
+const AUDIT_CREATE_DATE = "2033-06-11";
+const AUDIT_REMOVE_DATE = "2033-06-12";
+const RESTRICTION_DUPLICATE_DATE = "2034-06-11";
+const RESTRICTION_SCOPE_CONFLICT_DATE = "2034-06-12";
+const QUOTA_DUPLICATE_DATE = "2034-06-13";
+const QUOTA_SCOPE_CONFLICT_DATE = "2034-06-14";
 const available = isDatabaseAvailable();
 
 type ErrorResponse = { error?: { reasonCodes?: string[] } };
+type DraftResponse = { draft?: { id: number; status: string }; basedOnVersionId?: number | string };
 
 async function fetchWithReasonCodes(testApp: Awaited<ReturnType<typeof createTestApp>>, path: string, options: Parameters<typeof fetchJson>[2]): Promise<{ status: number; data: ErrorResponse; reasonCodes: string[] }> {
   let capturedReasonCodes: string[] = [];
@@ -106,10 +113,72 @@ async function cleanupCreatedDraft(draftVersionId: number): Promise<void> {
   await pool.query(`delete from appointments_v2.policy_versions where id = $1 and status = 'draft'`, [draftVersionId]);
 }
 
+async function setAuditTrailForTest(value: "enabled" | "disabled", userId: number): Promise<() => Promise<void>> {
+  const existing = await pool.query<{ setting_value: unknown; updated_by_user_id: number | string | null }>(
+    `select setting_value, updated_by_user_id
+       from system_settings
+      where category = 'audit_and_logging' and setting_key = 'audit_trail'
+      limit 1`
+  );
+  await pool.query(
+    `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+     values ('audit_and_logging', 'audit_trail', $1::jsonb, $2)
+     on conflict (category, setting_key) do update set
+       setting_value = excluded.setting_value,
+       updated_by_user_id = excluded.updated_by_user_id,
+       updated_at = now()`,
+    [JSON.stringify({ value }), userId]
+  );
+  return async () => {
+    if (existing.rows[0]) {
+      await pool.query(
+        `update system_settings
+            set setting_value = $1::jsonb,
+                updated_by_user_id = $2,
+                updated_at = now()
+          where category = 'audit_and_logging' and setting_key = 'audit_trail'`,
+        [JSON.stringify(existing.rows[0].setting_value), existing.rows[0].updated_by_user_id]
+      );
+    } else {
+      await pool.query(
+        `delete from system_settings where category = 'audit_and_logging' and setting_key = 'audit_trail'`
+      );
+    }
+  };
+}
+
+async function matchingSpecificDateRestrictions(policyVersionId: number, modalityId: number, date: string, examTypeId: number) {
+  return pool.query<{ id: number; effectMode: string }>(
+    `select rule.id, rule.effect_mode as "effectMode"
+       from appointments_v2.exam_type_rules rule
+      where rule.policy_version_id = $1
+        and rule.modality_id = $2
+        and rule.rule_type = 'specific_date'
+        and rule.specific_date = $3::date
+        and rule.is_active = true
+        and (select array_agg(item.exam_type_id order by item.exam_type_id) from appointments_v2.exam_type_rule_items item where item.rule_id = rule.id) = array[$4]::bigint[]`,
+    [policyVersionId, modalityId, date, examTypeId]
+  );
+}
+
+async function matchingSpecificDateExamMixQuotas(policyVersionId: number, modalityId: number, date: string, examTypeId: number) {
+  return pool.query<{ id: number; dailyLimit: number }>(
+    `select rule.id, rule.daily_limit as "dailyLimit"
+       from appointments_v2.exam_mix_quota_rules rule
+      where rule.policy_version_id = $1
+        and rule.modality_id = $2
+        and rule.rule_type = 'specific_date'
+        and rule.specific_date = $3::date
+        and rule.is_active = true
+        and (select array_agg(item.exam_type_id order by item.exam_type_id) from appointments_v2.exam_mix_quota_rule_items item where item.rule_id = rule.id) = array[$4]::bigint[]`,
+    [policyVersionId, modalityId, date, examTypeId]
+  );
+}
+
 describe("day management mutations integration", { skip: !available ? "Database URL not set" : false }, () => {
   let reachable = false; let testDb: Awaited<ReturnType<typeof setupTestDatabase>>; let data: TestData; let app: Awaited<ReturnType<typeof createTestApp>>;
   const cookie = () => createTestAuthCookie(data.userId, "super_admin");
-  const context = () => fetchJson<DayManagementContextDto>(app.baseUrl, `/api/v2/scheduling/admin/day-management/context?modalityId=${data.modalityId}&date=${DATE}&policySetKey=${data.policySetKey}`, { cookie: cookie() });
+  const context = (date = DATE) => fetchJson<DayManagementContextDto>(app.baseUrl, `/api/v2/scheduling/admin/day-management/context?modalityId=${data.modalityId}&date=${date}&policySetKey=${data.policySetKey}`, { cookie: cookie() });
   const body = (versionId: number, reason = "Scanner maintenance", date = DATE) => ({ policySetKey: data.policySetKey, modalityId: data.modalityId, date, expectedPublishedVersionId: versionId, reason });
   before(async () => { reachable = await canReachDatabase(); if (!reachable) return; testDb = await setupTestDatabase(PREFIX); data = await seedTestData(testDb.schemaName, PREFIX); app = await createTestApp(); });
   after(async () => { if (!reachable) return; await app.close(); await testDb.cleanup(); });
@@ -143,6 +212,363 @@ describe("day management mutations integration", { skip: !available ? "Database 
     current = await context(); assert.equal(current.data.effectiveRules.examTypeRestrictions.some((item) => item.ruleType === "specific_date" && item.effectMode === "restriction_overridable"), true);
     const quota = await fetchJson(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-mix-quota", { method: "POST", cookie: cookie(), body: { ...body(current.data.policy.published!.id), examTypeIds: [data.examTypeId], dailyLimit: 2 } }); assert.equal(quota.status, 201);
     current = await context(); assert.equal(current.data.effectiveRules.examMixQuotas.some((item) => item.ruleType === "specific_date" && item.dailyLimit === 2), true);
+  });
+
+  it("normal policy draft creation waits on the policy-set row lock", async () => {
+    if (!reachable) return;
+    const before = await policySafetyState(data, DATE, "Policy-set lock concurrency test");
+    assert.equal(before.draftCount, 0);
+    const publishedVersionId = before.publishedVersionId;
+    const client = await pool.connect();
+    let transactionOpen = false;
+    let requestPromise: Promise<{ status: number; data: DraftResponse }> | undefined;
+    let requestResult: { status: number; data: DraftResponse } | undefined;
+    try {
+      await client.query("begin");
+      transactionOpen = true;
+      await client.query(
+        "select id from appointments_v2.policy_sets where id = $1 for update",
+        [data.policySetId]
+      );
+
+      requestPromise = fetchJson<DraftResponse>(app.baseUrl, "/api/v2/scheduling/admin/policy/draft", {
+        method: "POST", cookie: cookie(), body: { policySetKey: data.policySetKey, changeNote: "Policy-set lock concurrency test" },
+      });
+      const earlyResult = await Promise.race([
+        requestPromise.then(() => "settled"),
+        new Promise<"still_waiting">((resolve) => setTimeout(() => resolve("still_waiting"), 100)),
+      ]);
+      assert.equal(earlyResult, "still_waiting");
+
+      await client.query("commit");
+      transactionOpen = false;
+      requestResult = await requestPromise;
+      assert.equal(requestResult.status, 201);
+      assert.equal(requestResult.data.draft?.status, "draft");
+      assert.equal(Number(requestResult.data.basedOnVersionId), publishedVersionId);
+
+      const draftVersionId = Number(requestResult.data.draft?.id);
+      assert.ok(draftVersionId > 0);
+      const [drafts, published, duplicateVersionNumbers] = await Promise.all([
+        pool.query<{ id: number }>("select id from appointments_v2.policy_versions where policy_set_id = $1 and status = 'draft'", [data.policySetId]),
+        pool.query<{ count: number }>("select count(*)::int as count from appointments_v2.policy_versions where policy_set_id = $1 and status = 'published'", [data.policySetId]),
+        pool.query("select version_no from appointments_v2.policy_versions where policy_set_id = $1 group by version_no having count(*) > 1", [data.policySetId]),
+      ]);
+      assert.equal(drafts.rows.length, 1);
+      assert.equal(Number(drafts.rows[0]?.id), draftVersionId);
+      assert.equal(published.rows[0]?.count, 1);
+      assert.equal(duplicateVersionNumbers.rows.length, 0);
+    } finally {
+      if (transactionOpen) await client.query("rollback").catch(() => undefined);
+      client.release();
+      if (!requestResult && requestPromise) requestResult = await requestPromise.catch(() => undefined);
+      const draftVersionId = Number(requestResult?.data.draft?.id);
+      if (draftVersionId > 0) await cleanupCreatedDraft(draftVersionId);
+    }
+  });
+
+  it("concurrent normal policy draft creation yields one draft and one conflict", async () => {
+    if (!reachable) return;
+    const before = await policySafetyState(data, DATE, "Concurrent normal policy draft test");
+    assert.equal(before.draftCount, 0);
+    const request = () => fetchJson<DraftResponse & ErrorResponse>(app.baseUrl, "/api/v2/scheduling/admin/policy/draft", {
+      method: "POST", cookie: cookie(), body: { policySetKey: data.policySetKey, changeNote: "Concurrent normal policy draft test" },
+    });
+    let capturedReasonCodes: string[] = [];
+    let results: Array<{ status: number; data: DraftResponse & ErrorResponse }> = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      const error = args.find((value) => value && typeof value === "object" && Array.isArray((value as { reasonCodes?: unknown }).reasonCodes)) as { reasonCodes?: unknown } | undefined;
+      if (error) capturedReasonCodes = (error.reasonCodes as unknown[]).filter((code): code is string => typeof code === "string");
+      originalError(...args);
+    };
+    try {
+      results = await Promise.all([request(), request()]);
+      const created = results.find((result) => result.status === 201);
+      const conflict = results.find((result) => result.status === 409);
+      assert.equal(results.filter((result) => result.status === 201).length, 1);
+      assert.equal(results.filter((result) => result.status === 409).length, 1);
+      assert.ok((conflict?.data.error?.reasonCodes ?? capturedReasonCodes).includes("draft_already_exists"));
+
+      const draftVersionId = Number(created?.data.draft?.id);
+      assert.ok(draftVersionId > 0);
+      const [drafts, published, duplicateVersionNumbers] = await Promise.all([
+        pool.query<{ id: number }>("select id from appointments_v2.policy_versions where policy_set_id = $1 and status = 'draft'", [data.policySetId]),
+        pool.query<{ count: number }>("select count(*)::int as count from appointments_v2.policy_versions where policy_set_id = $1 and status = 'published'", [data.policySetId]),
+        pool.query("select version_no from appointments_v2.policy_versions where policy_set_id = $1 group by version_no having count(*) > 1", [data.policySetId]),
+      ]);
+      assert.equal(drafts.rows.length, 1);
+      assert.equal(Number(drafts.rows[0]?.id), draftVersionId);
+      assert.equal(published.rows[0]?.count, 1);
+      assert.equal(duplicateVersionNumbers.rows.length, 0);
+    } finally {
+      console.error = originalError;
+      const draftVersionId = Number(results.find((result) => result.status === 201)?.data.draft?.id);
+      if (draftVersionId > 0) await cleanupCreatedDraft(draftVersionId);
+    }
+  });
+
+  it("rolls back Manage Day creation when audit trail is disabled", async () => {
+    if (!reachable) return;
+    const reason = "Audit-disabled creation rollback 2033";
+    const restoreAuditEnabled = await setAuditTrailForTest("enabled", data.userId);
+    try {
+      const before = await policySafetyState(data, AUDIT_CREATE_DATE, reason);
+      assert.equal(before.draftCount, 0);
+      const restoreAuditDisabled = await setAuditTrailForTest("disabled", data.userId);
+      try {
+        const rejected = await fetchWithReasonCodes(app, "/api/v2/scheduling/admin/day-management/block-modality", {
+          method: "POST", cookie: cookie(), body: { ...body(before.publishedVersionId, reason, AUDIT_CREATE_DATE), isOverridable: false },
+        });
+        assert.equal(rejected.status, 503);
+        assert.ok(rejected.reasonCodes.includes("day_management_audit_required"));
+
+        const after = await policySafetyState(data, AUDIT_CREATE_DATE, reason);
+        assert.equal(after.publishedVersionId, before.publishedVersionId);
+        assert.equal(after.publishedConfigHash, before.publishedConfigHash);
+        assert.equal(after.totalVersionCount, before.totalVersionCount);
+        assert.equal(after.draftCount, before.draftCount);
+        assert.equal(after.matchingDayRuleCount, before.matchingDayRuleCount);
+        assert.equal(after.matchingAuditCount, before.matchingAuditCount);
+        const previousPublished = await pool.query<{ status: string }>("select status from appointments_v2.policy_versions where id = $1", [before.publishedVersionId]);
+        assert.equal(previousPublished.rows[0]?.status, "published");
+      } finally {
+        await restoreAuditDisabled();
+      }
+    } finally {
+      await restoreAuditEnabled();
+    }
+  });
+
+  it("rolls back Manage Day rule removal when audit trail is disabled", async () => {
+    if (!reachable) return;
+    const createReason = "Audit-disabled removal setup 2033";
+    const removalReason = "Audit-disabled removal rollback 2033";
+    const restoreAuditEnabled = await setAuditTrailForTest("enabled", data.userId);
+    let ruleId: number | null = null;
+    let cleanupComplete = false;
+    try {
+      const beforeCreate = await context();
+      const created = await fetchJson<{ published?: { id: number } }>(app.baseUrl, "/api/v2/scheduling/admin/day-management/block-modality", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.data.policy.published!.id, createReason, AUDIT_REMOVE_DATE), isOverridable: false },
+      });
+      assert.equal(created.status, 201);
+      const afterCreate = await context(AUDIT_REMOVE_DATE);
+      const createdRule = afterCreate.data.effectiveRules.modalityBlocks.find((item) => item.ruleType === "specific_date" && item.specificDate === AUDIT_REMOVE_DATE);
+      assert.ok(createdRule);
+      ruleId = Number(createdRule!.id);
+      assert.ok(ruleId > 0);
+
+      const beforeRemoval = await policySafetyState(data, AUDIT_REMOVE_DATE, removalReason);
+      const restoreAuditDisabled = await setAuditTrailForTest("disabled", data.userId);
+      try {
+        const rejected = await fetchWithReasonCodes(app, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(beforeRemoval.publishedVersionId, removalReason, AUDIT_REMOVE_DATE),
+        });
+        assert.equal(rejected.status, 503);
+        assert.ok(rejected.reasonCodes.includes("day_management_audit_required"));
+
+        const afterRemoval = await policySafetyState(data, AUDIT_REMOVE_DATE, removalReason);
+        assert.equal(afterRemoval.publishedVersionId, beforeRemoval.publishedVersionId);
+        assert.equal(afterRemoval.publishedConfigHash, beforeRemoval.publishedConfigHash);
+        assert.equal(afterRemoval.totalVersionCount, beforeRemoval.totalVersionCount);
+        assert.equal(afterRemoval.draftCount, beforeRemoval.draftCount);
+        assert.equal(afterRemoval.matchingDayRuleCount, beforeRemoval.matchingDayRuleCount);
+        assert.equal(afterRemoval.matchingAuditCount, beforeRemoval.matchingAuditCount);
+        const originalRule = await pool.query<{ id: number }>(
+          "select id from appointments_v2.modality_blocked_rules where id = $1 and policy_version_id = $2 and is_active = true",
+          [ruleId, beforeRemoval.publishedVersionId]
+        );
+        assert.equal(originalRule.rows.length, 1);
+      } finally {
+        await restoreAuditDisabled();
+      }
+
+      const cleanupContext = await context(AUDIT_REMOVE_DATE);
+      const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+        method: "POST", cookie: cookie(), body: body(cleanupContext.data.policy.published!.id, "Audit-disabled removal cleanup 2033", AUDIT_REMOVE_DATE),
+      });
+      assert.equal(cleanup.status, 200);
+      cleanupComplete = true;
+    } finally {
+      try {
+        if (ruleId && !cleanupComplete) {
+          const cleanupContext = await context(AUDIT_REMOVE_DATE);
+          const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/block_modality/${ruleId}/remove`, {
+            method: "POST", cookie: cookie(), body: body(cleanupContext.data.policy.published!.id, "Audit-disabled removal cleanup 2033", AUDIT_REMOVE_DATE),
+          });
+          assert.equal(cleanup.status, 200);
+        }
+      } finally {
+        await restoreAuditEnabled();
+      }
+    }
+  });
+
+  it("rejects an identical same-scope specific-date exam restriction without residue", async () => {
+    if (!reachable) return;
+    const createReason = "Restriction duplicate setup 2034";
+    const rejectedReason = "Restriction duplicate rejection 2034";
+    let ruleId = 0;
+    let cleanupComplete = false;
+    try {
+      const beforeCreate = await policySafetyState(data, RESTRICTION_DUPLICATE_DATE, createReason);
+      const created = await fetchJson(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-restriction", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.publishedVersionId, createReason, RESTRICTION_DUPLICATE_DATE), examTypeIds: [data.examTypeId], effectMode: "hard_restriction" },
+      });
+      assert.equal(created.status, 201);
+      const beforeRejected = await policySafetyState(data, RESTRICTION_DUPLICATE_DATE, rejectedReason);
+      const beforeRules = await matchingSpecificDateRestrictions(beforeRejected.publishedVersionId, data.modalityId, RESTRICTION_DUPLICATE_DATE, data.examTypeId);
+      assert.equal(beforeRules.rows.length, 1);
+      ruleId = Number(beforeRules.rows[0]?.id);
+
+      const rejected = await fetchWithReasonCodes(app, "/api/v2/scheduling/admin/day-management/exam-restriction", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeRejected.publishedVersionId, rejectedReason, RESTRICTION_DUPLICATE_DATE), examTypeIds: [data.examTypeId], effectMode: "hard_restriction" },
+      });
+      assert.equal(rejected.status, 409);
+      assert.ok(rejected.reasonCodes.includes("day_management_rule_already_exists"));
+
+      const afterRejected = await policySafetyState(data, RESTRICTION_DUPLICATE_DATE, rejectedReason);
+      const afterRules = await matchingSpecificDateRestrictions(afterRejected.publishedVersionId, data.modalityId, RESTRICTION_DUPLICATE_DATE, data.examTypeId);
+      assert.equal(afterRejected.publishedVersionId, beforeRejected.publishedVersionId);
+      assert.equal(afterRejected.publishedConfigHash, beforeRejected.publishedConfigHash);
+      assert.equal(afterRejected.totalVersionCount, beforeRejected.totalVersionCount);
+      assert.equal(afterRejected.matchingAuditCount, beforeRejected.matchingAuditCount);
+      assert.equal(afterRules.rows.length, 1);
+    } finally {
+      if (ruleId > 0 && !cleanupComplete) {
+        const cleanupState = await policySafetyState(data, RESTRICTION_DUPLICATE_DATE, "Restriction duplicate cleanup 2034");
+        const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/restrict_exam_types/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Restriction duplicate cleanup 2034", RESTRICTION_DUPLICATE_DATE),
+        });
+        assert.equal(cleanup.status, 200);
+        cleanupComplete = true;
+      }
+    }
+  });
+
+  it("rejects a different-mode same-scope specific-date exam restriction without residue", async () => {
+    if (!reachable) return;
+    const createReason = "Restriction scope setup 2034";
+    const rejectedReason = "Restriction scope rejection 2034";
+    let ruleId = 0;
+    try {
+      const beforeCreate = await policySafetyState(data, RESTRICTION_SCOPE_CONFLICT_DATE, createReason);
+      const created = await fetchJson(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-restriction", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.publishedVersionId, createReason, RESTRICTION_SCOPE_CONFLICT_DATE), examTypeIds: [data.examTypeId], effectMode: "hard_restriction" },
+      });
+      assert.equal(created.status, 201);
+      const beforeRejected = await policySafetyState(data, RESTRICTION_SCOPE_CONFLICT_DATE, rejectedReason);
+      const beforeRules = await matchingSpecificDateRestrictions(beforeRejected.publishedVersionId, data.modalityId, RESTRICTION_SCOPE_CONFLICT_DATE, data.examTypeId);
+      assert.equal(beforeRules.rows.length, 1);
+      assert.equal(beforeRules.rows[0]?.effectMode, "hard_restriction");
+      ruleId = Number(beforeRules.rows[0]?.id);
+
+      const rejected = await fetchWithReasonCodes(app, "/api/v2/scheduling/admin/day-management/exam-restriction", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeRejected.publishedVersionId, rejectedReason, RESTRICTION_SCOPE_CONFLICT_DATE), examTypeIds: [data.examTypeId], effectMode: "restriction_overridable" },
+      });
+      assert.equal(rejected.status, 409);
+      assert.ok(rejected.reasonCodes.includes("day_management_rule_scope_conflict"));
+
+      const afterRejected = await policySafetyState(data, RESTRICTION_SCOPE_CONFLICT_DATE, rejectedReason);
+      const afterRules = await matchingSpecificDateRestrictions(afterRejected.publishedVersionId, data.modalityId, RESTRICTION_SCOPE_CONFLICT_DATE, data.examTypeId);
+      assert.equal(afterRejected.publishedVersionId, beforeRejected.publishedVersionId);
+      assert.equal(afterRejected.publishedConfigHash, beforeRejected.publishedConfigHash);
+      assert.equal(afterRejected.totalVersionCount, beforeRejected.totalVersionCount);
+      assert.equal(afterRejected.matchingAuditCount, beforeRejected.matchingAuditCount);
+      assert.equal(afterRules.rows.length, 1);
+      assert.equal(afterRules.rows[0]?.effectMode, "hard_restriction");
+    } finally {
+      if (ruleId > 0) {
+        const cleanupState = await policySafetyState(data, RESTRICTION_SCOPE_CONFLICT_DATE, "Restriction scope cleanup 2034");
+        const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/restrict_exam_types/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Restriction scope cleanup 2034", RESTRICTION_SCOPE_CONFLICT_DATE),
+        });
+        assert.equal(cleanup.status, 200);
+      }
+    }
+  });
+
+  it("rejects an identical same-scope specific-date exam-mix quota without residue", async () => {
+    if (!reachable) return;
+    const createReason = "Quota duplicate setup 2034";
+    const rejectedReason = "Quota duplicate rejection 2034";
+    let ruleId = 0;
+    try {
+      const beforeCreate = await policySafetyState(data, QUOTA_DUPLICATE_DATE, createReason);
+      const created = await fetchJson(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-mix-quota", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.publishedVersionId, createReason, QUOTA_DUPLICATE_DATE), examTypeIds: [data.examTypeId], dailyLimit: 2 },
+      });
+      assert.equal(created.status, 201);
+      const beforeRejected = await policySafetyState(data, QUOTA_DUPLICATE_DATE, rejectedReason);
+      const beforeRules = await matchingSpecificDateExamMixQuotas(beforeRejected.publishedVersionId, data.modalityId, QUOTA_DUPLICATE_DATE, data.examTypeId);
+      assert.equal(beforeRules.rows.length, 1);
+      ruleId = Number(beforeRules.rows[0]?.id);
+
+      const rejected = await fetchWithReasonCodes(app, "/api/v2/scheduling/admin/day-management/exam-mix-quota", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeRejected.publishedVersionId, rejectedReason, QUOTA_DUPLICATE_DATE), examTypeIds: [data.examTypeId], dailyLimit: 2 },
+      });
+      assert.equal(rejected.status, 409);
+      assert.ok(rejected.reasonCodes.includes("day_management_rule_already_exists"));
+
+      const afterRejected = await policySafetyState(data, QUOTA_DUPLICATE_DATE, rejectedReason);
+      const afterRules = await matchingSpecificDateExamMixQuotas(afterRejected.publishedVersionId, data.modalityId, QUOTA_DUPLICATE_DATE, data.examTypeId);
+      assert.equal(afterRejected.publishedVersionId, beforeRejected.publishedVersionId);
+      assert.equal(afterRejected.publishedConfigHash, beforeRejected.publishedConfigHash);
+      assert.equal(afterRejected.totalVersionCount, beforeRejected.totalVersionCount);
+      assert.equal(afterRejected.matchingAuditCount, beforeRejected.matchingAuditCount);
+      assert.equal(afterRules.rows.length, 1);
+    } finally {
+      if (ruleId > 0) {
+        const cleanupState = await policySafetyState(data, QUOTA_DUPLICATE_DATE, "Quota duplicate cleanup 2034");
+        const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/set_exam_mix_quota/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Quota duplicate cleanup 2034", QUOTA_DUPLICATE_DATE),
+        });
+        assert.equal(cleanup.status, 200);
+      }
+    }
+  });
+
+  it("rejects a different-limit same-scope specific-date exam-mix quota without residue", async () => {
+    if (!reachable) return;
+    const createReason = "Quota scope setup 2034";
+    const rejectedReason = "Quota scope rejection 2034";
+    let ruleId = 0;
+    try {
+      const beforeCreate = await policySafetyState(data, QUOTA_SCOPE_CONFLICT_DATE, createReason);
+      const created = await fetchJson(app.baseUrl, "/api/v2/scheduling/admin/day-management/exam-mix-quota", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeCreate.publishedVersionId, createReason, QUOTA_SCOPE_CONFLICT_DATE), examTypeIds: [data.examTypeId], dailyLimit: 2 },
+      });
+      assert.equal(created.status, 201);
+      const beforeRejected = await policySafetyState(data, QUOTA_SCOPE_CONFLICT_DATE, rejectedReason);
+      const beforeRules = await matchingSpecificDateExamMixQuotas(beforeRejected.publishedVersionId, data.modalityId, QUOTA_SCOPE_CONFLICT_DATE, data.examTypeId);
+      assert.equal(beforeRules.rows.length, 1);
+      assert.equal(Number(beforeRules.rows[0]?.dailyLimit), 2);
+      ruleId = Number(beforeRules.rows[0]?.id);
+
+      const rejected = await fetchWithReasonCodes(app, "/api/v2/scheduling/admin/day-management/exam-mix-quota", {
+        method: "POST", cookie: cookie(), body: { ...body(beforeRejected.publishedVersionId, rejectedReason, QUOTA_SCOPE_CONFLICT_DATE), examTypeIds: [data.examTypeId], dailyLimit: 3 },
+      });
+      assert.equal(rejected.status, 409);
+      assert.ok(rejected.reasonCodes.includes("day_management_rule_scope_conflict"));
+
+      const afterRejected = await policySafetyState(data, QUOTA_SCOPE_CONFLICT_DATE, rejectedReason);
+      const afterRules = await matchingSpecificDateExamMixQuotas(afterRejected.publishedVersionId, data.modalityId, QUOTA_SCOPE_CONFLICT_DATE, data.examTypeId);
+      assert.equal(afterRejected.publishedVersionId, beforeRejected.publishedVersionId);
+      assert.equal(afterRejected.publishedConfigHash, beforeRejected.publishedConfigHash);
+      assert.equal(afterRejected.totalVersionCount, beforeRejected.totalVersionCount);
+      assert.equal(afterRejected.matchingAuditCount, beforeRejected.matchingAuditCount);
+      assert.equal(afterRules.rows.length, 1);
+      assert.equal(Number(afterRules.rows[0]?.dailyLimit), 2);
+    } finally {
+      if (ruleId > 0) {
+        const cleanupState = await policySafetyState(data, QUOTA_SCOPE_CONFLICT_DATE, "Quota scope cleanup 2034");
+        const cleanup = await fetchJson(app.baseUrl, `/api/v2/scheduling/admin/day-management/rules/set_exam_mix_quota/${ruleId}/remove`, {
+          method: "POST", cookie: cookie(), body: body(cleanupState.publishedVersionId, "Quota scope cleanup 2034", QUOTA_SCOPE_CONFLICT_DATE),
+        });
+        assert.equal(cleanup.status, 200);
+      }
+    }
   });
 
   it("rejects an active draft without publishing, mutating, or creating audit residue", async () => {

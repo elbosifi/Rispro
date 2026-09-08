@@ -74,8 +74,10 @@ export async function createDayExamRestriction(input: CreateDayExamRestrictionDt
   if (input.effectMode !== "hard_restriction" && input.effectMode !== "restriction_overridable") throw invalid("effectMode is invalid.", "day_management_invalid_input");
   return runMutation(base, userId, "restrict exam types", async ({ snapshot, activeExamTypeIds }) => {
     const examTypeIds = normalizeExamTypeIds(input.examTypeIds, activeExamTypeIds);
-    if (snapshot.examTypeRules.some((rule) => rule.isActive && Number(rule.modalityId) === base.modalityId && rule.ruleType === "specific_date" && rule.specificDate === base.date && rule.effectMode === input.effectMode && sameIds(rule.examTypeIds, examTypeIds))) {
-      throw conflict("An identical specific-date exam restriction already exists.", "day_management_rule_already_exists");
+    const existingSameScope = snapshot.examTypeRules.find((rule) => rule.isActive && Number(rule.modalityId) === base.modalityId && rule.ruleType === "specific_date" && rule.specificDate === base.date && sameIds(rule.examTypeIds, examTypeIds));
+    if (existingSameScope) {
+      if (existingSameScope.effectMode === input.effectMode) throw conflict("An identical specific-date exam restriction already exists.", "day_management_rule_already_exists");
+      throw conflict("A specific-date exam restriction already exists for the same exam types. Remove it before changing the restriction mode.", "day_management_rule_scope_conflict");
     }
     snapshot.examTypeRules.push({
       id: 0, modalityId: base.modalityId, ruleType: "specific_date", effectMode: input.effectMode, specificDate: base.date,
@@ -95,8 +97,10 @@ export async function createDayExamMixQuota(input: CreateDayExamMixQuotaDto, use
       throw invalid("dailyLimit must be a valid positive limit for this modality.", "day_management_invalid_daily_limit");
     }
     snapshot.examMixQuotaRules ??= [];
-    if (snapshot.examMixQuotaRules.some((rule) => rule.isActive && Number(rule.modalityId) === base.modalityId && rule.ruleType === "specific_date" && rule.specificDate === base.date && Number(rule.dailyLimit) === dailyLimit && sameIds(rule.examTypeIds, examTypeIds))) {
-      throw conflict("An identical specific-date exam-mix quota already exists.", "day_management_rule_already_exists");
+    const existingSameScope = snapshot.examMixQuotaRules.find((rule) => rule.isActive && Number(rule.modalityId) === base.modalityId && rule.ruleType === "specific_date" && rule.specificDate === base.date && sameIds(rule.examTypeIds, examTypeIds));
+    if (existingSameScope) {
+      if (Number(existingSameScope.dailyLimit) === dailyLimit) throw conflict("An identical specific-date exam-mix quota already exists.", "day_management_rule_already_exists");
+      throw conflict("A specific-date exam-mix quota already exists for the same exam types. Remove it before changing the daily limit.", "day_management_rule_scope_conflict");
     }
     snapshot.examMixQuotaRules.push({
       id: 0, modalityId: base.modalityId, title: `Day exam-mix quota - ${base.date}`, ruleType: "specific_date", specificDate: base.date,
@@ -160,11 +164,12 @@ async function runMutation(
     const finalVersion = await findVersionById(client, draft.id);
     if (!finalVersion || finalVersion.status !== "published") throw new SchedulingError(500, "Published policy could not be retrieved.", ["day_management_publish_failed"]);
     const counts = metadata.action === "created" ? await getBookedCountsByCategoryForDate(client, base.modalityId, base.date) : null;
-    await logAuditEntry({
+    const auditEntry = await logAuditEntry({
       entityType: "scheduling_policy_day", entityId: finalVersion.id, actionType: metadata.actionType, oldValues: metadata.oldValues ?? null,
       newValues: { action: metadata.action, ruleType: metadata.ruleType, modalityId: base.modalityId, modalityCode: modality.code, date: base.date, reason: base.reason, previousPublishedVersionId: published.id, newPublishedVersionId: finalVersion.id, ...metadata.ruleValues, ...(counts ? { bookedTotal: counts.total, oncologyBooked: counts.oncology, nonOncologyBooked: counts.nonOncology } : {}) },
       changedByUserId: userId,
     }, client);
+    if (!auditEntry) throw new SchedulingError(503, "Manage Day requires the audit trail to be enabled.", ["day_management_audit_required"]);
     return { action: metadata.action, ruleType: metadata.ruleType, modalityId: base.modalityId, date: base.date, previousPublishedVersionId: Number(published.id), published: finalVersion };
   }, { isolationLevel: "serializable", operationName: "day_management_command" });
 }
