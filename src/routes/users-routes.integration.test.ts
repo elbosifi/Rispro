@@ -61,13 +61,13 @@ test("users identity, active-state, and temporary-password routes preserve middl
   const reauthToken = jwt.sign({ sub: actorId, role: "supervisor", purpose: "supervisor-reauth" }, env.jwtSecret);
   const cookie = `${env.cookieName}=${authToken}; ${env.reauthCookieName}=${reauthToken}`;
   const server = await startServer();
-  const request = async (path: string, method: "PUT" | "POST", body: unknown) => {
+  const request = async (path: string, method: "GET" | "PUT" | "POST", body?: unknown) => {
     const response = await fetch(`${server.baseUrl}/api/users${path}`, {
       method,
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    return { status: response.status, data: await response.json() as { user?: { id: number; username: string; full_name: string; role: string; is_active: boolean; must_change_password: boolean; can_request_scheduling_override: boolean }; message?: string; error?: { message: string } } };
+    return { status: response.status, data: await response.json() as { users?: Array<{ id: number; username: string; full_name: string; english_name: string | null }>; user?: { id: number; username: string; full_name: string; english_name: string | null; role: string; is_active: boolean; must_change_password: boolean; can_request_scheduling_override: boolean }; message?: string; error?: { message: string } } };
   };
 
   try {
@@ -75,26 +75,33 @@ test("users identity, active-state, and temporary-password routes preserve middl
       username: `  IDENTITY_TARGET_${suffix}  `,
       email: "  target@nccb.ly  ",
       fullName: "  Identity Target  ",
+      englishName: "  Identity Target English  ",
       role: "super_admin",
     });
     assert.equal(identity.status, 200);
     assert.equal(identity.data.user?.username, `identity_target_${suffix}`);
     assert.equal(identity.data.user?.full_name, "Identity Target");
+    assert.equal(identity.data.user?.english_name, "Identity Target English");
     assert.equal(identity.data.user?.role, "receptionist");
     assert.equal(identity.data.user?.is_active, false);
     assert.equal(identity.data.user?.must_change_password, false);
     assert.equal(identity.data.user?.can_request_scheduling_override, false);
     assert.equal((await pool.query<{ email: string | null }>("select email from users where id = $1", [targetId])).rows[0]?.email, "target@nccb.ly");
-    const clearedEmail = await request(`/${targetId}/identity`, "PUT", { username: `identity_target_${suffix}`, email: "   ", fullName: "Identity Target" });
+    const clearedEmail = await request(`/${targetId}/identity`, "PUT", { username: `identity_target_${suffix}`, email: "   ", fullName: "Identity Target", englishName: "   " });
     assert.equal(clearedEmail.status, 200);
     assert.equal((await pool.query<{ email: string | null }>("select email from users where id = $1", [targetId])).rows[0]?.email, null);
+    assert.equal(clearedEmail.data.user?.english_name, null);
     const invalidEmail = await request(`/${targetId}/identity`, "PUT", { username: `identity_target_${suffix}`, email: "not-an-email", fullName: "Identity Target" });
     assert.equal(invalidEmail.status, 400);
-    const firstSharedEmail = await request("/", "POST", { username: `users_route_email_one_${suffix}`, email: "shared@nccb.ly", fullName: "Shared Email One", password: "TemporaryPass123", role: "receptionist" });
+    const firstSharedEmail = await request("/", "POST", { username: `users_route_email_one_${suffix}`, email: "shared@nccb.ly", fullName: "Shared Email One", englishName: "Shared Email One English", password: "TemporaryPass123", role: "receptionist" });
     const secondSharedEmail = await request("/", "POST", { username: `users_route_email_two_${suffix}`, email: "shared@nccb.ly", fullName: "Shared Email Two", password: "TemporaryPass123", role: "receptionist" });
     assert.equal(firstSharedEmail.status, 201);
+    assert.equal(firstSharedEmail.data.user?.english_name, "Shared Email One English");
     assert.equal(secondSharedEmail.status, 201);
     createdIds.push(firstSharedEmail.data.user!.id, secondSharedEmail.data.user!.id);
+    const list = await request("/", "GET");
+    assert.equal(list.status, 200);
+    assert.equal(list.data.users?.find((user) => user.id === firstSharedEmail.data.user!.id)?.english_name, "Shared Email One English");
     const identityAudit = await pool.query<{ changed_by_user_id: number }>(
       `select changed_by_user_id
        from audit_log

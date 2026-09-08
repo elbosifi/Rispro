@@ -10,6 +10,7 @@ export interface DoctorProfileRow {
   username: string | null;
   email?: string | null;
   fullName: string | null;
+  englishName: string | null;
   coreRole: string | null;
   userActive: boolean | null;
   displayName: string;
@@ -63,6 +64,7 @@ const profileSelect = (includeEmail = false) => `
     u.username,
     ${includeEmail ? "u.email," : ""}
     u.full_name as "fullName",
+    u.english_name as "englishName",
     u.role as "coreRole",
     u.is_active as "userActive",
     dp.display_name as "displayName",
@@ -132,6 +134,7 @@ export async function createDoctorProfile(
         user_id as "userId",
         null::text as username,
         null::text as "fullName",
+        null::text as "englishName",
         null::text as "coreRole",
         null::boolean as "userActive",
         display_name as "displayName",
@@ -189,6 +192,7 @@ export async function updateDoctorProfile(
         user_id as "userId",
         null::text as username,
         null::text as "fullName",
+        null::text as "englishName",
         null::text as "coreRole",
         null::boolean as "userActive",
         display_name as "displayName",

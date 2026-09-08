@@ -20,6 +20,7 @@ import {
   updateUserPassword,
   updateUserSchedulingOverridePermission,
 } from "@/lib/api-hooks";
+import { getUserDisplayName } from "@/lib/user-display-name";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorProfile, Role, User } from "@/types/api";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
@@ -70,12 +71,13 @@ export default function UsersSection({
   const [createError, setCreateError] = useState<string | null>(null);
   const [manageError, setManageError] = useState<string | null>(null);
   const [identityEditing, setIdentityEditing] = useState(false);
-  const [identityDraft, setIdentityDraft] = useState({ username: "", email: "", fullName: "" });
+  const [identityDraft, setIdentityDraft] = useState({ username: "", email: "", fullName: "", englishName: "" });
   const [createEmailEdited, setCreateEmailEdited] = useState(false);
   const [createForm, setCreateForm] = useState({
     username: "",
     email: "",
     fullName: "",
+    englishName: "",
     password: "",
     role: "receptionist",
   });
@@ -99,6 +101,8 @@ export default function UsersSection({
         (statusFilter === "active" ? Boolean(user.isActive) : !user.isActive)) &&
       (!term ||
         user.fullName.toLocaleLowerCase().includes(term) ||
+        (user.englishName ?? "").toLocaleLowerCase().includes(term) ||
+        (user.email ?? "").toLocaleLowerCase().includes(term) ||
         user.username.toLocaleLowerCase().includes(term)),
   );
   const filtersActive =
@@ -107,6 +111,7 @@ export default function UsersSection({
     setCreateForm({
       username: "", email: "",
       fullName: "",
+      englishName: "",
       password: "",
       role: "receptionist",
     });
@@ -120,7 +125,7 @@ export default function UsersSection({
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
-    setIdentityDraft({ username: "", email: "", fullName: "" });
+    setIdentityDraft({ username: "", email: "", fullName: "", englishName: "" });
     setManageError(null);
   };
   const openManage = (user: User) => {
@@ -128,16 +133,16 @@ export default function UsersSection({
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
-    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName, englishName: user.englishName ?? "" });
     setManageError(null);
   };
   const startIdentityEditing = (user: User) => {
-    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName, englishName: user.englishName ?? "" });
     setIdentityEditing(true);
     setManageError(null);
   };
   const cancelIdentityEditing = (user: User) => {
-    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName });
+    setIdentityDraft({ username: user.username, email: user.email ?? "", fullName: user.fullName, englishName: user.englishName ?? "" });
     setIdentityEditing(false);
   };
   const invalidateUsers = () =>
@@ -205,11 +210,12 @@ export default function UsersSection({
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
   const identityMutation = useMutation({
-    mutationFn: (payload: { userId: number; username: string; email: string; fullName: string }) =>
+    mutationFn: (payload: { userId: number; username: string; email: string; fullName: string; englishName: string }) =>
       updateUserIdentity(payload.userId, {
         username: payload.username,
         email: payload.email,
         fullName: payload.fullName,
+        englishName: payload.englishName,
       }),
     onSuccess: () => {
       invalidateUsers();
@@ -231,6 +237,10 @@ export default function UsersSection({
         } as const
       )[role],
     );
+  const alternateUserName = (user: User) => {
+    const alternate = language === "ar" ? user.englishName : user.fullName;
+    return alternate && alternate !== getUserDisplayName(user, language) ? alternate : null;
+  };
   const doctorProfileLabel = (user: User) => {
     if (!isDoctorRole(user.role)) return t("settings.users.notAvailable");
     if (doctorProfilesQuery.isLoading)
@@ -376,8 +386,9 @@ export default function UsersSection({
                   >
                     <td className="p-3">
                       <p className="font-medium text-stone-900 dark:text-white">
-                        {user.fullName}
+                        {getUserDisplayName(user, language)}
                       </p>
+                      {alternateUserName(user) && <p className="text-xs description-center">{alternateUserName(user)}</p>}
                       <p className="text-xs description-center">
                         @{user.username}
                       </p>
@@ -421,8 +432,9 @@ export default function UsersSection({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-medium text-stone-900 dark:text-white">
-                      {user.fullName}
+                      {getUserDisplayName(user, language)}
                     </p>
+                    {alternateUserName(user) && <p className="text-xs description-center">{alternateUserName(user)}</p>}
                     <p className="text-xs description-center">
                       @{user.username} · {roleLabel(user.role)}
                     </p>
@@ -486,12 +498,20 @@ export default function UsersSection({
               <input aria-label="Email" value={createForm.email} onChange={(event) => { setCreateEmailEdited(true); setCreateForm({ ...createForm, email: event.target.value }); }} className="w-full rounded border px-3 py-2 dark:bg-stone-900" />
             </label>
             <label className="space-y-1 text-sm">
-              <span>{t("settings.fullName")}</span>
+              <span>{t("settings.arabicName")}</span>
               <input
                 value={createForm.fullName}
                 onChange={(event) =>
                   setCreateForm({ ...createForm, fullName: event.target.value })
                 }
+                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span>{t("settings.englishName")}</span>
+              <input
+                value={createForm.englishName}
+                onChange={(event) => setCreateForm({ ...createForm, englishName: event.target.value })}
                 className="w-full rounded border px-3 py-2 dark:bg-stone-900"
               />
             </label>
@@ -553,7 +573,7 @@ export default function UsersSection({
         {selectedUser && (
           <DialogContent maxWidth="720px">
             <DialogHeader closeLabel={t("settings.cancel")}>
-              <DialogTitle>{selectedUser.fullName}</DialogTitle>
+              <DialogTitle>{getUserDisplayName(selectedUser, language)}</DialogTitle>
               <DialogDescription>
                 @{selectedUser.username} · {roleLabel(selectedUser.role)} ·{" "}
                 {selectedUser.isActive
@@ -576,12 +596,12 @@ export default function UsersSection({
                   </div>
                   <div>
                     <dt className="description-center">
-                      {t("settings.fullName")}
+                      {t("settings.arabicName")}
                     </dt>
                     <dd>
                       {identityEditing ? (
                         <input
-                          aria-label={t("settings.fullName")}
+                          aria-label={t("settings.arabicName")}
                           value={identityDraft.fullName}
                           onChange={(event) =>
                             setIdentityDraft({
@@ -595,6 +615,10 @@ export default function UsersSection({
                         selectedUser.fullName
                       )}
                     </dd>
+                  </div>
+                  <div>
+                    <dt className="description-center">{t("settings.englishName")}</dt>
+                    <dd>{identityEditing ? <input aria-label={t("settings.englishName")} value={identityDraft.englishName} onChange={(event) => setIdentityDraft({ ...identityDraft, englishName: event.target.value })} className="w-full rounded border px-3 py-2 dark:bg-stone-900" /> : (selectedUser.englishName || t("settings.users.notAvailable"))}</dd>
                   </div>
                   <div>
                     <dt className="description-center">
@@ -675,7 +699,7 @@ export default function UsersSection({
                           !identityDraft.username.trim() ||
                           !identityDraft.fullName.trim() ||
                           (identityDraft.username.trim() === selectedUser.username && identityDraft.email.trim() === (selectedUser.email ?? "") &&
-                            identityDraft.fullName.trim() === selectedUser.fullName)
+                            identityDraft.fullName.trim() === selectedUser.fullName && identityDraft.englishName.trim() === (selectedUser.englishName ?? ""))
                         }
                         onClick={() =>
                           identityMutation.mutate({
@@ -683,6 +707,7 @@ export default function UsersSection({
                             username: identityDraft.username,
                             email: identityDraft.email,
                             fullName: identityDraft.fullName,
+                            englishName: identityDraft.englishName,
                           })
                         }
                       >

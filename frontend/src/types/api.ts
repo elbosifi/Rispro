@@ -25,6 +25,7 @@ export interface User {
   username: string;
   email?: string | null;
   fullName: string;
+  englishName?: string | null;
   role: Role;
   isActive?: boolean;
   createdAt?: string;
@@ -52,6 +53,7 @@ export interface DoctorProfile {
   username?: string | null;
   email?: string | null;
   fullName?: string | null;
+  englishName?: string | null;
   coreRole?: Role | string | null;
   userActive?: boolean | null;
   displayName: string;

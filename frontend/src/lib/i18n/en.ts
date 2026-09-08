@@ -1406,6 +1406,8 @@ export const en = {
   "settings.addUser": "Add User",
   "settings.username": "Username",
   "settings.fullName": "Full Name",
+  "settings.arabicName": "Arabic Name",
+  "settings.englishName": "English Name",
   "settings.password": "Password",
   "settings.receptionist": "Receptionist",
   "settings.supervisor": "Supervisor",

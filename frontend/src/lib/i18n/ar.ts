@@ -1447,6 +1447,8 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "settings.addUser": "إضافة مستخدم",
   "settings.username": "اسم المستخدم",
   "settings.fullName": "الاسم الكامل",
+  "settings.arabicName": "الاسم بالعربية",
+  "settings.englishName": "الاسم بالإنجليزية",
   "settings.password": "كلمة المرور",
   "settings.receptionist": "موظف استقبال",
   "settings.supervisor": "مشرف",

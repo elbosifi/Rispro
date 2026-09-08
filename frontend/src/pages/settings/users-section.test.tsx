@@ -7,7 +7,7 @@ import { LanguageProvider } from "@/providers/language-provider-component";
 import UsersSection from "./users-section";
 
 const users = [
-  { id: 1, username: "frontdesk", full_name: "Front Desk", role: "receptionist", is_active: true, can_request_scheduling_override: true, updated_at: "2026-08-01T10:00:00.000Z" },
+  { id: 1, username: "frontdesk", full_name: "مكتب الاستقبال", english_name: "Front Desk", email: "frontdesk@example.test", role: "receptionist", is_active: true, can_request_scheduling_override: true, updated_at: "2026-08-01T10:00:00.000Z" },
   { id: 2, username: "drstone", full_name: "Dr Stone", role: "doctor", is_active: false, must_change_password: true },
   { id: 3, username: "supervisor", full_name: "Supervisor", role: "supervisor", is_active: true },
 ];
@@ -99,7 +99,8 @@ describe("UsersSection", () => {
     await screen.findAllByText("Front Desk");
     await userEvent.click(screen.getByRole("button", { name: "Add User" }));
     await userEvent.type(screen.getByLabelText("Username"), "newuser");
-    await userEvent.type(screen.getByLabelText("Full Name"), "New User");
+    await userEvent.type(screen.getByLabelText("Arabic Name"), "New User");
+    await userEvent.type(screen.getByLabelText("English Name"), "New User English");
     await userEvent.type(screen.getByLabelText("Password"), "safe-password");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users" && (init as RequestInit).method === "POST")).toBe(true));
@@ -178,13 +179,14 @@ describe("UsersSection", () => {
     await screen.findAllByText("Front Desk");
     await userEvent.click(screen.getByRole("button", { name: "Add User" }));
     await userEvent.type(screen.getByLabelText("Username"), "discard-user");
-    await userEvent.type(screen.getByLabelText("Full Name"), "Discard User");
+    await userEvent.type(screen.getByLabelText("Arabic Name"), "Discard User");
     await userEvent.type(screen.getByLabelText("Password"), "discard-password");
     await userEvent.selectOptions(screen.getByLabelText("Role"), "doctor");
     await userEvent.click(screen.getAllByRole("button", { name: "Cancel" })[1]!);
     await userEvent.click(screen.getByRole("button", { name: "Add User" }));
     expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("Full Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Arabic Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("English Name") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Role") as HTMLSelectElement).value).toBe("receptionist");
   });
@@ -195,7 +197,7 @@ describe("UsersSection", () => {
     await screen.findAllByText("Front Desk");
     await userEvent.click(screen.getByRole("button", { name: "Add User" }));
     await userEvent.type(screen.getByLabelText("Username"), "duplicate");
-    await userEvent.type(screen.getByLabelText("Full Name"), "Duplicate User");
+    await userEvent.type(screen.getByLabelText("Arabic Name"), "Duplicate User");
     await userEvent.type(screen.getByLabelText("Password"), "safe-password");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Username is already in use.");
@@ -228,10 +230,11 @@ describe("UsersSection", () => {
     await screen.findAllByText("Front Desk");
     await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).queryByRole("textbox", { name: "Full Name" })).toBeNull();
+    expect(within(dialog).queryByRole("textbox", { name: "Arabic Name" })).toBeNull();
     expect(within(dialog).queryByRole("textbox", { name: "Username" })).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
-    expect((within(dialog).getByRole("textbox", { name: "Full Name" }) as HTMLInputElement).value).toBe("Front Desk");
+    expect((within(dialog).getByRole("textbox", { name: "Arabic Name" }) as HTMLInputElement).value).toBe("مكتب الاستقبال");
+    expect((within(dialog).getByRole("textbox", { name: "English Name" }) as HTMLInputElement).value).toBe("Front Desk");
     expect((within(dialog).getByRole("textbox", { name: "Username" }) as HTMLInputElement).value).toBe("frontdesk");
     expect(within(dialog).queryByRole("combobox", { name: "Role" })).toBeNull();
     expect((within(dialog).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
@@ -245,10 +248,12 @@ describe("UsersSection", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
     await userEvent.clear(within(dialog).getByRole("textbox", { name: "Username" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "UpdatedUser");
-    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Full Name" }));
-    await userEvent.type(within(dialog).getByRole("textbox", { name: "Full Name" }), "Updated User");
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "Arabic Name" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Arabic Name" }), "Updated User");
+    await userEvent.clear(within(dialog).getByRole("textbox", { name: "English Name" }));
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "English Name" }), "Updated User English");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/identity" && (init as RequestInit).method === "PUT" && String((init as RequestInit).body) === JSON.stringify({ username: "UpdatedUser", email: "", fullName: "Updated User" }))).toBe(true));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/identity" && (init as RequestInit).method === "PUT" && String((init as RequestInit).body) === JSON.stringify({ username: "UpdatedUser", email: "frontdesk@example.test", fullName: "Updated User", englishName: "Updated User English" }))).toBe(true));
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Edit details" }));
     await userEvent.type(within(dialog).getByRole("textbox", { name: "Username" }), "discard");

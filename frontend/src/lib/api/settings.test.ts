@@ -61,17 +61,17 @@ describe("settings API contracts", () => {
   it("preserves user administration routes and response mapping", async () => {
     vi.mocked(api).mockResolvedValue({ user: { id: 7, username: "doctor", full_name: "Doctor", role: "doctor" } });
 
-    await createUser({ username: "doctor", fullName: "Doctor", password: "secret", role: "doctor" });
+    await createUser({ username: "doctor", fullName: "Doctor", englishName: "Doctor", password: "secret", role: "doctor" });
     await updateUserSchedulingOverridePermission(7, true);
     await updateUserPassword(7, "replacement");
-    await updateUserIdentity(7, { username: "updated", fullName: "Updated User" });
+    await updateUserIdentity(7, { username: "updated", fullName: "Updated User", englishName: "Updated User" });
     await updateUserActiveState(7, false);
     await resetUserTemporaryPassword(7, "temporary");
     await deleteUser(7);
 
     expect(api).toHaveBeenNthCalledWith(1, "/users", {
       method: "POST",
-      body: JSON.stringify({ username: "doctor", fullName: "Doctor", password: "secret", role: "doctor" }),
+      body: JSON.stringify({ username: "doctor", fullName: "Doctor", englishName: "Doctor", password: "secret", role: "doctor" }),
     });
     expect(api).toHaveBeenNthCalledWith(2, "/users/7/scheduling-override-permission", {
       method: "PUT",
@@ -83,7 +83,7 @@ describe("settings API contracts", () => {
     });
     expect(api).toHaveBeenNthCalledWith(4, "/users/7/identity", {
       method: "PUT",
-      body: JSON.stringify({ username: "updated", fullName: "Updated User" }),
+      body: JSON.stringify({ username: "updated", fullName: "Updated User", englishName: "Updated User" }),
     });
     expect(api).toHaveBeenNthCalledWith(5, "/users/7/active", {
       method: "PUT",

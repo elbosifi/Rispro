@@ -142,6 +142,7 @@ router.patch(
       username: asString(body.username),
       ...(Object.prototype.hasOwnProperty.call(body, "email") ? { email: body.email === null ? null : asString(body.email) } : {}),
       fullName: asString(body.fullName),
+      englishName: body.englishName === null ? null : asOptionalString(body.englishName),
       coreRole: asString(body.coreRole),
       active: asOptionalBoolean(body.active) ?? true,
     });
@@ -170,6 +171,7 @@ router.post(
       username: asString(body.username),
       ...(Object.prototype.hasOwnProperty.call(body, "email") ? { email: body.email === null ? null : asString(body.email) } : {}),
       fullName: asString(body.fullName),
+      englishName: body.englishName === null ? null : asOptionalString(body.englishName),
       temporaryPassword: asString(body.temporaryPassword),
       coreRole: asString(body.coreRole),
       userActive: asOptionalBoolean(body.userActive) ?? true,

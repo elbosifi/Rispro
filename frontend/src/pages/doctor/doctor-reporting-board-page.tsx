@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Textarea } from "@/components/shared";
 import { ProtocolingAppointmentWorkspace } from "@/pages/doctor/doctor-protocols-page";
 import {
@@ -1086,6 +1088,7 @@ function BulkAssignModal({
   onClose: () => void;
   onResult: (result: ReportingBoardBulkAssignResult) => void;
 }) {
+  const { language } = useLanguage();
   const [doctorId, setDoctorId] = useState("");
   const [count, setCount] = useState("5");
   const [modalityId, setModalityId] = useState("");
@@ -1129,7 +1132,7 @@ function BulkAssignModal({
           <Field label="Doctor">
             <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
               <option value="">Select doctor</option>
-              {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+              {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
             </select>
           </Field>
           <Field label="Number of cases">
@@ -1191,6 +1194,7 @@ function ScheduleBulkAssignModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { language } = useLanguage();
   const [doctorId, setDoctorId] = useState("");
   const [count, setCount] = useState("5");
   const [modalityId, setModalityId] = useState("");
@@ -1340,7 +1344,7 @@ function ScheduleBulkAssignModal({
                           <label className="mb-1 block text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Doctor</label>
                           <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={invalidFieldClass(rowValidation?.missingDoctor)}>
                             <option value="">Select doctor</option>
-                            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
                           </select>
                         </div>
                         <div>
@@ -1363,7 +1367,7 @@ function ScheduleBulkAssignModal({
               <Field label="Doctor">
                 <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
                   <option value="">Select doctor</option>
-                  {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                  {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
                 </select>
               </Field>
               <Field label="Number of cases">
@@ -1705,6 +1709,7 @@ function BoardSettingsModal({
 }
 
 export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
+  const { language } = useLanguage();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
@@ -2527,7 +2532,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               <option value="all">All</option>
               <option value="unassigned">Unassigned</option>
               <option value="assigned">Assigned</option>
-              {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{doctor.displayName}</option>)}
+              {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{getDoctorDisplayName(doctor, language)}</option>)}
             </select>
           </Field>
           <Field label="Report status" compact>
@@ -2558,7 +2563,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         {utilitySection === "filters" && <div className="space-y-2 rounded-lg border p-3" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <ActiveFilterStrip userChips={userFilterChips} loadedSavedViewName={loadedSavedView?.name ?? null} />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            <Field label="Finalized Doctor"><select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}><option value="">All</option>{(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}</select></Field>
+            <Field label="Finalized Doctor"><select value={filters.finalizedByDoctorId ?? ""} onChange={(event) => setFilter("finalizedByDoctorId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}><option value="">All</option>{(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}</select></Field>
             <Field label="Assignment Match"><select value={filters.assignmentMatch ?? "all"} onChange={(event) => setFilter("assignmentMatch", event.target.value as ReportingBoardAssignmentMatch)} className={inputClass()}>{ASSIGNMENT_MATCH_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
             <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
             <Field label="Case type"><select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>{CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
@@ -2630,7 +2635,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               <Field label="Reassign to">
                 <select value={selectedReassignDoctorId} onChange={(event) => setSelectedReassignDoctorId(event.target.value)} disabled={!canManage} className={inputClass()}>
                   <option value="">Select doctor</option>
-                  {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                  {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
                 </select>
               </Field>
               <Field label="Reason/note">

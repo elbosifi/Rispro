@@ -620,6 +620,7 @@ export function mapUser(raw: RawRecord): User {
     username: str(raw, 'username'),
     email: str(raw, 'email') || null,
     fullName: str(raw, 'full_name') || str(raw, 'fullName'),
+    englishName: strOrNull(raw, 'english_name') ?? strOrNull(raw, 'englishName'),
     role: fallback(raw.role, "receptionist") as User["role"],
     isActive: bool(raw, 'is_active', bool(raw, 'isActive', true)),
     createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt'),

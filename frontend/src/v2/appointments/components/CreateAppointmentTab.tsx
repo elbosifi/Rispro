@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { fetchAppointments, fetchPatientNoShowHistory, fetchPatientQrSettings, fetchPublicSchedulingCapacitySettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
@@ -1226,7 +1227,7 @@ export function CreateAppointmentTab({
                   >
                     <option value="">{t(language, "appointments.create.normalReportingPool")}</option>
                     {(intendedReportingDoctorsQuery.data ?? []).map((doctor) => (
-                      <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>
+                      <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>
                     ))}
                   </select>
                   <textarea

@@ -35,6 +35,7 @@ usersRouter.post(
         username: asString(body.username),
         email: typeof body.email === "string" ? body.email : null,
         fullName: asString(body.fullName),
+        englishName: typeof body.englishName === "string" ? body.englishName : null,
         password: asString(body.password),
         role: asString(body.role),
         isActive: asOptionalBoolean(body.isActive),
@@ -73,7 +74,7 @@ usersRouter.put(
     const body = asUnknownRecord(req.body);
     const user = await updateUserIdentity(
       asString(req.params.userId),
-      { username: asString(body.username), email: typeof body.email === "string" ? body.email : null, fullName: asString(body.fullName) },
+      { username: asString(body.username), email: typeof body.email === "string" ? body.email : null, fullName: asString(body.fullName), englishName: typeof body.englishName === "string" ? body.englishName : null },
       { userId: req.user!.sub, role: req.user!.role }
     );
     res.json({ user });

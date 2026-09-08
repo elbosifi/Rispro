@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { DoctorMe, DoctorProfile, User } from "@/types/api";
 
 const fetchDoctorProfilesForAdminMock = vi.fn();
@@ -49,6 +50,7 @@ const users: User[] = [
     username: "existing.doc",
     email: "existing@nccb.ly",
     fullName: "Existing Doctor",
+    englishName: "Existing Doctor English",
     role: "doctor",
     isActive: true,
     mustChangePassword: false,
@@ -70,6 +72,7 @@ const profiles: DoctorProfile[] = [
     username: "existing.doc",
     email: "existing@nccb.ly",
     fullName: "Existing Doctor",
+    englishName: "Existing Doctor English",
     coreRole: "doctor",
     userActive: true,
     displayName: "Dr Existing",
@@ -82,10 +85,11 @@ const profiles: DoctorProfile[] = [
 ];
 
 function renderPage(me: DoctorMe = adminMe, options: { advanced?: boolean } = {}) {
+  localStorage.setItem("rispro-language", "en");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <DoctorAdminDoctorsPage me={me} advanced={options.advanced} />
+      <LanguageProvider><DoctorAdminDoctorsPage me={me} advanced={options.advanced} /></LanguageProvider>
     </QueryClientProvider>
   );
 }
@@ -139,8 +143,10 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.change(screen.getByPlaceholderText("Username"), { target: { value: "fresh.doc" } });
-    fireEvent.change(screen.getByPlaceholderText("Full name"), { target: { value: "Fresh Doctor" } });
+    fireEvent.change(screen.getByLabelText("Arabic Name"), { target: { value: "Fresh Doctor" } });
+    fireEvent.change(screen.getByLabelText("English Name"), { target: { value: "Fresh Doctor English" } });
     fireEvent.change(screen.getByPlaceholderText("Temporary password"), { target: { value: "Temp123!" } });
+    expect(screen.queryByPlaceholderText("Doctor display name")).toBeNull();
     const createModalityRow = (await screen.findByText("CT")).closest("tr")!;
     fireEvent.click(within(createModalityRow).getAllByRole("checkbox")[0]);
     expect(screen.getByRole("heading", { name: "Create login account and doctor profile" })).toBeTruthy();
@@ -154,8 +160,9 @@ describe("DoctorAdminDoctorsPage", () => {
       username: "fresh.doc",
       email: "",
       fullName: "Fresh Doctor",
+      englishName: "Fresh Doctor English",
       temporaryPassword: "Temp123!",
-      doctorDisplayName: "Fresh Doctor",
+      doctorDisplayName: "",
       userActive: true,
       modalityPermissions: [{ modalityId: 5, active: true }],
     });
@@ -192,14 +199,14 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
     expect(within(drawer).getByRole("button", { name: "Close" })).toBeTruthy();
     expect(within(drawer).getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
     expect(within(drawer).getByRole("tab", { name: "Modalities" }).getAttribute("aria-selected")).toBe("false");
-    expect(screen.queryByText("Edit doctor profile: Dr Existing")).toBeNull();
+    expect(screen.queryByText("Edit doctor profile: Existing Doctor English")).toBeNull();
     fireEvent.click(within(drawer).getByRole("tab", { name: "Doctor profile" }));
     const form = within(drawer).getByRole("region", { name: "Doctor profile" });
-    fireEvent.change(within(form).getByPlaceholderText("Display name"), { target: { value: "Dr Updated" } });
+    expect(within(form).queryByPlaceholderText("Display name")).toBeNull();
     fireEvent.change(within(form).getByDisplayValue("Specialist"), { target: { value: "consultant" } });
     fireEvent.click(within(form).getByLabelText("Can finalize reports"));
     fireEvent.click(within(form).getByLabelText("Can assign protocols"));
@@ -207,7 +214,7 @@ describe("DoctorAdminDoctorsPage", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save profile" }));
 
     await waitFor(() => expect(updateDoctorProfileForAdminMock).toHaveBeenCalledWith(1, {
-      displayName: "Dr Updated",
+      displayName: "Dr Existing",
       doctorRole: "consultant",
       active: true,
       canFinalizeReports: false,
@@ -220,7 +227,7 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Modalities" }));
-    const drawer = await screen.findByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    const drawer = await screen.findByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
     expect(within(drawer).getByRole("tab", { name: "Modalities" }).getAttribute("aria-selected")).toBe("true");
     const row = screen.getAllByText("CT").at(-1)!.closest("tr")!;
     await waitFor(() => expect((within(row).getAllByRole("checkbox")[0] as HTMLInputElement).checked).toBe(true));
@@ -257,12 +264,13 @@ describe("DoctorAdminDoctorsPage", () => {
     expect(await screen.findByText("existing.doc")).toBeTruthy();
     expect(screen.queryByText("@existing.doc")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
     expect(within(drawer).getByLabelText("Email")).toHaveProperty("value", "existing@nccb.ly");
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: " Updated.Doc " } });
-    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Updated Doctor" } });
+    fireEvent.change(within(drawer).getByLabelText("Arabic Name"), { target: { value: "Updated Doctor" } });
+    fireEvent.change(within(drawer).getByLabelText("English Name"), { target: { value: "Updated Doctor English" } });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
-    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", email: "existing@nccb.ly", fullName: "Updated Doctor", coreRole: "doctor", active: true }));
+    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", email: "existing@nccb.ly", fullName: "Updated Doctor", englishName: "Updated Doctor English", coreRole: "doctor", active: true }));
   });
 
   it("preserves the profile response email while the linked user query is still loading", async () => {
@@ -270,7 +278,7 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
     expect(within(drawer).getByLabelText("Email")).toHaveProperty("value", "existing@nccb.ly");
     fireEvent.click(within(drawer).getByRole("button", { name: "Save account" }));
 
@@ -278,6 +286,7 @@ describe("DoctorAdminDoctorsPage", () => {
       username: "existing.doc",
       email: "existing@nccb.ly",
       fullName: "Existing Doctor",
+      englishName: "Existing Doctor English",
       coreRole: "doctor",
       active: true,
     }));
@@ -306,7 +315,7 @@ describe("DoctorAdminDoctorsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
     expect((await screen.findByRole("alert")).textContent).toContain("already exists");
-    expect(screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" })).toBeTruthy();
   });
 
   it("confirms complete deactivation and keeps failures visible without changing the row", async () => {

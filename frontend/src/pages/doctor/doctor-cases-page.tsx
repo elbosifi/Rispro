@@ -13,6 +13,8 @@ import {
   reassignDoctorCase,
 } from "@/lib/api-hooks";
 import type { DoctorCase, DoctorMe, DoctorProfile } from "@/types/api";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -96,6 +98,7 @@ function CaseTable({
   rosterAssignments: Array<{ id: number; label: string }>;
   onAssignDoctor: (appointmentId: number, doctorId: number, rosterAssignmentId: number | null, reason: string) => void;
 }) {
+  const { language } = useLanguage();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [doctorId, setDoctorId] = useState("");
   const [rosterAssignmentId, setRosterAssignmentId] = useState("");
@@ -146,7 +149,7 @@ function CaseTable({
                       </select>
                       <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
                         <option value="">Doctor</option>
-                        {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                        {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
                       </select>
                       <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={row.assignedDoctorId ? "Reassignment reason" : "Assignment reason"} className="rounded-lg border px-2 py-1 text-xs" />
                       <div className="flex gap-2">
@@ -190,6 +193,7 @@ function QuickAssignCaseCard({
   rosterAssignments: Array<{ id: number; label: string }>;
   onAssignDoctor: (appointmentId: number, doctorId: number, rosterAssignmentId: number | null, reason: string) => void;
 }) {
+  const { language } = useLanguage();
   const [doctorId, setDoctorId] = useState(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
   const [rosterAssignmentId, setRosterAssignmentId] = useState(row.rosterAssignmentId ? String(row.rosterAssignmentId) : "");
   const [reason, setReason] = useState("");
@@ -215,7 +219,7 @@ function QuickAssignCaseCard({
         <div className="grid gap-2">
           <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
             <option value="">Select doctor</option>
-            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
           </select>
           <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
             <option value="">Optional roster slot</option>

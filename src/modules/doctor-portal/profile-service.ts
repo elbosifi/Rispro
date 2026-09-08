@@ -127,6 +127,7 @@ export async function createDoctorWithUserForAdmin(
     username: string;
     email?: string | null;
     fullName: string;
+    englishName?: string | null;
     temporaryPassword: string;
     coreRole: Role | string;
     userActive: boolean;
@@ -149,8 +150,9 @@ export async function createDoctorWithUserForAdmin(
   const username = normalizeUsername(input.username);
   const email = input.email === undefined ? emailFromUsername(username) : normalizeOptionalEmail(input.email);
   const fullName = input.fullName.trim();
+  const englishName = String(input.englishName ?? "").trim() || null;
   const temporaryPassword = requireExactPassword(input.temporaryPassword, "temporaryPassword");
-  const doctorDisplayName = input.doctorDisplayName.trim() || fullName;
+  const doctorDisplayName = fullName || englishName || username;
 
   if (!username || !fullName || !temporaryPassword || !doctorDisplayName) {
     throw new HttpError(400, "username, fullName, temporaryPassword, and doctorDisplayName are required.");
@@ -174,6 +176,7 @@ export async function createDoctorWithUserForAdmin(
       username: string;
       email: string | null;
       full_name: string;
+      english_name: string | null;
       role: Role;
       is_active: boolean;
       must_change_password: boolean;
@@ -181,11 +184,11 @@ export async function createDoctorWithUserForAdmin(
       updated_at: string;
     }>(
       `
-        insert into users (username, email, full_name, password_hash, role, is_active, must_change_password)
-        values ($1, $2, $3, $4, $5, $6, true)
-        returning id, username, email, full_name, role, is_active, must_change_password, created_at, updated_at
+        insert into users (username, email, full_name, english_name, password_hash, role, is_active, must_change_password)
+        values ($1, $2, $3, $4, $5, $6, $7, true)
+        returning id, username, email, full_name, english_name, role, is_active, must_change_password, created_at, updated_at
       `,
-      [username, email, fullName, passwordHash, input.coreRole, input.userActive]
+      [username, email, fullName, englishName, passwordHash, input.coreRole, input.userActive]
     );
     const user = userResult.rows[0];
 
@@ -206,8 +209,9 @@ export async function createDoctorWithUserForAdmin(
           user_id as "userId",
           $8::text as username,
           $9::text as "fullName",
-          $10::text as "coreRole",
-          $11::boolean as "userActive",
+          $10::text as "englishName",
+          $11::text as "coreRole",
+          $12::boolean as "userActive",
           display_name as "displayName",
           doctor_role as "doctorRole",
           active,
@@ -227,6 +231,7 @@ export async function createDoctorWithUserForAdmin(
         input.canSupervise,
         user.username,
         user.full_name,
+        user.english_name,
         user.role,
         user.is_active,
       ]
@@ -283,6 +288,7 @@ export async function createDoctorWithUserForAdmin(
         username: user.username,
         email: user.email,
         full_name: user.full_name,
+        english_name: user.english_name,
         role: user.role,
         is_active: user.is_active,
         must_change_password: user.must_change_password,
@@ -328,6 +334,7 @@ type DoctorAdminUserRow = {
   username: string;
   email: string | null;
   full_name: string;
+  english_name: string | null;
   role: Role;
   is_active: boolean;
   must_change_password: boolean;
@@ -337,7 +344,7 @@ type DoctorAdminUserRow = {
 
 async function lockLinkedDoctorUser(client: import("pg").PoolClient, userId: number) {
   const result = await client.query<DoctorAdminUserRow & { profile_id: number; profile_active: boolean }>(
-    `select u.id, u.username, u.email, u.full_name, u.role, u.is_active,
+    `select u.id, u.username, u.email, u.full_name, u.english_name, u.role, u.is_active,
             coalesce(u.must_change_password, false) as must_change_password,
             u.created_at, u.updated_at, dp.id as profile_id, dp.active as profile_active
        from users u
@@ -361,11 +368,12 @@ export async function updateLinkedDoctorUserForAdmin(
   actorUserId: UserId,
   appRole: Role,
   targetUserId: number,
-  input: { username: string; email?: string | null; fullName: string; coreRole: string; active: boolean }
+  input: { username: string; email?: string | null; fullName: string; englishName?: string | null; coreRole: string; active: boolean }
 ) {
   await requireDoctorAdmin(actorUserId, appRole);
   const username = normalizeUsername(input.username);
   const fullName = input.fullName.trim();
+  const englishName = String(input.englishName ?? "").trim() || null;
   assertDoctorAccountRole(input.coreRole);
   if (!username) throw new HttpError(400, "Username is required.");
   if (!fullName) throw new HttpError(400, "Full name is required.");
@@ -385,20 +393,20 @@ export async function updateLinkedDoctorUserForAdmin(
     }
     const result = await client.query<DoctorAdminUserRow>(
       `update users
-          set username = $2, email = $3, full_name = $4, role = $5, is_active = $6, updated_at = now()
+          set username = $2, email = $3, full_name = $4, english_name = $5, role = $6, is_active = $7, updated_at = now()
         where id = $1
-        returning id, username, email, full_name, role, is_active,
+        returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   created_at, updated_at`,
-      [targetUserId, username, email, fullName, input.coreRole, input.active]
+      [targetUserId, username, email, fullName, englishName, input.coreRole, input.active]
     );
     const updatedUser = result.rows[0];
     await insertDoctorAuditEvent(client, {
       actorUserId, actorDoctorId: null, eventType: "doctor_linked_user_updated",
       targetType: "user", targetId: targetUserId,
       metadata: {
-        oldValues: { username: previous.username, email: previous.email, fullName: previous.full_name, coreRole: previous.role, active: previous.is_active },
-        newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name, coreRole: updatedUser.role, active: updatedUser.is_active },
+        oldValues: { username: previous.username, email: previous.email, fullName: previous.full_name, englishName: previous.english_name, coreRole: previous.role, active: previous.is_active },
+        newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name, englishName: updatedUser.english_name, coreRole: updatedUser.role, active: updatedUser.is_active },
       },
       reason: null,
     });

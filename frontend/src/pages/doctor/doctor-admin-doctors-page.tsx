@@ -20,12 +20,15 @@ import {
   type DoctorImportPreview,
   type DoctorImportResult,
 } from "@/lib/api-hooks";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe, DoctorModalityPermission, DoctorProfile, DoctorProfileRole, User } from "@/types/api";
 
 type CreateDoctorDraft = {
   username: string;
   email: string;
   fullName: string;
+  englishName: string;
   temporaryPassword: string;
   coreRole: "doctor" | "supervisor";
   userActive: boolean;
@@ -53,7 +56,7 @@ type ModalityPermissionDraft = {
   active: boolean;
 };
 
-type AccountDraft = { username: string; email: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean };
+type AccountDraft = { username: string; email: string; fullName: string; englishName: string; coreRole: "doctor" | "supervisor"; active: boolean };
 type DrawerSection = "account" | "profile" | "modalities" | "security";
 
 type ModalityDraftOverride = {
@@ -82,6 +85,7 @@ const DEFAULT_CREATE_DOCTOR_DRAFT: CreateDoctorDraft = {
   username: "",
   email: "",
   fullName: "",
+  englishName: "",
   temporaryPassword: "",
   coreRole: "doctor",
   userActive: true,
@@ -107,6 +111,7 @@ function lockBodyScroll(): () => void {
 }
 
 export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe; advanced?: boolean }) {
+  const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [importFileBase64, setImportFileBase64] = useState("");
@@ -127,7 +132,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
   const [modalityDraftOverride, setModalityDraftOverride] = useState<ModalityDraftOverride | null>(null);
   const [resetPassword, setResetPassword] = useState("");
-  const [accountDraft, setAccountDraft] = useState<AccountDraft>({ username: "", email: "", fullName: "", coreRole: "doctor", active: true });
+  const [accountDraft, setAccountDraft] = useState<AccountDraft>({ username: "", email: "", fullName: "", englishName: "", coreRole: "doctor", active: true });
   const [drawerSection, setDrawerSection] = useState<DrawerSection>("account");
   const [confirmLifecycle, setConfirmLifecycle] = useState<DoctorProfile | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
@@ -405,6 +410,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       username: profile.username ?? linkedUser?.username ?? "",
       email: profile.email ?? linkedUser?.email ?? "",
       fullName: profile.fullName ?? linkedUser?.fullName ?? "",
+      englishName: profile.englishName ?? linkedUser?.englishName ?? "",
       coreRole: role === "supervisor" ? "supervisor" : "doctor",
       active: profile.userActive ?? linkedUser?.isActive ?? false,
     });
@@ -475,17 +481,13 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: createDoctorEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
           <input aria-label="Email" value={createDoctorDraft.email} onChange={(event) => { setCreateDoctorEmailEdited(true); setCreateDoctorDraft((current) => ({ ...current, email: event.target.value })); }} placeholder="Email" className="rounded-lg border px-3 py-2 text-sm" />
-          <input value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({
-            ...current,
-            fullName: event.target.value,
-            doctorDisplayName: current.doctorDisplayName || event.target.value,
-          }))} placeholder="Full name" className="rounded-lg border px-3 py-2 text-sm" />
+          <input aria-label={t("settings.arabicName")} value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, fullName: event.target.value }))} placeholder={t("settings.arabicName")} className="rounded-lg border px-3 py-2 text-sm" />
+          <input aria-label={t("settings.englishName")} value={createDoctorDraft.englishName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, englishName: event.target.value }))} placeholder={t("settings.englishName")} className="rounded-lg border px-3 py-2 text-sm" />
           <input type="password" value={createDoctorDraft.temporaryPassword} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} placeholder="Temporary password" className="rounded-lg border px-3 py-2 text-sm" />
           <select value={createDoctorDraft.coreRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, coreRole: event.target.value as "doctor" | "supervisor" }))} className="rounded-lg border px-3 py-2 text-sm">
             <option value="doctor">Doctor login</option>
             <option value="supervisor">Supervisor login</option>
           </select>
-          <input value={createDoctorDraft.doctorDisplayName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorDisplayName: event.target.value }))} placeholder="Doctor display name" className="rounded-lg border px-3 py-2 text-sm" />
           <select value={createDoctorDraft.doctorRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
             {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
           </select>
@@ -524,7 +526,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           </div>
         )}
         <div className="mt-4">
-          <button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || !createDoctorDraft.doctorDisplayName || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+          <button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
             Create login account and doctor profile
           </button>
         </div>
@@ -608,7 +610,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
             {profiles.map((profile) => (
               <tr key={profile.id}>
-                <td className="px-3 py-2 font-medium">{profile.displayName}</td>
+                <td className="px-3 py-2 font-medium">{getDoctorDisplayName(profile, language)}</td>
                 <td className="px-3 py-2">{profile.username ?? usersById.get(profile.userId)?.username ?? profile.userId}</td>
                 <td className="px-3 py-2">{profile.coreRole ?? usersById.get(profile.userId)?.role ?? "-"}</td>
                 <td className="px-3 py-2">{profile.userActive ?? usersById.get(profile.userId)?.isActive ? "Active" : "Inactive"}</td>
@@ -639,7 +641,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         <div className="fixed inset-0 z-[70] flex justify-end bg-black/35" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
           <aside className="flex h-dvh w-full flex-col bg-background shadow-2xl sm:max-w-[620px] sm:border-s" role="dialog" aria-modal="true" aria-labelledby="doctor-drawer-title">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
-              <div><h2 id="doctor-drawer-title" className="font-semibold">Manage doctor: {editingProfile.displayName}</h2><p className="text-xs text-muted-foreground">{accountDraft.username}</p></div>
+              <div><h2 id="doctor-drawer-title" className="font-semibold">Manage doctor: {getDoctorDisplayName(editingProfile, language)}</h2><p className="text-xs text-muted-foreground">{accountDraft.username}</p></div>
               <button ref={drawerCloseRef} type="button" onClick={closeDrawer} className="rounded-lg border px-3 py-2 text-sm font-semibold">Close</button>
             </header>
             <nav className="flex shrink-0 overflow-x-auto border-b px-2 py-2" role="tablist" aria-label="Doctor management sections">
@@ -652,17 +654,17 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
                 <div><h3 id="account-section-title" className="font-semibold">Account</h3><p className="text-sm text-muted-foreground">Login account active is separate from Doctor profile active.</p></div>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Username</span><input value={accountDraft.username} onChange={(event) => setAccountDraft((current) => ({ ...current, username: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Email</span><input aria-label="Email" value={accountDraft.email} onChange={(event) => setAccountDraft((current) => ({ ...current, email: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
-                <label className="grid gap-1 text-sm"><span className="font-medium">Full name</span><input value={accountDraft.fullName} onChange={(event) => setAccountDraft((current) => ({ ...current, fullName: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">{t("settings.arabicName")}</span><input aria-label={t("settings.arabicName")} value={accountDraft.fullName} onChange={(event) => setAccountDraft((current) => ({ ...current, fullName: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">{t("settings.englishName")}</span><input aria-label={t("settings.englishName")} value={accountDraft.englishName} onChange={(event) => setAccountDraft((current) => ({ ...current, englishName: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Core role</span><select value={accountDraft.coreRole} onChange={(event) => setAccountDraft((current) => ({ ...current, coreRole: event.target.value as AccountDraft['coreRole'] }))} className="rounded-lg border px-3 py-2"><option value="doctor">Doctor</option><option value="supervisor">Supervisor</option></select></label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={accountDraft.active} onChange={(event) => setAccountDraft((current) => ({ ...current, active: event.target.checked }))} /> Login account active</label>
                 <button type="button" disabled={!accountDraft.username.trim() || !accountDraft.fullName.trim() || accountMutation.isPending} onClick={() => accountMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{accountMutation.isPending ? "Saving account..." : "Save account"}</button>
               </section> : null}
               {drawerSection === "profile" ? <section aria-labelledby="profile-section-title" className="space-y-4">
                 <div><h3 id="profile-section-title" className="font-semibold">Doctor profile</h3><p className="text-sm text-muted-foreground">Doctor profile active controls assignments separately from login access.</p></div>
-                <label className="grid gap-1 text-sm"><span className="font-medium">Display name</span><input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2" /></label>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Doctor role</span><select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2">{DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
                 <div className="grid gap-3 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.active} onChange={(event) => setEditDraft((current) => ({ ...current, active: event.target.checked }))} /> Doctor profile active</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canFinalizeReports} onChange={(event) => setEditDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> Can finalize reports</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canAssignProtocols} onChange={(event) => setEditDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> Can assign protocols</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canSupervise} onChange={(event) => setEditDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> Can supervise</label></div>
-                <button type="button" disabled={!editDraft.displayName.trim() || editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{editMutation.isPending ? "Saving profile..." : "Save profile"}</button>
+                <button type="button" disabled={editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{editMutation.isPending ? "Saving profile..." : "Save profile"}</button>
               </section> : null}
               {drawerSection === "modalities" ? <section aria-labelledby="modalities-section-title"><h3 id="modalities-section-title" className="font-semibold">Modality permissions</h3><p className="mt-1 text-sm text-muted-foreground">Toggle Report for every modality this doctor can receive on the Reporting Assignment Board.</p><div className="mt-3 overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{["Modality", "Active", "Protocol", "Report", "Supervise"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">{header}</th>)}</tr></thead><tbody>{modalityRows.map((row) => <tr key={row.modalityId}><td className="px-3 py-2 font-medium">{row.label}</td>{(["active", "canProtocol", "canReport", "canSupervise"] as const).map((key) => <td key={key} className="px-3 py-2"><input aria-label={`${row.label} ${key}`} type="checkbox" disabled={modalityMutation.isPending} checked={Boolean(row[key])} onChange={(event) => saveModalities({ modalityId: row.modalityId, [key]: event.target.checked })} /></td>)}</tr>)}</tbody></table></div>{modalityMutation.isPending ? <p role="status" className="mt-3 text-sm">Saving modality permissions...</p> : null}</section> : null}
               {drawerSection === "security" ? <section aria-labelledby="security-section-title" className="space-y-4"><div><h3 id="security-section-title" className="font-semibold">Security</h3><p className="text-sm text-muted-foreground">Require password change only prompts at next login; it does not change the current password.</p></div><label className="grid gap-1 text-sm"><span className="font-medium">New temporary password</span><input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="New temporary password" className="rounded-lg border px-3 py-2" /></label><div className="flex flex-wrap gap-2"><button type="button" disabled={!resetPassword || resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{resetPasswordMutation.isPending ? "Resetting password..." : "Reset temporary password"}</button><button type="button" disabled={forcePasswordMutation.isPending} onClick={() => forcePasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{forcePasswordMutation.isPending ? "Updating requirement..." : "Require password change"}</button></div></section> : null}
