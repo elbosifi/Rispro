@@ -117,12 +117,12 @@ authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response
   res.json({
     user: {
       id: sessionUser.id,
-      username: sessionUser.username,
+      username: currentUser.username,
       fullName: sessionUser.full_name,
       englishName: sessionUser.english_name,
-      role: sessionUser.role,
+      role: currentUser.role,
       recentSupervisorReauth: hasRecentSupervisorReauth(request),
-      mustChangePassword: sessionUser.must_change_password
+      mustChangePassword: currentUser.mustChangePassword
     }
   });
 }));

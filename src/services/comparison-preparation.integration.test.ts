@@ -143,6 +143,22 @@ test("supervisor and super_admin can cancel pending comparisons", async () => {
   assert.equal((await cancelComparisonRequest(superAdmin, second.id, "Cancelled by requester")).status, "cancelled");
 });
 
+test("comparison actor name snapshots remain stable after the user is renamed", async () => {
+  const actor = await createUser("receptionist");
+  const original = { nameAr: `${marker} Creator Arabic`, nameEn: `${marker} Creator English` };
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [actor.userId, original.nameAr, original.nameEn]);
+  const request = await createRequest(actor, "historical actor snapshot");
+  assert.equal(request.createdByNameAr, original.nameAr);
+  assert.equal(request.createdByNameEn, original.nameEn);
+  assert.equal(request.createdByUsername, `${marker}_receptionist_0`);
+
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [actor.userId, `${marker} Renamed Arabic`, `${marker} Renamed English`, `${marker}_renamed_actor`]);
+  const refreshed = await findComparisonRequestById(request.id);
+  assert.equal(refreshed?.createdByNameAr, original.nameAr);
+  assert.equal(refreshed?.createdByNameEn, original.nameEn);
+  assert.equal(refreshed?.createdByUsername, `${marker}_receptionist_0`);
+});
+
 test("unauthorized, finalized, and repeated cancellation are rejected without overwriting metadata", async () => {
   const modalityStaff = await createUser("modality_staff");
   const supervisor = await createUser("supervisor");

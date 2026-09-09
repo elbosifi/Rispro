@@ -63,6 +63,9 @@ export interface ComparisonRequestRow {
   materialsConfirmed: boolean;
   materialsConfirmedBy: number | null;
   materialsConfirmedByName: string | null;
+  materialsConfirmedByNameAr: string | null;
+  materialsConfirmedByNameEn: string | null;
+  materialsConfirmedByUsername: string | null;
   materialsConfirmedAt: string | null;
   materialsConfirmationNote: string | null;
   imageAvailabilityConfirmed: boolean;
@@ -87,13 +90,23 @@ export interface ComparisonRequestRow {
   finalText: string | null;
   createdBy: number | null;
   createdByName: string | null;
+  createdByNameAr: string | null;
+  createdByNameEn: string | null;
+  createdByUsername: string | null;
   createdAt: string;
   updatedAt: string;
   cancelledBy: number | null;
+  cancelledByName: string | null;
+  cancelledByNameAr: string | null;
+  cancelledByNameEn: string | null;
+  cancelledByUsername: string | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
   preparationReturnedBy: number | null;
   preparationReturnedByName: string | null;
+  preparationReturnedByNameAr: string | null;
+  preparationReturnedByNameEn: string | null;
+  preparationReturnedByUsername: string | null;
   preparationReturnedAt: string | null;
   preparationReturnReason: string | null;
   documentCount: number;
@@ -134,6 +147,25 @@ function normalizeId(value: unknown, field: string): number {
 
 function actorDoctorId(profile: { id: number } | null | undefined): number | null {
   return profile?.id ?? null;
+}
+
+interface ActorIdentitySnapshot {
+  nameAr: string | null;
+  nameEn: string | null;
+  username: string | null;
+}
+
+async function loadActorIdentity(db: PoolClient, userId: UserId): Promise<ActorIdentitySnapshot> {
+  const result = await db.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+    "select full_name, english_name, username from users where id = $1 limit 1",
+    [Number(userId)]
+  );
+  const row = result.rows[0];
+  return {
+    nameAr: row?.full_name == null ? null : String(row.full_name),
+    nameEn: row?.english_name == null ? null : String(row.english_name),
+    username: row?.username == null ? null : String(row.username),
+  };
 }
 
 async function audit(
@@ -186,6 +218,9 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     materialsConfirmed: Boolean(row.materialsConfirmed),
     materialsConfirmedBy: row.materialsConfirmedBy == null ? null : Number(row.materialsConfirmedBy),
     materialsConfirmedByName: row.materialsConfirmedByName == null ? null : String(row.materialsConfirmedByName),
+    materialsConfirmedByNameAr: row.materialsConfirmedByNameAr == null ? null : String(row.materialsConfirmedByNameAr),
+    materialsConfirmedByNameEn: row.materialsConfirmedByNameEn == null ? null : String(row.materialsConfirmedByNameEn),
+    materialsConfirmedByUsername: row.materialsConfirmedByUsername == null ? null : String(row.materialsConfirmedByUsername),
     materialsConfirmedAt: optionalIso(row.materialsConfirmedAt),
     materialsConfirmationNote: row.materialsConfirmationNote == null ? null : String(row.materialsConfirmationNote),
     imageAvailabilityConfirmed: Boolean(row.imageAvailabilityConfirmed),
@@ -210,13 +245,23 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     finalText: row.finalText == null ? null : String(row.finalText),
     createdBy: row.createdBy == null ? null : Number(row.createdBy),
     createdByName: row.createdByName == null ? null : String(row.createdByName),
+    createdByNameAr: row.createdByNameAr == null ? null : String(row.createdByNameAr),
+    createdByNameEn: row.createdByNameEn == null ? null : String(row.createdByNameEn),
+    createdByUsername: row.createdByUsername == null ? null : String(row.createdByUsername),
     createdAt: optionalIso(row.createdAt) ?? "",
     updatedAt: optionalIso(row.updatedAt) ?? "",
     cancelledBy: row.cancelledBy == null ? null : Number(row.cancelledBy),
+    cancelledByName: row.cancelledByName == null ? null : String(row.cancelledByName),
+    cancelledByNameAr: row.cancelledByNameAr == null ? null : String(row.cancelledByNameAr),
+    cancelledByNameEn: row.cancelledByNameEn == null ? null : String(row.cancelledByNameEn),
+    cancelledByUsername: row.cancelledByUsername == null ? null : String(row.cancelledByUsername),
     cancelledAt: optionalIso(row.cancelledAt),
     cancellationReason: row.cancellationReason == null ? null : String(row.cancellationReason),
     preparationReturnedBy: row.preparationReturnedBy == null ? null : Number(row.preparationReturnedBy),
     preparationReturnedByName: row.preparationReturnedByName == null ? null : String(row.preparationReturnedByName),
+    preparationReturnedByNameAr: row.preparationReturnedByNameAr == null ? null : String(row.preparationReturnedByNameAr),
+    preparationReturnedByNameEn: row.preparationReturnedByNameEn == null ? null : String(row.preparationReturnedByNameEn),
+    preparationReturnedByUsername: row.preparationReturnedByUsername == null ? null : String(row.preparationReturnedByUsername),
     preparationReturnedAt: optionalIso(row.preparationReturnedAt),
     preparationReturnReason: row.preparationReturnReason == null ? null : String(row.preparationReturnReason),
     documentCount: Number(row.documentCount ?? 0),
@@ -249,7 +294,10 @@ const COMPARISON_SELECT = `
     cr.status,
     cr.materials_confirmed as "materialsConfirmed",
     cr.materials_confirmed_by as "materialsConfirmedBy",
-    confirmed_by.full_name as "materialsConfirmedByName",
+    coalesce(cr.materials_confirmed_by_name_ar_snapshot, cr.materials_confirmed_by_name_en_snapshot, cr.materials_confirmed_by_username_snapshot, confirmed_by.full_name) as "materialsConfirmedByName",
+    coalesce(cr.materials_confirmed_by_name_ar_snapshot, case when cr.materials_confirmed_by_name_en_snapshot is null and cr.materials_confirmed_by_username_snapshot is null then confirmed_by.full_name end) as "materialsConfirmedByNameAr",
+    coalesce(cr.materials_confirmed_by_name_en_snapshot, case when cr.materials_confirmed_by_name_ar_snapshot is null and cr.materials_confirmed_by_username_snapshot is null then confirmed_by.english_name end) as "materialsConfirmedByNameEn",
+    cr.materials_confirmed_by_username_snapshot as "materialsConfirmedByUsername",
     cr.materials_confirmed_at as "materialsConfirmedAt",
     cr.materials_confirmation_note as "materialsConfirmationNote",
     cr.image_availability_confirmed as "imageAvailabilityConfirmed",
@@ -273,14 +321,24 @@ const COMPARISON_SELECT = `
     cr.finalized_at as "finalizedAt",
     cr.final_text as "finalText",
     cr.created_by as "createdBy",
-    created_by.full_name as "createdByName",
+    coalesce(cr.created_by_name_ar_snapshot, cr.created_by_name_en_snapshot, cr.created_by_username_snapshot, created_by.full_name) as "createdByName",
+    coalesce(cr.created_by_name_ar_snapshot, case when cr.created_by_name_en_snapshot is null and cr.created_by_username_snapshot is null then created_by.full_name end) as "createdByNameAr",
+    coalesce(cr.created_by_name_en_snapshot, case when cr.created_by_name_ar_snapshot is null and cr.created_by_username_snapshot is null then created_by.english_name end) as "createdByNameEn",
+    cr.created_by_username_snapshot as "createdByUsername",
     cr.created_at as "createdAt",
     cr.updated_at as "updatedAt",
     cr.cancelled_by as "cancelledBy",
+    coalesce(cr.cancelled_by_name_ar_snapshot, cr.cancelled_by_name_en_snapshot, cr.cancelled_by_username_snapshot, cancelled_by.full_name) as "cancelledByName",
+    coalesce(cr.cancelled_by_name_ar_snapshot, case when cr.cancelled_by_name_en_snapshot is null and cr.cancelled_by_username_snapshot is null then cancelled_by.full_name end) as "cancelledByNameAr",
+    coalesce(cr.cancelled_by_name_en_snapshot, case when cr.cancelled_by_name_ar_snapshot is null and cr.cancelled_by_username_snapshot is null then cancelled_by.english_name end) as "cancelledByNameEn",
+    cr.cancelled_by_username_snapshot as "cancelledByUsername",
     cr.cancelled_at as "cancelledAt",
     cr.cancellation_reason as "cancellationReason",
     cr.preparation_returned_by as "preparationReturnedBy",
-    returned_by.full_name as "preparationReturnedByName",
+    coalesce(cr.preparation_returned_by_name_ar_snapshot, cr.preparation_returned_by_name_en_snapshot, cr.preparation_returned_by_username_snapshot, returned_by.full_name) as "preparationReturnedByName",
+    coalesce(cr.preparation_returned_by_name_ar_snapshot, case when cr.preparation_returned_by_name_en_snapshot is null and cr.preparation_returned_by_username_snapshot is null then returned_by.full_name end) as "preparationReturnedByNameAr",
+    coalesce(cr.preparation_returned_by_name_en_snapshot, case when cr.preparation_returned_by_name_ar_snapshot is null and cr.preparation_returned_by_username_snapshot is null then returned_by.english_name end) as "preparationReturnedByNameEn",
+    cr.preparation_returned_by_username_snapshot as "preparationReturnedByUsername",
     cr.preparation_returned_at as "preparationReturnedAt",
     cr.preparation_return_reason as "preparationReturnReason",
     coalesce(comparison_documents.document_count, 0)::integer as "documentCount",
@@ -296,6 +354,7 @@ const COMPARISON_SELECT = `
   left join users confirmed_by on confirmed_by.id = cr.materials_confirmed_by
   left join users finalized_by on finalized_by.id = cr.finalized_by
   left join users created_by on created_by.id = cr.created_by
+  left join users cancelled_by on cancelled_by.id = cr.cancelled_by
   left join users returned_by on returned_by.id = cr.preparation_returned_by
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cr.assigned_doctor_id
   left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
@@ -373,6 +432,7 @@ export async function createComparisonRequest(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const actorIdentity = await loadActorIdentity(client, actor.userId);
     const previous = await client.query(
       `
         select
@@ -413,11 +473,14 @@ export async function createComparisonRequest(
           linked_study_date,
           reason,
           created_by,
+          created_by_name_ar_snapshot,
+          created_by_name_en_snapshot,
+          created_by_username_snapshot,
           planned_reporting_doctor_id,
           planned_reporting_doctor_set_by,
           planned_reporting_doctor_set_at
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12::bigint, $13, case when $12::bigint is null then null else now() end)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, $14, $15::bigint, $16, case when $15::bigint is null then null else now() end)
         returning id
       `,
       [
@@ -432,6 +495,9 @@ export async function createComparisonRequest(
         previousRow.study_date ?? null,
         reason,
         actor.userId,
+        actorIdentity.nameAr,
+        actorIdentity.nameEn,
+        actorIdentity.username,
         plannedReportingDoctorId,
         plannedReportingDoctorId ? actor.userId : null,
       ]
@@ -755,6 +821,7 @@ export async function confirmComparisonMaterials(
   try {
     await client.query("begin");
     const request = await lockComparisonRequest(id, client);
+    const actorIdentity = await loadActorIdentity(client, actor.userId);
     const actorProfile = await findActiveDoctorProfileByUserId(actor.userId).catch(() => null);
     if (!CONFIRM_ROLES.has(actor.appRole)) {
       await audit(client, actor, "comparison_materials_confirmation_denied", request, { deniedReason: "role_not_allowed" }, null, actorProfile);
@@ -797,6 +864,9 @@ export async function confirmComparisonMaterials(
           status = case when $4::bigint is null then 'ready_for_reporting' else 'assigned' end,
           materials_confirmed = true,
           materials_confirmed_by = $2,
+          materials_confirmed_by_name_ar_snapshot = $6,
+          materials_confirmed_by_name_en_snapshot = $7,
+          materials_confirmed_by_username_snapshot = $8,
           materials_confirmed_at = now(),
           materials_confirmation_note = $3,
           image_availability_confirmed = true,
@@ -810,7 +880,7 @@ export async function confirmComparisonMaterials(
           updated_at = now()
         where id = $1
       `,
-      [id, actor.userId, note, activatedDoctorId, documentsDisposition]
+      [id, actor.userId, note, activatedDoctorId, documentsDisposition, actorIdentity.nameAr, actorIdentity.nameEn, actorIdentity.username]
     );
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
@@ -896,6 +966,7 @@ export async function returnComparisonToPreparation(actor: ComparisonActor, idIn
   try {
     await client.query("begin");
     const request = await lockComparisonRequest(id, client);
+    const actorIdentity = await loadActorIdentity(client, actor.userId);
     if (!['ready_for_reporting', 'assigned'].includes(request.status)) throw new HttpError(409, "Only released comparison requests can return to preparation.");
     const profile = await findActiveDoctorProfileByUserId(actor.userId).catch(() => null);
     const active = await client.query<{ id: number; doctorId: number }>(`select id, assigned_doctor_id as "doctorId" from doctor_portal.comparison_case_assignments where comparison_request_id=$1 and status='active' limit 1 for update`, [id]);
@@ -904,7 +975,7 @@ export async function returnComparisonToPreparation(actor: ComparisonActor, idIn
     const assignedDoctor = actor.appRole === "doctor" && profile?.canFinalizeReports === true && activeAssignment?.doctorId === profile.id;
     if (!supervisor && !assignedDoctor) throw new HttpError(403, "You are not allowed to return this comparison to preparation.");
     if (activeAssignment) await client.query(`update doctor_portal.comparison_case_assignments set status='cancelled', updated_at=now() where id=$1`, [activeAssignment.id]);
-    await client.query(`update comparison_requests set status='pending_upload_confirmation', assigned_doctor_id=null, planned_reporting_doctor_id=$2::bigint, planned_reporting_doctor_set_by=case when $2::bigint is null then null else $3::bigint end, planned_reporting_doctor_set_at=case when $2::bigint is null then null else now() end, materials_confirmed=false, materials_confirmed_by=null, materials_confirmed_at=null, materials_confirmation_note=null, image_availability_confirmed=false, documents_availability_confirmed=false, selected_prior_confirmed=false, documents_disposition=null, preparation_returned_by=$3::bigint, preparation_returned_at=now(), preparation_return_reason=$4, updated_at=now() where id=$1`, [id, activeAssignment?.doctorId ?? null, actor.userId, reason]);
+    await client.query(`update comparison_requests set status='pending_upload_confirmation', assigned_doctor_id=null, planned_reporting_doctor_id=$2::bigint, planned_reporting_doctor_set_by=case when $2::bigint is null then null else $3::bigint end, planned_reporting_doctor_set_at=case when $2::bigint is null then null else now() end, materials_confirmed=false, materials_confirmed_by=null, materials_confirmed_at=null, materials_confirmation_note=null, image_availability_confirmed=false, documents_availability_confirmed=false, selected_prior_confirmed=false, documents_disposition=null, preparation_returned_by=$3::bigint, preparation_returned_by_name_ar_snapshot=$5, preparation_returned_by_name_en_snapshot=$6, preparation_returned_by_username_snapshot=$7, preparation_returned_at=now(), preparation_return_reason=$4, updated_at=now() where id=$1`, [id, activeAssignment?.doctorId ?? null, actor.userId, reason, actorIdentity.nameAr, actorIdentity.nameEn, actorIdentity.username]);
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
     await audit(client, actor, "comparison_returned_to_preparation", updated, { previousStatus: request.status, previousAssignedDoctorId: activeAssignment?.doctorId ?? null, previousMaterialsConfirmationNote: request.materialsConfirmationNote, returnReason: reason }, reason, profile);
@@ -921,15 +992,20 @@ export async function cancelComparisonRequest(actor: ComparisonActor, idInput: u
   try {
     await client.query("begin");
     const request = await lockComparisonRequest(id, client);
+    const actorIdentity = await loadActorIdentity(client, actor.userId);
     if (request.status === "finalized") throw new HttpError(409, "Finalized comparison requests cannot be cancelled.");
     if (request.status === "cancelled") throw new HttpError(409, "Cancelled comparison requests cannot be cancelled again.");
     await client.query(
       `
         update comparison_requests
-        set status = 'cancelled', cancelled_by = $2, cancelled_at = now(), cancellation_reason = $3, updated_at = now()
+        set status = 'cancelled', cancelled_by = $2,
+            cancelled_by_name_ar_snapshot = $4,
+            cancelled_by_name_en_snapshot = $5,
+            cancelled_by_username_snapshot = $6,
+            cancelled_at = now(), cancellation_reason = $3, updated_at = now()
         where id = $1
       `,
-      [id, actor.userId, reason]
+      [id, actor.userId, reason, actorIdentity.nameAr, actorIdentity.nameEn, actorIdentity.username]
     );
     await client.query(
       `

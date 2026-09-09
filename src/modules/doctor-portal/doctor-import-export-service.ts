@@ -44,6 +44,7 @@ const IMPORT_COLUMNS = [
   "modalities_supervise",
   "reset_password",
 ];
+const REQUIRED_IMPORT_COLUMNS = IMPORT_COLUMNS.filter((column) => column !== "english_name" && column !== "reset_password");
 
 const DOCTOR_ROLES = new Set<DoctorRole>(["consultant", "specialist", "senior_house_officer", "resident"]);
 type DoctorImportFormat = "csv" | "xlsx";
@@ -205,7 +206,7 @@ export async function inspectDoctorImport(input: { fileContentBase64: string; fo
   return {
     format,
     columns: headers,
-    requiredColumns: IMPORT_COLUMNS,
+    requiredColumns: REQUIRED_IMPORT_COLUMNS,
     rowCount: rows.length,
     missingColumns: IMPORT_COLUMNS.filter((column) => !headers.includes(column) && column !== "reset_password" && column !== "english_name"),
   };

@@ -23,7 +23,7 @@ import {
 } from "@/lib/api-hooks";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
-import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { getDoctorDisplayName, getUserDisplayName } from "@/lib/user-display-name";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
@@ -202,7 +202,7 @@ function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: 
         </div>
         <div className="text-end text-xs text-muted-foreground">
           <div>{t(language, "comparisons.created", { date: formatDateTimeLy(row.createdAt) })}</div>
-          <div>{t(language, "comparisons.by", { name: row.createdByName || (row.createdBy ? `#${row.createdBy}` : "-") })}</div>
+          <div>{t(language, "comparisons.by", { name: getUserDisplayName({ fullName: row.createdByNameAr ?? row.createdByName, englishName: row.createdByNameEn, username: row.createdByUsername }, language) || (row.createdBy ? `#${row.createdBy}` : "-") })}</div>
           <Link to={`/comparisons/${row.id}`} className="mt-2 inline-flex items-center gap-1 font-semibold text-accent"><ExternalLink size={13} />{t(language, "comparisons.openDetails")}</Link>
           {canEdit && canPrepare ? <Button type="button" variant="ghost" size="sm" onClick={() => setEditOpen(true)}>{t(language, "comparisons.editRequest")}</Button> : null}
         </div>
@@ -234,7 +234,7 @@ function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: 
 
       {row.assignedDoctorId ? <p className="text-xs text-muted-foreground">{t(language, "comparisons.assignedDoctor", { name: getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || row.assignedDoctorName || t(language, "comparisons.assignReportingDoctor") })}</p> : null}
       {row.status === "pending_upload_confirmation" ? <p className="text-xs text-muted-foreground">{row.plannedReportingDoctorId ? t(language, "comparisons.plannedTarget", { name: getDoctorDisplayName({ fullName: row.plannedReportingDoctorNameAr, englishName: row.plannedReportingDoctorNameEn, displayName: row.plannedReportingDoctorName }, language) || row.plannedReportingDoctorName || t(language, "comparisons.assignReportingDoctor") }) : t(language, "comparisons.poolDestination")}</p> : null}
-      {row.preparationReturnReason ? <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900"><strong>{t(language, "comparisons.returnedPreparation")}</strong>{row.preparationReturnedByName ? ` ${t(language, "comparisons.by", { name: row.preparationReturnedByName })}` : ""}{row.preparationReturnedAt ? ` · ${formatDateTimeLy(row.preparationReturnedAt)}` : ""}: {row.preparationReturnReason}</p> : null}
+      {row.preparationReturnReason ? <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900"><strong>{t(language, "comparisons.returnedPreparation")}</strong>{getUserDisplayName({ fullName: row.preparationReturnedByNameAr ?? row.preparationReturnedByName, englishName: row.preparationReturnedByNameEn, username: row.preparationReturnedByUsername }, language) ? ` ${t(language, "comparisons.by", { name: getUserDisplayName({ fullName: row.preparationReturnedByNameAr ?? row.preparationReturnedByName, englishName: row.preparationReturnedByNameEn, username: row.preparationReturnedByUsername }, language) })}` : ""}{row.preparationReturnedAt ? ` · ${formatDateTimeLy(row.preparationReturnedAt)}` : ""}: {row.preparationReturnReason}</p> : null}
       {row.finalizedAt ? <p className="text-xs text-emerald-700">{t(language, "comparisons.finalizedBy", { date: formatDateTimeLy(row.finalizedAt), name: getDoctorDisplayName({ fullName: row.finalizedByNameAr ?? row.finalizedByName, englishName: row.finalizedByNameEn, displayName: row.finalizedByName, username: null }, language) || t(language, "comparisons.staff") })}</p> : null}
       {row.status !== "pending_upload_confirmation" && row.materialsConfirmationNote ? <p className="text-xs text-muted-foreground"><strong>{t(language, "comparisons.preparationNote")}:</strong> {row.materialsConfirmationNote}</p> : null}
       {row.status === "cancelled" ? <p className="rounded-md bg-red-50 p-2 text-xs text-red-800"><strong>{t(language, "comparisons.cancelled")}:</strong> {row.cancellationReason || t(language, "comparisons.noReason")}{row.cancelledAt ? ` · ${formatDateTimeLy(row.cancelledAt)}` : ""}</p> : null}
@@ -242,7 +242,7 @@ function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: 
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2.5">
         {row.materialsConfirmed ? (
-          <div className="flex flex-wrap gap-2 text-xs text-emerald-700"><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.imagesConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.documentsConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.priorConfirmed")}</span>{row.materialsConfirmedAt ? <span>{t(language, "comparisons.by", { name: row.materialsConfirmedByName || t(language, "comparisons.staff") })} · {formatDateTimeLy(row.materialsConfirmedAt)}</span> : null}</div>
+          <div className="flex flex-wrap gap-2 text-xs text-emerald-700"><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.imagesConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.documentsConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.priorConfirmed")}</span>{row.materialsConfirmedAt ? <span>{t(language, "comparisons.by", { name: getUserDisplayName({ fullName: row.materialsConfirmedByNameAr ?? row.materialsConfirmedByName, englishName: row.materialsConfirmedByNameEn, username: row.materialsConfirmedByUsername }, language) || t(language, "comparisons.staff") })} · {formatDateTimeLy(row.materialsConfirmedAt)}</span> : null}</div>
         ) : (
           <div className="inline-flex items-center gap-1 text-xs text-amber-700"><XCircle size={13} />{t(language, "comparisons.waitingConfirmation")}</div>
         )}

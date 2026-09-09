@@ -892,6 +892,10 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.ok(Number(cached.rows[0]?.seconds_until_check) >= 299 && Number(cached.rows[0]?.seconds_until_check) <= 301);
 
     await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [otherDoctor.id, `${TEST_PREFIX} Other Arabic Renamed`, `${TEST_PREFIX} Other English Renamed`]);
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: "1.2.840.1", requiresReport: true, status: "completed" },
+      { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "501", finalizedByAccount: `  ${finalizerEmail.toUpperCase()}  `, correlationMethod: "study_instance_uid" }
+    );
     const response = await api<{ cases: Array<{ appointmentId: number; assignedDoctorId: number | null; finalizedByDoctorId: number | null; finalizedByDoctorName: string | null; finalizedByDoctorNameAr: string | null; finalizedByDoctorNameEn: string | null; sonicDicomFinalizedByAccount: string | null; sonicDicomLatestDocumentId: string | null; sonicDicomCorrelationMethod: string | null; assignmentMatch: string }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`);
     const row = response.data.cases.find((item) => item.appointmentId === appointmentId);
     assert.equal(row?.assignedDoctorId, doctor.doctorId);

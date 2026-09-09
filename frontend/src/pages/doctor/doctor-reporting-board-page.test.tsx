@@ -549,8 +549,45 @@ describe("DoctorReportingBoardPage", () => {
 
     const row = (await screen.findByText("Alpha Patient")).closest("tr")!;
     expect(within(row).getByText("Assigned Doctor")).toBeTruthy();
-    expect(within(row).getByText("Finalized by: Dr Final Doctor")).toBeTruthy();
+    expect(within(row).getByText("Finalized by: Final Doctor")).toBeTruthy();
     expect(within(row).getByText("Different reporter")).toBeTruthy();
+  });
+
+  it("localizes historical SonicDICOM finalizer snapshots and preserves fallbacks", async () => {
+    localStorage.setItem("rispro-language", "en");
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportStatus: "final", finalizedByDoctorId: 8, finalizedByDoctorName: "Legacy Frozen", finalizedByDoctorNameAr: "Arabic Frozen", finalizedByDoctorNameEn: "English Frozen", sonicDicomFinalizedByAccount: "sonic.account", sonicDicomLatestDocumentId: "901", sonicDicomCorrelationMethod: "study_instance_uid" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    const englishView = renderPage();
+    const englishRow = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(englishRow).getByText("Finalized by: English Frozen")).toBeTruthy();
+    englishView.unmount();
+
+    localStorage.setItem("rispro-language", "ar");
+    const arabicView = renderPage();
+    const arabicRow = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(arabicRow).getByText("Finalized by: Arabic Frozen")).toBeTruthy();
+    arabicView.unmount();
+
+    localStorage.setItem("rispro-language", "en");
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportStatus: "final", finalizedByDoctorId: 8, finalizedByDoctorName: "Legacy Frozen", finalizedByDoctorNameAr: null, finalizedByDoctorNameEn: null, sonicDicomFinalizedByAccount: "sonic.account", sonicDicomLatestDocumentId: "902", sonicDicomCorrelationMethod: "study_instance_uid" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    const legacyView = renderPage();
+    const legacyRow = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(legacyRow).getByText("Finalized by: Legacy Frozen")).toBeTruthy();
+    legacyView.unmount();
+
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportStatus: "final", finalizedByDoctorId: null, finalizedByDoctorName: null, finalizedByDoctorNameAr: null, finalizedByDoctorNameEn: null, sonicDicomFinalizedByAccount: "sonic.account", sonicDicomLatestDocumentId: "903", sonicDicomCorrelationMethod: "study_instance_uid" }],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    const accountView = renderPage();
+    const accountRow = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(accountRow).getByText("Finalized by: sonic.account")).toBeTruthy();
+    accountView.unmount();
   });
 
   it("localizes current assigned doctor names and falls back to the legacy name", async () => {
@@ -568,9 +605,10 @@ describe("DoctorReportingBoardPage", () => {
     view.unmount();
 
     localStorage.setItem("rispro-language", "ar");
-    renderPage();
+    const arabicView = renderPage();
     expect(await screen.findByText("Arabic Doctor")).toBeTruthy();
     expect(screen.getByText("Legacy Only")).toBeTruthy();
+    arabicView.unmount();
   });
 
   it("does not tint draft, overdue, or unassigned routine rows", async () => {

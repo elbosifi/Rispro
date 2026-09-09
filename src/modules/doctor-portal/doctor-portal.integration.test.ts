@@ -927,6 +927,33 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((await api(cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 403);
   });
 
+  it("keeps /auth/me session claims aligned with the JWT while refreshing names from the database", async () => {
+    guard();
+    const original = (await pool.query<{ username: string; full_name: string; english_name: string | null; role: string }>(
+      "select username, full_name, english_name, role from users where id = $1",
+      [supervisor.id]
+    )).rows[0]!;
+    const login = await authRequest("/api/auth/login", { username: original.username, password: "test_password" });
+    assert.equal(login.status, 200, JSON.stringify(login.data));
+    assert.ok(login.cookie);
+    try {
+      await pool.query(
+        "update users set username = $2, role = 'doctor', full_name = $3, english_name = $4 where id = $1",
+        [supervisor.id, `${original.username}_renamed`, `${TEST_PREFIX} Supervisor Renamed Arabic`, `${TEST_PREFIX} Supervisor Renamed English`]
+      );
+      const refreshed = await api(login.cookie, "/api/auth/me");
+      const user = (refreshed.data as { user: { username: string; role: string; mustChangePassword: boolean; fullName: string; englishName: string | null } }).user;
+      assert.equal(refreshed.status, 200, JSON.stringify(refreshed.data));
+      assert.equal(user.username, original.username);
+      assert.equal(user.role, "supervisor");
+      assert.equal(user.mustChangePassword, false);
+      assert.equal(user.fullName, `${TEST_PREFIX} Supervisor Renamed Arabic`);
+      assert.equal(user.englishName, `${TEST_PREFIX} Supervisor Renamed English`);
+    } finally {
+      await pool.query("update users set username = $2, role = $3, full_name = $4, english_name = $5 where id = $1", [supervisor.id, original.username, original.role, original.full_name, original.english_name]);
+    }
+  });
+
   it("creates a doctor login, profile, and modality permissions atomically from Doctor Admin", async () => {
     guard();
     const username = `${TEST_PREFIX.toLowerCase()}created_${randomUUID().replace(/-/g, "").slice(0, 8)}`;

@@ -539,16 +539,18 @@ function reportStatusDisplay(row: ReportingBoardCaseRow): string {
   return row.manualFinalOverrideId && row.reportStatus === "final" ? "Final · manual" : reportStatusView(row).label;
 }
 
-function sonicFinalizerLabel(row: ReportingBoardCaseRow): string | null {
-  if (row.finalizedByDoctorName) {
-    const name = row.finalizedByDoctorName.trim();
-    return /^dr\b/i.test(name) ? name : `Dr ${name}`;
-  }
-  return row.sonicDicomFinalizedByAccount?.trim() || null;
+function sonicFinalizerLabel(row: ReportingBoardCaseRow, language: Parameters<typeof getDoctorDisplayName>[1]): string | null {
+  const localizedName = getDoctorDisplayName({
+    fullName: row.finalizedByDoctorNameAr,
+    englishName: row.finalizedByDoctorNameEn,
+    displayName: row.finalizedByDoctorName,
+    username: null,
+  }, language);
+  return localizedName || row.sonicDicomFinalizedByAccount?.trim() || null;
 }
 
-function sonicFinalizerRelationship(row: ReportingBoardCaseRow): string | null {
-  if (!sonicFinalizerLabel(row)) return null;
+function sonicFinalizerRelationship(row: ReportingBoardCaseRow, language: Parameters<typeof getDoctorDisplayName>[1]): string | null {
+  if (!sonicFinalizerLabel(row, language)) return null;
   if (!row.finalizedByDoctorId) return "Unmapped SonicDICOM account";
   if (!row.assignedDoctorId) return "Finalized while unassigned";
   return row.assignedDoctorId === row.finalizedByDoctorId ? "Matched" : "Different reporter";
@@ -580,7 +582,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow, language: Parameters<typeof
       `Preparation note: ${row.comparisonPreparationNote ?? "-"}`,
       `Pool: ${row.modalityCode}`,
       `Assigned doctor: ${row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}`,
-      `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
+      `Finalized by: ${sonicFinalizerLabel(row, language) ?? "-"}`,
       `Report: ${reportStatusDisplay(row)}`,
       `Status: ${labelStatus(row.appointmentStatus)}`,
       `Ready at: ${formatTimestamp(row.completedAt)}`,
@@ -595,7 +597,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow, language: Parameters<typeof
     `Study: ${row.modalityCode}${row.examTypeName ? ` - ${row.examTypeName}` : ""}`,
     `Category: ${labelStatus(row.caseCategory)}`,
     `Assigned doctor: ${row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}`,
-    `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
+    `Finalized by: ${sonicFinalizerLabel(row, language) ?? "-"}`,
     `Report: ${reportStatusDisplay(row)}`,
     `Appointment: ${labelStatus(row.appointmentStatus)}`,
     `Completed at: ${formatTimestamp(row.completedAt)}`,
@@ -690,11 +692,12 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
 }
 
 function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
+  const { language } = useLanguage();
   const [holdDetailsOpen, setHoldDetailsOpen] = useState(false);
   const view = reportStatusView(row);
   const Icon = view.icon;
-  const finalizer = sonicFinalizerLabel(row);
-  const finalizerRelationship = sonicFinalizerRelationship(row);
+  const finalizer = sonicFinalizerLabel(row, language);
+  const finalizerRelationship = sonicFinalizerRelationship(row, language);
   const appointmentLabel = row.caseType === "comparison"
     ? labelStatus(row.appointmentStatus)
     : row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
@@ -3106,7 +3109,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="text-lg font-semibold text-foreground">Reconcile reporting assignment?</h3>
           <p className="mt-3 text-sm text-foreground">Current assigned doctor: <strong>{reconcileTarget.assignedDoctorId ? getDoctorDisplayName({ fullName: reconcileTarget.assignedDoctorNameAr, englishName: reconcileTarget.assignedDoctorNameEn, displayName: reconcileTarget.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}</strong></p>
-            <p className="mt-1 text-sm text-foreground">SonicDICOM finalized by: <strong>{reconcileTarget.finalizedByDoctorName}</strong></p>
+            <p className="mt-1 text-sm text-foreground">SonicDICOM finalized by: <strong>{sonicFinalizerLabel(reconcileTarget, language) ?? "-"}</strong></p>
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>This preserves the previous assignment in the audit history and changes the current RISpro reporting assignment to the SonicDICOM finalizer.</p>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setReconcileTarget(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
