@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, MoreVertical, Pencil, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreVertical, Pencil, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -65,7 +65,7 @@ import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProto
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
-import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from "@/components/shared";
+import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea } from "@/components/shared";
 import { DateInput } from "@/components/common/date-input";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
@@ -421,8 +421,9 @@ function ProtocolLibraryPanel() {
   const [editingCtRowId, setEditingCtRowId] = useState<number | null>(null);
   const [mriRowDraft, setMriRowDraft] = useState<ProtocolLibraryMriSequenceRowPayload | null>(null);
   const [editingMriRowId, setEditingMriRowId] = useState<number | null>(null);
-  const [duplicateVersion, setDuplicateVersion] = useState<{ versionId: number; protocolName: string } | null>(null);
+  const [duplicateVersion, setDuplicateVersion] = useState<{ versionId: number; protocolName: string; versionNumber: string | null; source: ProtocolLibraryVersionDetail | null } | null>(null);
   const [duplicateName, setDuplicateName] = useState("");
+  const [protocolPendingToggle, setProtocolPendingToggle] = useState<ProtocolLibraryProtocol | null>(null);
   const [mriImportFileBase64, setMriImportFileBase64] = useState("");
   const [mriImportFileName, setMriImportFileName] = useState("");
   const [mriImportInspect, setMriImportInspect] = useState<MriSequenceImportInspect | null>(null);
@@ -435,6 +436,11 @@ function ProtocolLibraryPanel() {
   const ctPhasesQuery = useQuery({ queryKey: ["doctor", "protocol-library", "ct-phase-presets"], queryFn: fetchProtocolLibraryCtPhasePresets, enabled: section === "ctPhases" || selectedVersionId !== null });
   const mriSequencesQuery = useQuery({ queryKey: ["doctor", "protocol-library", "mri-sequence-presets"], queryFn: fetchProtocolLibraryMriSequencePresets, enabled: section === "mriSequences" || selectedVersionId !== null });
   const versionQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocol-version", selectedVersionId], queryFn: () => fetchProtocolLibraryVersionDetail(selectedVersionId!), enabled: section === "protocols" && selectedVersionId !== null });
+  const duplicateSourceQuery = useQuery({
+    queryKey: ["doctor", "protocol-library", "duplicate-source", duplicateVersion?.versionId],
+    queryFn: () => fetchProtocolLibraryVersionDetail(duplicateVersion!.versionId),
+    enabled: section === "protocols" && duplicateVersion !== null && duplicateVersion.source === null,
+  });
 
   const protocols = protocolsQuery.data ?? [];
   const anatomy = anatomyQuery.data ?? [];
@@ -549,15 +555,19 @@ function ProtocolLibraryPanel() {
         </p>
       )}
 
-      <div className="flex gap-2 overflow-x-auto">
-        <SectionButton label="Protocols" active={section === "protocols"} onClick={() => setSection("protocols")} />
-        <SectionButton label="Library setup" active={section !== "protocols"} onClick={() => setSection("anatomy")} />
-        {section !== "protocols" ? <>
-        <SectionButton label="Anatomy / Regions" active={section === "anatomy"} onClick={() => setSection("anatomy")} />
-        <SectionButton label="Scanners" active={section === "scanners"} onClick={() => setSection("scanners")} />
-        <SectionButton label="CT Phase Presets" active={section === "ctPhases"} onClick={() => setSection("ctPhases")} />
-        <SectionButton label="MRI Sequence Presets" active={section === "mriSequences"} onClick={() => setSection("mriSequences")} />
-        </> : null}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2" aria-label="Protocol library areas">
+          <span className="me-1 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Library areas</span>
+          <SectionButton label="Protocols" active={section === "protocols"} onClick={() => setSection("protocols")} />
+          <SectionButton label="Library setup" active={section !== "protocols"} onClick={() => setSection("anatomy")} />
+        </div>
+        {section !== "protocols" ? <div className="flex flex-wrap items-center gap-2 border-s ps-3" style={{ borderColor: "var(--border)" }} aria-label="Library setup navigation">
+          <span className="me-1 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Configuration</span>
+          <SectionButton label="Anatomy / Regions" active={section === "anatomy"} onClick={() => setSection("anatomy")} />
+          <SectionButton label="Scanners" active={section === "scanners"} onClick={() => setSection("scanners")} />
+          <SectionButton label="Legacy CT Phase Presets" active={section === "ctPhases"} onClick={() => setSection("ctPhases")} />
+          <SectionButton label="MRI Sequence Presets" active={section === "mriSequences"} onClick={() => setSection("mriSequences")} />
+        </div> : null}
       </div>
 
       {section === "protocols" && selectedVersion && (
@@ -579,8 +589,8 @@ function ProtocolLibraryPanel() {
           onSaveDraft={(changeSummary, protocolNotes) => updateVersionMutation.mutate({ versionId: selectedVersion.version.id, changeSummary, protocolNotes })}
           onActivate={() => activateVersionMutation.mutate(selectedVersion.version.id)}
           onDraftFromActive={(revisionType) => draftFromActiveMutation.mutate({ protocolId: selectedVersion.protocol.id, revisionType })}
-          onDuplicate={() => { setDuplicateVersion({ versionId: selectedVersion.version.id, protocolName: selectedVersion.protocol.name }); setDuplicateName(`Copy of ${selectedVersion.protocol.name}`); }}
-          onAddCtRow={() => setCtRowDraft(EMPTY_PROTOCOL_CT_PHASE)}
+          onDuplicate={(source) => { setDuplicateVersion({ versionId: source.version.id, protocolName: source.protocol.name, versionNumber: source.version.versionNumber, source }); setDuplicateName(`Copy of ${source.protocol.name}`); }}
+          onAddCtRow={() => { setEditingCtRowId(null); setCtRowDraft(EMPTY_PROTOCOL_CT_PHASE); }}
           onEditCtRow={startCtRowEdit}
           onCancelCtRow={() => { setCtRowDraft(null); setEditingCtRowId(null); }}
           onSaveCtRow={(payload) => editingCtRowId ? updateCtRowMutation.mutate({ versionId: selectedVersion.version.id, rowId: editingCtRowId, payload }) : createCtRowMutation.mutate({ versionId: selectedVersion.version.id, payload: payload as ProtocolLibraryCtPhaseRowPayload })}
@@ -594,7 +604,42 @@ function ProtocolLibraryPanel() {
           onReorderMriRows={(rowIds) => reorderMriRowsMutation.mutate({ versionId: selectedVersion.version.id, rowIds })}
         />
       )}
-      {duplicateVersion ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><section className="w-full max-w-md rounded-lg border bg-background p-4" role="dialog" aria-label="Duplicate protocol"><h3 className="text-lg font-semibold">Duplicate protocol</h3><Field label="New protocol name"><input aria-label="New protocol name" className={inputClass()} value={duplicateName} onChange={(event) => setDuplicateName(event.target.value)} /></Field><div className="mt-4 flex justify-end gap-2"><button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" onClick={() => setDuplicateVersion(null)}>Cancel</button><button type="button" disabled={!duplicateName.trim() || duplicateCtVersionMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => duplicateCtVersionMutation.mutate({ versionId: duplicateVersion.versionId, name: duplicateName.trim() })}>Duplicate</button></div></section></div> : null}
+      <Dialog open={duplicateVersion !== null} onClose={() => { if (!duplicateCtVersionMutation.isPending) setDuplicateVersion(null); }}>
+        <DialogContent maxWidth="520px">
+          <DialogHeader>
+            <DialogTitle>Duplicate protocol</DialogTitle>
+            <DialogDescription>Create an independent draft from the exact source version below.</DialogDescription>
+          </DialogHeader>
+          {duplicateVersion ? (() => {
+            const source = duplicateVersion.source ?? duplicateSourceQuery.data;
+            return <div className="space-y-3">
+              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+                <p className="font-semibold">Source: {duplicateVersion.protocolName} · v{duplicateVersion.versionNumber ?? source?.version.versionNumber ?? "—"} · {source?.version.status ?? "Loading"}</p>
+                {source ? <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>{source.ctPhases.length} CT phase{source.ctPhases.length === 1 ? "" : "s"} · {source.ctTechniques.length} scanner technique{source.ctTechniques.length === 1 ? "" : "s"}</p> : <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>Loading source content…</p>}
+              </div>
+              <Field label="New protocol name"><Input aria-label="New protocol name" value={duplicateName} onChange={(event) => setDuplicateName(event.target.value)} /></Field>
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Creates an independent Draft v1.0 protocol.</p>
+            </div>;
+          })() : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDuplicateVersion(null)} disabled={duplicateCtVersionMutation.isPending}>Cancel</Button>
+            <Button disabled={!duplicateName.trim() || duplicateCtVersionMutation.isPending} onClick={() => duplicateVersion && duplicateCtVersionMutation.mutate({ versionId: duplicateVersion.versionId, name: duplicateName.trim() })}>{duplicateCtVersionMutation.isPending ? "Duplicating…" : "Duplicate"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={protocolPendingToggle !== null} onClose={() => setProtocolPendingToggle(null)}>
+        <DialogContent maxWidth="460px">
+          <DialogHeader>
+            <DialogTitle>{protocolPendingToggle?.isActive ? "Deactivate protocol?" : "Reactivate protocol?"}</DialogTitle>
+            <DialogDescription>{protocolPendingToggle?.isActive ? "This protocol will stop being available for new assignments." : "This protocol will become available for new assignments again."}</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm font-semibold">{protocolPendingToggle?.name}</p>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setProtocolPendingToggle(null)}>Cancel</Button>
+            <Button variant={protocolPendingToggle?.isActive ? "destructive" : "primary"} onClick={() => { if (protocolPendingToggle) updateProtocolMutation.mutate({ id: protocolPendingToggle.id, payload: { isActive: !protocolPendingToggle.isActive } }); setProtocolPendingToggle(null); }}>{protocolPendingToggle?.isActive ? "Deactivate protocol" : "Reactivate protocol"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {section === "protocols" && !selectedVersion && (
         <ProtocolList
           rows={filteredProtocols}
@@ -612,8 +657,8 @@ function ProtocolLibraryPanel() {
             const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId;
             if (versionId) setSelectedVersionId(versionId);
           }}
-          onToggle={(protocol) => updateProtocolMutation.mutate({ id: protocol.id, payload: { isActive: !protocol.isActive } })}
-          onDuplicate={(protocol) => { const versionId = protocol.activeVersionId ?? protocol.latestDraftVersionId; if (versionId) { setDuplicateVersion({ versionId, protocolName: protocol.name }); setDuplicateName(`Copy of ${protocol.name}`); } }}
+          onToggle={(protocol) => protocol.isActive ? setProtocolPendingToggle(protocol) : updateProtocolMutation.mutate({ id: protocol.id, payload: { isActive: !protocol.isActive } })}
+          onDuplicate={(protocol) => { const versionId = protocol.activeVersionId ?? protocol.latestDraftVersionId; if (versionId) { setDuplicateVersion({ versionId, protocolName: protocol.name, versionNumber: protocol.activeVersionNumber ?? protocol.latestDraftVersionNumber, source: null }); setDuplicateName(`Copy of ${protocol.name}`); } }}
         />
       )}
       {section === "anatomy" && (
@@ -792,14 +837,15 @@ function CtProtocolCreateForm({ draft, saving, setDraft, onSave, onCancel }: { d
     <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3">
       <Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
       <Field label="Indication"><input aria-label="Indication" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field>
-      <Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.protocolNotes ?? null)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field>
+      <Field label="Internal protocol notes"><Textarea aria-label="Internal protocol notes" value={textValue(draft.protocolNotes ?? null)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Reusable guidance for doctors during protocoling. Not patient-facing.</span></Field>
       <FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
 }
 
 function VersionBadge({ status }: { status: string }) {
-  return <span className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold" style={{ borderColor: "var(--border)", color: status === "ACTIVE" ? "#047857" : "var(--text-muted)" }}>{status}</span>;
+  const variant = status === "ACTIVE" ? "success" : status === "DRAFT" ? "draft" : "neutral";
+  return <Badge variant={variant} size="sm">{status}</Badge>;
 }
 
 function ProtocolBuilder({
@@ -848,7 +894,7 @@ function ProtocolBuilder({
   onSaveDraft: (changeSummary: string | null, protocolNotes: string | null) => void;
   onActivate: () => void;
   onDraftFromActive: (revisionType: "MINOR" | "MAJOR") => void;
-  onDuplicate: () => void;
+  onDuplicate: (source: ProtocolLibraryVersionDetail) => void;
   onAddCtRow: () => void;
   onEditCtRow: (row: ProtocolLibraryCtPhaseRow) => void;
   onCancelCtRow: () => void;
@@ -865,34 +911,97 @@ function ProtocolBuilder({
   const [changeSummary, setChangeSummary] = useState(detail.version.changeSummary ?? "");
   const [protocolNotes, setProtocolNotes] = useState(detail.version.protocolNotes ?? "");
   const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const editable = detail.version.status === "DRAFT";
+  const isCt = detail.protocol.modality === "CT";
+  const canPublish = !isCt || detail.ctPhases.length > 0;
+  const currentActiveVersion = detail.protocol.activeVersionId && detail.protocol.activeVersionId !== detail.version.id
+    ? detail.protocol.activeVersionNumber
+    : null;
   return (
-    <div className="space-y-4">
-      <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-xl font-semibold">{detail.protocol.name}</h3>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{detail.protocol.modality}{detail.protocol.modality === "MRI" && detail.protocol.anatomyRegionName ? ` · ${detail.protocol.anatomyRegionName}` : ""} · Version {detail.version.versionNumber} <VersionBadge status={detail.version.status} /></p>
+    <div className="space-y-4" data-testid="protocol-builder">
+      <section className="rounded-xl border p-3" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>
+              <span>{detail.protocol.modality}</span>
+              {detail.protocol.modality === "MRI" && detail.protocol.anatomyRegionName ? <><span aria-hidden="true">·</span><span>{detail.protocol.anatomyRegionName}</span></> : null}
+              <span aria-hidden="true">·</span>
+              <span>v{detail.version.versionNumber}</span>
+              <VersionBadge status={detail.version.status} />
+            </div>
+            <h3 className="mt-1 truncate text-xl font-semibold">{detail.protocol.name}</h3>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={onBack} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Back to list</button>
-            {editable ? <button type="button" onClick={() => onSaveDraft(nullableText(changeSummary), nullableText(protocolNotes))} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Save draft</button> : null}
-            {detail.protocol.modality === "CT" ? <button type="button" onClick={onDuplicate} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate</button> : null}
-            {editable ? <button type="button" onClick={onActivate} disabled={saving || (detail.protocol.modality === "CT" && detail.ctPhases.length === 0)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">{detail.protocol.modality === "CT" ? "Publish protocol" : "Activate version"}</button> : <button type="button" onClick={() => setRevisionDialogOpen(true)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">{detail.protocol.modality === "CT" ? "Create revision" : "Create new draft version"}</button>}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onBack}>Back</Button>
+            {editable ? <Button type="button" variant="secondary" size="sm" onClick={() => onSaveDraft(nullableText(changeSummary), nullableText(protocolNotes))} disabled={saving}>Save draft</Button> : null}
+            {isCt ? <Button type="button" variant="secondary" size="sm" onClick={() => onDuplicate(detail)}>Duplicate</Button> : null}
+            {editable ? <Button type="button" size="sm" onClick={() => isCt ? setPublishDialogOpen(true) : onActivate()} disabled={saving || !canPublish}>{isCt ? "Publish protocol" : "Activate version"}</Button> : <Button type="button" size="sm" onClick={() => setRevisionDialogOpen(true)}>{isCt ? "Create revision" : "Create new draft version"}</Button>}
           </div>
         </div>
-        {detail.protocol.modality === "MRI" || detail.version.versionNumber !== "1.0" ? <Field label={detail.protocol.modality === "CT" ? "Reason for change" : "Change summary"}><input aria-label={detail.protocol.modality === "CT" ? "Reason for change" : "Change summary"} disabled={!editable} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} /></Field> : null}
-        {detail.protocol.modality === "CT" ? <Field label="Protocol notes"><textarea aria-label="Protocol notes" disabled={!editable} className={`${inputClass()} min-h-24`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} /></Field> : null}
-        {editable && detail.protocol.modality === "CT" && detail.ctPhases.length === 0 ? <p className="mt-2 text-sm text-amber-700">Add at least one CT phase before publishing.</p> : null}
+        {editable && isCt && !canPublish ? <div className="mt-2 flex justify-end"><p className="text-xs font-medium text-amber-700">Add at least one phase before publishing.</p></div> : null}
       </section>
-      {revisionDialogOpen ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><section className="w-full max-w-sm rounded-lg border bg-background p-4" role="dialog" aria-label="Revision type"><h3 className="text-lg font-semibold">Revision type</h3><div className="mt-3 grid gap-2"><button type="button" className="rounded-lg border p-2 text-start" onClick={() => { setRevisionDialogOpen(false); onDraftFromActive("MINOR"); }}>Minor revision</button><button type="button" className="rounded-lg border p-2 text-start" onClick={() => { setRevisionDialogOpen(false); onDraftFromActive("MAJOR"); }}>Major revision</button></div></section></div> : null}
-      {detail.protocol.modality === "CT" ? (
-        <><CtProtocolSummary detail={detail} /><CtProtocolRows detail={detail} presets={ctPhasePresets} draft={ctRowDraft} editingRowId={editingCtRowId} editable={editable} setDraft={setCtRowDraft} onAdd={onAddCtRow} onEdit={onEditCtRow} onCancel={onCancelCtRow} onSave={onSaveCtRow} onRemove={onRemoveCtRow} onReorder={onReorderCtRows} /><CtAdvancedTechniqueEditor detail={detail} scanners={scanners} editable={editable} /></>
-      ) : (
-        <MriProtocolRows detail={detail} scanners={scanners} presets={mriSequencePresets} draft={mriRowDraft} editingRowId={editingMriRowId} editable={editable} setDraft={setMriRowDraft} onAdd={onAddMriRow} onEdit={onEditMriRow} onCancel={onCancelMriRow} onSave={onSaveMriRow} onRemove={onRemoveMriRow} onReorder={onReorderMriRows} />
-      )}
+
+      {isCt ? <section className="rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Internal protocol notes</h3>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>Reusable guidance for doctors during protocoling. Not patient-facing.</p>
+          </div>
+          {editable && protocolNotes.trim() ? <span className="text-xs" style={{ color: "var(--text-muted)" }}>Draft content</span> : null}
+        </div>
+        {editable ? <Textarea aria-label="Internal protocol notes" className="mt-2 min-h-20" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} placeholder="Add reusable guidance for protocoling…" /> : <p className="mt-2 whitespace-pre-wrap text-sm">{protocolNotes.trim() || <span style={{ color: "var(--text-muted)" }}>No internal protocol notes.</span>}</p>}
+      </section> : null}
+
+      {detail.protocol.modality === "MRI" || detail.version.versionNumber !== "1.0" ? <section className="rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+        {editable ? <Field label={detail.protocol.modality === "CT" ? "Reason for change" : "Change summary"}><Input aria-label={detail.protocol.modality === "CT" ? "Reason for change" : "Change summary"} value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} /></Field> : <><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>{detail.protocol.modality === "CT" ? "Reason for change" : "Change summary"}</p><p className="mt-1 text-sm">{changeSummary || "Not recorded"}</p></>}
+      </section> : null}
+
+      <Dialog open={publishDialogOpen} onClose={() => setPublishDialogOpen(false)}>
+        <DialogContent maxWidth="500px">
+          <DialogHeader>
+            <DialogTitle>Publish protocol?</DialogTitle>
+            <DialogDescription>Review the version before it becomes available for future assignments.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+            <p className="font-semibold">{detail.protocol.name} · v{detail.version.versionNumber}</p>
+            <p>{detail.ctPhases.length} CT phase{detail.ctPhases.length === 1 ? "" : "s"} · {detail.ctTechniques.length} scanner technique{detail.ctTechniques.length === 1 ? "" : "s"}</p>
+            {currentActiveVersion ? <p className="text-amber-700">Current active version: v{currentActiveVersion}</p> : null}
+          </div>
+          <p className="mt-3 text-sm">This version will become the active protocol used for future assignments.</p>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setPublishDialogOpen(false)} disabled={saving}>Cancel</Button>
+            <Button onClick={() => { setPublishDialogOpen(false); onActivate(); }} disabled={saving || !canPublish}>Publish v{detail.version.versionNumber}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revisionDialogOpen} onClose={() => setRevisionDialogOpen(false)}>
+        <DialogContent maxWidth="500px">
+          <DialogHeader>
+            <DialogTitle>Create revision</DialogTitle>
+            <DialogDescription>Current active version: v{detail.version.versionNumber}</DialogDescription>
+          </DialogHeader>
+          <div className="mt-1 grid gap-2">
+            <Button variant="secondary" className="h-auto min-h-0 justify-start p-3 text-start" onClick={() => { setRevisionDialogOpen(false); onDraftFromActive("MINOR"); }}><span><span className="block font-semibold">Minor revision</span><span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Creates v{nextMinorVersion(detail.version.versionNumber)}</span></span></Button>
+            <Button variant="secondary" className="h-auto min-h-0 justify-start p-3 text-start" onClick={() => { setRevisionDialogOpen(false); onDraftFromActive("MAJOR"); }}><span><span className="block font-semibold">Major revision</span><span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Creates v{nextMajorVersion(detail.version.versionNumber)}</span></span></Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {isCt ? <><CtProtocolRows detail={detail} presets={ctPhasePresets} draft={ctRowDraft} editingRowId={editingCtRowId} editable={editable} setDraft={setCtRowDraft} onAdd={onAddCtRow} onEdit={onEditCtRow} onCancel={onCancelCtRow} onSave={onSaveCtRow} onRemove={onRemoveCtRow} onReorder={onReorderCtRows} /><ClinicalCtAdvancedTechniqueEditor detail={detail} scanners={scanners} editable={editable} /></> : <MriProtocolRows detail={detail} scanners={scanners} presets={mriSequencePresets} draft={mriRowDraft} editingRowId={editingMriRowId} editable={editable} setDraft={setMriRowDraft} onAdd={onAddMriRow} onEdit={onEditMriRow} onCancel={onCancelMriRow} onSave={onSaveMriRow} onRemove={onRemoveMriRow} onReorder={onReorderMriRows} />}
     </div>
   );
+}
+
+function nextMinorVersion(version: string): string {
+  const [major, minor] = version.split(".").map(Number);
+  return `${Number.isFinite(major) ? major : 1}.${Number.isFinite(minor) ? minor + 1 : 1}`;
+}
+
+function nextMajorVersion(version: string): string {
+  const major = Number(version.split(".")[0]);
+  return `${Number.isFinite(major) ? major + 1 : 2}.0`;
 }
 
 type CtPhaseDisplayRow = { timingType: string | null; timingOverride: string | null; delaySeconds: number | null; bolusTrackingSite?: string | null; triggerHu?: number | null; postTriggerDelaySeconds?: number | null; coverageOverride: string | null; reconstructionOverride: string | null; instructionsOverride: string | null; presetContrastStatus?: string | null; presetTimingType?: string | null; presetDelaySeconds?: number | null; presetBolusTrackingSite?: string | null; presetTriggerHu?: number | null; presetDefaultCoverage?: string | null; presetReconstructionNotes?: string | null; presetInstructions?: string | null; };
@@ -916,37 +1025,98 @@ function CtProtocolSummary({ detail }: { detail: ProtocolLibraryVersionDetail })
   return <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)" }}><h3 className="font-semibold">CT protocol summary</h3><p className="mt-1">{detail.protocol.name} · Version {detail.version.versionNumber} · {detail.version.status}</p>{detail.protocol.indication ? <p>Indication: {detail.protocol.indication}</p> : null}{detail.version.protocolNotes ? <p>Notes: {detail.version.protocolNotes}</p> : null}<ol className="mt-2 list-decimal space-y-1 ps-5">{detail.ctPhases.map((phase) => <li key={phase.id}>{phase.customPhaseName ?? phase.ctPhasePresetName ?? "Unnamed phase"} — {formatCtPhaseTiming(phase)}{effectiveCtPhaseCoverage(phase) ? ` — ${effectiveCtPhaseCoverage(phase)}` : ""}</li>)}</ol>{detail.ctTechniques.length ? <p className="mt-2">Techniques: {detail.ctTechniques.map((technique) => [technique.scannerName, technique.kvMode, technique.tubeCurrentMode, technique.reconstructionMethod].filter(Boolean).join(" · ")).join("; ")}</p> : null}</section>;
 }
 
-function CtAdvancedTechniqueEditor({ detail, scanners, editable }: { detail: ProtocolLibraryVersionDetail; scanners: ImagingScanner[]; editable: boolean }) {
+function techniquePayloadFromRow(row: ProtocolLibraryCtTechniqueRow): ProtocolLibraryCtTechniquePayload {
+  return {
+    scannerId: row.scannerId,
+    kvMode: row.kvMode,
+    kvp: row.kvp,
+    tubeCurrentMode: row.tubeCurrentMode,
+    fixedMa: row.fixedMa,
+    referenceMas: row.referenceMas,
+    exposureControl: row.exposureControl,
+    noiseIndex: row.noiseIndex,
+    minMa: row.minMa,
+    maxMa: row.maxMa,
+    reconstructionMethod: row.reconstructionMethod,
+    reconstructionStrength: row.reconstructionStrength,
+    reconstructionImageDefinition: row.reconstructionImageDefinition,
+    sliceThicknessMm: row.sliceThicknessMm,
+    reconstructionIntervalMm: row.reconstructionIntervalMm,
+    kernel: row.kernel,
+  };
+}
+
+function emptyTechniquePayload(scannerId: number): ProtocolLibraryCtTechniquePayload {
+  return { scannerId, kvMode: null, kvp: null, tubeCurrentMode: null, fixedMa: null, referenceMas: null, exposureControl: null, noiseIndex: null, minMa: null, maxMa: null, reconstructionMethod: null, reconstructionStrength: null, reconstructionImageDefinition: null, sliceThicknessMm: null, reconstructionIntervalMm: null, kernel: null };
+}
+
+function techniqueLabel(row: ProtocolLibraryCtTechniqueRow): string {
+  return row.scannerName || [row.scannerVendor, row.scannerModel].filter(Boolean).join(" ") || "Scanner technique";
+}
+
+function techniqueSummary(row: ProtocolLibraryCtTechniqueRow): string[] {
+  const vendor = `${row.scannerVendor ?? ""} ${row.scannerModel ?? ""}`.toLowerCase();
+  const exposure = row.tubeCurrentMode === "AUTOMATIC"
+    ? [row.exposureControl ?? (vendor.includes("ge") ? "SmartmA" : vendor.includes("philips") ? "DoseRight / AEC" : "Automatic modulation"), row.noiseIndex != null ? `NI ${row.noiseIndex}` : null].filter(Boolean).join(" · ")
+    : row.tubeCurrentMode === "FIXED_MA" && row.fixedMa != null ? `${row.fixedMa} mA` : row.tubeCurrentMode === "REFERENCE_MAS" && row.referenceMas != null ? `${row.referenceMas} mAs` : null;
+  const currentRange = row.minMa != null && row.maxMa != null ? `${row.minMa}–${row.maxMa} mA` : row.minMa != null ? `min ${row.minMa} mA` : row.maxMa != null ? `max ${row.maxMa} mA` : null;
+  const reconstruction = row.reconstructionMethod === "Precise Image"
+    ? [row.reconstructionMethod, row.reconstructionImageDefinition, row.reconstructionStrength].filter(Boolean).join(" · ")
+    : [row.reconstructionMethod, row.reconstructionStrength ? `${row.reconstructionStrength}%` : null].filter(Boolean).join(" ");
+  const geometry = row.sliceThicknessMm != null && row.reconstructionIntervalMm != null ? `${row.sliceThicknessMm} / ${row.reconstructionIntervalMm} mm` : row.sliceThicknessMm != null ? `${row.sliceThicknessMm} mm slice` : row.reconstructionIntervalMm != null ? `${row.reconstructionIntervalMm} mm interval` : null;
+  return [row.kvMode === "AUTO" ? "Auto kV" : row.kvMode === "FIXED" && row.kvp != null ? `${row.kvp} kVp` : null, exposure, currentRange || null, reconstruction || null, geometry, row.kernel].filter((value): value is string => Boolean(value));
+}
+
+function ClinicalCtAdvancedTechniqueEditor({ detail, scanners, editable }: { detail: ProtocolLibraryVersionDetail; scanners: ImagingScanner[]; editable: boolean }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [scannerId, setScannerId] = useState("");
-  const existing = detail.ctTechniques.find((item) => String(item.scannerId) === scannerId) ?? null;
   const [draft, setDraft] = useState<ProtocolLibraryCtTechniquePayload | null>(null);
-  const mutation = useMutation({ mutationFn: (payload: ProtocolLibraryCtTechniquePayload) => upsertProtocolLibraryCtTechnique(detail.version.id, payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocol-version", detail.version.id] }) });
-  const removeMutation = useMutation({ mutationFn: (id: number) => deleteProtocolLibraryCtTechnique(detail.version.id, id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocol-version", detail.version.id] }) });
+  const [initialDraft, setInitialDraft] = useState<ProtocolLibraryCtTechniquePayload | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [removeScannerId, setRemoveScannerId] = useState<number | null>(null);
+  const [pendingAction, setPendingAction] = useState<"collapse" | { type: "scanner"; value: string } | null>(null);
+  const mutation = useMutation({ mutationFn: (payload: ProtocolLibraryCtTechniquePayload) => upsertProtocolLibraryCtTechnique(detail.version.id, payload), onSuccess: async () => { setDraft(null); setInitialDraft(null); setEditing(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocol-version", detail.version.id] }); } });
+  const removeMutation = useMutation({ mutationFn: (id: number) => deleteProtocolLibraryCtTechnique(detail.version.id, id), onSuccess: async () => { setRemoveScannerId(null); setScannerId(""); setDraft(null); setInitialDraft(null); setEditing(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocol-version", detail.version.id] }); } });
   const ctScanners = scanners.filter((scanner) => scanner.isActive && scanner.modality === "CT");
   const selectedScanner = ctScanners.find((scanner) => String(scanner.id) === scannerId) ?? null;
-  const vendor = selectedScanner?.vendor?.toLowerCase() ?? "";
-  const current = draft ?? existing;
-  const begin = () => {
-    if (!selectedScanner) return;
-    setDraft(existing ? { ...existing } : { scannerId: selectedScanner.id, kvMode: null, kvp: null, tubeCurrentMode: null, fixedMa: null, referenceMas: null, exposureControl: null, noiseIndex: null, minMa: null, maxMa: null, reconstructionMethod: null, reconstructionStrength: null, reconstructionImageDefinition: null, sliceThicknessMm: null, reconstructionIntervalMm: null, kernel: null });
-  };
+  const existing = detail.ctTechniques.find((item) => String(item.scannerId) === scannerId) ?? null;
+  const vendor = selectedScanner?.vendor?.toLowerCase() ?? existing?.scannerVendor?.toLowerCase() ?? "";
+  const dirty = Boolean(draft && initialDraft && JSON.stringify(draft) !== JSON.stringify(initialDraft));
   const normalizedTechnique = (value: ProtocolLibraryCtTechniquePayload): ProtocolLibraryCtTechniquePayload => {
     const normalized = value.tubeCurrentMode === "AUTOMATIC" ? { ...value, fixedMa: null, referenceMas: null } : value.tubeCurrentMode === "FIXED_MA" ? { ...value, referenceMas: null, noiseIndex: null, minMa: null, maxMa: null } : value.tubeCurrentMode === "REFERENCE_MAS" ? { ...value, fixedMa: null, noiseIndex: null, minMa: null, maxMa: null } : value;
     return { ...normalized, kvp: normalized.kvMode === "AUTO" ? null : normalized.kvp };
   };
-  /* Replaced by the single canonical editor below.
-  if (current && selectedScanner) return <section className="rounded-lg border p-4" style={{ borderColor: "var(--border)" }}><div className="flex items-center justify-between gap-2"><h3 className="text-lg font-semibold">Advanced technique</h3><button type="button" className="text-sm underline" onClick={() => { setScannerId(""); setDraft(null); }}>Choose another scanner</button></div><p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{[selectedScanner.name, selectedScanner.vendor, selectedScanner.model].filter(Boolean).join(" · ")}</p><div className="mt-3 grid gap-3 md:grid-cols-3"><Field label="Tube current mode"><select aria-label="Tube current mode" disabled={!editable} className={inputClass()} value={current.tubeCurrentMode ?? ""} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : "DoseRight / AEC"}</option><option value="REFERENCE_MAS">Reference mAs</option><option value="FIXED_MA">Fixed mA</option></select></Field>{current.tubeCurrentMode === "FIXED_MA" ? <NumberField label="Fixed mA" value={current.fixedMa} positive onChange={(value) => setDraft({ ...current, fixedMa: nullableNumber(value, true) })} /> : null}{current.tubeCurrentMode === "REFERENCE_MAS" ? <NumberField label="Reference mAs" value={current.referenceMas} positive onChange={(value) => setDraft({ ...current, referenceMas: nullableNumber(value, true) })} /> : null}{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}<Field label="Reconstruction method"><input aria-label="Reconstruction method" disabled={!editable} className={inputClass()} value={textValue(current.reconstructionMethod)} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value) })} /></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}<NumberField label="Slice thickness (mm)" value={current.sliceThicknessMm} onChange={(value) => setDraft({ ...current, sliceThicknessMm: nullableNumber(value) })} /><NumberField label="Kernel" value={current.kernel} onChange={(value) => setDraft({ ...current, kernel: value || null })} /></div>{editable ? <div className="mt-3 flex gap-2"><button type="button" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => mutation.mutate(normalizedTechnique(current))}>Save technique</button>{existing ? <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold text-red-700" onClick={() => removeMutation.mutate(existing.scannerId)}>Remove</button> : null}</div> : null}</section>;
-  return <section className="rounded-lg border p-4" style={{ borderColor: "var(--border)" }}><button type="button" className="flex w-full items-center justify-between text-start text-lg font-semibold" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Advanced technique <span>{open ? "−" : "+"}</span></button>{open ? <div className="mt-3 space-y-3"><div className="flex flex-wrap gap-2"><select aria-label="Scanner technique" className={inputClass()} value={scannerId} onChange={(event) => { setScannerId(event.target.value); setDraft(null); }}><option value="">Add scanner technique</option>{ctScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{[scanner.name, scanner.vendor, scanner.model].filter(Boolean).join(" · ")}</option>)}</select>{editable && <button type="button" disabled={!scannerId} onClick={begin} className="rounded-lg border px-3 py-2 text-sm font-semibold">{existing ? "Edit technique" : "Add scanner technique"}</button>}</div>{current && selectedScanner ? <div className="grid gap-3 rounded-lg border p-3 md:grid-cols-3" style={{ borderColor: "var(--border)" }}><Field label="kV mode"><select aria-label="kV mode" className={inputClass()} value={current.kvMode ?? ""} disabled={!editable} onChange={(event) => setDraft({ ...current, kvMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["kvMode"] })}><option value="">Not specified</option><option value="AUTO">Automatic</option><option value="FIXED">Fixed</option></select></Field>{current.kvMode === "FIXED" ? <NumberField label="kVp" value={current.kvp} positive onChange={(value) => setDraft({ ...current, kvp: nullableNumber(value, true) })} /> : null}<Field label="Tube current mode"><select aria-label="Tube current mode" className={inputClass()} value={current.tubeCurrentMode ?? ""} disabled={!editable} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : "Automatic"}</option><option value="FIXED_MA">Fixed mA</option><option value="REFERENCE_MAS">Reference mAs</option></select></Field>{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><Field label="Exposure control"><input aria-label="Exposure control" className={inputClass()} value={textValue(current.exposureControl)} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })} placeholder="SmartmA" /></Field><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}{vendor.includes("philips") ? <Field label="Exposure control"><select aria-label="Exposure control" className={inputClass()} value={current.exposureControl ?? ""} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })}><option value="">Not specified</option><option>DoseRight / AEC</option><option>Reference mAs</option></select></Field> : null}<Field label="Reconstruction method"><select aria-label="Reconstruction method" className={inputClass()} value={current.reconstructionMethod ?? ""} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value), reconstructionStrength: null, reconstructionImageDefinition: null })}><option value="">Not specified</option>{(vendor.includes("ge") ? ["FBP", "ASiR-V", "TrueFidelity", "Other"] : vendor.includes("philips") ? ["FBP", "iDose⁴", "Precise Image", "Other"] : ["FBP", "Other"]).map((value) => <option key={value}>{value}</option>)}</select></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}{current.reconstructionMethod === "TrueFidelity" ? <Field label="Strength"><select aria-label="Strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></Field> : null}{current.reconstructionMethod === "iDose⁴" ? <Field label="iDose⁴ level"><input aria-label="iDose⁴ level" className={inputClass()} value={textValue(current.reconstructionStrength)} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })} /></Field> : null}{current.reconstructionMethod === "Precise Image" ? <><Field label="Image definition"><select aria-label="Image definition" className={inputClass()} value={current.reconstructionImageDefinition ?? ""} onChange={(event) => setDraft({ ...current, reconstructionImageDefinition: editableText(event.target.value) })}><option value="">Not specified</option><option>Soft Tissue</option><option>Bone</option><option>Lung</option></select></Field><Field label="Strength"><select aria-label="Strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option>{["Smoother", "Smooth", "Standard", "Sharp", "Sharper"].map((value) => <option key={value}>{value}</option>)}</select></Field></> : null}<NumberField label="Slice thickness (mm)" value={current.sliceThicknessMm} onChange={(value) => setDraft({ ...current, sliceThicknessMm: nullableNumber(value) })} /><NumberField label="Reconstruction interval (mm)" value={current.reconstructionIntervalMm} onChange={(value) => setDraft({ ...current, reconstructionIntervalMm: nullableNumber(value) })} /><Field label="Kernel"><input aria-label="Kernel" className={inputClass()} value={textValue(current.kernel)} onChange={(event) => setDraft({ ...current, kernel: editableText(event.target.value) })} /></Field>{editable ? <div className="flex items-end gap-2"><button type="button" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => mutation.mutate(current)}>Save technique</button>{existing ? <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold text-red-700" onClick={() => removeMutation.mutate(existing.scannerId)}>Remove</button> : null}</div> : null}</div> : null}</div> : null}</section>;
+  const begin = () => { if (!selectedScanner) return; const next = existing ? techniquePayloadFromRow(existing) : emptyTechniquePayload(selectedScanner.id); setDraft(next); setInitialDraft(next); setEditing(true); };
+  const discardPendingAction = () => { if (pendingAction && pendingAction !== "collapse") setScannerId(pendingAction.value); setDraft(null); setInitialDraft(null); setEditing(false); if (pendingAction === "collapse") setOpen(false); setPendingAction(null); };
+  const changeScanner = (value: string) => { if (dirty) { setPendingAction({ type: "scanner", value }); return; } setScannerId(value); setDraft(null); setInitialDraft(null); setEditing(false); };
+  const toggleOpen = () => { if (open && dirty) { setPendingAction("collapse"); return; } setOpen((value) => !value); };
+  return <section className="rounded-lg border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }} data-testid="advanced-technique-section">
+    <button type="button" className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-start" aria-expanded={open} onClick={toggleOpen}>
+      <span><span className="block text-sm font-semibold">Advanced technique</span><span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Scanner-specific acquisition and reconstruction settings</span></span>
+      <span className="flex shrink-0 items-center gap-2 text-xs font-semibold" style={{ color: "var(--text-muted)" }}>{detail.ctTechniques.length ? `${detail.ctTechniques.length} scanner${detail.ctTechniques.length === 1 ? "" : "s"} configured` : "No scanner-specific techniques"}{open ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}</span>
+    </button>
+    {open ? <div className="space-y-3 border-t px-3 py-3" style={{ borderColor: "var(--border)" }}>
+      {detail.ctTechniques.length ? <div className="space-y-2">{detail.ctTechniques.map((technique) => <div key={technique.id} className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)" }}><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="font-semibold">{techniqueLabel(technique)}</p><p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{techniqueSummary(technique).join(" · ") || "No populated settings"}</p></div>{editable ? <div className="flex shrink-0 items-center gap-1"><Button type="button" variant="secondary" size="sm" onClick={() => { setScannerId(String(technique.scannerId)); const next = techniquePayloadFromRow(technique); setDraft(next); setInitialDraft(next); setEditing(true); }}>Edit</Button><Button type="button" variant="ghost" size="sm" className="text-red-700" onClick={() => setRemoveScannerId(technique.scannerId)}>Remove</Button></div> : null}</div></div>)}</div> : <p className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>No scanner-specific techniques</p>}
+      {editable ? <div className="flex flex-wrap items-end gap-2 border-t pt-3" style={{ borderColor: "var(--border)" }}><label className="min-w-64 flex-1 text-sm font-medium">Scanner technique<select aria-label="Scanner technique" className={inputClass()} value={scannerId} onChange={(event) => changeScanner(event.target.value)}><option value="">Select a scanner</option>{ctScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{[scanner.name, scanner.vendor, scanner.model].filter(Boolean).join(" · ")}</option>)}</select></label><Button type="button" variant="secondary" size="sm" disabled={!selectedScanner} onClick={begin}>{existing ? "Edit technique" : "Add scanner technique"}</Button></div> : null}
+      {editing && draft && selectedScanner ? <CanonicalClinicalCtTechniqueFields current={draft} vendor={vendor} editable={editable} setDraft={setDraft} onSave={() => mutation.mutate(normalizedTechnique(draft))} onCancel={() => { if (dirty) setPendingAction("collapse"); else { setDraft(null); setInitialDraft(null); setEditing(false); } }} onRemove={existing ? () => setRemoveScannerId(existing.scannerId) : null} /> : null}
+    </div> : null}
+    <Dialog open={removeScannerId !== null} onClose={() => setRemoveScannerId(null)}><DialogContent maxWidth="460px"><DialogHeader><DialogTitle>Remove {detail.ctTechniques.find((item) => item.scannerId === removeScannerId)?.scannerName ?? "scanner"} technique?</DialogTitle><DialogDescription>This removes the saved scanner-specific settings from the current draft.</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setRemoveScannerId(null)} disabled={removeMutation.isPending}>Cancel</Button><Button variant="destructive" onClick={() => removeScannerId !== null && removeMutation.mutate(removeScannerId)} disabled={removeMutation.isPending}>{removeMutation.isPending ? "Removing..." : "Remove technique"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={pendingAction !== null} onClose={() => setPendingAction(null)}><DialogContent maxWidth="460px"><DialogHeader><DialogTitle>Discard unsaved changes?</DialogTitle><DialogDescription>Advanced Technique has unsaved changes.</DialogDescription></DialogHeader><p className="text-sm">Keep editing or discard the scanner-specific changes made in this editor.</p><DialogFooter><Button variant="secondary" onClick={() => setPendingAction(null)}>Keep editing</Button><Button variant="destructive" onClick={discardPendingAction}>Discard changes</Button></DialogFooter></DialogContent></Dialog>
+  </section>;
 }
 
-*/
-  return <section className="rounded-lg border p-4" style={{ borderColor: "var(--border)" }}><button type="button" className="flex w-full items-center justify-between text-start text-lg font-semibold" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Advanced technique <span>{open ? "−" : "+"}</span></button>{open ? <div className="mt-3 space-y-3"><div className="flex flex-wrap gap-2"><select aria-label="Scanner technique" className={inputClass()} value={scannerId} onChange={(event) => { setScannerId(event.target.value); setDraft(null); }}><option value="">Add scanner technique</option>{ctScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{[scanner.name, scanner.vendor, scanner.model].filter(Boolean).join(" · ")}</option>)}</select>{editable ? <button type="button" disabled={!scannerId} onClick={begin} className="rounded-lg border px-3 py-2 text-sm font-semibold">{existing ? "Edit technique" : "Add scanner technique"}</button> : null}</div>{current && selectedScanner ? <CanonicalCtTechniqueFields current={current} vendor={vendor} editable={editable} setDraft={setDraft} onSave={() => mutation.mutate(normalizedTechnique(current))} onRemove={existing ? () => removeMutation.mutate(existing.scannerId) : null} /> : null}</div> : null}</section>;
+function CanonicalClinicalCtTechniqueFields({ current, vendor, editable, setDraft, onSave, onCancel, onRemove }: { current: ProtocolLibraryCtTechniquePayload; vendor: string; editable: boolean; setDraft: (draft: ProtocolLibraryCtTechniquePayload) => void; onSave: () => void; onCancel: () => void; onRemove: (() => void) | null }) {
+  return <div className="space-y-3 rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+    <TechniqueFieldGroup title="Exposure"><Field label="kV mode"><select aria-label="kV mode" className={inputClass()} value={current.kvMode ?? ""} onChange={(event) => setDraft({ ...current, kvMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["kvMode"] })}><option value="">Not specified</option><option value="AUTO">Automatic</option><option value="FIXED">Fixed</option></select></Field>{current.kvMode === "FIXED" ? <NumberField label="kVp" value={current.kvp} positive onChange={(value) => setDraft({ ...current, kvp: nullableNumber(value, true) })} /> : null}<Field label="Tube current mode"><select aria-label="Tube current mode" className={inputClass()} value={current.tubeCurrentMode ?? ""} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : vendor.includes("philips") ? "DoseRight / AEC" : "Automatic modulation"}</option><option value="FIXED_MA">Fixed mA</option><option value="REFERENCE_MAS">Reference mAs</option></select></Field>{current.tubeCurrentMode === "FIXED_MA" ? <NumberField label="Fixed mA" value={current.fixedMa} positive onChange={(value) => setDraft({ ...current, fixedMa: nullableNumber(value, true) })} /> : null}{current.tubeCurrentMode === "REFERENCE_MAS" ? <NumberField label="Reference mAs" value={current.referenceMas} positive onChange={(value) => setDraft({ ...current, referenceMas: nullableNumber(value, true) })} /> : null}{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><Field label="Exposure control"><Input aria-label="Exposure control" value={textValue(current.exposureControl)} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })} placeholder="SmartmA" /></Field><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}{vendor.includes("philips") ? <Field label="Exposure control"><select aria-label="Exposure control" className={inputClass()} value={current.exposureControl ?? ""} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })}><option value="">Not specified</option><option>DoseRight / AEC</option><option>Reference mAs</option></select></Field> : null}</TechniqueFieldGroup>
+    <TechniqueFieldGroup title="Reconstruction"><Field label="Reconstruction method"><select aria-label="Reconstruction method" className={inputClass()} value={current.reconstructionMethod ?? ""} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value), reconstructionStrength: null, reconstructionImageDefinition: null })}><option value="">Not specified</option>{(vendor.includes("ge") ? ["FBP", "ASiR-V", "TrueFidelity", "Other"] : vendor.includes("philips") ? ["FBP", "iDose⁴", "Precise Image", "Other"] : ["FBP", "Other"]).map((value) => <option key={value}>{value}</option>)}</select></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}{current.reconstructionMethod === "TrueFidelity" ? <Field label="TrueFidelity strength"><select aria-label="TrueFidelity strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></Field> : null}{current.reconstructionMethod === "iDose⁴" ? <Field label="iDose⁴ level"><Input aria-label="iDose⁴ level" value={textValue(current.reconstructionStrength)} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })} /></Field> : null}{current.reconstructionMethod === "Precise Image" ? <><Field label="Precise Image definition"><select aria-label="Precise Image definition" className={inputClass()} value={current.reconstructionImageDefinition ?? ""} onChange={(event) => setDraft({ ...current, reconstructionImageDefinition: editableText(event.target.value) })}><option value="">Not specified</option><option>Soft Tissue</option><option>Bone</option><option>Lung</option></select></Field><Field label="Precise Image strength"><select aria-label="Precise Image strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option>{["Smoother", "Smooth", "Standard", "Sharp", "Sharper"].map((value) => <option key={value}>{value}</option>)}</select></Field></> : null}</TechniqueFieldGroup>
+    <TechniqueFieldGroup title="Image geometry"><NumberField label="Slice thickness (mm)" value={current.sliceThicknessMm} onChange={(value) => setDraft({ ...current, sliceThicknessMm: nullableNumber(value) })} /><NumberField label="Reconstruction interval (mm)" value={current.reconstructionIntervalMm} onChange={(value) => setDraft({ ...current, reconstructionIntervalMm: nullableNumber(value) })} /><Field label="Kernel"><Input aria-label="Kernel" value={textValue(current.kernel)} onChange={(event) => setDraft({ ...current, kernel: editableText(event.target.value) })} /></Field></TechniqueFieldGroup>
+    {editable ? <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button><Button type="button" size="sm" onClick={onSave} disabled={!current.scannerId}>Save technique</Button>{onRemove ? <Button type="button" variant="destructive" size="sm" onClick={onRemove}>Remove</Button> : null}</div> : null}
+  </div>;
 }
 
-function CanonicalCtTechniqueFields({ current, vendor, editable, setDraft, onSave, onRemove }: { current: ProtocolLibraryCtTechniquePayload; vendor: string; editable: boolean; setDraft: (draft: ProtocolLibraryCtTechniquePayload) => void; onSave: () => void; onRemove: (() => void) | null }) {
-  return <div className="grid gap-3 rounded-lg border p-3 md:grid-cols-3" style={{ borderColor: "var(--border)" }}><Field label="kV mode"><select aria-label="kV mode" className={inputClass()} disabled={!editable} value={current.kvMode ?? ""} onChange={(event) => setDraft({ ...current, kvMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["kvMode"] })}><option value="">Not specified</option><option value="AUTO">Automatic</option><option value="FIXED">Fixed</option></select></Field>{current.kvMode === "FIXED" ? <NumberField label="kVp" value={current.kvp} positive onChange={(value) => setDraft({ ...current, kvp: nullableNumber(value, true) })} /> : null}<Field label="Tube current mode"><select aria-label="Tube current mode" className={inputClass()} disabled={!editable} value={current.tubeCurrentMode ?? ""} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : vendor.includes("philips") ? "DoseRight / AEC" : "Automatic modulation"}</option><option value="FIXED_MA">Fixed mA</option><option value="REFERENCE_MAS">Reference mAs</option></select></Field>{current.tubeCurrentMode === "FIXED_MA" ? <NumberField label="Fixed mA" value={current.fixedMa} positive onChange={(value) => setDraft({ ...current, fixedMa: nullableNumber(value, true) })} /> : null}{current.tubeCurrentMode === "REFERENCE_MAS" ? <NumberField label="Reference mAs" value={current.referenceMas} positive onChange={(value) => setDraft({ ...current, referenceMas: nullableNumber(value, true) })} /> : null}{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}<Field label="Reconstruction method"><select aria-label="Reconstruction method" className={inputClass()} value={current.reconstructionMethod ?? ""} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value), reconstructionStrength: null, reconstructionImageDefinition: null })}><option value="">Not specified</option>{(vendor.includes("ge") ? ["FBP", "ASiR-V", "TrueFidelity", "Other"] : vendor.includes("philips") ? ["FBP", "iDose⁴", "Precise Image", "Other"] : ["FBP", "Other"]).map((value) => <option key={value}>{value}</option>)}</select></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}{current.reconstructionMethod === "TrueFidelity" ? <Field label="TrueFidelity strength"><select aria-label="TrueFidelity strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></Field> : null}{current.reconstructionMethod === "iDose⁴" ? <Field label="iDose⁴ level"><input aria-label="iDose⁴ level" className={inputClass()} value={textValue(current.reconstructionStrength)} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })} /></Field> : null}{current.reconstructionMethod === "Precise Image" ? <><Field label="Precise Image definition"><select aria-label="Precise Image definition" className={inputClass()} value={current.reconstructionImageDefinition ?? ""} onChange={(event) => setDraft({ ...current, reconstructionImageDefinition: editableText(event.target.value) })}><option value="">Not specified</option><option>Soft Tissue</option><option>Bone</option><option>Lung</option></select></Field><Field label="Precise Image strength"><select aria-label="Precise Image strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option>{["Smoother", "Smooth", "Standard", "Sharp", "Sharper"].map((value) => <option key={value}>{value}</option>)}</select></Field></> : null}<NumberField label="Slice thickness (mm)" value={current.sliceThicknessMm} onChange={(value) => setDraft({ ...current, sliceThicknessMm: nullableNumber(value) })} /><NumberField label="Reconstruction interval (mm)" value={current.reconstructionIntervalMm} onChange={(value) => setDraft({ ...current, reconstructionIntervalMm: nullableNumber(value) })} /><Field label="Kernel"><input aria-label="Kernel" className={inputClass()} value={textValue(current.kernel)} onChange={(event) => setDraft({ ...current, kernel: editableText(event.target.value) })} /></Field>{editable ? <div className="flex items-end gap-2"><button type="button" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white" onClick={onSave}>Save technique</button>{onRemove ? <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold text-red-700" onClick={onRemove}>Remove</button> : null}</div> : null}</div>;
+function TechniqueFieldGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><h4 className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>{title}</h4><div className="mt-2 grid gap-3 md:grid-cols-3">{children}</div></section>;
 }
 
 function normalizeCtPhasePayload(draft: ProtocolLibraryCtPhaseRowPayload): Partial<ProtocolLibraryCtPhaseRowPayload> {
@@ -960,6 +1130,7 @@ function normalizeCtPhasePayload(draft: ProtocolLibraryCtPhaseRowPayload): Parti
 
 function CtProtocolRows({ detail, presets, draft, editingRowId, editable, setDraft, onAdd, onEdit, onCancel, onSave, onRemove, onReorder }: { detail: ProtocolLibraryVersionDetail; presets: CtPhasePreset[]; draft: ProtocolLibraryCtPhaseRowPayload | null; editingRowId: number | null; editable: boolean; setDraft: (draft: ProtocolLibraryCtPhaseRowPayload | null) => void; onAdd: () => void; onEdit: (row: ProtocolLibraryCtPhaseRow) => void; onCancel: () => void; onSave: (payload: Partial<ProtocolLibraryCtPhaseRowPayload>) => void; onRemove: (rowId: number) => void; onReorder: (rowIds: number[]) => void }) {
   const activePresets = presets.filter((preset) => preset.isActive);
+  const [pendingRemove, setPendingRemove] = useState<ProtocolLibraryCtPhaseRow | null>(null);
   const move = (index: number, direction: -1 | 1) => {
     const rows = [...detail.ctPhases];
     const target = index + direction;
@@ -967,23 +1138,45 @@ function CtProtocolRows({ detail, presets, draft, editingRowId, editable, setDra
     [rows[index], rows[target]] = [rows[target], rows[index]];
     onReorder(rows.map((row) => row.id));
   };
+  const renderEditor = () => draft && editable ? <CtProtocolRowForm draft={draft} presets={activePresets} setDraft={setDraft} onCancel={onCancel} onSave={() => onSave(normalizeCtPhasePayload(draft))} /> : null;
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold">CT phases</h3>
-        {editable && <AddButton label="Add phase" onClick={onAdd} />}
+    <section className="space-y-3" aria-labelledby="ct-phases-heading">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 id="ct-phases-heading" className="text-lg font-semibold">CT phases</h3>
+          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{detail.ctPhases.length ? `${detail.ctPhases.length} acquisition${detail.ctPhases.length === 1 ? "" : "s"} in scan order` : "Build the protocol in scan order"}</p>
+        </div>
+        {editable && <AddButton label={detail.ctPhases.length ? "Add phase" : "Add first phase"} onClick={onAdd} />}
       </div>
-      <SettingsTable emptyText="No CT phases added yet" headers={["Phase", "Timing", "Coverage", "Actions"]}>
-        {draft && editable && <CtProtocolRowForm draft={draft} presets={activePresets} setDraft={setDraft} onCancel={onCancel} onSave={() => onSave(normalizeCtPhasePayload(draft))} />}
-        {detail.ctPhases.map((row, index) => (
-          <tr key={row.id}>
-            <Cell>{row.orderIndex}. {row.customPhaseName ?? row.ctPhasePresetName ?? "-"}</Cell>
-            <Cell>{formatCtPhaseTiming(row)}</Cell>
-            <Cell>{effectiveCtPhaseCoverage(row) ?? "-"}</Cell>
-            <Cell>{editable ? <RowBuilderActions onEdit={() => onEdit(row)} onRemove={() => onRemove(row.id)} onMoveUp={() => move(index, -1)} onMoveDown={() => move(index, 1)} first={index === 0} last={index === detail.ctPhases.length - 1} editing={editingRowId === row.id} /> : "Read-only"}</Cell>
-          </tr>
-        ))}
-      </SettingsTable>
+      <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+        {detail.ctPhases.length === 0 && !draft ? <div className="px-4 py-8 text-center">
+          <p className="text-sm font-semibold">No phases yet</p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Build this CT protocol by adding acquisitions in scan order.</p>
+          {editable ? <Button type="button" size="sm" className="mt-4" onClick={onAdd}>Add first phase</Button> : null}
+        </div> : null}
+        {draft && editable && editingRowId === null ? <div className="border-b p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>{renderEditor()}</div> : null}
+        <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+          {detail.ctPhases.map((row, index) => {
+            const phaseName = row.customPhaseName ?? row.ctPhasePresetName ?? "Unnamed phase";
+            return <div key={row.id} className="px-3 py-3">
+              <div className="grid gap-3 md:grid-cols-[2rem_minmax(10rem,1.15fr)_minmax(17rem,2fr)_minmax(13rem,1.35fr)_auto] md:items-center">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} aria-label={`Phase ${row.orderIndex}`}>{row.orderIndex}</div>
+                <div className="min-w-0"><p className="font-semibold leading-5">{phaseName}</p><p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{row.isRequired ? "Required acquisition" : "Optional acquisition"}</p></div>
+                <div className="min-w-0"><p className="text-sm leading-5">{formatCtPhaseTiming(row)}</p>{effectiveCtPhaseInstructions(row) ? <p className="mt-0.5 truncate text-xs" title={effectiveCtPhaseInstructions(row) ?? undefined} style={{ color: "var(--text-muted)" }}>{effectiveCtPhaseInstructions(row)}</p> : null}</div>
+                <div className="min-w-0"><p className="text-sm leading-5">{effectiveCtPhaseCoverage(row) ?? "Coverage not specified"}</p>{effectiveCtPhaseReconstruction(row) ? <p className="mt-0.5 truncate text-xs" title={effectiveCtPhaseReconstruction(row) ?? undefined} style={{ color: "var(--text-muted)" }}>{effectiveCtPhaseReconstruction(row)}</p> : null}</div>
+                {editable ? <PhaseActions phaseName={phaseName} onEdit={() => onEdit(row)} onRemove={() => setPendingRemove(row)} onMoveUp={() => move(index, -1)} onMoveDown={() => move(index, 1)} first={index === 0} last={index === detail.ctPhases.length - 1} editing={editingRowId === row.id} /> : <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Read-only</span>}
+              </div>
+              {draft && editable && editingRowId === row.id ? <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>{renderEditor()}</div> : null}
+            </div>;
+          })}
+        </div>
+      </div>
+      <Dialog open={pendingRemove !== null} onClose={() => setPendingRemove(null)}>
+        <DialogContent maxWidth="460px">
+          <DialogHeader><DialogTitle>Remove {pendingRemove?.customPhaseName ?? pendingRemove?.ctPhasePresetName ?? "phase"} phase?</DialogTitle><DialogDescription>This removes the phase from the current draft.</DialogDescription></DialogHeader>
+          <DialogFooter><Button variant="secondary" onClick={() => setPendingRemove(null)}>Cancel</Button><Button variant="destructive" onClick={() => { if (pendingRemove) onRemove(pendingRemove.id); setPendingRemove(null); }}>Remove phase</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -993,17 +1186,18 @@ function CtProtocolRowForm({ draft, presets, setDraft, onSave, onCancel }: { dra
   const legacyPreset = Boolean(draft.ctPhasePresetId && !draft.timingType);
   const effectiveCoverage = draft.coverageOverride?.trim() || selectedPreset?.defaultCoverage?.trim() || null;
   return (
-    <tr><td colSpan={4} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      {legacyPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Legacy preset: {selectedPreset?.name ?? "Unknown preset"} · {formatCtPhaseTiming({ ...draft, presetContrastStatus: selectedPreset?.contrastStatus, presetTimingType: selectedPreset?.timingType, presetDelaySeconds: selectedPreset?.delaySeconds, presetBolusTrackingSite: selectedPreset?.bolusTrackingSite, presetTriggerHu: selectedPreset?.triggerHu, presetInstructions: selectedPreset?.instructions })}</p>}
-      <Field label="Phase name"><input aria-label="Phase name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: editableText(event.target.value) })} /></Field>
-      <Field label="Timing"><select aria-label="Timing" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.timingType ?? ""} onChange={(event) => setDraft({ ...draft, timingType: (event.target.value || null) as ProtocolLibraryCtPhaseRowPayload["timingType"] })}>{legacyPreset && <option value="">Keep legacy preset timing</option>}<option value="NON_CONTRAST">Non-contrast</option><option value="FIXED_DELAY_INJECTION_START">Fixed delay after start</option><option value="FIXED_DELAY_INJECTION_END">Fixed delay after completion</option><option value="BOLUS_TRACKING">Bolus tracking</option><option value="MANUAL">Manual</option></select></Field>
-      {(draft.timingType === "FIXED_DELAY_INJECTION_START" || draft.timingType === "FIXED_DELAY_INJECTION_END") ? <NumberField label={draft.timingType === "FIXED_DELAY_INJECTION_START" ? "Delay after start of IV contrast" : "Delay after completion of IV contrast"} value={draft.delaySeconds} onChange={(value) => setDraft({ ...draft, delaySeconds: nullableNumber(value) })} /> : null}
-      {draft.timingType === "BOLUS_TRACKING" ? <><Field label="Tracking site"><input aria-label="Tracking site" className={inputClass()} value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field><NumberField label="Trigger threshold (HU)" value={draft.triggerHu} onChange={(value) => setDraft({ ...draft, triggerHu: nullableNumber(value) })} /><NumberField label="Post-trigger delay (sec)" value={draft.postTriggerDelaySeconds} onChange={(value) => setDraft({ ...draft, postTriggerDelaySeconds: nullableNumber(value) })} /></> : null}
-      {draft.timingType === "MANUAL" ? <Field label="Timing instructions"><input aria-label="Timing instructions" className={inputClass()} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field> : null}
-      <Field label="Coverage"><input aria-label="Coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
-      <FormActions saving={false} saveLabel="Save phase" canSave={Boolean(draft.customPhaseName?.trim()) && Boolean(draft.timingType || legacyPreset) && Boolean(draft.ctPhasePresetId ? effectiveCoverage : draft.coverageOverride?.trim())} onSave={onSave} onCancel={onCancel} />
-      {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {selectedPreset.contrastStatus} · {selectedPreset.timingType} · {selectedPreset.defaultCoverage ?? "No default coverage"}</p>}
-    </div></td></tr>
+    <div className="space-y-3" role="group" aria-label={`${draft.customPhaseName || "CT phase"} editor`}>
+      {legacyPreset && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Legacy preset: {selectedPreset?.name ?? "Unknown preset"} · {formatCtPhaseTiming({ ...draft, presetContrastStatus: selectedPreset?.contrastStatus, presetTimingType: selectedPreset?.timingType, presetDelaySeconds: selectedPreset?.delaySeconds, presetBolusTrackingSite: selectedPreset?.bolusTrackingSite, presetTriggerHu: selectedPreset?.triggerHu, presetInstructions: selectedPreset?.instructions })}</p>}
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Phase name"><Input aria-label="Phase name" value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: editableText(event.target.value) })} /></Field>
+        <Field label="Timing"><select aria-label="Timing" className={inputClass()} value={draft.timingType ?? ""} onChange={(event) => setDraft({ ...draft, timingType: (event.target.value || null) as ProtocolLibraryCtPhaseRowPayload["timingType"] })}>{legacyPreset && <option value="">Keep legacy preset timing</option>}<option value="NON_CONTRAST">Non-contrast</option><option value="FIXED_DELAY_INJECTION_START">Fixed delay after start</option><option value="FIXED_DELAY_INJECTION_END">Fixed delay after completion</option><option value="BOLUS_TRACKING">Bolus tracking</option><option value="MANUAL">Manual</option></select></Field>
+      </div>
+      {draft.timingType === "BOLUS_TRACKING" ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Trigger</p><div className="mt-2 grid gap-3 md:grid-cols-3"><Field label="Tracking site"><Input aria-label="Tracking site" value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field><NumberField label="Trigger threshold (HU)" value={draft.triggerHu} onChange={(value) => setDraft({ ...draft, triggerHu: nullableNumber(value) })} /><NumberField label="Post-trigger delay (sec)" value={draft.postTriggerDelaySeconds} onChange={(value) => setDraft({ ...draft, postTriggerDelaySeconds: nullableNumber(value) })} /></div></div> : null}
+      {(draft.timingType === "FIXED_DELAY_INJECTION_START" || draft.timingType === "FIXED_DELAY_INJECTION_END") ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Timing</p><div className="mt-2 max-w-xs"><NumberField label={draft.timingType === "FIXED_DELAY_INJECTION_START" ? "Delay after start of IV contrast" : "Delay after completion of IV contrast"} value={draft.delaySeconds} onChange={(value) => setDraft({ ...draft, delaySeconds: nullableNumber(value) })} /></div></div> : null}
+      {draft.timingType === "MANUAL" ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Timing</p><div className="mt-2"><Field label="Timing instructions"><Input aria-label="Timing instructions" value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field></div></div> : null}
+      <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Coverage</p><div className="mt-2"><Field label="Coverage"><Input aria-label="Coverage" value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><div>{selectedPreset && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Preset reference: {selectedPreset.contrastStatus} · {selectedPreset.timingType} · {selectedPreset.defaultCoverage ?? "No default coverage"}</p>}</div><FormActions saving={false} saveLabel="Save phase" canSave={Boolean(draft.customPhaseName?.trim()) && Boolean(draft.timingType || legacyPreset) && Boolean(draft.ctPhasePresetId ? effectiveCoverage : draft.coverageOverride?.trim())} onSave={onSave} onCancel={onCancel} /></div>
+    </div>
   );
 }
 
@@ -1178,6 +1372,15 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
 export function ProtocolingAppointmentWorkspace({ appointmentId, canAssign, onClose, onUpdated }: { appointmentId: number; canAssign: boolean; onClose: () => void; onUpdated?: () => void | Promise<void> }) {
   if (!canAssign) return null;
   return <ProtocolingWorklist canAssign={canAssign} embeddedAppointmentId={appointmentId} onEmbeddedClose={onClose} onEmbeddedUpdated={onUpdated} />;
+}
+
+function PhaseActions({ phaseName, first, last, editing, onEdit, onRemove, onMoveUp, onMoveDown }: { phaseName: string; first: boolean; last: boolean; editing: boolean; onEdit: () => void; onRemove: () => void; onMoveUp: () => void; onMoveDown: () => void }) {
+  return <div className="flex flex-wrap items-center justify-end gap-1">
+    <Button type="button" variant="ghost" size="icon" disabled={first} onClick={onMoveUp} aria-label={`Move ${phaseName} phase up`} title={`Move ${phaseName} phase up`}><ChevronUp size={15} aria-hidden="true" /></Button>
+    <Button type="button" variant="ghost" size="icon" disabled={last} onClick={onMoveDown} aria-label={`Move ${phaseName} phase down`} title={`Move ${phaseName} phase down`}><ChevronDown size={15} aria-hidden="true" /></Button>
+    <Button type="button" variant="secondary" size="sm" onClick={onEdit} aria-label={editing ? `Editing ${phaseName} phase` : `Edit ${phaseName} phase`}>{editing ? "Editing" : "Edit"}</Button>
+    <Button type="button" variant="ghost" size="sm" className="text-red-700" onClick={onRemove} aria-label={`Remove ${phaseName} phase`}>Remove</Button>
+  </div>;
 }
 
 function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }: { loading: boolean; error: unknown; onRetry: () => void; onClose: () => void }) {

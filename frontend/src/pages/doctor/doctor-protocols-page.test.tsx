@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
+import type { ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow, ProtocolLibraryVersion, ProtocolLibraryVersionDetail } from "@/types/api";
+import * as apiHooks from "@/lib/api-hooks";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
 import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
@@ -118,6 +120,9 @@ const me = {
 
 describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     mockFetchAppointments.mockReset();
     mockFetchAppointmentDetail.mockReset();
     mockFetchAppointments.mockResolvedValue([appointment]);
@@ -1043,5 +1048,198 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByRole("textbox", { name: "Oral contrast policy" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Bowel preparation" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Initial change summary" })).toBeTruthy();
+  });
+});
+
+const libraryProtocol = {
+  id: 101,
+  name: "Liver Multiphasic CT",
+  modality: "CT" as const,
+  anatomyRegionId: null,
+  anatomyRegionName: "Liver",
+  category: "General",
+  indication: "Characterize focal liver lesion",
+  contrastPolicy: null,
+  oralContrastPolicy: null,
+  bowelPreparation: null,
+  preparationNotes: null,
+  activeVersionId: 202,
+  activeVersionNumber: "1.7",
+  activeVersionStatus: "ACTIVE" as const,
+  latestDraftVersionId: null,
+  latestDraftVersionNumber: null,
+  isActive: true,
+  createdAt: "2026-09-01T08:00:00.000Z",
+  updatedAt: "2026-09-01T08:00:00.000Z",
+};
+
+const phase = (id: number, orderIndex: number, name: string, timingType: "NON_CONTRAST" | "BOLUS_TRACKING" = "BOLUS_TRACKING") => ({
+  id,
+  protocolVersionId: 201,
+  orderIndex,
+  ctPhasePresetId: null,
+  ctPhasePresetName: null,
+  presetContrastStatus: null,
+  presetTimingType: null,
+  presetDelaySeconds: null,
+  presetBolusTrackingSite: null,
+  presetTriggerHu: null,
+  presetDefaultCoverage: null,
+  presetReconstructionNotes: null,
+  presetInstructions: null,
+  customPhaseName: name,
+  timingOverride: null,
+  timingType,
+  delaySeconds: null,
+  bolusTrackingSite: timingType === "BOLUS_TRACKING" ? "Abdominal aorta" : null,
+  triggerHu: timingType === "BOLUS_TRACKING" ? 150 : null,
+  postTriggerDelaySeconds: timingType === "BOLUS_TRACKING" ? 18 : null,
+  coverageOverride: "Liver dome to lower margin",
+  reconstructionOverride: null,
+  instructionsOverride: null,
+  isRequired: true,
+  createdAt: "2026-09-01T08:00:00.000Z",
+  updatedAt: "2026-09-01T08:00:00.000Z",
+});
+
+const draftVersion: ProtocolLibraryVersion = { id: 201, protocolId: 101, versionNumber: "1.0", status: "DRAFT", changeSummary: "Initial protocol version", protocolNotes: null, createdBy: 1, approvedBy: null, approvedAt: null, retiredAt: null, createdAt: "2026-09-01T08:00:00.000Z", updatedAt: "2026-09-01T08:00:00.000Z" };
+const activeVersion: ProtocolLibraryVersion = { ...draftVersion, id: 202, versionNumber: "1.7", status: "ACTIVE", changeSummary: "Approved liver multiphasic protocol", protocolNotes: "Use for characterization of indeterminate focal liver lesions." };
+const technique: ProtocolLibraryCtTechniqueRow = { id: 301, protocolVersionId: 202, scannerId: 401, scannerName: "GE Revolution CT", scannerVendor: "GE Healthcare", scannerModel: "Revolution CT", kvMode: "FIXED", kvp: 120, tubeCurrentMode: "AUTOMATIC", fixedMa: null, referenceMas: null, exposureControl: "SmartmA", noiseIndex: 25, minMa: 100, maxMa: 500, reconstructionMethod: "ASiR-V", reconstructionStrength: "40", reconstructionImageDefinition: null, sliceThicknessMm: 1.25, reconstructionIntervalMm: 0.625, kernel: "STANDARD", createdAt: "2026-09-01T08:00:00.000Z", updatedAt: "2026-09-01T08:00:00.000Z" };
+
+function libraryDetail(version: ProtocolLibraryVersion = draftVersion, phases?: ProtocolLibraryCtPhaseRow[], techniques: ProtocolLibraryCtTechniqueRow[] = []): ProtocolLibraryVersionDetail {
+  const phaseRows = phases ?? [phase(1, 1, "Noncontrast", "NON_CONTRAST"), phase(2, 2, "Arterial"), phase(3, 3, "Portal venous"), phase(4, 4, "Delayed")];
+  return { protocol: { ...libraryProtocol, activeVersionId: version.status === "ACTIVE" ? version.id : null, activeVersionNumber: version.status === "ACTIVE" ? version.versionNumber : null, activeVersionStatus: version.status === "ACTIVE" ? "ACTIVE" : null, latestDraftVersionId: version.status === "DRAFT" ? version.id : null, latestDraftVersionNumber: version.status === "DRAFT" ? version.versionNumber : null }, version, ctPhases: phaseRows, mriSequences: [], ctTechniques: techniques };
+}
+
+describe("CT protocol library workbench", () => {
+  beforeEach(() => {
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([libraryProtocol]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail());
+    vi.mocked(apiHooks.fetchProtocolLibraryAnatomyRegions).mockResolvedValue([]);
+    vi.mocked(apiHooks.fetchProtocolLibraryScanners).mockResolvedValue([{ id: 401, name: "GE Revolution CT", modality: "CT", vendor: "GE Healthcare", model: "Revolution CT", fieldStrength: null, ctSliceDetectorSpecification: null, location: null, notes: null, isActive: true, createdAt: "2026-09-01T08:00:00.000Z", updatedAt: "2026-09-01T08:00:00.000Z" }]);
+    vi.mocked(apiHooks.fetchProtocolLibraryCtPhasePresets).mockResolvedValue([]);
+    vi.mocked(apiHooks.fetchProtocolLibraryMriSequencePresets).mockResolvedValue([]);
+    vi.mocked(apiHooks.createProtocolLibraryProtocol).mockResolvedValue({ protocol: libraryProtocol, version: draftVersion });
+    vi.mocked(apiHooks.activateProtocolLibraryVersion).mockResolvedValue(libraryDetail(activeVersion));
+    vi.mocked(apiHooks.deleteProtocolLibraryCtPhaseRow).mockResolvedValue(libraryDetail());
+  });
+
+  it("renders the empty draft as a phase-first workspace with disabled publish", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(draftVersion, []));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Protocol name" }), "Liver Multiphasic CT");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByTestId("protocol-builder")).toBeTruthy();
+    expect(screen.getByText("Internal protocol notes")).toBeTruthy();
+    expect(screen.getByText("No phases yet")).toBeTruthy();
+    expect(screen.getByText("Build this CT protocol by adding acquisitions in scan order.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish protocol" })).toHaveProperty("disabled", true);
+    expect(screen.queryByText("CT protocol summary")).toBeNull();
+  });
+
+  it("renders phase readbacks and scanner summaries without duplicating the protocol summary", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(activeVersion, undefined, [technique]));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    expect(await screen.findByText("Liver Multiphasic CT")).toBeTruthy();
+    expect(screen.getByText("Portal venous")).toBeTruthy();
+    expect(screen.getAllByText("Bolus tracking · Abdominal aorta · 150 HU · +18 sec").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 scanner configured")).toBeTruthy();
+    expect(screen.queryByText("CT protocol summary")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Internal protocol notes" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
+    expect(screen.getByText("120 kVp · SmartmA · NI 25 · 100–500 mA · ASiR-V 40% · 1.25 / 0.625 mm · STANDARD")).toBeTruthy();
+  });
+
+  it("shows resulting revision versions and exact duplicate source context", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(activeVersion, undefined, [technique]));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create revision" }));
+    expect(screen.getByRole("heading", { name: "Create revision" })).toBeTruthy();
+    expect(screen.getByText("Creates v1.8")).toBeTruthy();
+    expect(screen.getByText("Creates v2.0")).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+    expect(screen.getByRole("heading", { name: "Duplicate protocol" })).toBeTruthy();
+    expect(screen.getByText("Source: Liver Multiphasic CT · v1.7 · ACTIVE")).toBeTruthy();
+    expect(screen.getByText("4 CT phases · 1 scanner technique")).toBeTruthy();
+  });
+
+  it("confirms phase removal through a shared dialog", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Arterial phase" }));
+    expect(screen.getByRole("heading", { name: "Remove Arterial phase?" })).toBeTruthy();
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove phase" }));
+    await waitFor(() => expect(apiHooks.deleteProtocolLibraryCtPhaseRow).toHaveBeenCalledWith(201, 2));
+  });
+
+  it("shows publish review content for a populated draft", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([{ ...libraryProtocol, activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: 201, latestDraftVersionNumber: "1.0" }]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(draftVersion, undefined, [technique]));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Publish protocol" }));
+    expect(screen.getByRole("heading", { name: "Publish protocol?" })).toBeTruthy();
+    expect(screen.getByText("Liver Multiphasic CT · v1.0")).toBeTruthy();
+    expect(screen.getByText("4 CT phases · 1 scanner technique")).toBeTruthy();
+    expect(screen.getByText("This version will become the active protocol used for future assignments.")).toBeTruthy();
+  });
+
+  it("confirms scanner-technique removal through a shared dialog", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([{ ...libraryProtocol, activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: 201, latestDraftVersionNumber: "1.0" }]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(draftVersion, undefined, [technique]));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Remove" }).at(-1)!);
+    expect(screen.getByRole("heading", { name: "Remove GE Revolution CT technique?" })).toBeTruthy();
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Remove GE Revolution CT technique?" })).toBeNull();
+  });
+
+  it("protects dirty Advanced Technique edits before collapsing", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail(draftVersion, undefined, [technique]));
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([{ ...libraryProtocol, activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: 201, latestDraftVersionNumber: "1.0" }]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.clear(screen.getByLabelText("Noise Index"));
+    await userEvent.type(screen.getByLabelText("Noise Index"), "30");
+    await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
+    expect(screen.getByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Keep editing" })).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect((screen.getByLabelText("Noise Index") as HTMLInputElement).value).toBe("30");
   });
 });
