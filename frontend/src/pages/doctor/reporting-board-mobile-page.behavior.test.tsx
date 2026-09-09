@@ -73,6 +73,7 @@ function viewData(): ReportingBoardMobileResponse {
     filters: {},
     filterSummary: [],
     counters: { total: 0, assignedToMe: 0, unassigned: 0, urgent: 0, requiredNotFinal: 0, overdue: 0 },
+    finalizedStats: null,
     totalCount: 0,
     pagination: { limit: 40, offset: 0, hasMore: false, nextOffset: null },
     cases: [],
@@ -801,6 +802,7 @@ describe("Personal Reporting Desk case presentation", () => {
     testState.fetchView.mockResolvedValue({
       ...view,
       counters: { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, requiredNotFinal: 0, overdue: 0 },
+      finalizedStats: { total: 3, risproAssigned: 1, sonicDicomOnly: 2 },
       cases: [makeCase({ reportStatus: "final", canAssignToMe: false })],
     });
     renderPage();
@@ -813,6 +815,10 @@ describe("Personal Reporting Desk case presentation", () => {
     expect((screen.getByRole("button", { name: /Available 0/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /Urgent 0/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /Overdue 0/ }) as HTMLButtonElement).disabled).toBe(true);
+    const provenance = screen.getByLabelText("Finalized history provenance").textContent;
+    expect(provenance).to.contain("RISpro assigned: 1");
+    expect(provenance).to.contain("SonicDICOM only: 2");
+    expect(provenance).to.contain("Total finalized: 3");
   });
 
   it("opens history from the card without opening Details first", async () => {

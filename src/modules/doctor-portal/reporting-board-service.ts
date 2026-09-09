@@ -38,6 +38,7 @@ import {
   getReportingBoardPushSubscriptionStatus,
   listReportingBoardBulkAssignmentJobs,
   listReportingBoardCasesByAppointmentIds,
+  listPreFinalRisproAssignedAppointmentIds,
   listReportingBoardCaseCandidates,
   listReportingBoardNotifications,
   listReportingBoardStatsRows,
@@ -84,6 +85,7 @@ import type {
   ReportingBoardStatsBaseRow,
   ReportingBoardStatsResponse,
   ReportingBoardStatsSummary,
+  ReportingBoardFinalizedHistoryStats,
   DoctorReportingWorklistSummary,
 } from "./reporting-board-types.js";
 import type { ClaimedReportingBoardBulkAssignmentJob } from "./reporting-board-repository.js";
@@ -1498,6 +1500,20 @@ function filterSummary(filters: ReportingBoardFilters): string[] {
   ].filter(Boolean) as string[];
 }
 
+async function finalizedHistoryStats(cases: ReportingBoardCaseRow[], doctorId: number): Promise<ReportingBoardFinalizedHistoryStats> {
+  const finalizedAppointments = cases
+    .filter((row) => row.caseType === "appointment" && row.reportFinalAt)
+    .map((row) => ({ appointmentId: row.appointmentId, reportFinalAt: row.reportFinalAt! }));
+  const preFinalRisproAssignedIds = await listPreFinalRisproAssignedAppointmentIds({ doctorId, finalizedAppointments });
+  return {
+    total: cases.length,
+    risproAssigned: cases.filter((row) => row.caseType === "appointment" && preFinalRisproAssignedIds.has(row.appointmentId)).length,
+    sonicDicomOnly: cases.filter((row) =>
+      row.caseType === "appointment" && row.finalizedByDoctorId === doctorId && !preFinalRisproAssignedIds.has(row.appointmentId)
+    ).length,
+  };
+}
+
 async function doctorWorklistScope(
   doctorId: number,
   input: ReportingBoardFilters = {},
@@ -1656,6 +1672,9 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const finalizedByPersonalDoctor = finalizedDoctorWorklist && personalDoctorId
     ? allCases.filter((row) => row.finalizedByDoctorId === personalDoctorId || row.manualFinalByDoctorId === personalDoctorId)
     : allCases;
+  const finalizedStats = finalizedDoctorWorklist && personalDoctorId
+    ? await finalizedHistoryStats(finalizedByPersonalDoctor, personalDoctorId)
+    : null;
   const resultCases = applyMobileQuickTab(
     finalizedByPersonalDoctor,
     { ...input, assignedDoctorId: input.assignedDoctorId ?? personalDoctorId },
@@ -1698,6 +1717,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       finalizedDoctorWorklist,
       personalDeskDoctorId
     ),
+    finalizedStats,
     totalCount: resultCases.length,
     pagination: {
       limit: filters.limit,
@@ -2628,19 +2648,25 @@ export async function assignReportingBoardCaseToDoctor(
 ) {
   await requireRosterManager(actor);
   const rows = await listReportingBoardCasesByAppointmentIds([input.appointmentId]);
+  const existing = rows.find((row) => row.caseType === "appointment" && row.appointmentId === input.appointmentId);
   const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
-  if (verification.finalIds.has(input.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
   if (verification.unavailableIds.has(input.appointmentId)) throw new HttpError(503, "Report finality could not be verified. Please try again.");
+  const retrospectiveFinalAssignment = verification.finalIds.has(input.appointmentId) && existing?.assignmentStatus === "unassigned";
+  if (verification.finalIds.has(input.appointmentId) && !retrospectiveFinalAssignment) {
+    throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
+  }
   const result = await assignDoctorCase(actor, {
     appointmentId: input.appointmentId,
     doctorId: input.doctorId,
     reason: input.reason ?? null,
   });
-  await createAssignedToMeNotifications({
-    doctorId: input.doctorId,
-    appointmentIds: [input.appointmentId],
-    appointmentNotes: { [input.appointmentId]: input.reason ?? null },
-  });
+  if (!retrospectiveFinalAssignment) {
+    await createAssignedToMeNotifications({
+      doctorId: input.doctorId,
+      appointmentIds: [input.appointmentId],
+      appointmentNotes: { [input.appointmentId]: input.reason ?? null },
+    });
+  }
   return result;
 }
 

@@ -383,6 +383,12 @@ export interface BulkUnassignSelectedCasesResult {
   skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
+export interface ReportingBoardFinalizedHistoryStats {
+  total: number;
+  risproAssigned: number;
+  sonicDicomOnly: number;
+}
+
 export interface BulkPlaceReportingHoldSelectedCasesInput {
   appointmentIds: number[];
   reason: string;

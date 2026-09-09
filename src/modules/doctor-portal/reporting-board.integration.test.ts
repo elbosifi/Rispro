@@ -2594,6 +2594,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const label = uniq("personal_finalized_owner");
     const manualFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} manual` });
     const sonicFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} sonic` });
+    const risproSonicFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} rispro sonic` });
+    const retrospectiveSonicFinal = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} retrospective sonic` });
     const comparisonSourceA = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} comparison a source` });
     const comparisonSourceB = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} comparison b source` });
     const comparisonFinalA = await createComparisonRequestForBooking(comparisonSourceA, `${date}T08:00:00.000Z`, `${label} comparison a`);
@@ -2602,17 +2604,39 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
     await pool.query(`insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id, created_by_doctor_id) values ($1, 'personal history test', $2, $3)`, [manualFinal, targetDoctor.id, targetDoctor.doctorId]);
     await assignDirectly(sonicFinal, otherDoctor.doctorId);
+    await assignDirectly(risproSonicFinal, targetDoctor.doctorId, "2026-08-23T10:00:00.000Z");
     await pool.query(`update users set username = $2 where id = $1`, [targetDoctor.id, finalizerEmail]);
     await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
       { bookingId: sonicFinal, accessionNumber: `V2-${String(sonicFinal).padStart(6, "0")}`, studyInstanceUid: `1.2.840.personal.${sonicFinal}`, requiresReport: true, status: "completed" },
       { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "personal-final", finalizedByAccount: finalizerEmail, correlationMethod: "study_instance_uid" }
     );
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      { bookingId: risproSonicFinal, accessionNumber: `V2-${String(risproSonicFinal).padStart(6, "0")}`, studyInstanceUid: `1.2.840.personal.${risproSonicFinal}`, requiresReport: true, status: "completed" },
+      { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "personal-rispro-final", finalizedByAccount: finalizerEmail, correlationMethod: "study_instance_uid" }
+    );
+    sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
+      checkStatusesBatch: async (contexts) => new Map(contexts.map((context) => [context.bookingId, {
+        state: "final" as const, canViewReport: true, source: "sonicdicom" as const,
+        reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "personal-retrospective-final",
+        finalizedByAccount: finalizerEmail, correlationMethod: "study_instance_uid" as const,
+      }])),
+      fetchDocumentHistoriesBatch: async () => { throw new Error("history unavailable"); },
+    });
+    try {
+      const retrospectiveAssignment = await api(supervisor.cookie, `/api/doctor/reporting-board/${retrospectiveSonicFinal}/assign-doctor`, {
+        method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "post-final recordkeeping attribution" },
+      });
+      assert.equal(retrospectiveAssignment.status, 200, JSON.stringify(retrospectiveAssignment.data));
+    } finally {
+      installDefaultSonicDicomReadersForTest();
+    }
     await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonFinalA, targetDoctor.id]);
     await pool.query(`update comparison_requests set status = 'finalized', finalized_by = $2, finalized_at = now() where id = $1`, [comparisonFinalB, otherDoctor.id]);
 
     const worklist = await getDoctorWorklist(targetDoctor, false);
     type FinalizedMobileView = {
       counters: { assignedToMe: number | null; unassigned: number; urgent: number; overdue: number; requiredNotFinal: number };
+      finalizedStats: { total: number; risproAssigned: number; sonicDicomOnly: number } | null;
       cases: Array<{ appointmentId: number; comparisonRequestId: number | null; finalizedByDoctorId: number | null; manualFinalByDoctorId?: number | null }>;
     };
     const finalizedPath = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`;
@@ -2625,9 +2649,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(supervisorView.status, 200, JSON.stringify(supervisorView.data));
     assert.equal(adminView.status, 200, JSON.stringify(adminView.data));
     for (const view of [ownerView, supervisorView, adminView]) {
-      assert.deepEqual(view.data.counters, { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
+      assert.deepEqual(view.data.counters, { total: 5, assignedToMe: 5, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
+      assert.deepEqual(view.data.finalizedStats, { total: 5, risproAssigned: 1, sonicDicomOnly: 2 });
       assert.equal(view.data.cases.some((row) => row.appointmentId === manualFinal), true);
       assert.equal(view.data.cases.some((row) => row.appointmentId === sonicFinal && row.finalizedByDoctorId === targetDoctor.doctorId), true);
+      assert.equal(view.data.cases.some((row) => row.appointmentId === risproSonicFinal && row.finalizedByDoctorId === targetDoctor.doctorId), true);
+      assert.equal(view.data.cases.some((row) => row.appointmentId === retrospectiveSonicFinal && row.finalizedByDoctorId === targetDoctor.doctorId), true);
       assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparisonFinalA && row.finalizedByDoctorId === targetDoctor.doctorId), true);
       assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparisonFinalB), false);
     }
@@ -2635,7 +2662,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const finalizedAvailable = await api<FinalizedMobileView>(supervisor.cookie, `${finalizedPath}&mobileQuickTab=available`);
     assert.equal(finalizedAvailable.status, 200, JSON.stringify(finalizedAvailable.data));
     assert.deepEqual(finalizedAvailable.data.cases, []);
-    assert.deepEqual(finalizedAvailable.data.counters, { total: 3, assignedToMe: 3, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
+    assert.deepEqual(finalizedAvailable.data.counters, { total: 5, assignedToMe: 5, unassigned: 0, urgent: 0, overdue: 0, requiredNotFinal: 0 });
+    assert.deepEqual(finalizedAvailable.data.finalizedStats, { total: 5, risproAssigned: 1, sonicDicomOnly: 2 });
 
     const otherWorklist = await getDoctorWorklist(otherDoctor, false);
     const otherFinal = await api<FinalizedMobileView>(otherDoctor.cookie, `/api/reporting/saved-views/public/${otherWorklist.token}/mobile?q=${encodeURIComponent(label)}&reportStatus=final&mobileQuickTab=my_cases&limit=100`);
@@ -4009,12 +4037,16 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
-  it("blocks a supervisor from assigning an unassigned SonicDICOM-final appointment", async () => {
+  it("allows a supervisor to assign an unassigned SonicDICOM-final appointment without changing finality", async () => {
     guard();
     const date = addDays(48);
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual final attribution" });
-    statusByAppointmentId.set(appointmentId, "final");
-    await statusByAppointmentId.flush();
+    const finalAt = "2026-08-23T11:00:00.000Z";
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "final");
+    await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
+      { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: `1.2.840.manual.${appointmentId}`, requiresReport: true, status: "completed" },
+      { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: finalAt, latestDocumentId: "manual-final-document", finalizedByAccount: "unmapped.finalizer@nccb.ly", correlationMethod: "study_instance_uid" }
+    );
 
     const board = await api<{ cases: Array<{ appointmentId: number; reportStatus: string; canAssign: boolean; exclusionReason: string | null }> }>(
       supervisor.cookie,
@@ -4026,20 +4058,30 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       reportStatus: "final", canAssign: true, exclusionReason: null,
     });
 
-    const assigned = await api<{ error: string }>(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+    const assigned = await api<{ assignmentId: number }>(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
       method: "POST",
       body: { doctorId: targetDoctor.doctorId, reason: "attribute completed final report" },
     });
-    assert.equal(assigned.status, 409, JSON.stringify(assigned.data));
-    assert.equal(assigned.data.error, "Case is already final in SonicDICOM and cannot be assigned.");
+    assert.equal(assigned.status, 200, JSON.stringify(assigned.data));
     assert.equal((await pool.query(
       `select 1 from doctor_portal.case_team_assignments where appointment_id = $1 and assigned_doctor_id = $2 and assignment_type = 'reporting' and status = 'active'`,
       [appointmentId, targetDoctor.doctorId]
-    )).rowCount, 0);
+    )).rowCount, 1);
+    assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where appointment_id = $1 and recipient_doctor_id = $2 and event_type = 'reporting_case_assigned_to_me'`, [appointmentId, targetDoctor.doctorId])).rowCount, 0);
+    const cache = (await pool.query<{ report_status: string; report_final_at: string | null; finalized_by_account: string | null; latest_document_id: string | null; correlation_method: string | null }>(`select report_status, report_final_at::text, sonicdicom_finalized_by_account as finalized_by_account, sonicdicom_latest_document_id as latest_document_id, correlation_method from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`, [appointmentId])).rows[0];
+    assert.equal(cache?.report_status, "final");
+    assert.equal(new Date(String(cache?.report_final_at)).toISOString(), finalAt);
+    assert.equal(cache?.finalized_by_account, "unmapped.finalizer@nccb.ly");
+    assert.equal(cache?.latest_document_id, "manual-final-document");
+    assert.equal(cache?.correlation_method, "study_instance_uid");
     assert.equal((await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
       supervisor.cookie,
       `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=final`
     )).data.cases.find((caseRow) => caseRow.appointmentId === appointmentId)?.reportStatus, "final");
+    assert.equal((await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=required_not_final`
+    )).data.cases.some((caseRow) => caseRow.appointmentId === appointmentId), false);
   });
 
   it("blocks a supervisor from reassigning a SonicDICOM-final appointment", async () => {

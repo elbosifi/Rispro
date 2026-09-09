@@ -1584,6 +1584,31 @@ export async function findActiveManualFinalOverride(appointmentId: number): Prom
   return result.rows[0] ? manualFinalOverride(result.rows[0]) : null;
 }
 
+export async function listPreFinalRisproAssignedAppointmentIds(input: {
+  doctorId: number;
+  finalizedAppointments: Array<{ appointmentId: number; reportFinalAt: string }>;
+}): Promise<Set<number>> {
+  if (!input.finalizedAppointments.length) return new Set();
+  const result = await pool.query<{ appointment_id: number }>(
+    `
+      select distinct assignment.appointment_id
+      from doctor_portal.case_team_assignments assignment
+      join unnest($1::bigint[], $2::timestamptz[]) as finalized(appointment_id, report_final_at)
+        on finalized.appointment_id = assignment.appointment_id
+      where assignment.assignment_type = 'reporting'
+        and assignment.assigned_doctor_id = $3
+        and assignment.assignment_origin = 'rispro'
+        and assignment.assigned_at <= finalized.report_final_at
+    `,
+    [
+      input.finalizedAppointments.map((row) => row.appointmentId),
+      input.finalizedAppointments.map((row) => row.reportFinalAt),
+      input.doctorId,
+    ]
+  );
+  return new Set(result.rows.map((row) => Number(row.appointment_id)));
+}
+
 export async function findActiveReportingBoardCaseHold(appointmentId: number): Promise<ReportingBoardCaseHoldSummary | null> {
   const result = await pool.query<ReportingBoardCaseHoldRecord>(
     `

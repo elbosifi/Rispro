@@ -961,6 +961,11 @@ export interface ReportingBoardMobileResponse {
     requiredNotFinal: number;
     overdue: number;
   };
+  finalizedStats: {
+    total: number;
+    risproAssigned: number;
+    sonicDicomOnly: number;
+  } | null;
   totalCount: number;
   pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
   cases: ReportingBoardMobileCase[];

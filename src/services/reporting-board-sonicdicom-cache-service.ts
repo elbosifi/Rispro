@@ -489,16 +489,16 @@ export async function persistReportingBoardSonicDicomCacheResults(
       from prepared
       on conflict (appointment_id) do update set
         report_status = case when excluded.last_success_at is not null then excluded.report_status else doctor_portal.reporting_board_sonicdicom_cache.report_status end,
-        report_final_at = case when excluded.last_success_at is not null then excluded.report_final_at else doctor_portal.reporting_board_sonicdicom_cache.report_final_at end,
-        sonicdicom_latest_document_id = case when excluded.last_success_at is not null then excluded.sonicdicom_latest_document_id else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id end,
-        sonicdicom_finalized_by_account = case when excluded.last_success_at is not null then excluded.sonicdicom_finalized_by_account else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account end,
-        finalized_by_doctor_id = case when excluded.last_success_at is not null then excluded.finalized_by_doctor_id else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_doctor_id end,
+        report_final_at = case when excluded.last_success_at is not null and excluded.report_status = 'final' then coalesce(excluded.report_final_at, doctor_portal.reporting_board_sonicdicom_cache.report_final_at) when excluded.last_success_at is not null then excluded.report_final_at else doctor_portal.reporting_board_sonicdicom_cache.report_final_at end,
+        sonicdicom_latest_document_id = case when excluded.last_success_at is not null and excluded.report_status = 'final' then coalesce(excluded.sonicdicom_latest_document_id, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id) when excluded.last_success_at is not null then excluded.sonicdicom_latest_document_id else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id end,
+        sonicdicom_finalized_by_account = case when excluded.last_success_at is not null and excluded.report_status = 'final' then coalesce(excluded.sonicdicom_finalized_by_account, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account) when excluded.last_success_at is not null then excluded.sonicdicom_finalized_by_account else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account end,
+        finalized_by_doctor_id = case when excluded.last_success_at is not null and excluded.report_status = 'final' and nullif(btrim(excluded.sonicdicom_finalized_by_account), '') is null then doctor_portal.reporting_board_sonicdicom_cache.finalized_by_doctor_id when excluded.last_success_at is not null then excluded.finalized_by_doctor_id else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_doctor_id end,
         finalized_by_name_ar_snapshot = case
           when doctor_portal.reporting_board_sonicdicom_cache.report_status = 'final'
             and excluded.report_status = 'final'
-            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(excluded.sonicdicom_finalized_by_account))
-            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from excluded.sonicdicom_latest_document_id
-            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from excluded.report_final_at
+            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(coalesce(excluded.sonicdicom_finalized_by_account, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)))
+            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from coalesce(excluded.sonicdicom_latest_document_id, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id)
+            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from coalesce(excluded.report_final_at, doctor_portal.reporting_board_sonicdicom_cache.report_final_at)
             then doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_ar_snapshot
           when excluded.last_success_at is not null then excluded.finalized_by_name_ar_snapshot
           else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_ar_snapshot
@@ -506,9 +506,9 @@ export async function persistReportingBoardSonicDicomCacheResults(
         finalized_by_name_en_snapshot = case
           when doctor_portal.reporting_board_sonicdicom_cache.report_status = 'final'
             and excluded.report_status = 'final'
-            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(excluded.sonicdicom_finalized_by_account))
-            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from excluded.sonicdicom_latest_document_id
-            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from excluded.report_final_at
+            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(coalesce(excluded.sonicdicom_finalized_by_account, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)))
+            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from coalesce(excluded.sonicdicom_latest_document_id, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id)
+            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from coalesce(excluded.report_final_at, doctor_portal.reporting_board_sonicdicom_cache.report_final_at)
             then doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_en_snapshot
           when excluded.last_success_at is not null then excluded.finalized_by_name_en_snapshot
           else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_en_snapshot
@@ -516,14 +516,14 @@ export async function persistReportingBoardSonicDicomCacheResults(
         finalized_by_username_snapshot = case
           when doctor_portal.reporting_board_sonicdicom_cache.report_status = 'final'
             and excluded.report_status = 'final'
-            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(excluded.sonicdicom_finalized_by_account))
-            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from excluded.sonicdicom_latest_document_id
-            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from excluded.report_final_at
+            and lower(btrim(doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)) is not distinct from lower(btrim(coalesce(excluded.sonicdicom_finalized_by_account, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account)))
+            and doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id is not distinct from coalesce(excluded.sonicdicom_latest_document_id, doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id)
+            and doctor_portal.reporting_board_sonicdicom_cache.report_final_at is not distinct from coalesce(excluded.report_final_at, doctor_portal.reporting_board_sonicdicom_cache.report_final_at)
             then doctor_portal.reporting_board_sonicdicom_cache.finalized_by_username_snapshot
           when excluded.last_success_at is not null then excluded.finalized_by_username_snapshot
           else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_username_snapshot
         end,
-        correlation_method = case when excluded.last_success_at is not null then excluded.correlation_method else doctor_portal.reporting_board_sonicdicom_cache.correlation_method end,
+        correlation_method = case when excluded.last_success_at is not null and excluded.report_status = 'final' then coalesce(excluded.correlation_method, doctor_portal.reporting_board_sonicdicom_cache.correlation_method) when excluded.last_success_at is not null then excluded.correlation_method else doctor_portal.reporting_board_sonicdicom_cache.correlation_method end,
         sonicdicom_study_note = case when excluded.last_success_at is not null then excluded.sonicdicom_study_note else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_study_note end,
         source = case when excluded.last_success_at is not null then 'sonicdicom' else doctor_portal.reporting_board_sonicdicom_cache.source end,
         last_success_at = coalesce(excluded.last_success_at, doctor_portal.reporting_board_sonicdicom_cache.last_success_at), last_attempt_at = now(), next_check_at = excluded.next_check_at,
