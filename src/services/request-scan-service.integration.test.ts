@@ -34,6 +34,7 @@ import {
 import { claimRequestScanJob, recoverExpiredRequestScanJobs, updateRequestScanCheckpoint } from "./request-scan-processing-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
+import { SmbCommandError } from "./backup-v3-smb-destination.js";
 import { __resetAuthoritativeOrthancForTests, __setAuthoritativeOrthancSettingsForTests } from "./authoritative-orthanc-service.js";
 
 const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], examTypes: [] as number[], users: [] as number[] };
@@ -474,6 +475,113 @@ test("modality inbox paths are exact and unsafe modality codes are rejected", ()
   }
 });
 
+test("healthy empty Request Scan inboxes list without repeated folder provisioning", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const workerId = `healthy-empty-${suffix()}`;
+  const listed: string[] = [];
+  const provisioned: string[][] = [];
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  assert.equal(await acquireRequestScanWorkerLeadership(workerId), true);
+  try {
+    const result = await runRequestScanCycle(
+      { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" },
+      {
+        ...dependencies({ ok: false, reason: "no_barcode" }, { diagnostics }),
+        listActiveModalities: async () => [{ id: 101, code: "CT" }, { id: 102, code: "MR" }],
+        ensureRequestScanFolders: async (_settings, folders) => { provisioned.push(folders); },
+        listRequestScanFiles: async (_settings, _dependencies, incomingSubfolder) => { listed.push(incomingSubfolder!); return []; },
+      },
+      workerId,
+    );
+    assert.deepEqual(result, { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 });
+  } finally {
+    await releaseRequestScanWorkerLeadership(workerId);
+  }
+  assert.deepEqual(listed, ["Requests/Incoming", "ModalityDocuments\\CT\\Incoming", "ModalityDocuments\\MR\\Incoming"]);
+  assert.equal(provisioned.length, 0);
+  const discovery = diagnostics.find(({ event }) => event === "request_scan_discovery")?.metadata;
+  assert.equal(discovery?.inboxesInspected, 3);
+  assert.equal(discovery?.incomingFiles, 0);
+  assert.equal(diagnostics.find(({ event }) => event === "request_scan_cycle")?.metadata.cycleReason, "scheduled");
+});
+
+test("a missing Request Scan inbox provisions only that inbox and retries its listing once", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const workerId = `missing-inbox-${suffix()}`;
+  const listed: string[] = [];
+  const provisioned: string[][] = [];
+  const missingIncoming = "ModalityDocuments\\CT\\Incoming";
+  assert.equal(await acquireRequestScanWorkerLeadership(workerId), true);
+  try {
+    await runRequestScanCycle(
+      { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" },
+      {
+        ...dependencies({ ok: false, reason: "no_barcode" }),
+        listActiveModalities: async () => [{ id: 101, code: "CT" }, { id: 102, code: "MR" }],
+        ensureRequestScanFolders: async (_settings, folders) => { provisioned.push(folders); },
+        listRequestScanFiles: async (_settings, _dependencies, incomingSubfolder) => {
+          listed.push(incomingSubfolder!);
+          if (incomingSubfolder === missingIncoming && listed.filter((folder) => folder === missingIncoming).length === 1) {
+            throw new SmbCommandError(502, "Configured SMB folder was not found.", "not_found");
+          }
+          return [];
+        },
+      },
+      workerId,
+    );
+  } finally {
+    await releaseRequestScanWorkerLeadership(workerId);
+  }
+  assert.equal(listed.filter((folder) => folder === missingIncoming).length, 2);
+  assert.equal(provisioned.length, 1);
+  assert.deepEqual(provisioned[0], ["ModalityDocuments\\CT\\Incoming", "ModalityDocuments\\CT\\Processed", "ModalityDocuments\\CT\\Failed"]);
+  assert.equal(listed.filter((folder) => folder === "Requests/Incoming").length, 1);
+  assert.equal(listed.filter((folder) => folder === "ModalityDocuments\\MR\\Incoming").length, 1);
+});
+
+test("non-missing Request Scan SMB failures do not trigger folder provisioning", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  for (const smbCode of ["authentication", "permission", "network", "timeout"] as const) {
+    const workerId = `non-missing-${smbCode}-${suffix()}`;
+    let listed = 0;
+    let provisioned = 0;
+    assert.equal(await acquireRequestScanWorkerLeadership(workerId), true);
+    try {
+      await assert.rejects(
+        () => runRequestScanCycle(settings, {
+          ...dependencies({ ok: false, reason: "no_barcode" }),
+          ensureRequestScanFolders: async () => { provisioned += 1; },
+          listRequestScanFiles: async () => { listed += 1; throw new SmbCommandError(502, "SMB failure", smbCode); },
+        }, workerId),
+        /Every Request Scan inbox failed/,
+      );
+    } finally {
+      await releaseRequestScanWorkerLeadership(workerId);
+    }
+    assert.equal(listed, 1, smbCode);
+    assert.equal(provisioned, 0, smbCode);
+  }
+});
+
+test("all unavailable Request Scan inboxes retain the aggregate failure contract", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const workerId = `all-inboxes-failed-${suffix()}`;
+  assert.equal(await acquireRequestScanWorkerLeadership(workerId), true);
+  try {
+    await assert.rejects(
+      () => runRequestScanCycle({ ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, {
+        ...dependencies({ ok: false, reason: "no_barcode" }),
+        listActiveModalities: async () => [{ id: 101, code: "CT" }],
+        ensureRequestScanFolders: async () => { throw new Error("folder provisioning must not run"); },
+        listRequestScanFiles: async () => { throw new SmbCommandError(502, "SMB permission denied.", "permission"); },
+      }, workerId),
+      /Every Request Scan inbox failed/,
+    );
+  } finally {
+    await releaseRequestScanWorkerLeadership(workerId);
+  }
+});
+
 test("one cycle processes Reception and CT while isolating an unavailable MRI inbox and unsafe modality code", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
@@ -498,11 +606,12 @@ test("one cycle processes Reception and CT while isolating an unavailable MRI in
           { id: booking.modalityId + 200_000, code: "../unsafe" },
         ],
         ensureRequestScanFolders: async (_settings, folders) => {
-          if (folders.some((folder) => folder.includes("\\MRI\\"))) throw Object.assign(new Error("MRI share unavailable"), { code: "ENOENT" });
+          if (folders.some((folder) => folder.includes("\\MRI\\"))) throw new SmbCommandError(502, "Configured SMB folder was not found.", "not_found");
         },
         listRequestScanFiles: async (_settings, _limit, incomingSubfolder) => {
           if (incomingSubfolder === settings.incomingSubfolder) return [{ filename: receptionFilename, relativePath: `Requests\\Incoming\\${receptionFilename}`, modifiedAt: null }];
           if (incomingSubfolder === `ModalityDocuments\\${code}\\Incoming`) return [{ filename: modalityFilename, relativePath: `ModalityDocuments\\${code}\\Incoming\\${modalityFilename}`, modifiedAt: null }];
+          if (incomingSubfolder === "ModalityDocuments\\MRI\\Incoming") throw new SmbCommandError(502, "Configured SMB folder was not found.", "not_found");
           return [];
         },
       },

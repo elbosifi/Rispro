@@ -1,5 +1,6 @@
 import { validateBackupV3SmbConfig } from "./backup-v3-smb-destination.js";
 import { loadSettingsMap, upsertSettings } from "./settings-service.js";
+import { requestRequestScanWorkerRun } from "./request-scan-worker-control-service.js";
 import { HttpError } from "../utils/http-error.js";
 import type { UserId } from "../types/http.js";
 
@@ -95,5 +96,7 @@ export async function saveRequestScanSettings(input: Record<string, unknown>, us
     { key: "polling_interval_seconds", value: String(candidate.pollingIntervalSeconds) }, { key: "file_ready_delay_seconds", value: String(candidate.fileReadyDelaySeconds) },
     ...(password ? [{ key: "password", value: password }] : []),
   ], userId);
+  // Prompt the dedicated worker to refresh settings without making idle wakes poll settings continuously.
+  await requestRequestScanWorkerRun();
   return readRequestScanSettingsForDisplay();
 }

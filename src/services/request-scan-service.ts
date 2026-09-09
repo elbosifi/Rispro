@@ -14,7 +14,7 @@ import {
   requestScanSafeDisplayFilename,
   type RequestScanFilenameDecision,
 } from "./request-scan-filename-identifier.js";
-import { classifyRequestScanSmbError, downloadRequestScanFile, ensureRequestScanFolders, listRequestScanFiles, moveRequestScanFile, reconcileRequestScanMove, requestScanArchivePath, validateRequestScanRemoteFilename } from "./request-scan-smb-service.js";
+import { classifyRequestScanSmbError, downloadRequestScanFile, ensureRequestScanFolders, isRequestScanSmbFolderNotFound, listRequestScanFiles, moveRequestScanFile, reconcileRequestScanMove, requestScanArchivePath, validateRequestScanRemoteFilename } from "./request-scan-smb-service.js";
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { env } from "../config/env.js";
@@ -50,7 +50,7 @@ export type RequestScanServiceDependencies = {
   listActiveModalities?: () => Promise<Array<{ id: number; code: string }>>;
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
 };
-export type RequestScanCycleOptions = { maxConcurrency?: 1 | 2; shouldContinue?: () => boolean };
+export type RequestScanCycleOptions = { maxConcurrency?: 1 | 2; shouldContinue?: () => boolean; cycleReason?: "scheduled" | "explicit" };
 type RequestScanRetryDependencies = {
   readSettings: typeof readRequestScanSettings;
   getJob: typeof getRequestScanJob;
@@ -156,7 +156,10 @@ const defaultDependencies: RequestScanServiceDependencies = {
   findEligibleAppointment: findRequestScanAppointment,
   verifyPublicAppointmentToken: resolveRequestScanAppointmentToken,
   listActiveModalities: async () => (await pool.query<{ id: number; code: string }>("select id,code from modalities where is_active=true order by id")).rows,
-  logDiagnostic(event, metadata) { console.info("[RequestScanIdentifier]", event, metadata); },
+  logDiagnostic(event, metadata) {
+    const log = event === "request_scan_discovery" && metadata.incomingFiles === 0 ? console.debug : console.info;
+    log("[RequestScanIdentifier]", event, metadata);
+  },
 };
 const REQUEST_SCAN_DUPLICATE_MESSAGE = "This file is identical to an existing document and was not attached again.";
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
@@ -862,6 +865,7 @@ function logInboxFailure(
 
 export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId, options: RequestScanCycleOptions = {}): Promise<RequestScanCycleResult> {
   const settings = suppliedSettings ?? await readRequestScanSettings(); if (!settings.enabled) return { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
+  const cycleStartedAt = Date.now();
   const result = emptyCycleResult(); const queuedAtStart = await drainPendingRequestScanJobs(settings, dependencies, REQUEST_SCAN_MAX_JOBS_PER_CYCLE, workerId, options); addCycleResult(result, queuedAtStart.result);
   if (options.shouldContinue && !options.shouldContinue()) return result;
   const modalities = dependencies.listActiveModalities ? await dependencies.listActiveModalities() : [];
@@ -874,14 +878,23 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
       logInboxFailure(dependencies, { workflowSource: "modality", modalityId: Number(modality.id), stage: "configuration" }, error);
     }
   }
-  const discovery = { incomingFiles: 0, activeJobs: 0, createdJobs: 0, reactivatedJobs: 0, archivePendingJobs: 0, orphanConflicts: 0, skippedYoungFiles: 0 };
+  const discoveryStartedAt = Date.now();
+  const discovery = { incomingFiles: 0, activeJobs: 0, createdJobs: 0, reactivatedJobs: 0, archivePendingJobs: 0, orphanConflicts: 0, skippedYoungFiles: 0, inboxesInspected: 0 };
   let successfulInboxes = 0;
   for (const inbox of inboxes) {
-    let inboxStage: "folder_setup" | "listing_or_reconciliation" = dependencies.ensureRequestScanFolders ? "folder_setup" : "listing_or_reconciliation";
+    let inboxStage: "folder_setup" | "listing_or_reconciliation" = "listing_or_reconciliation";
     try {
-      if (dependencies.ensureRequestScanFolders) await dependencies.ensureRequestScanFolders(settings, [inbox.incomingSubfolder, inbox.processedSubfolder, inbox.failedSubfolder]);
-      inboxStage = "listing_or_reconciliation";
-      const files = await dependencies.listRequestScanFiles(settings, undefined, inbox.incomingSubfolder);
+      discovery.inboxesInspected += 1;
+      let files: Awaited<ReturnType<typeof listRequestScanFiles>>;
+      try {
+        files = await dependencies.listRequestScanFiles(settings, undefined, inbox.incomingSubfolder);
+      } catch (error) {
+        if (!dependencies.ensureRequestScanFolders || !isRequestScanSmbFolderNotFound(error)) throw error;
+        inboxStage = "folder_setup";
+        await dependencies.ensureRequestScanFolders(settings, [inbox.incomingSubfolder, inbox.processedSubfolder, inbox.failedSubfolder]);
+        inboxStage = "listing_or_reconciliation";
+        files = await dependencies.listRequestScanFiles(settings, undefined, inbox.incomingSubfolder);
+      }
       result.discovered += files.length; discovery.incomingFiles += files.length;
       for (const file of files) {
         if (file.modifiedAt && Date.now() - file.modifiedAt.getTime() < settings.fileReadyDelaySeconds * 1000) { result.skipped += 1; discovery.skippedYoungFiles += 1; continue; }
@@ -899,8 +912,9 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
     }
   }
   if (successfulInboxes === 0 && inboxFailures.length) throw new AggregateError(inboxFailures, "Every Request Scan inbox failed.");
-  dependencies.logDiagnostic?.("request_scan_discovery", discovery);
+  dependencies.logDiagnostic?.("request_scan_discovery", { ...discovery, elapsedMs: Date.now() - discoveryStartedAt });
   const queuedAfterDiscovery = await drainPendingRequestScanJobs(settings, dependencies, REQUEST_SCAN_MAX_JOBS_PER_CYCLE - queuedAtStart.claimed, workerId, options); addCycleResult(result, queuedAfterDiscovery.result);
+  dependencies.logDiagnostic?.("request_scan_cycle", { cycleReason: options.cycleReason ?? "scheduled", elapsedMs: Date.now() - cycleStartedAt, discovered: result.discovered, processed: result.processed, failed: result.failed, duplicates: result.duplicates, skipped: result.skipped });
   return result;
 }
 

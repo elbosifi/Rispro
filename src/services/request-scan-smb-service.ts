@@ -17,6 +17,11 @@ export function classifyRequestScanSmbError(error: unknown): RequestScanSmbFailu
   return code === "ENOENT" || code === "STATUS_NO_SUCH_FILE" || code === "NT_STATUS_NO_SUCH_FILE" || /NO SUCH FILE|OBJECT NAME NOT FOUND|FILE NOT FOUND/.test(message) ? "source_missing" : "smb_storage";
 }
 
+/** A missing configured inbox is recoverable; other SMB failures must retain their original handling. */
+export function isRequestScanSmbFolderNotFound(error: unknown): boolean {
+  return error instanceof SmbCommandError && error.smbCode === "not_found";
+}
+
 function config(settings: RequestScanSettings, subfolder = "") { return { server: settings.server, share: settings.share, domain: settings.domain, subfolder, timeoutSeconds: 30 }; }
 function credentials(settings: RequestScanSettings): BackupV3SmbCredentials { return { username: settings.username, password: settings.password }; }
 function joinRemote(...segments: string[]): string { return segments.filter(Boolean).map((value) => value.replace(/^[\\/]+|[\\/]+$/g, "").replace(/[\\/]+/g, "\\")).join("\\"); }
