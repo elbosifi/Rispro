@@ -37,6 +37,10 @@ function mapModalityProtocolAssignment(raw: RawRecord): ModalityProtocolAssignme
     ctPhases: rawArray(raw.ct_phases).map((phase) => ({
       orderIndex: Number(phase.order_index), phasePresetName: rawString(phase.phase_preset_name), customPhaseName: rawString(phase.custom_phase_name),
       contrastStatus: rawString(phase.contrast_status), timingType: rawString(phase.timing_type), delaySeconds: rawNumber(phase.delay_seconds),
+      bolusTrackingSite: rawString(phase.bolus_tracking_site), triggerHu: rawNumber(phase.trigger_hu), postTriggerDelaySeconds: rawNumber(phase.post_trigger_delay_seconds),
+      presetContrastStatus: rawString(phase.preset_contrast_status), presetTimingType: rawString(phase.preset_timing_type), presetDelaySeconds: rawNumber(phase.preset_delay_seconds),
+      presetBolusTrackingSite: rawString(phase.preset_bolus_tracking_site), presetTriggerHu: rawNumber(phase.preset_trigger_hu), presetDefaultCoverage: rawString(phase.preset_default_coverage),
+      presetReconstructionNotes: rawString(phase.preset_reconstruction_notes), presetInstructions: rawString(phase.preset_instructions),
       timingOverride: rawString(phase.timing_override), coverage: rawString(phase.coverage), coverageOverride: rawString(phase.coverage_override),
       reconstructionNotes: rawString(phase.reconstruction_notes), reconstructionOverride: rawString(phase.reconstruction_override),
       instructions: rawString(phase.instructions), instructionsOverride: rawString(phase.instructions_override), isRequired: rawBool(phase.is_required),

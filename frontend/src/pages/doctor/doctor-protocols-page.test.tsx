@@ -60,6 +60,7 @@ vi.mock("@/lib/api-hooks", () => ({
   createProtocolLibraryAnatomyRegion: vi.fn(), createProtocolLibraryCtPhasePreset: vi.fn(), createProtocolLibraryCtPhaseRow: vi.fn(),
   createProtocolLibraryDraftFromActive: vi.fn(), createProtocolLibraryMriSequencePreset: vi.fn(), createProtocolLibraryMriSequenceRow: vi.fn(),
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
+  deleteProtocolLibraryCtTechnique: vi.fn(), duplicateProtocolLibraryCtVersion: vi.fn(),
   confirmMriSequenceImport: vi.fn(), downloadMriSequenceImportTemplate: vi.fn(), exportMriSequencePresetsWorkbook: vi.fn(),
   fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
@@ -76,6 +77,7 @@ vi.mock("@/lib/api-hooks", () => ({
   reorderProtocolLibraryMriSequenceRows: vi.fn(), updateProtocolLibraryCtPhaseRow: vi.fn(), updateProtocolLibraryAnatomyRegion: vi.fn(),
   updateProtocolLibraryCtPhasePreset: vi.fn(), updateProtocolLibraryMriSequenceRow: vi.fn(), updateProtocolLibraryMriSequencePreset: vi.fn(),
   updateProtocolLibraryProtocol: vi.fn(), updateProtocolLibraryScanner: vi.fn(), updateProtocolLibraryVersion: vi.fn(),
+  upsertProtocolLibraryCtTechnique: vi.fn(),
   updateDoctorProtocolReportRequirement: mockUpdateReportRequirement,
 }));
 
@@ -1024,5 +1026,18 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Assign" })); await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     const section = screen.getByRole("region", { name: "Possible older PACS studies" });
     expect(within(section).getByText("Possible patient match")).toBeTruthy(); expect(within(section).getByText(/Patient denied ownership/)).toBeTruthy(); expect(within(section).getByText(/Denied study/)).toBeTruthy(); expect(within(section).getByRole("button", { name: /Reconcile/ })).toBeTruthy();
+  });
+
+  it("offers separate minimal CT and full MRI protocol creation paths", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
+    expect(screen.getByRole("textbox", { name: "Protocol name" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Indication" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Anatomy region" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "New MRI Protocol" }));
+    expect(screen.getByRole("combobox", { name: "Anatomy region" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Category" })).toBeTruthy();
   });
 });

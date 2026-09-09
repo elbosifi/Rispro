@@ -63,6 +63,16 @@ test("modality protocol assignment returns CT assignment with CT phases", async 
   assert.equal(assignment?.ct_phases.length, 1);
   assert.equal(assignment?.ct_phases[0].coverage_override, "Liver to symphysis");
   assert.deepEqual(db.calls.map((call) => call.values), [[101], [31]]);
+  assert.match(db.calls[1].sql, /phase\.timing_type/);
+  assert.match(db.calls[1].sql, /preset\.timing_type as preset_timing_type/);
+});
+
+test("modality protocol assignment keeps structured CT timing distinct from legacy preset fields", async () => {
+  const db = executor([[{ assignment_id: 1, appointment_id: 1, protocol_id: 1, protocol_version_id: 1, protocol_name: "CT", version_number: "1.0", modality: "CT", scanner_id: null, scanner_name: null, scanner_vendor: null, protocol_notes: null, contrast_notes: null, assigned_by: "Dr", assigned_at: "2026-01-01T00:00:00Z", status: "ASSIGNED" }], [{ order_index: 1, phase_preset_name: "Legacy", custom_phase_name: null, timing_type: "FIXED_DELAY_INJECTION_END", delay_seconds: 65, bolus_tracking_site: null, trigger_hu: null, post_trigger_delay_seconds: null, preset_contrast_status: "POST_CONTRAST", preset_timing_type: "FIXED_DELAY", preset_delay_seconds: 70, preset_bolus_tracking_site: null, preset_trigger_hu: null, preset_default_coverage: "Chest", preset_reconstruction_notes: null, preset_instructions: null, timing_override: null, coverage_override: null, reconstruction_override: null, instructions_override: null, is_required: true }], []]);
+  const assignment = await getModalityProtocolAssignment(1, db);
+  assert.equal(assignment?.ct_phases[0].timing_type, "FIXED_DELAY_INJECTION_END");
+  assert.equal(assignment?.ct_phases[0].preset_timing_type, "FIXED_DELAY");
+  assert.equal(assignment?.ct_phases[0].preset_default_coverage, "Chest");
 });
 
 test("modality protocol assignment returns MRI assignment with MRI sequences", async () => {

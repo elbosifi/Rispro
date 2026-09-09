@@ -20,6 +20,17 @@ export interface ModalityCtProtocolPhase {
   reconstruction_override: string | null;
   instructions: string | null;
   instructions_override: string | null;
+  bolus_tracking_site: string | null;
+  trigger_hu: number | null;
+  post_trigger_delay_seconds: number | null;
+  preset_contrast_status: string | null;
+  preset_timing_type: string | null;
+  preset_delay_seconds: number | null;
+  preset_bolus_tracking_site: string | null;
+  preset_trigger_hu: number | null;
+  preset_default_coverage: string | null;
+  preset_reconstruction_notes: string | null;
+  preset_instructions: string | null;
   is_required: boolean;
 }
 
@@ -99,15 +110,26 @@ function mapCtPhase(row: RawRecord): ModalityCtProtocolPhase {
     order_index: Number(row.order_index),
     phase_preset_name: textOrNull(row.phase_preset_name),
     custom_phase_name: textOrNull(row.custom_phase_name),
-    contrast_status: textOrNull(row.contrast_status),
+    contrast_status: textOrNull(row.preset_contrast_status),
     timing_type: textOrNull(row.timing_type),
     delay_seconds: numberOrNull(row.delay_seconds),
+    bolus_tracking_site: textOrNull(row.bolus_tracking_site),
+    trigger_hu: numberOrNull(row.trigger_hu),
+    post_trigger_delay_seconds: numberOrNull(row.post_trigger_delay_seconds),
+    preset_contrast_status: textOrNull(row.preset_contrast_status),
+    preset_timing_type: textOrNull(row.preset_timing_type),
+    preset_delay_seconds: numberOrNull(row.preset_delay_seconds),
+    preset_bolus_tracking_site: textOrNull(row.preset_bolus_tracking_site),
+    preset_trigger_hu: numberOrNull(row.preset_trigger_hu),
+    preset_default_coverage: textOrNull(row.preset_default_coverage),
+    preset_reconstruction_notes: textOrNull(row.preset_reconstruction_notes),
+    preset_instructions: textOrNull(row.preset_instructions),
     timing_override: textOrNull(row.timing_override),
-    coverage: textOrNull(row.coverage),
+    coverage: textOrNull(row.preset_default_coverage),
     coverage_override: textOrNull(row.coverage_override),
-    reconstruction_notes: textOrNull(row.reconstruction_notes),
+    reconstruction_notes: textOrNull(row.preset_reconstruction_notes),
     reconstruction_override: textOrNull(row.reconstruction_override),
-    instructions: textOrNull(row.instructions),
+    instructions: textOrNull(row.preset_instructions),
     instructions_override: textOrNull(row.instructions_override),
     is_required: Boolean(row.is_required),
   };
@@ -192,15 +214,22 @@ export async function getModalityProtocolAssignment(
           phase.order_index,
           preset.name as phase_preset_name,
           phase.custom_phase_name,
-          preset.contrast_status,
-          preset.timing_type,
-          preset.delay_seconds,
+          phase.timing_type,
+          phase.delay_seconds,
+          phase.bolus_tracking_site,
+          phase.trigger_hu,
+          phase.post_trigger_delay_seconds,
+          preset.contrast_status as preset_contrast_status,
+          preset.timing_type as preset_timing_type,
+          preset.delay_seconds as preset_delay_seconds,
+          preset.bolus_tracking_site as preset_bolus_tracking_site,
+          preset.trigger_hu as preset_trigger_hu,
           phase.timing_override,
-          preset.default_coverage as coverage,
+          preset.default_coverage as preset_default_coverage,
           phase.coverage_override,
-          preset.reconstruction_notes,
+          preset.reconstruction_notes as preset_reconstruction_notes,
           phase.reconstruction_override,
-          preset.instructions,
+          preset.instructions as preset_instructions,
           phase.instructions_override,
           phase.is_required
         from protocol_ct_phases phase

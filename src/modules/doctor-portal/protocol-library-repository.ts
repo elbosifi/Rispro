@@ -152,6 +152,14 @@ export interface ProtocolCtPhaseRow {
   orderIndex: number;
   ctPhasePresetId: number | null;
   ctPhasePresetName: string | null;
+  presetContrastStatus: string | null;
+  presetTimingType: string | null;
+  presetDelaySeconds: number | null;
+  presetBolusTrackingSite: string | null;
+  presetTriggerHu: number | null;
+  presetDefaultCoverage: string | null;
+  presetReconstructionNotes: string | null;
+  presetInstructions: string | null;
   customPhaseName: string | null;
   timingOverride: string | null;
   timingType: "NON_CONTRAST" | "FIXED_DELAY_INJECTION_START" | "FIXED_DELAY_INJECTION_END" | "BOLUS_TRACKING" | "MANUAL" | null;
@@ -478,6 +486,14 @@ function mapProtocolCtPhase(row: RawRecord): ProtocolCtPhaseRow {
     orderIndex: Number(row.order_index),
     ctPhasePresetId: numberOrNull(row.ct_phase_preset_id),
     ctPhasePresetName: stringOrNull(row.ct_phase_preset_name),
+    presetContrastStatus: stringOrNull(row.preset_contrast_status),
+    presetTimingType: stringOrNull(row.preset_timing_type),
+    presetDelaySeconds: numberOrNull(row.preset_delay_seconds),
+    presetBolusTrackingSite: stringOrNull(row.preset_bolus_tracking_site),
+    presetTriggerHu: numberOrNull(row.preset_trigger_hu),
+    presetDefaultCoverage: stringOrNull(row.preset_default_coverage),
+    presetReconstructionNotes: stringOrNull(row.preset_reconstruction_notes),
+    presetInstructions: stringOrNull(row.preset_instructions),
     customPhaseName: stringOrNull(row.custom_phase_name),
     timingOverride: stringOrNull(row.timing_override),
     timingType: row.timing_type == null ? null : String(row.timing_type) as ProtocolCtPhaseRow["timingType"],
@@ -907,7 +923,11 @@ async function ctPhasesForVersion(client: DbClient, versionId: number): Promise<
   const result = await client.query(
     `
       select pcp.id, pcp.protocol_version_id, pcp.order_index, pcp.ct_phase_preset_id,
-             cpp.name as ct_phase_preset_name, pcp.custom_phase_name, pcp.timing_override, pcp.timing_type,
+             cpp.name as ct_phase_preset_name, cpp.contrast_status as preset_contrast_status, cpp.timing_type as preset_timing_type,
+             cpp.delay_seconds as preset_delay_seconds, cpp.bolus_tracking_site as preset_bolus_tracking_site,
+             cpp.trigger_hu as preset_trigger_hu, cpp.default_coverage as preset_default_coverage,
+             cpp.reconstruction_notes as preset_reconstruction_notes, cpp.instructions as preset_instructions,
+             pcp.custom_phase_name, pcp.timing_override, pcp.timing_type,
              pcp.delay_seconds, pcp.bolus_tracking_site, pcp.trigger_hu, pcp.post_trigger_delay_seconds,
              pcp.coverage_override, pcp.reconstruction_override, pcp.instructions_override,
              pcp.is_required, pcp.created_at, pcp.updated_at
@@ -1123,6 +1143,7 @@ export async function addProtocolCtPhase(versionId: number, input: ProtocolCtPha
   assertDraft(version);
   if (protocol.modality !== "CT") throw new HttpError(400, "CT phase rows can only be added to CT protocol versions.");
   if (!input.customPhaseName?.trim()) throw new HttpError(400, "customPhaseName is required for CT phases.");
+  if (input.ctPhasePresetId == null && !input.coverageOverride?.trim()) throw new HttpError(400, "coverageOverride is required for direct CT phases.");
   validateCtPhaseTiming(input);
   const orderIndex = await nextOrder(pool, "protocol_ct_phases", versionId);
   const result = await pool.query(
@@ -1436,6 +1457,9 @@ export async function upsertProtocolCtTechnique(versionId: number, input: Protoc
   assertDraft(version);
   if (protocol.modality !== "CT") throw new HttpError(400, "CT techniques can only be added to CT protocol versions.");
   if (input.kvMode === "FIXED" && (input.kvp == null || input.kvp <= 0)) throw new HttpError(400, "kvp is required when kV mode is fixed.");
+  if (input.tubeCurrentMode === "FIXED_MA" && (input.fixedMa == null || input.fixedMa <= 0)) throw new HttpError(400, "fixedMa is required when tube current mode is fixed.");
+  if (input.tubeCurrentMode === "REFERENCE_MAS" && (input.referenceMas == null || input.referenceMas <= 0)) throw new HttpError(400, "referenceMas is required when tube current mode is reference mAs.");
+  if (input.minMa != null && input.maxMa != null && input.minMa > input.maxMa) throw new HttpError(400, "minMa cannot exceed maxMa.");
   if (input.reconstructionMethod === "ASiR-V" && (!input.reconstructionStrength || !/^([0-9]|[1-9][0-9]|100)$/.test(input.reconstructionStrength))) throw new HttpError(400, "ASiR-V strength must be between 0 and 100.");
   const result = await pool.query(`
     insert into protocol_ct_techniques (protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel)

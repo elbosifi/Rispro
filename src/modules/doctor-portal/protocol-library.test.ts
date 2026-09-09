@@ -369,4 +369,21 @@ describe("Protocol library read repository", () => {
     assert.match(repo, /Activation requires at least one MRI sequence/);
     assert.match(repo, /createDraftFromActiveVersion/);
   });
+
+  it("preserves structured CT timing separately from legacy preset fallback metadata", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-repository.ts`, "utf8");
+    assert.match(repo, /preset_contrast_status/);
+    assert.match(repo, /preset_timing_type/);
+    assert.match(repo, /preset_default_coverage/);
+    assert.match(repo, /coverageOverride is required for direct CT phases/);
+    assert.match(repo, /FIXED_DELAY_INJECTION_START/);
+    assert.match(repo, /BOLUS_TRACKING/);
+  });
+
+  it("validates CT technique mode-specific numeric inputs", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-repository.ts`, "utf8");
+    assert.match(repo, /fixedMa is required when tube current mode is fixed/);
+    assert.match(repo, /referenceMas is required when tube current mode is reference mAs/);
+    assert.match(repo, /minMa cannot exceed maxMa/);
+  });
 });

@@ -1131,8 +1131,21 @@ export interface ProtocolingCtPhase {
   orderIndex: number;
   ctPhasePresetId: number | null;
   ctPhasePresetName: string | null;
+  presetContrastStatus: string | null;
+  presetTimingType: string | null;
+  presetDelaySeconds: number | null;
+  presetBolusTrackingSite: string | null;
+  presetTriggerHu: number | null;
+  presetDefaultCoverage: string | null;
+  presetReconstructionNotes: string | null;
+  presetInstructions: string | null;
   customPhaseName: string | null;
   timingOverride: string | null;
+  timingType: string | null;
+  delaySeconds: number | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  postTriggerDelaySeconds: number | null;
   coverageOverride: string | null;
   reconstructionOverride: string | null;
   instructionsOverride: string | null;
@@ -1225,6 +1238,17 @@ export interface ModalityCtProtocolPhase {
   reconstructionOverride: string | null;
   instructions: string | null;
   instructionsOverride: string | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  postTriggerDelaySeconds: number | null;
+  presetContrastStatus: string | null;
+  presetTimingType: string | null;
+  presetDelaySeconds: number | null;
+  presetBolusTrackingSite: string | null;
+  presetTriggerHu: number | null;
+  presetDefaultCoverage: string | null;
+  presetReconstructionNotes: string | null;
+  presetInstructions: string | null;
   isRequired: boolean;
 }
 
@@ -1393,6 +1417,14 @@ export interface ProtocolLibraryCtPhaseRow {
   orderIndex: number;
   ctPhasePresetId: number | null;
   ctPhasePresetName: string | null;
+  presetContrastStatus: string | null;
+  presetTimingType: string | null;
+  presetDelaySeconds: number | null;
+  presetBolusTrackingSite: string | null;
+  presetTriggerHu: number | null;
+  presetDefaultCoverage: string | null;
+  presetReconstructionNotes: string | null;
+  presetInstructions: string | null;
   customPhaseName: string | null;
   timingOverride: string | null;
   timingType: "NON_CONTRAST" | "FIXED_DELAY_INJECTION_START" | "FIXED_DELAY_INJECTION_END" | "BOLUS_TRACKING" | "MANUAL" | null;
