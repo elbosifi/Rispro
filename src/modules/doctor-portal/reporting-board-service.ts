@@ -2659,6 +2659,7 @@ export async function assignReportingBoardCaseToDoctor(
     appointmentId: input.appointmentId,
     doctorId: input.doctorId,
     reason: input.reason ?? null,
+    expectedUnassigned: retrospectiveFinalAssignment,
   });
   if (!retrospectiveFinalAssignment) {
     await createAssignedToMeNotifications({

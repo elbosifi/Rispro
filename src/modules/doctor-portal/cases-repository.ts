@@ -440,7 +440,7 @@ export async function reassignCase(input: { appointmentId: number; rosterAssignm
 }
 
 export async function assignCaseToDoctor(
-  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null },
+  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null; expectedUnassigned?: boolean },
   actor: AssignmentActor
 ) {
   const client = await pool.connect();
@@ -503,6 +503,9 @@ export async function assignCaseToDoctor(
       `,
       [booking.appointmentId]
     );
+    if (input.expectedUnassigned && existing.rows[0]) {
+      throw new Error("expected_unassigned_conflict");
+    }
     if (existing.rows[0] && (!input.reason || !input.reason.trim())) {
       throw new Error("reassignment_reason_required");
     }

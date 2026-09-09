@@ -932,6 +932,78 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(refinal.rows[0]?.sonicdicom_latest_document_id, "603");
   });
 
+  it("retries Sonic auto-attribution from effective Final provenance after a sparse refresh", async () => {
+    guard();
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(85), patientName: "Sonic sparse final retry" });
+    const finalAt = "2026-08-24T10:00:00.000Z";
+    const finalizerEmail = `rbit.sparse.${randomUUID().slice(0, 8)}@nccb.ly`;
+    const originalUsername = (await pool.query<{ username: string }>(`select username from users where id = $1`, [targetDoctor.id])).rows[0]!.username;
+    const context = { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: `1.2.840.sparse.${appointmentId}`, requiresReport: true, status: "completed" };
+    await pool.query(`update users set username = $2 where id = $1`, [targetDoctor.id, finalizerEmail]);
+    try {
+      await pool.query(`
+        update doctor_portal.reporting_board_sonicdicom_cache
+        set report_status = 'final', report_final_at = $2::timestamptz,
+          sonicdicom_latest_document_id = 'sparse-known-document', sonicdicom_finalized_by_account = $3,
+          finalized_by_doctor_id = $4, correlation_method = 'study_instance_uid', source = 'sonicdicom',
+          last_success_at = now(), last_attempt_at = now(), next_check_at = now() + interval '5 minutes',
+          status_changed_at = now(), failure_count = 0, last_error = null
+        where appointment_id = $1
+      `, [appointmentId, finalAt, finalizerEmail, targetDoctor.doctorId]);
+
+      const sparseFinal = {
+        state: "final" as const,
+        canViewReport: true,
+        source: "sonicdicom" as const,
+        reportFinalAt: null,
+        latestDocumentId: null,
+        finalizedByAccount: null,
+        correlationMethod: null,
+      };
+      await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, sparseFinal);
+
+      const cache = (await pool.query<{
+        report_status: string;
+        report_final_at: string | null;
+        sonicdicom_latest_document_id: string | null;
+        sonicdicom_finalized_by_account: string | null;
+        finalized_by_doctor_id: string | null;
+        correlation_method: string | null;
+      }>(`
+        select report_status, report_final_at::text, sonicdicom_latest_document_id,
+          sonicdicom_finalized_by_account, finalized_by_doctor_id::text, correlation_method
+        from doctor_portal.reporting_board_sonicdicom_cache
+        where appointment_id = $1
+      `, [appointmentId])).rows[0];
+      assert.equal(cache?.report_status, "final");
+      assert.equal(new Date(String(cache?.report_final_at)).toISOString(), finalAt);
+      assert.equal(cache?.sonicdicom_latest_document_id, "sparse-known-document");
+      assert.equal(cache?.sonicdicom_finalized_by_account, finalizerEmail);
+      assert.equal(cache?.finalized_by_doctor_id, String(targetDoctor.doctorId));
+      assert.equal(cache?.correlation_method, "study_instance_uid");
+
+      const firstAssignments = await pool.query<{ assigned_doctor_id: string; assignment_origin: string; status: string }>(`
+        select assigned_doctor_id::text, assignment_origin, status
+        from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting'
+        order by id
+      `, [appointmentId]);
+      assert.deepEqual(firstAssignments.rows, [{ assigned_doctor_id: String(targetDoctor.doctorId), assignment_origin: "sonic_auto", status: "active" }]);
+      const firstAssignmentId = (await pool.query<{ id: string }>(`
+        select id::text from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+      `, [appointmentId])).rows[0]!.id;
+      assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_assignment_sonic_auto' and target_id = $1`, [Number(firstAssignmentId)])).rowCount, 1);
+      assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where appointment_id = $1`, [appointmentId])).rowCount, 0);
+
+      await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(context, sparseFinal);
+      assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting'`, [appointmentId])).rows[0].count, 1);
+      assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.doctor_module_audit_events where event_type = 'reporting_assignment_sonic_auto' and metadata_json->>'appointmentId' = $1`, [String(appointmentId)])).rows[0].count, 1);
+    } finally {
+      await pool.query(`update users set username = $2 where id = $1`, [targetDoctor.id, originalUsername]);
+    }
+  });
+
   it("preserves unmapped raw accounts and last good attribution on outage, while manual Final creates no SonicDICOM finalizer", async () => {
     guard();
     const date = addDays(86);
@@ -2623,10 +2695,11 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       fetchDocumentHistoriesBatch: async () => { throw new Error("history unavailable"); },
     });
     try {
-      const retrospectiveAssignment = await api(supervisor.cookie, `/api/doctor/reporting-board/${retrospectiveSonicFinal}/assign-doctor`, {
+      const retrospectiveAssignment = await api<{ error: string }>(supervisor.cookie, `/api/doctor/reporting-board/${retrospectiveSonicFinal}/assign-doctor`, {
         method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "post-final recordkeeping attribution" },
       });
-      assert.equal(retrospectiveAssignment.status, 200, JSON.stringify(retrospectiveAssignment.data));
+      assert.equal(retrospectiveAssignment.status, 409, JSON.stringify(retrospectiveAssignment.data));
+      assert.equal(retrospectiveAssignment.data.error, "Case was assigned while finality was being verified. Refresh and try again.");
     } finally {
       installDefaultSonicDicomReadersForTest();
     }
@@ -4082,6 +4155,55 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       supervisor.cookie,
       `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=required_not_final`
     )).data.cases.some((caseRow) => caseRow.appointmentId === appointmentId), false);
+  });
+
+  it("does not overwrite SonicDICOM auto-attribution discovered during retrospective Final assignment", async () => {
+    guard();
+    const date = addDays(49);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sonic final assignment race" });
+    const finalizerEmail = `rbit.race.finalizer.${randomUUID().slice(0, 8)}@nccb.ly`;
+    const originalUsername = (await pool.query<{ username: string }>(`select username from users where id = $1`, [otherDoctor.id])).rows[0]!.username;
+    await pool.query(`update users set username = $2 where id = $1`, [otherDoctor.id, finalizerEmail]);
+    sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
+      checkStatusesBatch: async (contexts) => new Map(contexts.map((context) => [context.bookingId, {
+        state: "final" as const,
+        canViewReport: true,
+        source: "sonicdicom" as const,
+        reportFinalAt: "2026-08-24T11:00:00.000Z",
+        latestDocumentId: "race-final-document",
+        finalizedByAccount: finalizerEmail,
+        correlationMethod: "study_instance_uid" as const,
+      }])),
+      fetchDocumentHistoriesBatch: async () => { throw new Error("history unavailable during retrospective assignment race test"); },
+    });
+    try {
+      const assigned = await api<{ error: string }>(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+        method: "POST",
+        body: { doctorId: targetDoctor.doctorId, reason: "post-final race attribution" },
+      });
+      assert.equal(assigned.status, 409, JSON.stringify(assigned.data));
+      assert.equal(assigned.data.error, "Case was assigned while finality was being verified. Refresh and try again.");
+
+      const assignments = await pool.query<{ assigned_doctor_id: string; assignment_origin: string; status: string }>(`
+        select assigned_doctor_id::text, assignment_origin, status
+        from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting'
+        order by id
+      `, [appointmentId]);
+      assert.deepEqual(assignments.rows, [{ assigned_doctor_id: String(otherDoctor.doctorId), assignment_origin: "sonic_auto", status: "active" }]);
+      assert.equal((await pool.query(`select 1 from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_origin = 'sonic_auto' and status = 'corrected'`, [appointmentId])).rowCount, 0);
+      assert.equal((await pool.query(`select 1 from doctor_portal.case_team_assignments where appointment_id = $1 and assigned_doctor_id = $2 and status = 'active'`, [appointmentId, targetDoctor.doctorId])).rowCount, 0);
+      const cache = (await pool.query<{ report_status: string; finalized_by_doctor_id: string | null }>(`
+        select report_status, finalized_by_doctor_id::text
+        from doctor_portal.reporting_board_sonicdicom_cache
+        where appointment_id = $1
+      `, [appointmentId])).rows[0];
+      assert.deepEqual(cache, { report_status: "final", finalized_by_doctor_id: String(otherDoctor.doctorId) });
+      assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where appointment_id = $1 and recipient_doctor_id = $2 and event_type = 'reporting_case_assigned_to_me'`, [appointmentId, targetDoctor.doctorId])).rowCount, 0);
+    } finally {
+      installDefaultSonicDicomReadersForTest();
+      await pool.query(`update users set username = $2 where id = $1`, [otherDoctor.id, originalUsername]);
+    }
   });
 
   it("blocks a supervisor from reassigning a SonicDICOM-final appointment", async () => {

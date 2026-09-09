@@ -79,7 +79,7 @@ export async function correctDoctorCaseAssignment(
 
 export async function assignDoctorCase(
   actor: Actor,
-  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null }
+  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null; expectedUnassigned?: boolean }
 ) {
   const me = await requireRosterManager(actor);
   try {
@@ -102,6 +102,9 @@ export async function assignDoctorCase(
     }
     if (error instanceof Error && error.message === "reassignment_reason_required") {
       throw new HttpError(400, "Reassignment reason is required.");
+    }
+    if (error instanceof Error && error.message === "expected_unassigned_conflict") {
+      throw new HttpError(409, "Case was assigned while finality was being verified. Refresh and try again.");
     }
     throw error;
   }

@@ -818,7 +818,7 @@ describe("Personal Reporting Desk case presentation", () => {
     const provenance = screen.getByLabelText("Finalized history provenance").textContent;
     expect(provenance).to.contain("RISpro assigned: 1");
     expect(provenance).to.contain("SonicDICOM only: 2");
-    expect(provenance).to.contain("Total finalized: 3");
+    expect(provenance).not.to.contain("Total finalized");
   });
 
   it("opens history from the card without opening Details first", async () => {

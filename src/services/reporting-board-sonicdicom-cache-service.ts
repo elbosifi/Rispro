@@ -529,16 +529,21 @@ export async function persistReportingBoardSonicDicomCacheResults(
         last_success_at = coalesce(excluded.last_success_at, doctor_portal.reporting_board_sonicdicom_cache.last_success_at), last_attempt_at = now(), next_check_at = excluded.next_check_at,
         status_changed_at = case when excluded.last_success_at is not null and doctor_portal.reporting_board_sonicdicom_cache.report_status is distinct from excluded.report_status then now() else doctor_portal.reporting_board_sonicdicom_cache.status_changed_at end,
         failure_count = excluded.failure_count, last_error = excluded.last_error, study_instance_uid_snapshot = excluded.study_instance_uid_snapshot, accession_number_snapshot = excluded.accession_number_snapshot, updated_at = now()
-      returning appointment_id as "appointmentId", report_status as status, last_success_at
-    ) select u."appointmentId", u.status,
-      (u.last_success_at is not null and p.successful and p.previous_status is distinct from p.status) as changed,
-      p.successful,
-      p.finalized_by_doctor_id as "finalizedByDoctorId",
-      p."finalizedByAccount" as "sonicDicomFinalizedByAccount",
-      p."latestDocumentId" as "sonicDicomLatestDocumentId",
-      p."reportFinalAt" as "reportFinalAt",
-      p."correlationMethod" as "sonicDicomCorrelationMethod"
-    from upserted u join prepared p on p."appointmentId" = u."appointmentId"
+       returning appointment_id as "appointmentId", report_status as status, last_success_at,
+         finalized_by_doctor_id as "finalizedByDoctorId",
+         sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
+         sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
+         report_final_at as "reportFinalAt",
+         correlation_method as "sonicDicomCorrelationMethod"
+     ) select u."appointmentId", u.status,
+       (u.last_success_at is not null and p.successful and p.previous_status is distinct from p.status) as changed,
+       p.successful,
+       u."finalizedByDoctorId",
+       u."sonicDicomFinalizedByAccount",
+       u."sonicDicomLatestDocumentId",
+       u."reportFinalAt",
+       u."sonicDicomCorrelationMethod"
+     from upserted u join prepared p on p."appointmentId" = u."appointmentId"
   `, [JSON.stringify(payload)]);
   for (const row of updated.rows) {
     await tryCreateSonicAutoAssignment(row).catch((error) => {
