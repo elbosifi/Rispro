@@ -1238,17 +1238,17 @@ export interface ModalityCtProtocolPhase {
   reconstructionOverride: string | null;
   instructions: string | null;
   instructionsOverride: string | null;
-  bolusTrackingSite: string | null;
-  triggerHu: number | null;
-  postTriggerDelaySeconds: number | null;
-  presetContrastStatus: string | null;
-  presetTimingType: string | null;
-  presetDelaySeconds: number | null;
-  presetBolusTrackingSite: string | null;
-  presetTriggerHu: number | null;
-  presetDefaultCoverage: string | null;
-  presetReconstructionNotes: string | null;
-  presetInstructions: string | null;
+  bolusTrackingSite?: string | null;
+  triggerHu?: number | null;
+  postTriggerDelaySeconds?: number | null;
+  presetContrastStatus?: string | null;
+  presetTimingType?: string | null;
+  presetDelaySeconds?: number | null;
+  presetBolusTrackingSite?: string | null;
+  presetTriggerHu?: number | null;
+  presetDefaultCoverage?: string | null;
+  presetReconstructionNotes?: string | null;
+  presetInstructions?: string | null;
   isRequired: boolean;
 }
 

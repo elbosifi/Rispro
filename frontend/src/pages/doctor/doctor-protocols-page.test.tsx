@@ -1038,6 +1038,10 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await userEvent.click(screen.getByRole("button", { name: "New MRI Protocol" }));
     expect(screen.getByRole("combobox", { name: "Anatomy region" })).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Category" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Category" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "IV contrast policy" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Oral contrast policy" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Bowel preparation" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Initial change summary" })).toBeTruthy();
   });
 });
