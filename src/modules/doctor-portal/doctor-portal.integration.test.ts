@@ -954,6 +954,25 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     }
   });
 
+  it("rejects /auth/me when an existing session user becomes inactive", async () => {
+    guard();
+    const original = (await pool.query<{ username: string; is_active: boolean }>(
+      "select username, is_active from users where id = $1",
+      [supervisor.id]
+    )).rows[0]!;
+    const login = await authRequest("/api/auth/login", { username: original.username, password: "test_password" });
+    assert.equal(login.status, 200, JSON.stringify(login.data));
+    assert.ok(login.cookie);
+    try {
+      assert.equal((await api(login.cookie, "/api/auth/me")).status, 200);
+      await pool.query("update users set is_active = false where id = $1", [supervisor.id]);
+      const inactive = await api(login.cookie, "/api/auth/me");
+      assert.equal(inactive.status, 401, JSON.stringify(inactive.data));
+    } finally {
+      await pool.query("update users set is_active = $2 where id = $1", [supervisor.id, original.is_active]);
+    }
+  });
+
   it("creates a doctor login, profile, and modality permissions atomically from Doctor Admin", async () => {
     guard();
     const username = `${TEST_PREFIX.toLowerCase()}created_${randomUUID().replace(/-/g, "").slice(0, 8)}`;

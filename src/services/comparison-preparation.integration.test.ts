@@ -67,6 +67,18 @@ async function createUser(role: Role): Promise<ComparisonActor> {
   return { userId, appRole: role };
 }
 
+type UserIdentity = { username: string; nameAr: string; nameEn: string | null };
+
+async function readUserIdentity(userId: ComparisonActor["userId"]): Promise<UserIdentity> {
+  const result = await pool.query<{ username: string; full_name: string; english_name: string | null }>(
+    "select username, full_name, english_name from users where id=$1",
+    [userId]
+  );
+  const row = result.rows[0];
+  assert.ok(row);
+  return { username: row.username, nameAr: row.full_name, nameEn: row.english_name };
+}
+
 async function createPatient(label: string, userId: number): Promise<number> {
   const suffix = `${Date.now()}${created.patients.length}`.slice(-11).padStart(11, "0");
   const result = await pool.query<{ id: number }>(
@@ -137,26 +149,58 @@ async function expectHttpStatus(promise: Promise<unknown>, statusCode: number) {
 test("supervisor and super_admin can cancel pending comparisons", async () => {
   const supervisor = await createUser("supervisor");
   const superAdmin = await createUser("super_admin");
+  const supervisorIdentity = await readUserIdentity(supervisor.userId);
+  const activeSupervisorIdentity = { ...supervisorIdentity, nameAr: `${marker} Cancellation Arabic`, nameEn: `${marker} Cancellation English` };
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [supervisor.userId, activeSupervisorIdentity.nameAr, activeSupervisorIdentity.nameEn]);
   const first = await createRequest(supervisor, "supervisor cancel");
   const second = await createRequest(superAdmin, "admin cancel");
-  assert.equal((await cancelComparisonRequest(supervisor, first.id, "Incorrect request")).status, "cancelled");
+  const cancelled = await cancelComparisonRequest(supervisor, first.id, "Incorrect request");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.cancelledByNameAr, activeSupervisorIdentity.nameAr);
+  assert.equal(cancelled.cancelledByNameEn, activeSupervisorIdentity.nameEn);
+  assert.equal(cancelled.cancelledByUsername, activeSupervisorIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [supervisor.userId, `${marker} Renamed Cancellation Arabic`, `${marker} Renamed Cancellation English`, `${marker}_cancelled_actor`]);
+  const refreshed = await findComparisonRequestById(first.id);
+  assert.equal(refreshed?.cancelledByNameAr, activeSupervisorIdentity.nameAr);
+  assert.equal(refreshed?.cancelledByNameEn, activeSupervisorIdentity.nameEn);
+  assert.equal(refreshed?.cancelledByUsername, activeSupervisorIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [supervisor.userId, supervisorIdentity.nameAr, supervisorIdentity.nameEn, supervisorIdentity.username]);
   assert.equal((await cancelComparisonRequest(superAdmin, second.id, "Cancelled by requester")).status, "cancelled");
 });
 
 test("comparison actor name snapshots remain stable after the user is renamed", async () => {
   const actor = await createUser("receptionist");
-  const original = { nameAr: `${marker} Creator Arabic`, nameEn: `${marker} Creator English` };
-  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [actor.userId, original.nameAr, original.nameEn]);
+  const originalIdentity = await readUserIdentity(actor.userId);
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [actor.userId, `${marker} Creator Arabic`, `${marker} Creator English`]);
+  const original = await readUserIdentity(actor.userId);
   const request = await createRequest(actor, "historical actor snapshot");
   assert.equal(request.createdByNameAr, original.nameAr);
   assert.equal(request.createdByNameEn, original.nameEn);
-  assert.equal(request.createdByUsername, `${marker}_receptionist_0`);
+  assert.equal(request.createdByUsername, original.username);
 
   await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [actor.userId, `${marker} Renamed Arabic`, `${marker} Renamed English`, `${marker}_renamed_actor`]);
   const refreshed = await findComparisonRequestById(request.id);
   assert.equal(refreshed?.createdByNameAr, original.nameAr);
   assert.equal(refreshed?.createdByNameEn, original.nameEn);
-  assert.equal(refreshed?.createdByUsername, `${marker}_receptionist_0`);
+  assert.equal(refreshed?.createdByUsername, original.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [actor.userId, originalIdentity.nameAr, originalIdentity.nameEn, originalIdentity.username]);
+});
+
+test("legacy comparison actor rows fall back to the current linked user identity", async () => {
+  const actor = await createUser("receptionist");
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [actor.userId, `${marker} Legacy Arabic`, `${marker} Legacy English`]);
+  const current = await readUserIdentity(actor.userId);
+  const request = await createRequest(actor, "legacy actor fallback");
+  await pool.query(
+    `update comparison_requests
+     set created_by_name_ar_snapshot=null, created_by_name_en_snapshot=null, created_by_username_snapshot=null
+     where id=$1`,
+    [request.id]
+  );
+  const refreshed = await findComparisonRequestById(request.id);
+  assert.equal(refreshed?.createdByName, current.nameAr);
+  assert.equal(refreshed?.createdByNameAr, current.nameAr);
+  assert.equal(refreshed?.createdByNameEn, current.nameEn);
 });
 
 test("unauthorized, finalized, and repeated cancellation are rejected without overwriting metadata", async () => {
@@ -265,9 +309,21 @@ test("comparison remap jobs link durably and reject invalid or cross-patient con
 
 test("material confirmation enforces actual paper disposition and permits receptionist release", async () => {
   const receptionist = await createUser("receptionist");
+  const receptionistIdentity = await readUserIdentity(receptionist.userId);
+  const confirmationIdentity = { ...receptionistIdentity, nameAr: `${marker} Materials Arabic`, nameEn: `${marker} Materials English` };
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [receptionist.userId, confirmationIdentity.nameAr, confirmationIdentity.nameEn]);
   const noPaper = await createRequest(receptionist, "no paper release");
   const released = await confirmComparisonMaterials(receptionist, noPaper.id, { imageAvailabilityConfirmed: true, documentsDisposition: "not_required", selectedPriorConfirmed: true });
   assert.equal(released.status, "ready_for_reporting");
+  assert.equal(released.materialsConfirmedByNameAr, confirmationIdentity.nameAr);
+  assert.equal(released.materialsConfirmedByNameEn, confirmationIdentity.nameEn);
+  assert.equal(released.materialsConfirmedByUsername, confirmationIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [receptionist.userId, `${marker} Renamed Materials Arabic`, `${marker} Renamed Materials English`, `${marker}_materials_actor`]);
+  const refreshed = await findComparisonRequestById(noPaper.id);
+  assert.equal(refreshed?.materialsConfirmedByNameAr, confirmationIdentity.nameAr);
+  assert.equal(refreshed?.materialsConfirmedByNameEn, confirmationIdentity.nameEn);
+  assert.equal(refreshed?.materialsConfirmedByUsername, confirmationIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [receptionist.userId, receptionistIdentity.nameAr, receptionistIdentity.nameEn, receptionistIdentity.username]);
   const persisted = await pool.query<{ documents_disposition: string; materials_confirmed: boolean }>("select documents_disposition,materials_confirmed from comparison_requests where id=$1", [noPaper.id]);
   assert.deepEqual(persisted.rows[0], { documents_disposition: "not_required", materials_confirmed: true });
   const invalid = await createRequest(receptionist, "verified zero paper");
@@ -323,6 +379,9 @@ test("planned doctor activates on release, falls back when ineligible, and unass
 test("return preserves papers and remap, replans the assigned doctor, and re-release activates it", async () => {
   const creator = await createUser("receptionist"); const request = await createRequest(creator, "return lifecycle");
   const doctor = await createReportingDoctor("doctor", request.linkedModalityId!); const manager = await createReportingDoctor("supervisor", request.linkedModalityId!);
+  const doctorIdentity = await readUserIdentity(doctor.actor.userId);
+  const returnIdentity = { ...doctorIdentity, nameAr: `${marker} Return Arabic`, nameEn: `${marker} Return English` };
+  await pool.query("update users set full_name=$2, english_name=$3 where id=$1", [doctor.actor.userId, returnIdentity.nameAr, returnIdentity.nameEn]);
   await updateComparisonRequest(manager.actor, request.id, { plannedReportingDoctorId: doctor.doctorId });
   const document = await uploadComparisonRequestDocument(creator, request.id, { originalFilename: "return.pdf", mimeType: "application/pdf", fileContentBase64: Buffer.from("%PDF-1.4\nreturn\n%%EOF").toString("base64") }); created.documents.push(document.id);
   const context = await createDicomRemapStagingContext(creator.userId, request.id); created.remapJobs.push(context.job.id);
@@ -330,6 +389,16 @@ test("return preserves papers and remap, replans the assigned doctor, and re-rel
   const unrelated = await createReportingDoctor("doctor", request.linkedModalityId!);
   await expectHttpStatus(returnComparisonToPreparation(unrelated.actor, request.id, "no permission"), 403);
   await returnComparisonToPreparation(doctor.actor, request.id, "Need corrected comparison material");
+  const returnedRequest = await findComparisonRequestById(request.id);
+  assert.equal(returnedRequest?.preparationReturnedByNameAr, returnIdentity.nameAr);
+  assert.equal(returnedRequest?.preparationReturnedByNameEn, returnIdentity.nameEn);
+  assert.equal(returnedRequest?.preparationReturnedByUsername, returnIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [doctor.actor.userId, `${marker} Renamed Return Arabic`, `${marker} Renamed Return English`, `${marker}_return_actor`]);
+  const refreshed = await findComparisonRequestById(request.id);
+  assert.equal(refreshed?.preparationReturnedByNameAr, returnIdentity.nameAr);
+  assert.equal(refreshed?.preparationReturnedByNameEn, returnIdentity.nameEn);
+  assert.equal(refreshed?.preparationReturnedByUsername, returnIdentity.username);
+  await pool.query("update users set full_name=$2, english_name=$3, username=$4 where id=$1", [doctor.actor.userId, doctorIdentity.nameAr, doctorIdentity.nameEn, doctorIdentity.username]);
   const returned = await pool.query<{ status: string; assigned_doctor_id: number | null; planned_reporting_doctor_id: number | null; planned_reporting_doctor_set_by: number | null; planned_reporting_doctor_set_at: string | null; materials_confirmed: boolean; image_availability_confirmed: boolean; documents_availability_confirmed: boolean; selected_prior_confirmed: boolean; documents_disposition: string | null; preparation_return_reason: string; assignments: string; documents: string; remap: number | null }>(`select cr.status,cr.assigned_doctor_id,cr.planned_reporting_doctor_id,cr.planned_reporting_doctor_set_by,cr.planned_reporting_doctor_set_at,cr.materials_confirmed,cr.image_availability_confirmed,cr.documents_availability_confirmed,cr.selected_prior_confirmed,cr.documents_disposition,cr.preparation_return_reason,(select count(*)::text from doctor_portal.comparison_case_assignments a where a.comparison_request_id=cr.id and a.status='cancelled') assignments,(select count(*)::text from comparison_request_documents d where d.comparison_request_id=cr.id) documents,(select comparison_request_id from dicom_remap_jobs j where j.id=$2) remap from comparison_requests cr where cr.id=$1`, [request.id, context.job.id]);
   assert.equal(returned.rows[0]!.status, "pending_upload_confirmation"); assert.equal(returned.rows[0]!.assigned_doctor_id, null); assert.equal(Number(returned.rows[0]!.planned_reporting_doctor_id), doctor.doctorId); assert.equal(Number(returned.rows[0]!.planned_reporting_doctor_set_by), Number(doctor.actor.userId)); assert.ok(returned.rows[0]!.planned_reporting_doctor_set_at); assert.equal(returned.rows[0]!.materials_confirmed, false); assert.equal(returned.rows[0]!.image_availability_confirmed, false); assert.equal(returned.rows[0]!.documents_availability_confirmed, false); assert.equal(returned.rows[0]!.selected_prior_confirmed, false); assert.equal(returned.rows[0]!.documents_disposition, null); assert.equal(returned.rows[0]!.preparation_return_reason, "Need corrected comparison material"); assert.equal(Number(returned.rows[0]!.assignments), 1); assert.equal(Number(returned.rows[0]!.documents), 1); assert.equal(Number(returned.rows[0]!.remap), request.id);
   const rereleased = await confirmComparisonMaterials(creator, request.id, { imageAvailabilityConfirmed: true, documentsDisposition: "attached_verified", selectedPriorConfirmed: true }); assert.equal(rereleased.status, "assigned"); assert.equal(rereleased.assignedDoctorId, doctor.doctorId); assert.equal(rereleased.plannedReportingDoctorId, null); assert.equal(rereleased.plannedReportingDoctorSetBy, null); assert.equal(rereleased.plannedReportingDoctorSetAt, null);
