@@ -60,12 +60,13 @@ export async function startRequestScanWorkerRuntime(
   let wakePromise: Promise<void> | null = null;
   let heartbeatBusy = false;
   let controlPlaneFailures = 0;
+  let consecutiveHeartbeatFailures = 0;
   let followUpRequested = false;
 
   const recordControlPlaneSuccess = () => { controlPlaneFailures = 0; };
-  const recordControlPlaneFailure = () => {
+  const recordControlPlaneFailure = (invokeFatal = true) => {
     controlPlaneFailures += 1;
-    if (controlPlaneFailures >= REQUEST_SCAN_WORKER_MAX_CONTROL_PLANE_FAILURES) onFatal();
+    if (invokeFatal && controlPlaneFailures >= REQUEST_SCAN_WORKER_MAX_CONTROL_PLANE_FAILURES) onFatal();
   };
   const heartbeat = async (): Promise<boolean> => {
     if (!ownsLeadership || heartbeatBusy || leadershipLost) return !leadershipLost;
@@ -73,10 +74,19 @@ export async function startRequestScanWorkerRuntime(
     try {
       const owned = await dependencies.heartbeat(workerId);
       if (!owned) leadershipLost = true;
-      else recordControlPlaneSuccess();
+      else {
+        consecutiveHeartbeatFailures = 0;
+        recordControlPlaneSuccess();
+      }
       return owned;
     } catch {
-      recordControlPlaneFailure();
+      consecutiveHeartbeatFailures += 1;
+      const heartbeatFailureThresholdReached = consecutiveHeartbeatFailures >= REQUEST_SCAN_WORKER_MAX_CONTROL_PLANE_FAILURES;
+      recordControlPlaneFailure(!heartbeatFailureThresholdReached);
+      if (heartbeatFailureThresholdReached) {
+        leadershipLost = true;
+        onFatal();
+      }
       return false;
     } finally {
       heartbeatBusy = false;
@@ -158,7 +168,7 @@ export async function startRequestScanWorkerRuntime(
         recordControlPlaneFailure();
       }
     } finally {
-      if (reason === "scheduled") lastRoutineCycleCompletedAt = dependencies.now();
+      lastRoutineCycleCompletedAt = dependencies.now();
       if (!stopping && !leadershipLost) await checkForFollowUpRequest();
     }
   };

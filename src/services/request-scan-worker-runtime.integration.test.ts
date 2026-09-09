@@ -23,6 +23,7 @@ function runtimeHarness(options: { cycleDurationMs?: number; acquireLeadership?:
   let requestSequence = 0;
   let acknowledgedSequence = 0;
   let heartbeatOwned = true;
+  let heartbeatThrows = false;
   let readRuntimeFailures = options.readRuntimeFailures ?? 0;
   let settingsReads = 0;
   let releaseBlockedCycle: (() => void) | null = null;
@@ -37,7 +38,10 @@ function runtimeHarness(options: { cycleDurationMs?: number; acquireLeadership?:
   const dependencies: Partial<RequestScanWorkerRuntimeDependencies> = {
     createWorkerId: () => "runtime-test-worker",
     acquireLeadership: async () => options.acquireLeadership ?? true,
-    heartbeat: async () => heartbeatOwned,
+    heartbeat: async () => {
+      if (heartbeatThrows) throw new Error("heartbeat unavailable");
+      return heartbeatOwned;
+    },
     readRuntime: async () => {
       if (readRuntimeFailures > 0) {
         readRuntimeFailures -= 1;
@@ -84,6 +88,7 @@ function runtimeHarness(options: { cycleDurationMs?: number; acquireLeadership?:
     acknowledgedSequence: () => acknowledgedSequence,
     releaseBlockedCycle: () => releaseBlockedCycle?.(),
     setHeartbeatOwned: (value: boolean) => { heartbeatOwned = value; },
+    setHeartbeatThrows: (value: boolean) => { heartbeatThrows = value; },
     leadershipReleases: () => leadershipReleases,
     onFatal: () => { fatalCalls += 1; },
     fatalCalls: () => fatalCalls,
@@ -137,6 +142,29 @@ test("an explicit durable Request Scan request bypasses the routine wait", async
   await worker.stop();
 });
 
+test("an explicit Request Scan cycle resets the next routine deadline from its completion", async () => {
+  const harness = runtimeHarness({ cycleDurationMs: 100 });
+  const worker = await startRequestScanWorkerRuntime(harness.runCycle, harness.onFatal, harness.dependencies);
+  harness.now(4_999);
+  harness.request(1);
+  await worker.requestWake();
+  assert.deepEqual(harness.cycles.map(({ reason }) => reason), ["scheduled", "explicit"]);
+  harness.now(5_100);
+  await worker.requestWake();
+  assert.equal(harness.cycles.length, 2);
+  harness.now(10_098);
+  await worker.requestWake();
+  assert.equal(harness.cycles.length, 2);
+  harness.now(10_099);
+  await worker.requestWake();
+  assert.deepEqual(harness.cycles.map(({ startedAt, reason }) => ({ startedAt, reason })), [
+    { startedAt: 0, reason: "scheduled" },
+    { startedAt: 4_999, reason: "explicit" },
+    { startedAt: 10_099, reason: "scheduled" },
+  ]);
+  await worker.stop();
+});
+
 test("durable requests received during an active Request Scan cycle coalesce into one follow-up", async () => {
   const harness = runtimeHarness({ blockCycleNumber: 2 });
   const worker = await startRequestScanWorkerRuntime(harness.runCycle, harness.onFatal, harness.dependencies);
@@ -183,6 +211,27 @@ test("Request Scan control-plane failures retain the fatal threshold", async () 
   await worker.requestWake();
   assert.equal(harness.fatalCalls(), 1);
   assert.equal(harness.cycles.length, 0);
+  await worker.stop();
+});
+
+test("heartbeat failures reach their own fatal threshold despite successful idle runtime reads", async () => {
+  const harness = runtimeHarness();
+  const worker = await startRequestScanWorkerRuntime(harness.runCycle, harness.onFatal, harness.dependencies);
+  const heartbeat = [...harness.timers.values()].find((timer) => timer.interval === 12_000);
+  assert.ok(heartbeat);
+  harness.setHeartbeatThrows(true);
+  heartbeat.callback();
+  await nextTurn();
+  await worker.requestWake();
+  heartbeat.callback();
+  await nextTurn();
+  await worker.requestWake();
+  heartbeat.callback();
+  await nextTurn();
+  assert.equal(harness.fatalCalls(), 1);
+  harness.now(5_000);
+  await worker.requestWake();
+  assert.equal(harness.cycles.length, 1);
   await worker.stop();
 });
 
