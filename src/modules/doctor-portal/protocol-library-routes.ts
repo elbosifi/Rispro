@@ -11,6 +11,7 @@ import {
   addProtocolMriSequence,
   createCtPhasePreset,
   createDraftFromActiveVersion,
+  duplicateCtProtocolVersion,
   createMriSequencePreset,
   createProtocolWithDraft,
   createProtocolAnatomyRegion,
@@ -22,6 +23,7 @@ import {
   listProtocolAnatomyRegions,
   listProtocols,
   removeProtocolCtPhase,
+  removeProtocolCtTechnique,
   removeProtocolMriSequence,
   reorderProtocolRows,
   updateCtPhasePreset,
@@ -30,6 +32,7 @@ import {
   updateProtocolCtPhase,
   updateProtocolMriSequence,
   updateProtocolVersion,
+  upsertProtocolCtTechnique,
   updateProtocolAnatomyRegion,
 } from "./protocol-library-repository.js";
 import {
@@ -168,6 +171,7 @@ function protocolInput(body: Record<string, unknown>) {
     bowelPreparation: optionalText(body.bowelPreparation ?? body.bowel_preparation),
     preparationNotes: optionalText(body.preparationNotes ?? body.preparation_notes),
     changeSummary: optionalText(body.changeSummary ?? body.change_summary) ?? "Initial protocol version",
+    protocolNotes: optionalText(body.protocolNotes ?? body.protocol_notes),
   };
 }
 
@@ -215,6 +219,11 @@ function ctPhaseRowInput(body: Record<string, unknown>) {
     ctPhasePresetId: optionalPositiveInteger(body.ctPhasePresetId ?? body.ct_phase_preset_id, "ctPhasePresetId"),
     customPhaseName: optionalText(body.customPhaseName ?? body.custom_phase_name),
     timingOverride: optionalText(body.timingOverride ?? body.timing_override),
+    timingType: oneOf(body.timingType ?? body.timing_type, "timingType", ["NON_CONTRAST", "FIXED_DELAY_INJECTION_START", "FIXED_DELAY_INJECTION_END", "BOLUS_TRACKING", "MANUAL"] as const),
+    delaySeconds: optionalNonNegativeInteger(body.delaySeconds ?? body.delay_seconds, "delaySeconds"),
+    bolusTrackingSite: optionalText(body.bolusTrackingSite ?? body.bolus_tracking_site),
+    triggerHu: optionalNonNegativeInteger(body.triggerHu ?? body.trigger_hu, "triggerHu"),
+    postTriggerDelaySeconds: optionalNonNegativeInteger(body.postTriggerDelaySeconds ?? body.post_trigger_delay_seconds, "postTriggerDelaySeconds"),
     coverageOverride: optionalText(body.coverageOverride ?? body.coverage_override),
     reconstructionOverride: optionalText(body.reconstructionOverride ?? body.reconstruction_override),
     instructionsOverride: optionalText(body.instructionsOverride ?? body.instructions_override),
@@ -227,10 +236,36 @@ function ctPhaseRowPatch(body: Record<string, unknown>) {
     ctPhasePresetId: maybeEither(body, "ctPhasePresetId", "ct_phase_preset_id", (value) => optionalPositiveInteger(value, "ctPhasePresetId")),
     customPhaseName: maybeEither(body, "customPhaseName", "custom_phase_name", optionalText),
     timingOverride: maybeEither(body, "timingOverride", "timing_override", optionalText),
+    timingType: maybeEither(body, "timingType", "timing_type", (value) => oneOf(value, "timingType", ["NON_CONTRAST", "FIXED_DELAY_INJECTION_START", "FIXED_DELAY_INJECTION_END", "BOLUS_TRACKING", "MANUAL"] as const)),
+    delaySeconds: maybeEither(body, "delaySeconds", "delay_seconds", (value) => optionalNonNegativeInteger(value, "delaySeconds")),
+    bolusTrackingSite: maybeEither(body, "bolusTrackingSite", "bolus_tracking_site", optionalText),
+    triggerHu: maybeEither(body, "triggerHu", "trigger_hu", (value) => optionalNonNegativeInteger(value, "triggerHu")),
+    postTriggerDelaySeconds: maybeEither(body, "postTriggerDelaySeconds", "post_trigger_delay_seconds", (value) => optionalNonNegativeInteger(value, "postTriggerDelaySeconds")),
     coverageOverride: maybeEither(body, "coverageOverride", "coverage_override", optionalText),
     reconstructionOverride: maybeEither(body, "reconstructionOverride", "reconstruction_override", optionalText),
     instructionsOverride: maybeEither(body, "instructionsOverride", "instructions_override", optionalText),
     isRequired: optionalBoolean(body.isRequired ?? body.is_required, "isRequired"),
+  };
+}
+
+function ctTechniqueInput(body: Record<string, unknown>) {
+  return {
+    scannerId: positiveInteger(body.scannerId ?? body.scanner_id, "scannerId"),
+    kvMode: optionalDropdown(body.kvMode ?? body.kv_mode, "kvMode", ["AUTO", "FIXED"] as const),
+    kvp: optionalPositiveInteger(body.kvp, "kvp"),
+    tubeCurrentMode: optionalDropdown(body.tubeCurrentMode ?? body.tube_current_mode, "tubeCurrentMode", ["AUTOMATIC", "FIXED_MA", "REFERENCE_MAS"] as const),
+    fixedMa: optionalNonNegativeInteger(body.fixedMa ?? body.fixed_ma, "fixedMa"),
+    referenceMas: optionalPositiveNumber(body.referenceMas ?? body.reference_mas, "referenceMas"),
+    exposureControl: optionalText(body.exposureControl ?? body.exposure_control),
+    noiseIndex: optionalPositiveNumber(body.noiseIndex ?? body.noise_index, "noiseIndex"),
+    minMa: optionalNonNegativeInteger(body.minMa ?? body.min_ma, "minMa"),
+    maxMa: optionalNonNegativeInteger(body.maxMa ?? body.max_ma, "maxMa"),
+    reconstructionMethod: optionalText(body.reconstructionMethod ?? body.reconstruction_method),
+    reconstructionStrength: optionalText(body.reconstructionStrength ?? body.reconstruction_strength),
+    reconstructionImageDefinition: optionalText(body.reconstructionImageDefinition ?? body.reconstruction_image_definition),
+    sliceThicknessMm: optionalPositiveNumber(body.sliceThicknessMm ?? body.slice_thickness_mm, "sliceThicknessMm"),
+    reconstructionIntervalMm: optionalPositiveNumber(body.reconstructionIntervalMm ?? body.reconstruction_interval_mm, "reconstructionIntervalMm"),
+    kernel: optionalText(body.kernel),
   };
 }
 
@@ -507,7 +542,9 @@ router.post(
   "/protocols/:id/draft-from-active",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolLibraryAdminAccess(req);
-    const detail = await createDraftFromActiveVersion(positiveInteger(req.params.id, "protocol id"), actorUserId(req));
+    const body = asUnknownRecord(req.body);
+    const revisionType = body.revisionType == null ? "MINOR" : oneOf(body.revisionType, "revisionType", ["MINOR", "MAJOR"] as const);
+    const detail = await createDraftFromActiveVersion(positiveInteger(req.params.id, "protocol id"), actorUserId(req), revisionType);
     res.status(201).json({ detail });
   })
 );
@@ -529,8 +566,39 @@ router.patch(
     const body = asUnknownRecord(req.body);
     const version = await updateProtocolVersion(versionId, {
       changeSummary: maybeEither(body, "changeSummary", "change_summary", optionalText),
+      protocolNotes: maybeEither(body, "protocolNotes", "protocol_notes", optionalText),
     });
     requireFound(version, "Protocol version not found.");
+    res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
+  })
+);
+
+router.post(
+  "/protocol-versions/:versionId/duplicate",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const body = asUnknownRecord(req.body);
+    const detail = await duplicateCtProtocolVersion(positiveInteger(req.params.versionId, "version id"), requiredText(body.name, "name"), actorUserId(req));
+    res.status(201).json({ detail });
+  })
+);
+
+router.post(
+  "/protocol-versions/:versionId/ct-techniques",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const versionId = positiveInteger(req.params.versionId, "version id");
+    await upsertProtocolCtTechnique(versionId, ctTechniqueInput(asUnknownRecord(req.body)));
+    res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
+  })
+);
+
+router.delete(
+  "/protocol-versions/:versionId/ct-techniques/:scannerId",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const versionId = positiveInteger(req.params.versionId, "version id");
+    await removeProtocolCtTechnique(versionId, positiveInteger(req.params.scannerId, "scanner id"));
     res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
   })
 );

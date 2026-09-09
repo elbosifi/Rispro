@@ -14,7 +14,7 @@ import type {
   ReportingBoardPushConfig, ReportingBoardSavedView, DoctorReportingWorklistSummary, DoctorReportingWorklistEmailQueueResult, ReportingBoardSettings,
   ReportingBoardStatsResponse, ReportingBoardCaseHoldSummary, ComparisonRequest, PreviousCompletedStudy, RosterDutyTypeConfig, RosterShiftImportMapping,
   RosterXmlImportPreview, RosterXmlImportResult, AppointmentProtocol, ProtocolAuditTimelineEvent, ProtocolAnatomyRegion,
-  ProtocolLibraryProtocol, ProtocolLibraryVersion, ProtocolLibraryVersionDetail, ProtocolLibraryCtPhaseRow,
+  ProtocolLibraryProtocol, ProtocolLibraryVersion, ProtocolLibraryVersionDetail, ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow,
   ProtocolLibraryMriSequenceRow, ProtocolDetails, ProtocolFilters, ProtocolPayload, DoctorProtocolingAppointment,
   DoctorProtocolingAppointmentDetail, DoctorProtocolingFilters, ProtocolAssignmentPayload, ProtocolTask, ImagingScanner, CtPhasePreset,
   MriSequencePreset, TeamWorkloadSummaryRow, WorkloadCalculationSummary, WorkloadCatalogRule, WorkloadFilters,
@@ -1390,9 +1390,10 @@ export type CtPhasePresetPayload = Pick<CtPhasePreset, "name" | "contrastStatus"
 export type MriSequencePresetPayload = Pick<MriSequencePreset, "scannerId" | "vendor" | "name" | "vendorSequenceName" | "genericFamily" | "weighting" | "defaultPlane" | "fatSuppression" | "acquisitionType" | "contrastRelation" | "defaultCoverage" | "defaultBValues" | "defaultDynamicTiming" | "estimatedScanTimeMinutes" | "notes" | "isActive"> & {
   scannerAliases?: Array<Pick<NonNullable<MriSequencePreset["scannerAliases"]>[number], "scannerId" | "vendorSequenceName" | "notes">>;
 };
-export type ProtocolLibraryProtocolPayload = Pick<ProtocolLibraryProtocol, "name" | "modality" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "oralContrastPolicy" | "bowelPreparation" | "preparationNotes"> & { changeSummary?: string | null };
+export type ProtocolLibraryProtocolPayload = Pick<ProtocolLibraryProtocol, "name" | "modality" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "oralContrastPolicy" | "bowelPreparation" | "preparationNotes"> & { changeSummary?: string | null; protocolNotes?: string | null };
 export type ProtocolLibraryProtocolPatch = Partial<Pick<ProtocolLibraryProtocol, "name" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "oralContrastPolicy" | "bowelPreparation" | "preparationNotes" | "isActive">>;
-export type ProtocolLibraryCtPhaseRowPayload = Pick<ProtocolLibraryCtPhaseRow, "ctPhasePresetId" | "customPhaseName" | "timingOverride" | "coverageOverride" | "reconstructionOverride" | "instructionsOverride" | "isRequired">;
+export type ProtocolLibraryCtPhaseRowPayload = Pick<ProtocolLibraryCtPhaseRow, "ctPhasePresetId" | "customPhaseName" | "timingOverride" | "timingType" | "delaySeconds" | "bolusTrackingSite" | "triggerHu" | "postTriggerDelaySeconds" | "coverageOverride" | "reconstructionOverride" | "instructionsOverride" | "isRequired">;
+export type ProtocolLibraryCtTechniquePayload = Omit<ProtocolLibraryCtTechniqueRow, "id" | "protocolVersionId" | "scannerName" | "scannerVendor" | "scannerModel" | "createdAt" | "updatedAt">;
 export type ProtocolLibraryMriSequenceRowPayload = Pick<ProtocolLibraryMriSequenceRow, "scannerId" | "mriSequencePresetId" | "planeOverride" | "coverageOverride" | "bValuesOverride" | "timingOverride" | "notesOverride" | "isRequired">;
 
 export async function createProtocolLibraryProtocol(
@@ -1412,7 +1413,7 @@ export async function updateProtocolLibraryProtocol(id: number, payload: Protoco
   return raw.protocol;
 }
 
-export async function updateProtocolLibraryVersion(versionId: number, payload: { changeSummary?: string | null }): Promise<ProtocolLibraryVersionDetail> {
+export async function updateProtocolLibraryVersion(versionId: number, payload: { changeSummary?: string | null; protocolNotes?: string | null }): Promise<ProtocolLibraryVersionDetail> {
   const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -1427,9 +1428,9 @@ export async function activateProtocolLibraryVersion(versionId: number): Promise
   return raw.detail;
 }
 
-export async function createProtocolLibraryDraftFromActive(protocolId: number): Promise<ProtocolLibraryVersionDetail> {
+export async function createProtocolLibraryDraftFromActive(protocolId: number, revisionType: "MINOR" | "MAJOR" = "MINOR"): Promise<ProtocolLibraryVersionDetail> {
   const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocols/${protocolId}/draft-from-active`, {
-    method: "POST",
+    method: "POST", body: JSON.stringify({ revisionType }),
   });
   return raw.detail;
 }
@@ -1629,6 +1630,21 @@ export async function fetchProtocolingHistoricalPacsCandidates(appointmentId: nu
 
 export async function fetchReportingBoardHistoricalPacsCandidates(appointmentId: number): Promise<ProtocolingHistoricalPacsCandidatesResponse> {
   return api<ProtocolingHistoricalPacsCandidatesResponse>(`/doctor/reporting-board/cases/${appointmentId}/history/historical-candidates`);
+}
+
+export async function duplicateProtocolLibraryCtVersion(versionId: number, name: string): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/duplicate`, { method: "POST", body: JSON.stringify({ name }) });
+  return raw.detail;
+}
+
+export async function upsertProtocolLibraryCtTechnique(versionId: number, payload: ProtocolLibraryCtTechniquePayload): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-techniques`, { method: "POST", body: JSON.stringify(payload) });
+  return raw.detail;
+}
+
+export async function deleteProtocolLibraryCtTechnique(versionId: number, scannerId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-techniques/${scannerId}`, { method: "DELETE" });
+  return raw.detail;
 }
 
 export async function fetchReportingBoardComparisonHistory(comparisonRequestId: number): Promise<ProtocolingPatientHistoryResponse> {

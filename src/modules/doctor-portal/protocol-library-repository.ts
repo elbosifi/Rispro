@@ -116,6 +116,7 @@ export interface ProtocolInput {
   bowelPreparation: string | null;
   preparationNotes: string | null;
   changeSummary: string | null;
+  protocolNotes: string | null;
 }
 
 export interface ProtocolUpdateInput {
@@ -136,6 +137,7 @@ export interface ProtocolVersionRow {
   versionNumber: string;
   status: ProtocolVersionStatus;
   changeSummary: string | null;
+  protocolNotes: string | null;
   createdBy: number | null;
   approvedBy: number | null;
   approvedAt: string | null;
@@ -152,6 +154,11 @@ export interface ProtocolCtPhaseRow {
   ctPhasePresetName: string | null;
   customPhaseName: string | null;
   timingOverride: string | null;
+  timingType: "NON_CONTRAST" | "FIXED_DELAY_INJECTION_START" | "FIXED_DELAY_INJECTION_END" | "BOLUS_TRACKING" | "MANUAL" | null;
+  delaySeconds: number | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  postTriggerDelaySeconds: number | null;
   coverageOverride: string | null;
   reconstructionOverride: string | null;
   instructionsOverride: string | null;
@@ -190,16 +197,67 @@ export interface ProtocolVersionDetail {
   version: ProtocolVersionRow;
   ctPhases: ProtocolCtPhaseRow[];
   mriSequences: ProtocolMriSequenceRow[];
+  ctTechniques: ProtocolCtTechniqueRow[];
+}
+
+export interface ProtocolCtTechniqueRow {
+  id: number;
+  protocolVersionId: number;
+  scannerId: number;
+  scannerName: string | null;
+  scannerVendor: string | null;
+  scannerModel: string | null;
+  kvMode: "AUTO" | "FIXED" | null;
+  kvp: number | null;
+  tubeCurrentMode: "AUTOMATIC" | "FIXED_MA" | "REFERENCE_MAS" | null;
+  fixedMa: number | null;
+  referenceMas: number | null;
+  exposureControl: string | null;
+  noiseIndex: number | null;
+  minMa: number | null;
+  maxMa: number | null;
+  reconstructionMethod: string | null;
+  reconstructionStrength: string | null;
+  reconstructionImageDefinition: string | null;
+  sliceThicknessMm: number | null;
+  reconstructionIntervalMm: number | null;
+  kernel: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProtocolCtPhaseInput {
   ctPhasePresetId: number | null;
   customPhaseName: string | null;
   timingOverride: string | null;
+  timingType: ProtocolCtPhaseRow["timingType"];
+  delaySeconds: number | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  postTriggerDelaySeconds: number | null;
   coverageOverride: string | null;
   reconstructionOverride: string | null;
   instructionsOverride: string | null;
   isRequired: boolean;
+}
+
+export interface ProtocolCtTechniqueInput {
+  scannerId: number;
+  kvMode: ProtocolCtTechniqueRow["kvMode"];
+  kvp: number | null;
+  tubeCurrentMode: ProtocolCtTechniqueRow["tubeCurrentMode"];
+  fixedMa: number | null;
+  referenceMas: number | null;
+  exposureControl: string | null;
+  noiseIndex: number | null;
+  minMa: number | null;
+  maxMa: number | null;
+  reconstructionMethod: string | null;
+  reconstructionStrength: string | null;
+  reconstructionImageDefinition: string | null;
+  sliceThicknessMm: number | null;
+  reconstructionIntervalMm: number | null;
+  kernel: string | null;
 }
 
 export interface ProtocolMriSequenceInput {
@@ -403,6 +461,7 @@ function mapVersion(row: RawRecord): ProtocolVersionRow {
     versionNumber: String(row.version_number),
     status: String(row.status) as ProtocolVersionStatus,
     changeSummary: stringOrNull(row.change_summary),
+    protocolNotes: stringOrNull(row.protocol_notes),
     createdBy: numberOrNull(row.created_by),
     approvedBy: numberOrNull(row.approved_by),
     approvedAt: stringOrNull(row.approved_at),
@@ -421,12 +480,32 @@ function mapProtocolCtPhase(row: RawRecord): ProtocolCtPhaseRow {
     ctPhasePresetName: stringOrNull(row.ct_phase_preset_name),
     customPhaseName: stringOrNull(row.custom_phase_name),
     timingOverride: stringOrNull(row.timing_override),
+    timingType: row.timing_type == null ? null : String(row.timing_type) as ProtocolCtPhaseRow["timingType"],
+    delaySeconds: numberOrNull(row.delay_seconds),
+    bolusTrackingSite: stringOrNull(row.bolus_tracking_site),
+    triggerHu: numberOrNull(row.trigger_hu),
+    postTriggerDelaySeconds: numberOrNull(row.post_trigger_delay_seconds),
     coverageOverride: stringOrNull(row.coverage_override),
     reconstructionOverride: stringOrNull(row.reconstruction_override),
     instructionsOverride: stringOrNull(row.instructions_override),
     isRequired: Boolean(row.is_required),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+function mapProtocolCtTechnique(row: RawRecord): ProtocolCtTechniqueRow {
+  return {
+    id: Number(row.id), protocolVersionId: Number(row.protocol_version_id), scannerId: Number(row.scanner_id),
+    scannerName: stringOrNull(row.scanner_name), scannerVendor: stringOrNull(row.scanner_vendor), scannerModel: stringOrNull(row.scanner_model),
+    kvMode: row.kv_mode == null ? null : String(row.kv_mode) as ProtocolCtTechniqueRow["kvMode"], kvp: numberOrNull(row.kvp),
+    tubeCurrentMode: row.tube_current_mode == null ? null : String(row.tube_current_mode) as ProtocolCtTechniqueRow["tubeCurrentMode"],
+    fixedMa: numberOrNull(row.fixed_ma), referenceMas: numberOrNull(row.reference_mas), exposureControl: stringOrNull(row.exposure_control),
+    noiseIndex: numberOrNull(row.noise_index), minMa: numberOrNull(row.min_ma), maxMa: numberOrNull(row.max_ma),
+    reconstructionMethod: stringOrNull(row.reconstruction_method), reconstructionStrength: stringOrNull(row.reconstruction_strength),
+    reconstructionImageDefinition: stringOrNull(row.reconstruction_image_definition), sliceThicknessMm: numberOrNull(row.slice_thickness_mm),
+    reconstructionIntervalMm: numberOrNull(row.reconstruction_interval_mm), kernel: stringOrNull(row.kernel),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
   };
 }
 
@@ -814,7 +893,7 @@ async function protocolById(client: DbClient, protocolId: number): Promise<Proto
 async function versionById(client: DbClient, versionId: number): Promise<ProtocolVersionRow | null> {
   const result = await client.query(
     `
-      select id, protocol_id, version_number, status, change_summary, created_by, approved_by,
+      select id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
              approved_at, retired_at, created_at, updated_at
       from protocol_versions
       where id = $1
@@ -828,7 +907,8 @@ async function ctPhasesForVersion(client: DbClient, versionId: number): Promise<
   const result = await client.query(
     `
       select pcp.id, pcp.protocol_version_id, pcp.order_index, pcp.ct_phase_preset_id,
-             cpp.name as ct_phase_preset_name, pcp.custom_phase_name, pcp.timing_override,
+             cpp.name as ct_phase_preset_name, pcp.custom_phase_name, pcp.timing_override, pcp.timing_type,
+             pcp.delay_seconds, pcp.bolus_tracking_site, pcp.trigger_hu, pcp.post_trigger_delay_seconds,
              pcp.coverage_override, pcp.reconstruction_override, pcp.instructions_override,
              pcp.is_required, pcp.created_at, pcp.updated_at
       from protocol_ct_phases pcp
@@ -839,6 +919,17 @@ async function ctPhasesForVersion(client: DbClient, versionId: number): Promise<
     [versionId]
   );
   return result.rows.map(mapProtocolCtPhase);
+}
+
+async function ctTechniquesForVersion(client: DbClient, versionId: number): Promise<ProtocolCtTechniqueRow[]> {
+  const result = await client.query(`
+    select technique.*, scanner.name as scanner_name, scanner.vendor as scanner_vendor, scanner.model as scanner_model
+    from protocol_ct_techniques technique
+    join equipment scanner on scanner.id = technique.scanner_id
+    where technique.protocol_version_id = $1
+    order by scanner.name asc, technique.id asc
+  `, [versionId]);
+  return result.rows.map(mapProtocolCtTechnique);
 }
 
 async function mriSequencesForVersion(client: DbClient, versionId: number): Promise<ProtocolMriSequenceRow[]> {
@@ -869,7 +960,7 @@ export async function getProtocolDetail(protocolId: number): Promise<{ protocol:
   if (!protocol) return null;
   const versionsResult = await pool.query(
     `
-      select id, protocol_id, version_number, status, change_summary, created_by, approved_by,
+      select id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
              approved_at, retired_at, created_at, updated_at
       from protocol_versions
       where protocol_id = $1
@@ -890,6 +981,7 @@ export async function getProtocolVersionDetail(versionId: number): Promise<Proto
     version,
     ctPhases: await ctPhasesForVersion(pool, versionId),
     mriSequences: await mriSequencesForVersion(pool, versionId),
+    ctTechniques: await ctTechniquesForVersion(pool, versionId),
   };
 }
 
@@ -921,12 +1013,12 @@ export async function createProtocolWithDraft(input: ProtocolInput, actorUserId:
     const protocolId = Number(protocolResult.rows[0].id);
     const versionResult = await client.query(
       `
-        insert into protocol_versions (protocol_id, version_number, status, change_summary, created_by)
-        values ($1, '1.0', 'DRAFT', $2, $3)
-        returning id, protocol_id, version_number, status, change_summary, created_by, approved_by,
+        insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by)
+        values ($1, '1.0', 'DRAFT', $2, $3, $4)
+        returning id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
                   approved_at, retired_at, created_at, updated_at
       `,
-      [protocolId, input.changeSummary || "Initial protocol version", actorUserId]
+      [protocolId, input.changeSummary || "Initial protocol version", input.protocolNotes, actorUserId]
     );
     const protocol = await protocolById(client, protocolId);
     await client.query("commit");
@@ -992,18 +1084,19 @@ async function versionContext(client: DbClient, versionId: number): Promise<{ ve
   return { version, protocol };
 }
 
-export async function updateProtocolVersion(versionId: number, input: { changeSummary?: string | null }): Promise<ProtocolVersionRow | null> {
+export async function updateProtocolVersion(versionId: number, input: { changeSummary?: string | null; protocolNotes?: string | null }): Promise<ProtocolVersionRow | null> {
   const { version } = await versionContext(pool, versionId);
   assertDraft(version);
   const result = await pool.query(
     `
       update protocol_versions
-      set change_summary = case when $2::boolean then $3 else change_summary end
+      set change_summary = case when $2::boolean then $3 else change_summary end,
+          protocol_notes = case when $4::boolean then $5 else protocol_notes end
       where id = $1
-      returning id, protocol_id, version_number, status, change_summary, created_by, approved_by,
+      returning id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
                 approved_at, retired_at, created_at, updated_at
     `,
-    [versionId, "changeSummary" in input, input.changeSummary ?? null]
+    [versionId, "changeSummary" in input, input.changeSummary ?? null, "protocolNotes" in input, input.protocolNotes ?? null]
   );
   return result.rows[0] ? mapVersion(result.rows[0]) : null;
 }
@@ -1013,23 +1106,38 @@ async function nextOrder(client: DbClient, table: "protocol_ct_phases" | "protoc
   return Number(result.rows[0].next_order);
 }
 
+function validateCtPhaseTiming(input: Partial<ProtocolCtPhaseInput>) {
+  if (!("timingType" in input)) return;
+  if (!input.timingType) throw new HttpError(400, "timingType is required.");
+  if ((input.timingType === "FIXED_DELAY_INJECTION_START" || input.timingType === "FIXED_DELAY_INJECTION_END") && (input.delaySeconds == null || input.delaySeconds < 0)) {
+    throw new HttpError(400, "delaySeconds is required for fixed-delay timing.");
+  }
+  if (input.timingType === "BOLUS_TRACKING" && (!input.bolusTrackingSite || input.triggerHu == null || input.triggerHu < 0)) {
+    throw new HttpError(400, "bolusTrackingSite and triggerHu are required for bolus tracking.");
+  }
+  if (input.timingType === "MANUAL" && !input.timingOverride) throw new HttpError(400, "timingOverride is required for manual timing.");
+}
+
 export async function addProtocolCtPhase(versionId: number, input: ProtocolCtPhaseInput): Promise<ProtocolCtPhaseRow> {
   const { version, protocol } = await versionContext(pool, versionId);
   assertDraft(version);
   if (protocol.modality !== "CT") throw new HttpError(400, "CT phase rows can only be added to CT protocol versions.");
+  if (!input.customPhaseName?.trim()) throw new HttpError(400, "customPhaseName is required for CT phases.");
+  validateCtPhaseTiming(input);
   const orderIndex = await nextOrder(pool, "protocol_ct_phases", versionId);
   const result = await pool.query(
     `
       insert into protocol_ct_phases (
-        protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override,
+        protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
+        delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
         coverage_override, reconstruction_override, instructions_override, is_required
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       returning id, protocol_version_id, order_index, ct_phase_preset_id, null::text as ct_phase_preset_name,
-                custom_phase_name, timing_override, coverage_override, reconstruction_override,
+                custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override,
                 instructions_override, is_required, created_at, updated_at
     `,
-    [versionId, orderIndex, input.ctPhasePresetId, input.customPhaseName, input.timingOverride, input.coverageOverride, input.reconstructionOverride, input.instructionsOverride, input.isRequired]
+    [versionId, orderIndex, input.ctPhasePresetId, input.customPhaseName, input.timingOverride, input.timingType, input.delaySeconds, input.bolusTrackingSite, input.triggerHu, input.postTriggerDelaySeconds, input.coverageOverride, input.reconstructionOverride, input.instructionsOverride, input.isRequired]
   );
   return mapProtocolCtPhase(result.rows[0]);
 }
@@ -1038,6 +1146,7 @@ export async function updateProtocolCtPhase(versionId: number, rowId: number, in
   const { version, protocol } = await versionContext(pool, versionId);
   assertDraft(version);
   if (protocol.modality !== "CT") throw new HttpError(400, "CT phase rows can only be added to CT protocol versions.");
+  validateCtPhaseTiming(input);
   const result = await pool.query(
     `
       update protocol_ct_phases
@@ -1045,13 +1154,18 @@ export async function updateProtocolCtPhase(versionId: number, rowId: number, in
         ct_phase_preset_id = case when $3::boolean then $4 else ct_phase_preset_id end,
         custom_phase_name = case when $5::boolean then $6 else custom_phase_name end,
         timing_override = case when $7::boolean then $8 else timing_override end,
-        coverage_override = case when $9::boolean then $10 else coverage_override end,
-        reconstruction_override = case when $11::boolean then $12 else reconstruction_override end,
-        instructions_override = case when $13::boolean then $14 else instructions_override end,
-        is_required = coalesce($15, is_required)
+        timing_type = case when $9::boolean then $10 else timing_type end,
+        delay_seconds = case when $11::boolean then $12 else delay_seconds end,
+        bolus_tracking_site = case when $13::boolean then $14 else bolus_tracking_site end,
+        trigger_hu = case when $15::boolean then $16 else trigger_hu end,
+        post_trigger_delay_seconds = case when $17::boolean then $18 else post_trigger_delay_seconds end,
+        coverage_override = case when $19::boolean then $20 else coverage_override end,
+        reconstruction_override = case when $21::boolean then $22 else reconstruction_override end,
+        instructions_override = case when $23::boolean then $24 else instructions_override end,
+        is_required = coalesce($25, is_required)
       where protocol_version_id = $1 and id = $2
       returning id, protocol_version_id, order_index, ct_phase_preset_id, null::text as ct_phase_preset_name,
-                custom_phase_name, timing_override, coverage_override, reconstruction_override,
+                custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override,
                 instructions_override, is_required, created_at, updated_at
     `,
     [
@@ -1063,12 +1177,14 @@ export async function updateProtocolCtPhase(versionId: number, rowId: number, in
       input.customPhaseName ?? null,
       "timingOverride" in input,
       input.timingOverride ?? null,
-      "coverageOverride" in input,
-      input.coverageOverride ?? null,
-      "reconstructionOverride" in input,
-      input.reconstructionOverride ?? null,
-      "instructionsOverride" in input,
-      input.instructionsOverride ?? null,
+      "timingType" in input, input.timingType ?? null,
+      "delaySeconds" in input, input.delaySeconds ?? null,
+      "bolusTrackingSite" in input, input.bolusTrackingSite ?? null,
+      "triggerHu" in input, input.triggerHu ?? null,
+      "postTriggerDelaySeconds" in input, input.postTriggerDelaySeconds ?? null,
+      "coverageOverride" in input, input.coverageOverride ?? null,
+      "reconstructionOverride" in input, input.reconstructionOverride ?? null,
+      "instructionsOverride" in input, input.instructionsOverride ?? null,
       input.isRequired,
     ]
   );
@@ -1173,12 +1289,12 @@ export async function reorderProtocolRows(versionId: number, rowIds: number[], k
   }
 }
 
-function nextDraftVersionNumber(versionNumber: string): string {
-  const parts = versionNumber.split(".");
-  const minor = Number(parts[parts.length - 1] || "0");
-  if (!Number.isInteger(minor)) return `${versionNumber}.1`;
-  parts[parts.length - 1] = String(minor + 1);
-  return parts.join(".");
+function nextDraftVersionNumber(versionNumber: string, revisionType: "MINOR" | "MAJOR"): string {
+  const [majorText, minorText] = versionNumber.split(".");
+  const major = Number(majorText);
+  const minor = Number(minorText ?? "0");
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) throw new HttpError(400, "Active protocol version number is invalid.");
+  return revisionType === "MAJOR" ? `${major + 1}.0` : `${major}.${minor + 1}`;
 }
 
 export async function activateProtocolVersion(versionId: number, actorUserId: number | null): Promise<ProtocolVersionDetail> {
@@ -1214,7 +1330,7 @@ export async function activateProtocolVersion(versionId: number, actorUserId: nu
   }
 }
 
-export async function createDraftFromActiveVersion(protocolId: number, actorUserId: number | null): Promise<ProtocolVersionDetail> {
+export async function createDraftFromActiveVersion(protocolId: number, actorUserId: number | null, revisionType: "MINOR" | "MAJOR" = "MINOR"): Promise<ProtocolVersionDetail> {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -1224,21 +1340,23 @@ export async function createDraftFromActiveVersion(protocolId: number, actorUser
     if (!activeVersion) throw new HttpError(400, "Protocol has no active version.");
     const versionResult = await client.query(
       `
-        insert into protocol_versions (protocol_id, version_number, status, change_summary, created_by)
-        values ($1, $2, 'DRAFT', $3, $4)
-        returning id, protocol_id, version_number, status, change_summary, created_by, approved_by,
+        insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by)
+        values ($1, $2, 'DRAFT', $3, $4, $5)
+        returning id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
                   approved_at, retired_at, created_at, updated_at
       `,
-      [protocolId, nextDraftVersionNumber(activeVersion.versionNumber), `Draft from active ${activeVersion.versionNumber}`, actorUserId]
+      [protocolId, nextDraftVersionNumber(activeVersion.versionNumber, revisionType), `Draft from active ${activeVersion.versionNumber}`, activeVersion.protocolNotes, actorUserId]
     );
     const draft = mapVersion(versionResult.rows[0]);
     await client.query(
       `
         insert into protocol_ct_phases (
-          protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override,
+          protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
+          delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
           coverage_override, reconstruction_override, instructions_override, is_required
         )
-        select $1, order_index, ct_phase_preset_id, custom_phase_name, timing_override,
+        select $1, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
+               delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
                coverage_override, reconstruction_override, instructions_override, is_required
         from protocol_ct_phases
         where protocol_version_id = $2
@@ -1258,6 +1376,19 @@ export async function createDraftFromActiveVersion(protocolId: number, actorUser
       `,
       [draft.id, activeVersion.id]
     );
+    if (protocol.modality === "CT") {
+      await client.query(`
+        insert into protocol_ct_techniques (
+          protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
+          exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
+          reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
+        )
+        select $1, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
+               exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
+               reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
+        from protocol_ct_techniques where protocol_version_id = $2
+      `, [draft.id, activeVersion.id]);
+    }
     await client.query("commit");
     const detail = await getProtocolVersionDetail(draft.id);
     return detail!;
@@ -1267,4 +1398,57 @@ export async function createDraftFromActiveVersion(protocolId: number, actorUser
   } finally {
     client.release();
   }
+}
+
+export async function duplicateCtProtocolVersion(versionId: number, name: string, actorUserId: number | null): Promise<ProtocolVersionDetail> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { version: sourceVersion, protocol: source } = await versionContext(client, versionId);
+    if (source.modality !== "CT") throw new HttpError(400, "Only CT protocol versions can be duplicated.");
+    const protocolResult = await client.query(`
+      insert into protocols (name, modality, anatomy_region_id, category, indication, contrast_policy, oral_contrast_policy, bowel_preparation, preparation_notes, is_active)
+      values ($1, 'CT', $2, $3, $4, $5, $6, $7, $8, true) returning id
+    `, [name, source.anatomyRegionId, source.category, source.indication, source.contrastPolicy, source.oralContrastPolicy, source.bowelPreparation, source.preparationNotes]);
+    const protocolId = Number(protocolResult.rows[0].id);
+    const versionResult = await client.query(`
+      insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by)
+      values ($1, '1.0', 'DRAFT', 'Initial protocol version', $2, $3)
+      returning id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by, approved_at, retired_at, created_at, updated_at
+    `, [protocolId, sourceVersion.protocolNotes, actorUserId]);
+    const draft = mapVersion(versionResult.rows[0]);
+    await client.query(`insert into protocol_ct_phases (protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override, instructions_override, is_required)
+      select $1, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override, instructions_override, is_required
+      from protocol_ct_phases where protocol_version_id = $2`, [draft.id, sourceVersion.id]);
+    await client.query(`insert into protocol_ct_techniques (protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel)
+      select $1, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
+      from protocol_ct_techniques where protocol_version_id = $2`, [draft.id, sourceVersion.id]);
+    await client.query("commit");
+    return (await getProtocolVersionDetail(draft.id))!;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function upsertProtocolCtTechnique(versionId: number, input: ProtocolCtTechniqueInput): Promise<ProtocolCtTechniqueRow> {
+  const { version, protocol } = await versionContext(pool, versionId);
+  assertDraft(version);
+  if (protocol.modality !== "CT") throw new HttpError(400, "CT techniques can only be added to CT protocol versions.");
+  if (input.kvMode === "FIXED" && (input.kvp == null || input.kvp <= 0)) throw new HttpError(400, "kvp is required when kV mode is fixed.");
+  if (input.reconstructionMethod === "ASiR-V" && (!input.reconstructionStrength || !/^([0-9]|[1-9][0-9]|100)$/.test(input.reconstructionStrength))) throw new HttpError(400, "ASiR-V strength must be between 0 and 100.");
+  const result = await pool.query(`
+    insert into protocol_ct_techniques (protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    on conflict (protocol_version_id, scanner_id) do update set kv_mode=excluded.kv_mode, kvp=excluded.kvp, tube_current_mode=excluded.tube_current_mode, fixed_ma=excluded.fixed_ma, reference_mas=excluded.reference_mas, exposure_control=excluded.exposure_control, noise_index=excluded.noise_index, min_ma=excluded.min_ma, max_ma=excluded.max_ma, reconstruction_method=excluded.reconstruction_method, reconstruction_strength=excluded.reconstruction_strength, reconstruction_image_definition=excluded.reconstruction_image_definition, slice_thickness_mm=excluded.slice_thickness_mm, reconstruction_interval_mm=excluded.reconstruction_interval_mm, kernel=excluded.kernel
+    returning id, protocol_version_id, scanner_id, null::text as scanner_name, null::text as scanner_vendor, null::text as scanner_model, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel, created_at, updated_at
+  `, [versionId, input.scannerId, input.kvMode, input.kvp, input.tubeCurrentMode, input.fixedMa, input.referenceMas, input.exposureControl, input.noiseIndex, input.minMa, input.maxMa, input.reconstructionMethod, input.reconstructionStrength, input.reconstructionImageDefinition, input.sliceThicknessMm, input.reconstructionIntervalMm, input.kernel]);
+  return mapProtocolCtTechnique(result.rows[0]);
+}
+
+export async function removeProtocolCtTechnique(versionId: number, scannerId: number): Promise<void> {
+  const { version, protocol } = await versionContext(pool, versionId);
+  assertDraft(version);
+  if (protocol.modality !== "CT") throw new HttpError(400, "CT techniques can only be removed from CT protocol versions.");
+  await pool.query(`delete from protocol_ct_techniques where protocol_version_id = $1 and scanner_id = $2`, [versionId, scannerId]);
 }

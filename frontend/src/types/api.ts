@@ -1378,6 +1378,7 @@ export interface ProtocolLibraryVersion {
   versionNumber: string;
   status: ProtocolLibraryVersionStatus;
   changeSummary: string | null;
+  protocolNotes: string | null;
   createdBy: number | null;
   approvedBy: number | null;
   approvedAt: string | null;
@@ -1394,10 +1395,41 @@ export interface ProtocolLibraryCtPhaseRow {
   ctPhasePresetName: string | null;
   customPhaseName: string | null;
   timingOverride: string | null;
+  timingType: "NON_CONTRAST" | "FIXED_DELAY_INJECTION_START" | "FIXED_DELAY_INJECTION_END" | "BOLUS_TRACKING" | "MANUAL" | null;
+  delaySeconds: number | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  postTriggerDelaySeconds: number | null;
   coverageOverride: string | null;
   reconstructionOverride: string | null;
   instructionsOverride: string | null;
   isRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolLibraryCtTechniqueRow {
+  id: number;
+  protocolVersionId: number;
+  scannerId: number;
+  scannerName: string | null;
+  scannerVendor: string | null;
+  scannerModel: string | null;
+  kvMode: "AUTO" | "FIXED" | null;
+  kvp: number | null;
+  tubeCurrentMode: "AUTOMATIC" | "FIXED_MA" | "REFERENCE_MAS" | null;
+  fixedMa: number | null;
+  referenceMas: number | null;
+  exposureControl: string | null;
+  noiseIndex: number | null;
+  minMa: number | null;
+  maxMa: number | null;
+  reconstructionMethod: string | null;
+  reconstructionStrength: string | null;
+  reconstructionImageDefinition: string | null;
+  sliceThicknessMm: number | null;
+  reconstructionIntervalMm: number | null;
+  kernel: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1432,6 +1464,7 @@ export interface ProtocolLibraryVersionDetail {
   version: ProtocolLibraryVersion;
   ctPhases: ProtocolLibraryCtPhaseRow[];
   mriSequences: ProtocolLibraryMriSequenceRow[];
+  ctTechniques: ProtocolLibraryCtTechniqueRow[];
 }
 
 export interface TeamWorkloadSummaryRow {
