@@ -71,12 +71,18 @@ export interface ComparisonRequestRow {
   documentsDisposition: "attached_verified" | "not_required" | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr: string | null;
+  assignedDoctorNameEn: string | null;
   plannedReportingDoctorId: number | null;
   plannedReportingDoctorName: string | null;
+  plannedReportingDoctorNameAr: string | null;
+  plannedReportingDoctorNameEn: string | null;
   plannedReportingDoctorSetBy: number | null;
   plannedReportingDoctorSetAt: string | null;
   finalizedBy: number | null;
   finalizedByName: string | null;
+  finalizedByNameAr: string | null;
+  finalizedByNameEn: string | null;
   finalizedAt: string | null;
   finalText: string | null;
   createdBy: number | null;
@@ -188,12 +194,18 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     documentsDisposition: row.documentsDisposition === "attached_verified" || row.documentsDisposition === "not_required" ? row.documentsDisposition : null,
     assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
     assignedDoctorName: row.assignedDoctorName == null ? null : String(row.assignedDoctorName),
+    assignedDoctorNameAr: row.assignedDoctorNameAr == null ? null : String(row.assignedDoctorNameAr),
+    assignedDoctorNameEn: row.assignedDoctorNameEn == null ? null : String(row.assignedDoctorNameEn),
     plannedReportingDoctorId: row.plannedReportingDoctorId == null ? null : Number(row.plannedReportingDoctorId),
     plannedReportingDoctorName: row.plannedReportingDoctorName == null ? null : String(row.plannedReportingDoctorName),
+    plannedReportingDoctorNameAr: row.plannedReportingDoctorNameAr == null ? null : String(row.plannedReportingDoctorNameAr),
+    plannedReportingDoctorNameEn: row.plannedReportingDoctorNameEn == null ? null : String(row.plannedReportingDoctorNameEn),
     plannedReportingDoctorSetBy: row.plannedReportingDoctorSetBy == null ? null : Number(row.plannedReportingDoctorSetBy),
     plannedReportingDoctorSetAt: optionalIso(row.plannedReportingDoctorSetAt),
     finalizedBy: row.finalizedBy == null ? null : Number(row.finalizedBy),
     finalizedByName: row.finalizedByName == null ? null : String(row.finalizedByName),
+    finalizedByNameAr: row.finalizedByNameAr == null ? null : String(row.finalizedByNameAr),
+    finalizedByNameEn: row.finalizedByNameEn == null ? null : String(row.finalizedByNameEn),
     finalizedAt: optionalIso(row.finalizedAt),
     finalText: row.finalText == null ? null : String(row.finalText),
     createdBy: row.createdBy == null ? null : Number(row.createdBy),
@@ -246,12 +258,18 @@ const COMPARISON_SELECT = `
     cr.documents_disposition as "documentsDisposition",
     cr.assigned_doctor_id as "assignedDoctorId",
     assigned_doctor.display_name as "assignedDoctorName",
+    assigned_doctor_user.full_name as "assignedDoctorNameAr",
+    assigned_doctor_user.english_name as "assignedDoctorNameEn",
     cr.planned_reporting_doctor_id as "plannedReportingDoctorId",
     planned_doctor.display_name as "plannedReportingDoctorName",
+    planned_doctor_user.full_name as "plannedReportingDoctorNameAr",
+    planned_doctor_user.english_name as "plannedReportingDoctorNameEn",
     cr.planned_reporting_doctor_set_by as "plannedReportingDoctorSetBy",
     cr.planned_reporting_doctor_set_at as "plannedReportingDoctorSetAt",
     cr.finalized_by as "finalizedBy",
-    finalized_by.full_name as "finalizedByName",
+    coalesce(cr.finalized_by_name_ar_snapshot, finalized_by.full_name) as "finalizedByName",
+    coalesce(cr.finalized_by_name_ar_snapshot, finalized_by.full_name) as "finalizedByNameAr",
+    cr.finalized_by_name_en_snapshot as "finalizedByNameEn",
     cr.finalized_at as "finalizedAt",
     cr.final_text as "finalText",
     cr.created_by as "createdBy",
@@ -280,7 +298,9 @@ const COMPARISON_SELECT = `
   left join users created_by on created_by.id = cr.created_by
   left join users returned_by on returned_by.id = cr.preparation_returned_by
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cr.assigned_doctor_id
+  left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
   left join doctor_portal.doctor_profiles planned_doctor on planned_doctor.id = cr.planned_reporting_doctor_id
+  left join users planned_doctor_user on planned_doctor_user.id = planned_doctor.user_id
   left join lateral (
     select count(*)::integer as document_count
     from comparison_request_documents crd
@@ -438,12 +458,29 @@ async function assertDoctorCanReportComparison(doctorId: number, modalityId: num
   }
 }
 
-export async function listComparisonReportingDoctors(actor: ComparisonActor, modalityIdInput: unknown): Promise<Array<{ id: number; displayName: string }>> {
+export async function listComparisonReportingDoctors(actor: ComparisonActor, modalityIdInput: unknown): Promise<Array<{
+  id: number;
+  displayName: string;
+  fullName: string | null;
+  englishName: string | null;
+  username: string | null;
+}>> {
   if (actor.appRole !== "supervisor" && actor.appRole !== "super_admin") throw new HttpError(403, "Only supervisors can select reporting doctors.");
   const modalityId = normalizeId(modalityIdInput, "modalityId");
-  const result = await pool.query<{ id: number; displayName: string }>(
-    `select distinct dp.id, dp.display_name as "displayName"
+  const result = await pool.query<{
+    id: number;
+    displayName: string;
+    fullName: string | null;
+    englishName: string | null;
+    username: string | null;
+  }>(
+    `select distinct dp.id,
+            dp.display_name as "displayName",
+            u.full_name as "fullName",
+            u.english_name as "englishName",
+            u.username
      from doctor_portal.doctor_profiles dp
+     join users u on u.id = dp.user_id
      join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
      where dp.active = true and dp.can_finalize_reports = true
        and dmp.modality_id = $1 and dmp.can_report = true and dmp.active = true
@@ -1036,13 +1073,19 @@ export async function finalizeComparisonRequest(
     if (!["assigned", "ready_for_reporting"].includes(request.status)) {
       throw new HttpError(409, "Only released comparison requests can be finalized.");
     }
+    const finalizer = (await client.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+      "select full_name, english_name, username from users where id = $1 limit 1",
+      [actor.userId]
+    )).rows[0];
     await client.query(
       `
         update comparison_requests
-        set status = 'finalized', finalized_by = $2, finalized_at = now(), final_text = $3, updated_at = now()
+        set status = 'finalized', finalized_by = $2, finalized_at = now(), final_text = $3,
+            finalized_by_name_ar_snapshot = $4, finalized_by_name_en_snapshot = $5,
+            finalized_by_username_snapshot = $6, updated_at = now()
         where id = $1
       `,
-      [id, actor.userId, finalText]
+      [id, actor.userId, finalText, finalizer?.full_name ?? null, finalizer?.english_name ?? null, finalizer?.username ?? null]
     );
     const updated = await findComparisonRequestById(id, client);
     if (!updated) throw new HttpError(404, "Comparison request not found.");
@@ -1144,9 +1187,13 @@ function comparisonReportingCaseRow(row: Record<string, unknown>): ReportingBoar
     reportingPrioritySortOrder: null,
     assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
     assignedDoctorName: row.assignedDoctorName == null ? null : String(row.assignedDoctorName),
+    assignedDoctorNameAr: row.assignedDoctorNameAr == null ? null : String(row.assignedDoctorNameAr),
+    assignedDoctorNameEn: row.assignedDoctorNameEn == null ? null : String(row.assignedDoctorNameEn),
     assignmentOrigin: "rispro",
     finalizedByDoctorId: row.finalizedByDoctorId == null ? null : Number(row.finalizedByDoctorId),
     finalizedByDoctorName: row.finalizedByDoctorName == null ? null : String(row.finalizedByDoctorName),
+    finalizedByDoctorNameAr: row.finalizedByDoctorNameAr == null ? null : String(row.finalizedByDoctorNameAr),
+    finalizedByDoctorNameEn: row.finalizedByDoctorNameEn == null ? null : String(row.finalizedByDoctorNameEn),
     sonicDicomFinalizedByAccount: hasSonicObservation ? row.sonicAccount == null ? null : String(row.sonicAccount) : null,
     sonicDicomLatestDocumentId: hasSonicObservation ? row.sonicDocumentId == null ? null : String(row.sonicDocumentId) : null,
     sonicDicomDocumentRemoved,
@@ -1216,9 +1263,13 @@ export async function listComparisonReportingBoardRows(
         cca.assigned_at as "currentAssignedAt",
         cr.finalized_at as "reportFinalAt",
         finalized_doctor.id as "finalizedByDoctorId",
-        finalized_doctor.display_name as "finalizedByDoctorName",
+        coalesce(cr.finalized_by_name_ar_snapshot, finalized_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorName",
+        coalesce(cr.finalized_by_name_ar_snapshot, finalized_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorNameAr",
+        cr.finalized_by_name_en_snapshot as "finalizedByDoctorNameEn",
         cca.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        assigned_doctor_user.full_name as "assignedDoctorNameAr",
+        assigned_doctor_user.english_name as "assignedDoctorNameEn",
         comparison_cache.report_status as "sonicReportStatus",
         comparison_cache.report_final_at as "sonicReportFinalAt",
         comparison_cache.sonicdicom_document_id as "sonicDocumentId",
@@ -1238,7 +1289,9 @@ export async function listComparisonReportingBoardRows(
         limit 1
       ) comparison_cache on true
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
+      left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.user_id = cr.finalized_by
+      left join users finalized_user on finalized_user.id = cr.finalized_by
       left join lateral (
         select pi.value
         from patient_identifiers pi
@@ -1270,6 +1323,8 @@ export async function listComparisonReportingBoardStatsRows(filters: ReportingBo
     reportingPriorityName: null,
     assignedDoctorId: row.assignedDoctorId,
     assignedDoctorName: row.assignedDoctorName,
+    assignedDoctorNameAr: row.assignedDoctorNameAr,
+    assignedDoctorNameEn: row.assignedDoctorNameEn,
     assignmentOrigin: row.assignmentOrigin,
     assignmentStatus: row.assignmentStatus,
     completedAt: row.completedAt,

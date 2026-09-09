@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { ExamTypeDto, ModalityDto, PolicyDisplayLookupsDto, PolicySnapshotDto, PolicyUserDto } from "../types";
+import { getUserDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 
 interface LivePolicyPanelProps {
   snapshot: PolicySnapshotDto;
@@ -140,13 +142,13 @@ function formatExamType(examTypeId: number, examTypes: Array<Pick<ExamTypeDto, "
   return examType.isActive === false ? `${label} (inactive)` : label;
 }
 
-function formatAllowedUsers(userIds: number[], policyUsers: PolicyUserDto[]): string {
+function formatAllowedUsers(userIds: number[], policyUsers: PolicyUserDto[], language: Parameters<typeof getUserDisplayName>[1]): string {
   if (userIds.length === 0) return "Super admin only";
   return userIds
     .map((userId) => {
       const user = policyUsers.find((row) => Number(row.id) === Number(userId));
       if (!user) return `Unknown user ID ${userId}`;
-      const label = `${user.fullName || user.username} (${user.username})`;
+      const label = `${getUserDisplayName(user, language)} (${user.username})`;
       return user.isActive === false ? `${label} (inactive)` : label;
     })
     .join(", ");
@@ -228,6 +230,7 @@ export function LivePolicyPanel({
   policyUsers = [],
   displayLookups,
 }: LivePolicyPanelProps) {
+  const { language } = useLanguage();
   const [copied, setCopied] = useState(false);
   const resolvedModalities = displayLookups?.modalities ?? modalities;
   const resolvedExamTypes = displayLookups?.examTypes ?? examTypes;
@@ -351,7 +354,7 @@ export function LivePolicyPanel({
                 <Field label="Modality" value={formatModality(row.modalityId, resolvedModalities)} />
                 <Field label="Extra slots/day" value={row.dailyExtraSlots} />
                 <Field label="Exam count" value={row.examTypeIds.length} />
-                <Field label="Allowed users" value={formatAllowedUsers(row.allowedUserIds ?? [], resolvedPolicyUsers)} />
+                <Field label="Allowed users" value={formatAllowedUsers(row.allowedUserIds ?? [], resolvedPolicyUsers, language)} />
               </div>
               <ExamChips examTypeIds={row.examTypeIds} examTypes={resolvedExamTypes} />
             </Card>

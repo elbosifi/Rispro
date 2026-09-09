@@ -128,6 +128,7 @@ router.get(
           id: user.id,
           username: user.username,
           fullName: user.full_name,
+          englishName: user.english_name,
           role: user.role,
         })),
     });

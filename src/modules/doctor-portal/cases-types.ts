@@ -21,6 +21,8 @@ export interface DoctorCaseRow {
   rosterAssignmentId: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr: string | null;
+  assignedDoctorNameEn: string | null;
   teamName: string | null;
   dutyType: RosterDutyType | null;
   expectedReportingDate: string | null;

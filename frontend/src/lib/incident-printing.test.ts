@@ -149,4 +149,27 @@ describe("printIncidentReport", () => {
     expect(html).toContain('lang="en" dir="ltr"');
     expect(html).toContain('class="isolate"');
   });
+
+  it("uses stored reporter and reviewer bilingual snapshots for both print languages", () => {
+    const incident = equipmentIncident({
+      reporter_name: "Legacy Reporter",
+      reporter_name_ar: "Arabic Reporter",
+      reporter_name_en: "English Reporter",
+      reporter_username: "old.reporter",
+      reviewer_name: "Legacy Reviewer",
+      reviewer_name_ar: "Arabic Reviewer",
+      reviewer_name_en: "English Reviewer",
+      reviewer_username: "old.reviewer",
+    });
+
+    printIncidentReport(incident, [], "en");
+    const englishHtml = String(write.mock.calls[0][0]);
+    expect(englishHtml).toContain("English Reporter");
+    expect(englishHtml).toContain("English Reviewer");
+
+    printIncidentReport(incident, [], "ar");
+    const arabicHtml = String(write.mock.calls[1][0]);
+    expect(arabicHtml).toContain("Arabic Reporter");
+    expect(arabicHtml).toContain("Arabic Reviewer");
+  });
 });

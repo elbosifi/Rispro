@@ -131,7 +131,7 @@ export async function createDoctorWithUserForAdmin(
     temporaryPassword: string;
     coreRole: Role | string;
     userActive: boolean;
-    doctorDisplayName: string;
+    doctorDisplayName?: string;
     doctorRole: DoctorRole;
     doctorProfileActive: boolean;
     canFinalizeReports: boolean;
@@ -154,8 +154,8 @@ export async function createDoctorWithUserForAdmin(
   const temporaryPassword = requireExactPassword(input.temporaryPassword, "temporaryPassword");
   const doctorDisplayName = fullName || englishName || username;
 
-  if (!username || !fullName || !temporaryPassword || !doctorDisplayName) {
-    throw new HttpError(400, "username, fullName, temporaryPassword, and doctorDisplayName are required.");
+  if (!username || !fullName || !temporaryPassword) {
+    throw new HttpError(400, "username, fullName, and temporaryPassword are required.");
   }
   if (input.coreRole !== "doctor" && input.coreRole !== "supervisor") {
     throw new HttpError(400, "coreRole must be doctor or supervisor.");
@@ -448,17 +448,17 @@ export async function setDoctorIdentityActiveForAdmin(
     }
     const userResult = await client.query<DoctorAdminUserRow>(
       `update users set is_active = $2, updated_at = now() where id = $1
-       returning id, username, full_name, role, is_active,
+       returning id, username, email, full_name, english_name, role, is_active,
                  coalesce(must_change_password, false) as must_change_password, created_at, updated_at`,
       [targetUserId, active]
     );
     const profileResult = await client.query<DoctorProfileRow>(
       `update doctor_portal.doctor_profiles set active = $2, updated_at = now() where id = $1
-       returning id, user_id as "userId", $3::text as username, $4::text as "fullName", $5::text as "coreRole",
-                 $6::boolean as "userActive", display_name as "displayName", doctor_role as "doctorRole", active,
+       returning id, user_id as "userId", $3::text as username, $4::text as "email", $5::text as "fullName", $6::text as "englishName", $7::text as "coreRole",
+                 $8::boolean as "userActive", display_name as "displayName", doctor_role as "doctorRole", active,
                  can_finalize_reports as "canFinalizeReports", can_assign_protocols as "canAssignProtocols",
                  can_supervise as "canSupervise", created_at as "createdAt", updated_at as "updatedAt"`,
-      [previous.profile_id, active, userResult.rows[0].username, userResult.rows[0].full_name, userResult.rows[0].role, userResult.rows[0].is_active]
+      [previous.profile_id, active, userResult.rows[0].username, userResult.rows[0].email, userResult.rows[0].full_name, userResult.rows[0].english_name, userResult.rows[0].role, userResult.rows[0].is_active]
     );
     await insertDoctorAuditEvent(client, {
       actorUserId, actorDoctorId: null, eventType: active ? "doctor_identity_reactivated" : "doctor_identity_deactivated",

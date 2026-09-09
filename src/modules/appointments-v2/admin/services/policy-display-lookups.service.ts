@@ -95,6 +95,7 @@ export async function loadPolicyDisplayLookups(
               id,
               username,
               full_name as "fullName",
+              english_name as "englishName",
               role,
               is_active as "isActive"
             from users
@@ -113,6 +114,7 @@ export async function loadPolicyDisplayLookups(
       id: user.id,
       username: user.username,
       fullName: user.fullName,
+      englishName: user.englishName,
       role: user.role,
       isActive: user.isActive,
     })),

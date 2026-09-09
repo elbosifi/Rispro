@@ -4,6 +4,7 @@ import {
   changeOwnPassword,
   disableOwnActionPin,
   fetchActionPinStatus,
+  fetchCurrentSession,
   lockActionPinIdleSession,
   login,
   logout,
@@ -38,5 +39,19 @@ describe("auth API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(2, "/action-pin/idle-lock", { method: "POST" });
     expect(api).toHaveBeenNthCalledWith(3, "/action-pin/set", { method: "POST", body: JSON.stringify({ pin: "1234", confirmPin: "1234", currentPassword: "password" }) });
     expect(api).toHaveBeenNthCalledWith(4, "/action-pin/disable", { method: "POST", body: JSON.stringify({ currentPassword: "password" }) });
+  });
+
+  it("maps the current session bilingual name fields", async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      user: { id: 7, username: "doctor", full_name: "الطبيب", english_name: "The Doctor", role: "doctor" },
+    });
+
+    await expect(fetchCurrentSession()).resolves.toMatchObject({
+      id: 7,
+      username: "doctor",
+      fullName: "الطبيب",
+      englishName: "The Doctor",
+    });
+    expect(api).toHaveBeenCalledWith("/auth/me");
   });
 });

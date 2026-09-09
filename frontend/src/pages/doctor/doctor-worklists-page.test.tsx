@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists-page";
+import { LanguageProvider } from "@/providers/language-provider-component";
 
 const fetchMine = vi.fn();
 const fetchAll = vi.fn();
@@ -15,7 +16,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 function renderQuery(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(<LanguageProvider><QueryClientProvider client={client}>{ui}</QueryClientProvider></LanguageProvider>);
 }
 
 describe("Doctor worklist query states", () => {

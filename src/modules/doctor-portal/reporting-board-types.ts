@@ -108,6 +108,8 @@ export interface ReportingBoardSavedView {
 
 export interface DoctorReportingWorklistSummary extends ReportingBoardSavedView {
   doctorDisplayName: string;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   username: string;
   doctorUserId: number;
   doctorEmail: string | null;
@@ -167,9 +169,13 @@ export interface ReportingBoardCaseRow {
   reportingPrioritySortOrder: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr: string | null;
+  assignedDoctorNameEn: string | null;
   assignmentOrigin: ReportingBoardAssignmentOrigin;
   finalizedByDoctorId: number | null;
   finalizedByDoctorName: string | null;
+  finalizedByDoctorNameAr: string | null;
+  finalizedByDoctorNameEn: string | null;
   sonicDicomFinalizedByAccount: string | null;
   sonicDicomLatestDocumentId: string | null;
   sonicDicomDocumentRemoved?: boolean;
@@ -213,6 +219,8 @@ export interface ReportingBoardStatsBaseRow {
   reportingPriorityName: string | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr: string | null;
+  assignedDoctorNameEn: string | null;
   assignmentOrigin: ReportingBoardAssignmentOrigin;
   assignmentStatus: "assigned" | "unassigned";
   completedAt: string | null;
@@ -253,6 +261,8 @@ export interface ReportingBoardStatsSummary {
 export interface ReportingBoardDoctorStatsRow {
   doctorId: number | null;
   doctorName: string;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   total: number;
   requiredNotFinal: number;
   statOrUrgent: number;

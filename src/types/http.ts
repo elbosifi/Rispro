@@ -13,5 +13,6 @@ export interface AuthenticatedUserContext {
   purpose?: string;
   username?: string;
   fullName?: string;
+  englishName?: string;
   mustChangePassword?: boolean;
 }

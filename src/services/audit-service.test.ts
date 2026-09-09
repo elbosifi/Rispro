@@ -23,6 +23,7 @@ test("Audit Log pagination and filters reject unsafe query values before databas
   assert.match(filtered.whereClause, /category|report_status|security/);
   assert.match(filtered.whereClause, /outcome|status|failed/);
   assert.match(filtered.whereClause, /ilike/);
+  assert.match(filtered.whereClause, /changed_by_name_en_snapshot/);
   await assert.rejects(() => listAuditPage({ page: "0" }), /page must be a positive whole number/);
   await assert.rejects(() => listAuditPage({ page: "1.5" }), /page must be a positive whole number/);
   await assert.rejects(() => listAuditPage({ pageSize: "30" }), /pageSize must be one of 25, 50, or 100/);

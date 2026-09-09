@@ -13,6 +13,7 @@ import { emailFromUsername } from "../../utils/email-address.js";
 const EXPORT_COLUMNS = [
   "username",
   "full_name",
+  "english_name",
   "core_role",
   "user_active",
   "doctor_profile_id",
@@ -29,6 +30,7 @@ const EXPORT_COLUMNS = [
 const IMPORT_COLUMNS = [
   "username",
   "full_name",
+  "english_name",
   "temporary_password",
   "core_role",
   "user_active",
@@ -158,6 +160,7 @@ export async function exportDoctorProfilesCsv(): Promise<{ csv: string; filename
       select
         u.username,
         u.full_name,
+        u.english_name,
         u.role as core_role,
         u.is_active as user_active,
         dp.id as doctor_profile_id,
@@ -175,7 +178,7 @@ export async function exportDoctorProfilesCsv(): Promise<{ csv: string; filename
       left join modalities mp on mp.id = dmp.modality_id
       left join modalities mr on mr.id = dmp.modality_id
       left join modalities ms on ms.id = dmp.modality_id
-      group by u.username, u.full_name, u.role, u.is_active, dp.id
+      group by u.username, u.full_name, u.english_name, u.role, u.is_active, dp.id
       order by dp.active desc, dp.display_name asc
     `
   );
@@ -204,7 +207,7 @@ export async function inspectDoctorImport(input: { fileContentBase64: string; fo
     columns: headers,
     requiredColumns: IMPORT_COLUMNS,
     rowCount: rows.length,
-    missingColumns: IMPORT_COLUMNS.filter((column) => !headers.includes(column) && column !== "reset_password"),
+    missingColumns: IMPORT_COLUMNS.filter((column) => !headers.includes(column) && column !== "reset_password" && column !== "english_name"),
   };
 }
 
@@ -285,6 +288,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
     for (const row of preview.rows) {
       const values = row.values;
       const username = normalizeUsername(values.username);
+      const hasEnglishName = Object.prototype.hasOwnProperty.call(values, "english_name");
       const existing = await client.query<{ id: number }>(`select id from users where lower(btrim(username)) = $1 limit 1`, [username]);
       let userId = existing.rows[0]?.id;
       const resetPassword = boolValue(values.reset_password, false);
@@ -292,26 +296,40 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
         const inserted = await client.query<{ id: number }>(
           `
-            insert into users (username, email, full_name, password_hash, role, is_active, must_change_password)
-            values ($1, $2, $3, $4, $5, $6, true)
+            insert into users (username, email, full_name, english_name, password_hash, role, is_active, must_change_password)
+            values ($1, $2, $3, $4, $5, $6, $7, true)
             returning id
           `,
-          [username, emailFromUsername(username), values.full_name, passwordHash, values.core_role as Role, boolValue(values.user_active, true)]
+          [username, emailFromUsername(username), values.full_name, values.english_name || null, passwordHash, values.core_role as Role, boolValue(values.user_active, true)]
         );
         userId = inserted.rows[0].id;
         summary.createdUsers += 1;
       } else {
         if (resetPassword) {
           const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
-          await client.query(
-            `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true, updated_at = now() where id = $1`,
-            [userId, values.full_name, values.core_role, boolValue(values.user_active, true), passwordHash]
-          );
+          if (hasEnglishName) {
+            await client.query(
+              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, password_hash = $6, must_change_password = true, updated_at = now() where id = $1`,
+              [userId, values.full_name, values.english_name || null, values.core_role, boolValue(values.user_active, true), passwordHash]
+            );
+          } else {
+            await client.query(
+              `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true, updated_at = now() where id = $1`,
+              [userId, values.full_name, values.core_role, boolValue(values.user_active, true), passwordHash]
+            );
+          }
         } else {
-          await client.query(
-            `update users set full_name = $2, role = $3, is_active = $4, updated_at = now() where id = $1`,
-            [userId, values.full_name, values.core_role, boolValue(values.user_active, true)]
-          );
+          if (hasEnglishName) {
+            await client.query(
+              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, updated_at = now() where id = $1`,
+              [userId, values.full_name, values.english_name || null, values.core_role, boolValue(values.user_active, true)]
+            );
+          } else {
+            await client.query(
+              `update users set full_name = $2, role = $3, is_active = $4, updated_at = now() where id = $1`,
+              [userId, values.full_name, values.core_role, boolValue(values.user_active, true)]
+            );
+          }
         }
         summary.updatedUsers += 1;
       }
@@ -330,7 +348,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
           `,
           [
             userId,
-            values.full_name,
+            String(values.full_name || values.english_name || username).trim(),
             values.doctor_role,
             profileActive,
             boolValue(values.can_finalize_reports, false),
@@ -344,13 +362,12 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         await client.query(
           `
             update doctor_portal.doctor_profiles
-            set display_name = $2, doctor_role = $3, active = $4,
-                can_finalize_reports = $5, can_assign_protocols = $6, can_supervise = $7, updated_at = now()
+            set doctor_role = $2, active = $3,
+                can_finalize_reports = $4, can_assign_protocols = $5, can_supervise = $6, updated_at = now()
             where id = $1
           `,
           [
             profileId,
-            values.full_name,
             values.doctor_role,
             profileActive,
             boolValue(values.can_finalize_reports, false),

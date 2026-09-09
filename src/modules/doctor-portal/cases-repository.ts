@@ -41,6 +41,8 @@ const CASE_SELECT = `
     cta.roster_assignment_id as "rosterAssignmentId",
     cta.assigned_doctor_id as "assignedDoctorId",
     assigned_doctor.display_name as "assignedDoctorName",
+    assigned_doctor_user.full_name as "assignedDoctorNameAr",
+    assigned_doctor_user.english_name as "assignedDoctorNameEn",
     dra.team_name as "teamName",
     dra.duty_type as "dutyType",
     cta.expected_reporting_date::text as "expectedReportingDate",
@@ -57,6 +59,7 @@ const CASE_SELECT = `
   left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.status = 'active'
   left join doctor_portal.doctor_roster_assignments dra on dra.id = cta.roster_assignment_id
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+  left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
   left join doctor_portal.case_workload_units cwu on cwu.case_team_assignment_id = cta.id and cwu.status = 'active'
   left join lateral (
     select (wuc.base_units * wuc.report_required_multiplier) as workload_units

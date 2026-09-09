@@ -29,6 +29,8 @@ import {
   saveRosterShiftImportMapping,
 } from "@/lib/api-hooks";
 import type { ApplyRosterTemplateResult, GenerateDraftRosterResult, RosterBalanceStrategy, RosterNotificationSummary, RosterXmlImportPreview, RosterXmlImportResult, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 
 const TEAM_ROLES: Array<{ value: RosterTeamRole; label: string }> = [
   { value: "lead", label: "Lead" },
@@ -307,6 +309,7 @@ function AssignmentList({
 }
 
 export function DoctorRosterPage({ me, management = false, advanced = false }: { me: DoctorMe; management?: boolean; advanced?: boolean }) {
+  const { language } = useLanguage();
   const queryClient = useQueryClient();
   const canManage = management && isManager(me);
   const canManageTemplates = canManage && isAdmin(me);
@@ -885,7 +888,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
                     <DraggableDoctor
                       key={doctor.id}
                       id={doctor.id}
-                      label={doctor.displayName}
+                      label={getDoctorDisplayName(doctor, language)}
                       dimmed={conflictedDoctorIds.has(doctor.id)}
                       reason={conflictReasonByDoctorId.get(doctor.id)}
                     />
@@ -1023,7 +1026,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
               <select value={memberForm.doctorId} onChange={(e) => setMemberForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Doctor</option>
                 {(doctorsQuery.data ?? []).map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.displayName}{conflictedDoctorIds.has(doctor.id) ? " · conflict" : ""}</option>
+                  <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}{conflictedDoctorIds.has(doctor.id) ? " · conflict" : ""}</option>
                 ))}
               </select>
               <select value={memberForm.teamRole} onChange={(e) => setMemberForm((c) => ({ ...c, teamRole: e.target.value as RosterTeamRole }))} className="rounded-lg border px-3 py-2 text-sm">

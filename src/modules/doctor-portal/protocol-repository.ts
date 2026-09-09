@@ -280,6 +280,12 @@ export async function insertProtocolAudit(
     reason: string | null;
   }
 ) {
+  const actor = (await db.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+    `select u.full_name, u.english_name, u.username
+       from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id
+      where dp.id = $1 limit 1`,
+    [input.doctorId]
+  )).rows[0];
   await db.query(
     `
       insert into doctor_portal.appointment_protocol_audit_events (
@@ -289,9 +295,12 @@ export async function insertProtocolAudit(
         event_type,
         old_value_json,
         new_value_json,
-        reason
+        reason,
+        changed_by_name_ar_snapshot,
+        changed_by_name_en_snapshot,
+        changed_by_username_snapshot
       )
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
     `,
     [
       input.protocolId,
@@ -301,6 +310,9 @@ export async function insertProtocolAudit(
       input.oldValue == null ? null : JSON.stringify(input.oldValue),
       input.newValue == null ? null : JSON.stringify(input.newValue),
       input.reason,
+      actor?.full_name ?? null,
+      actor?.english_name ?? null,
+      actor?.username ?? null,
     ]
   );
 }
@@ -323,6 +335,8 @@ export async function listProtocolAuditEvents(appointmentId: number): Promise<Pr
     eventType: ProtocolAuditEventType;
     changedByDoctorId: number | null;
     changedByDoctorName: string | null;
+    changedByDoctorNameAr: string | null;
+    changedByDoctorNameEn: string | null;
     createdAt: string;
     reason: string | null;
     oldValueJson: unknown;
@@ -334,7 +348,9 @@ export async function listProtocolAuditEvents(appointmentId: number): Promise<Pr
       select
         pae.event_type as "eventType",
         pae.changed_by_doctor_id as "changedByDoctorId",
-        dp.display_name as "changedByDoctorName",
+        coalesce(pae.changed_by_name_ar_snapshot, u.full_name, dp.display_name) as "changedByDoctorName",
+        coalesce(pae.changed_by_name_ar_snapshot, u.full_name, dp.display_name) as "changedByDoctorNameAr",
+        pae.changed_by_name_en_snapshot as "changedByDoctorNameEn",
         pae.created_at as "createdAt",
         pae.reason,
         pae.old_value_json as "oldValueJson",
@@ -343,6 +359,7 @@ export async function listProtocolAuditEvents(appointmentId: number): Promise<Pr
         pae.new_value_json->>'protocolStatus' as "protocolStatus"
       from doctor_portal.appointment_protocol_audit_events pae
       left join doctor_portal.doctor_profiles dp on dp.id = pae.changed_by_doctor_id
+      left join users u on u.id = dp.user_id
       where pae.appointment_id = $1
       order by pae.created_at asc, pae.id asc
     `,
@@ -352,6 +369,8 @@ export async function listProtocolAuditEvents(appointmentId: number): Promise<Pr
     eventType: row.eventType,
     changedByDoctorId: row.changedByDoctorId,
     changedByDoctorName: row.changedByDoctorName,
+    changedByDoctorNameAr: row.changedByDoctorNameAr,
+    changedByDoctorNameEn: row.changedByDoctorNameEn,
     createdAt: row.createdAt,
     reason: row.reason,
     oldSummary: protocolSummary(row.oldValueJson),

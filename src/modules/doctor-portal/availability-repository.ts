@@ -14,6 +14,8 @@ const AVAILABILITY_SELECT = `
     da.id,
     da.doctor_id as "doctorId",
     dp.display_name as "doctorName",
+    u.full_name as "doctorNameAr",
+    u.english_name as "doctorNameEn",
     da.date::text as "date",
     da.start_time::text as "startTime",
     da.end_time::text as "endTime",
@@ -24,6 +26,7 @@ const AVAILABILITY_SELECT = `
     da.updated_at as "updatedAt"
   from doctor_portal.doctor_availability da
   join doctor_portal.doctor_profiles dp on dp.id = da.doctor_id
+  join users u on u.id = dp.user_id
 `;
 
 const LEAVE_SELECT = `
@@ -81,7 +84,7 @@ export async function createAvailability(
         doctor_id, date, start_time, end_time, availability_status, note, created_by
       )
       values ($1, $2::date, $3::time, $4::time, $5, $6, $7)
-      returning id, doctor_id as "doctorId", null::text as "doctorName", date::text as "date",
+      returning id, doctor_id as "doctorId", null::text as "doctorName", null::text as "doctorNameAr", null::text as "doctorNameEn", date::text as "date",
         start_time::text as "startTime", end_time::text as "endTime",
         availability_status as "availabilityStatus", note, created_by as "createdBy",
         created_at as "createdAt", updated_at as "updatedAt"

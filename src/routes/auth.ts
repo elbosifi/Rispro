@@ -5,6 +5,7 @@ import {
   authenticateUser,
   buildSessionToken,
   buildSupervisorReauthToken,
+  findCurrentSessionUser,
   clearSupervisorReauthCookie,
   clearSessionCookie,
   writeSessionCookie,
@@ -94,6 +95,7 @@ authRouter.post(
         id: user.id,
         username: user.username,
         fullName: user.full_name,
+        englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password
       }
@@ -107,17 +109,23 @@ authRouter.post("/logout", (_req: Request, res: Response) => {
   res.status(204).end();
 });
 
-authRouter.get("/me", requireAuth, (req: Request, res: Response) => {
+authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response) => {
   const request = req as AuthSessionRequest;
   const currentUser = requireCurrentUser(request);
+  const sessionUser = await findCurrentSessionUser(currentUser.sub);
+  if (!sessionUser || !sessionUser.is_active) throw new HttpError(401, "Authentication required.");
   res.json({
     user: {
-      ...currentUser,
+      id: sessionUser.id,
+      username: sessionUser.username,
+      fullName: sessionUser.full_name,
+      englishName: sessionUser.english_name,
+      role: sessionUser.role,
       recentSupervisorReauth: hasRecentSupervisorReauth(request),
-      mustChangePassword: Boolean(currentUser.mustChangePassword)
+      mustChangePassword: sessionUser.must_change_password
     }
   });
-});
+}));
 
 authRouter.post(
   "/change-password",
@@ -139,6 +147,7 @@ authRouter.post(
         id: user.id,
         username: user.username,
         fullName: user.full_name,
+        englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password
       }
@@ -173,6 +182,7 @@ authRouter.post(
         id: user.id,
         username: user.username,
         fullName: user.full_name,
+        englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password,
         recentSupervisorReauth: true

@@ -47,6 +47,7 @@ export interface ActionPinAdminUser {
   userId: number;
   username: string;
   fullName: string;
+  englishName: string | null;
   role: string;
   isActive: boolean;
   hasActionPin: boolean;

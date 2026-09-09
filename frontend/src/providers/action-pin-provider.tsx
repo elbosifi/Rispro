@@ -12,6 +12,7 @@ import {
 } from "@/lib/action-pin-policy";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { getUserDisplayName } from "@/lib/user-display-name";
 
 interface ActionPinChallenge {
   actionKey: string;
@@ -186,11 +187,13 @@ function ActionPinDialog({
 function ActionPinIdleLockOverlay({
   hasPin,
   userFullName,
+  userEnglishName,
   username,
   onUnlocked
 }: {
   hasPin: boolean;
   userFullName?: string | null;
+  userEnglishName?: string | null;
   username?: string | null;
   onUnlocked: () => void;
 }) {
@@ -239,7 +242,7 @@ function ActionPinIdleLockOverlay({
       <div className="w-full max-w-sm rounded-xl border border-white/10 bg-stone-900 p-6 shadow-2xl">
         <h2 className="text-xl font-semibold">{isArabic ? "الجلسة مقفلة" : "Session locked"}</h2>
         <p className="mt-2 text-sm text-stone-300">
-          {userFullName || username || (isArabic ? "المستخدم الحالي" : "Current user")}
+          {getUserDisplayName({ fullName: userFullName, englishName: userEnglishName, username }, language) || (isArabic ? "المستخدم الحالي" : "Current user")}
           {username ? <span className="block font-mono text-xs text-stone-400">{username}</span> : null}
         </p>
         {!hasPin ? (
@@ -338,6 +341,7 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
         <ActionPinIdleLockOverlay
           hasPin={Boolean(status?.hasPin)}
           userFullName={user.fullName}
+          userEnglishName={user.englishName}
           username={user.username}
           onUnlocked={() => {
             setLockedSession(null);

@@ -71,6 +71,8 @@ export interface ProtocolAuditTimelineEvent {
   eventType: ProtocolAuditEventType;
   changedByDoctorId: number | null;
   changedByDoctorName: string | null;
+  changedByDoctorNameAr: string | null;
+  changedByDoctorNameEn: string | null;
   createdAt: string;
   reason: string | null;
   oldSummary: string | null;

@@ -1827,7 +1827,8 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/reporting-board");
 
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Assign next cases/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Auto-assign" }));
+    expect(screen.getByRole("menuitem", { name: /Auto-assign next cases/i })).toBeTruthy();
     expect(screen.getByText("Saved views")).toBeTruthy();
   });
 

@@ -29,6 +29,8 @@ const WORKLIST_SELECT = `
     sv.created_at as "createdAt",
     sv.updated_at as "updatedAt",
     dp.display_name as "doctorDisplayName",
+    u.full_name as "doctorNameAr",
+    u.english_name as "doctorNameEn",
     u.username,
     u.id as "doctorUserId",
     u.email as "doctorEmail",

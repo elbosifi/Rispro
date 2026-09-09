@@ -26,6 +26,7 @@ import {
   type ActionPinRotationMode,
 } from "@/lib/action-pin-policy";
 import { useLanguage } from "@/providers/language-provider";
+import { getUserDisplayName } from "@/lib/user-display-name";
 
 function isReAuthRequiredError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -115,11 +116,12 @@ function IdleLockUserSelector({
   users: ActionPinAdminUser[];
   onChange: (userId: number, selected: boolean) => void;
 }) {
+  const { language } = useLanguage();
   const [search, setSearch] = useState("");
   const normalizedSearch = search.trim().toLowerCase();
   const visibleUsers = users.filter((user) => {
     if (!normalizedSearch) return true;
-    return [user.fullName, user.username, user.role].some((value) => value.toLowerCase().includes(normalizedSearch));
+    return [user.fullName, user.englishName ?? "", user.username, user.role].some((value) => value.toLowerCase().includes(normalizedSearch));
   });
 
   return (
@@ -136,13 +138,13 @@ function IdleLockUserSelector({
         {visibleUsers.map((user) => (
           <label key={user.userId} className="flex items-start gap-2 rounded p-1 text-sm hover:bg-stone-50 dark:hover:bg-stone-800">
             <input
-              aria-label={`${label} ${user.fullName}`}
+              aria-label={`${label} ${getUserDisplayName({ fullName: user.fullName, englishName: user.englishName, username: user.username }, language)}`}
               type="checkbox"
               checked={selectedUserIds.includes(user.userId)}
               onChange={(event) => onChange(user.userId, event.target.checked)}
             />
             <span>
-              <span className="block font-medium">{user.fullName}</span>
+              <span className="block font-medium">{getUserDisplayName({ fullName: user.fullName, englishName: user.englishName, username: user.username }, language)}</span>
               <span className="block text-xs text-stone-500 dark:text-stone-400">{user.username} · {user.role}</span>
             </span>
           </label>
@@ -164,6 +166,7 @@ function UserPinManagementTable({
   policyEnabled: boolean;
   onReAuthRequired: (key: string[]) => void;
 }) {
+  const { language } = useLanguage();
   const queryClient = useQueryClient();
   const [roleFilter, setRoleFilter] = useState("all");
   const [activeOnly, setActiveOnly] = useState(true);
@@ -199,9 +202,9 @@ function UserPinManagementTable({
 
   const runAction = (action: "reset" | "unlock" | "expire", user: ActionPinAdminUser) => {
     const prompt = action === "reset"
-      ? `Reset Action PIN for ${user.fullName}? The user will need to set a new PIN.`
+      ? `Reset Action PIN for ${getUserDisplayName({ fullName: user.fullName, englishName: user.englishName, username: user.username }, language)}? The user will need to set a new PIN.`
       : action === "expire"
-        ? `Force expire Action PIN for ${user.fullName}?`
+        ? `Force expire Action PIN for ${getUserDisplayName({ fullName: user.fullName, englishName: user.englishName, username: user.username }, language)}?`
         : "";
     if (prompt && !window.confirm(prompt)) return;
     setMessage("");
@@ -291,7 +294,7 @@ function UserPinManagementTable({
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.userId} className="border-t border-stone-200 dark:border-stone-700">
-                <td className="p-2">{user.fullName}</td>
+                <td className="p-2">{getUserDisplayName({ fullName: user.fullName, englishName: user.englishName, username: user.username }, language)}</td>
                 <td className="p-2 font-mono text-xs">{user.username}</td>
                 <td className="p-2">{user.role}</td>
                 <td className="p-2">{user.isActive ? "Active" : "Inactive"}</td>

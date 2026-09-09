@@ -39,6 +39,7 @@ function currentUser(request: PasskeyRequest): PasskeyUser {
     id: request.user.sub,
     username: request.user.username,
     fullName: request.user.fullName || request.user.username,
+    englishName: null,
     role: request.user.role,
     mustChangePassword: request.user.mustChangePassword === true
   };
@@ -58,6 +59,7 @@ function loginResponse(user: PasskeyUser) {
       id: user.id,
       username: user.username,
       fullName: user.fullName,
+      englishName: user.englishName,
       role: user.role,
       mustChangePassword: user.mustChangePassword
     }
@@ -191,6 +193,7 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
           id: verified.id,
           username: verified.username,
           fullName: verified.fullName,
+          englishName: verified.englishName,
           role: verified.role,
           mustChangePassword: verified.mustChangePassword,
           recentSupervisorReauth: true

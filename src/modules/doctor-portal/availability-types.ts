@@ -23,6 +23,8 @@ export interface DoctorAvailabilityRow {
   id: number;
   doctorId: number;
   doctorName: string | null;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   date: string;
   startTime: string | null;
   endTime: string | null;

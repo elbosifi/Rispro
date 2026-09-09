@@ -873,30 +873,37 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sonic finalizer mapping" });
     await assignDirectly(appointmentId, doctor.doctorId);
     const finalizerEmail = `rbit.finalizer.${randomUUID().slice(0, 8)}@nccb.ly`.toLowerCase();
-    await pool.query(`update users set username = $2 where id = $1`, [otherDoctor.id, finalizerEmail]);
+    const otherIdentity = (await pool.query<{ full_name: string | null; english_name: string | null; username: string }>("select full_name, english_name, username from users where id = $1", [otherDoctor.id])).rows[0]!;
+    await pool.query(`update users set username = $2, english_name = $3 where id = $1`, [otherDoctor.id, finalizerEmail, `${TEST_PREFIX} Other English`]);
     await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult(
       { bookingId: appointmentId, accessionNumber: `V2-${String(appointmentId).padStart(6, "0")}`, studyInstanceUid: "1.2.840.1", requiresReport: true, status: "completed" },
       { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: "2026-08-23T11:00:00.000Z", latestDocumentId: "501", finalizedByAccount: `  ${finalizerEmail.toUpperCase()}  `, correlationMethod: "study_instance_uid" }
     );
 
-    const cached = await pool.query<{ finalized_by_doctor_id: string | null; sonicdicom_finalized_by_account: string | null; seconds_until_check: string }>(`
-      select finalized_by_doctor_id::text, sonicdicom_finalized_by_account,
+    const cached = await pool.query<{ finalized_by_doctor_id: string | null; sonicdicom_finalized_by_account: string | null; finalized_by_name_ar_snapshot: string | null; finalized_by_name_en_snapshot: string | null; seconds_until_check: string }>(`
+      select finalized_by_doctor_id::text, sonicdicom_finalized_by_account, finalized_by_name_ar_snapshot, finalized_by_name_en_snapshot,
         extract(epoch from (next_check_at - last_attempt_at))::text as seconds_until_check
       from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1
     `, [appointmentId]);
     assert.equal(Number(cached.rows[0]?.finalized_by_doctor_id), otherDoctor.doctorId);
     assert.equal(cached.rows[0]?.sonicdicom_finalized_by_account, finalizerEmail.toUpperCase());
+    assert.equal(cached.rows[0]?.finalized_by_name_ar_snapshot, otherIdentity.full_name);
+    assert.equal(cached.rows[0]?.finalized_by_name_en_snapshot, `${TEST_PREFIX} Other English`);
     assert.ok(Number(cached.rows[0]?.seconds_until_check) >= 299 && Number(cached.rows[0]?.seconds_until_check) <= 301);
 
-    const response = await api<{ cases: Array<{ appointmentId: number; assignedDoctorId: number | null; finalizedByDoctorId: number | null; finalizedByDoctorName: string | null; sonicDicomFinalizedByAccount: string | null; sonicDicomLatestDocumentId: string | null; sonicDicomCorrelationMethod: string | null; assignmentMatch: string }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [otherDoctor.id, `${TEST_PREFIX} Other Arabic Renamed`, `${TEST_PREFIX} Other English Renamed`]);
+    const response = await api<{ cases: Array<{ appointmentId: number; assignedDoctorId: number | null; finalizedByDoctorId: number | null; finalizedByDoctorName: string | null; finalizedByDoctorNameAr: string | null; finalizedByDoctorNameEn: string | null; sonicDicomFinalizedByAccount: string | null; sonicDicomLatestDocumentId: string | null; sonicDicomCorrelationMethod: string | null; assignmentMatch: string }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all`);
     const row = response.data.cases.find((item) => item.appointmentId === appointmentId);
     assert.equal(row?.assignedDoctorId, doctor.doctorId);
     assert.equal(row?.finalizedByDoctorId, otherDoctor.doctorId);
     assert.equal(row?.finalizedByDoctorName, `${TEST_PREFIX}other`);
+    assert.equal(row?.finalizedByDoctorNameAr, otherIdentity.full_name);
+    assert.equal(row?.finalizedByDoctorNameEn, `${TEST_PREFIX} Other English`);
     assert.equal(row?.sonicDicomFinalizedByAccount, finalizerEmail.toUpperCase());
     assert.equal(row?.sonicDicomLatestDocumentId, "501");
     assert.equal(row?.sonicDicomCorrelationMethod, "study_instance_uid");
     assert.equal(row?.assignmentMatch, "mismatch");
+    await pool.query("update users set full_name = $2, english_name = $3, username = $4 where id = $1", [otherDoctor.id, otherIdentity.full_name, otherIdentity.english_name, otherIdentity.username]);
     const preserved = await pool.query<{ assigned_doctor_id: string; status: string; assignment_origin: string }>(`select assigned_doctor_id::text, status, assignment_origin from doctor_portal.case_team_assignments where appointment_id = $1 order by id`, [appointmentId]);
     assert.deepEqual(preserved.rows, [{ assigned_doctor_id: String(doctor.doctorId), status: "active", assignment_origin: "rispro" }]);
   });
@@ -2557,8 +2564,17 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const comparisonSource = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Comparison final auth source" });
     const assignedComparison = await createComparisonRequestForBooking(comparisonSource, `${date}T08:00:00.000Z`, "Assigned comparison final auth");
     await assignComparisonDirectly(assignedComparison, targetDoctor.doctorId);
+    const targetIdentity = (await pool.query<{ full_name: string | null; english_name: string | null }>("select full_name, english_name from users where id = $1", [targetDoctor.id])).rows[0]!;
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [targetDoctor.id, `${TEST_PREFIX} Finalizer Arabic`, `${TEST_PREFIX} Finalizer English`]);
     const comparisonFinal = await comparisonRequestService.finalizeComparisonRequest({ userId: targetDoctor.id, appRole: "doctor" }, assignedComparison, "Final comparison report text");
     assert.equal(comparisonFinal.status, "finalized");
+    assert.equal(comparisonFinal.finalizedByNameAr, `${TEST_PREFIX} Finalizer Arabic`);
+    assert.equal(comparisonFinal.finalizedByNameEn, `${TEST_PREFIX} Finalizer English`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [targetDoctor.id, `${TEST_PREFIX} Finalizer Arabic Renamed`, `${TEST_PREFIX} Finalizer English Renamed`]);
+    const historicalComparison = await comparisonRequestService.findComparisonRequestById(assignedComparison);
+    assert.equal(historicalComparison?.finalizedByNameAr, `${TEST_PREFIX} Finalizer Arabic`);
+    assert.equal(historicalComparison?.finalizedByNameEn, `${TEST_PREFIX} Finalizer English`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [targetDoctor.id, targetIdentity.full_name, targetIdentity.english_name]);
 
     const unassignedComparisonSource = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Comparison unassigned final auth source" });
     const unassignedComparison = await createComparisonRequestForBooking(unassignedComparisonSource, `${date}T08:01:00.000Z`, "Unassigned comparison final auth");

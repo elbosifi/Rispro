@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { Role, User } from "@/types/api";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
+import { getUserDisplayName } from "@/lib/user-display-name";
 import {
   canRoleAccessRoute,
   DEFAULT_PAGE_VISIBILITY_MATRIX,
@@ -474,16 +475,17 @@ function AccountMenu({ user, language, accountActions, canAccessSettings, onSett
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useCloseOnOutside(ref, () => setOpen(false), open);
-  const initials = user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U";
+  const displayName = getUserDisplayName(user, language);
+  const initials = displayName.charAt(0).toUpperCase() || "U";
   return (
     <div ref={ref} className="relative hidden lg:block">
       <button type="button" className="flex items-center gap-2 rounded-xl border px-2 py-1.5 text-start transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" style={{ borderColor: "var(--border)" }} onClick={() => setOpen((value) => !value)} aria-label={t(language, "topbar.accountMenu")} aria-expanded={open} aria-haspopup="menu">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))" }}>{initials}</span>
-        <span className="hidden max-w-32 min-w-0 md:block"><span className="block truncate text-sm font-medium text-foreground">{user.fullName}</span><span className="block truncate text-[10px] text-muted-foreground">{readableRole(language, user.role)}</span></span>
+        <span className="hidden max-w-32 min-w-0 md:block"><span className="block truncate text-sm font-medium text-foreground">{displayName}</span><span className="block truncate text-[10px] text-muted-foreground">{readableRole(language, user.role)}</span></span>
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
       </button>
       {open ? <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-60 rounded-xl border bg-card p-2 shadow-xl" style={{ borderColor: "var(--border)" }}>
-        <div className="border-b px-3 pb-2 text-start" style={{ borderColor: "var(--border)" }}><p className="truncate text-sm font-semibold text-foreground">{user.fullName}</p><p className="text-xs text-muted-foreground">{readableRole(language, user.role)}</p></div>
+        <div className="border-b px-3 pb-2 text-start" style={{ borderColor: "var(--border)" }}><p className="truncate text-sm font-semibold text-foreground">{displayName}</p><p className="text-xs text-muted-foreground">{readableRole(language, user.role)}</p></div>
         {accountActions}
         {canAccessSettings ? <button type="button" role="menuitem" className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onSettings(); setOpen(false); }}><Settings className="h-4 w-4" />{t(language, "common.settings")}</button> : null}
         <button type="button" role="menuitem" className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start text-accent hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onLogout(); setOpen(false); }}><LogOut className="h-4 w-4" />{t(language, "common.signOut")}</button>
@@ -864,10 +866,10 @@ export function MobileDrawer({
           {user ? (
             <div className="flex items-center gap-3 rounded-xl border bg-card px-3 py-2" style={{ borderColor: "var(--border)" }}>
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white" style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))" }}>
-                {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
+                {getUserDisplayName(user, language).charAt(0).toUpperCase() || "U"}
               </div>
               <div className="min-w-0 text-start">
-                <p className="truncate text-sm font-medium text-foreground">{user.fullName}</p>
+                <p className="truncate text-sm font-medium text-foreground">{getUserDisplayName(user, language)}</p>
                 <p className="truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{user.role}</p>
               </div>
             </div>

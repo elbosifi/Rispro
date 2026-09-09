@@ -1,5 +1,6 @@
 import { t, type Language } from "@/lib/i18n";
 import type { Incident, IncidentDocument } from "@/lib/api/incidents";
+import { getUserDisplayName } from "@/lib/user-display-name";
 
 const escapeHtml = (value: unknown) => String(value ?? "-")
   .replace(/&/g, "&amp;")
@@ -15,6 +16,11 @@ const escapeCssContent = (value: unknown) => String(value ?? "")
 
 const incidentText = (language: Language, key: string) => t(language, `incidents.${key}` as never);
 const incidentLabel = (language: Language, key: string) => escapeHtml(incidentText(language, key));
+const incidentActorName = (incident: Incident, role: "reporter" | "reviewer", language: Language) => getUserDisplayName({
+  fullName: role === "reporter" ? incident.reporter_name_ar ?? incident.reporter_name : incident.reviewer_name_ar ?? incident.reviewer_name,
+  englishName: role === "reporter" ? incident.reporter_name_en : incident.reviewer_name_en,
+  username: role === "reporter" ? incident.reporter_username : incident.reviewer_username,
+}, language);
 
 const printCopy = {
   en: {
@@ -114,7 +120,7 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const structuredRows = incident.incident_type === "equipment"
     ? [
         dataRow(language, "type", incidentText(language, typeKey)),
-        dataRow(language, "reporterDisplay", incident.reporter_name),
+        dataRow(language, "reporterDisplay", incidentActorName(incident, "reporter", language)),
         dataRow(language, "equipmentName", incident.equipment_name, true),
         dataRow(language, "equipmentType", incident.equipment_type, true),
         dataRow(language, "location", incident.location),
@@ -125,7 +131,7 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
       ].join("")
     : [
         dataRow(language, "type", incidentText(language, typeKey)),
-        dataRow(language, "reporterDisplay", incident.reporter_name),
+        dataRow(language, "reporterDisplay", incidentActorName(incident, "reporter", language)),
         dataRow(language, "patientName", patientName),
         dataRow(language, "mrn", incident.mrn, true),
         dataRow(language, "clinicalCategory", incident.clinical_category ? incidentText(language, incident.clinical_category) : null),
@@ -141,7 +147,7 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const administrativeReview = reportSection(
     printLabel(language, "administrativeReview"),
     `<table class="data-table review-meta"><tbody>
-      ${reviewRow(printLabel(language, "reviewedBy"), incident.reviewer_name)}
+      ${reviewRow(printLabel(language, "reviewedBy"), incidentActorName(incident, "reviewer", language))}
       ${reviewRow(printLabel(language, "currentStatus"), status)}
     </tbody></table><div class="subsection-label">${incidentLabel(language, "reviewNotes")}</div><div class="narrative-content review-content">${escapeHtml(incident.review_notes)}</div>`,
     "narrative-section review-section",
@@ -155,8 +161,8 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
   const signatureArea = reportSection(
     rtl ? "للاستخدام الرسمي" : "For official use",
     `<div class="signature-grid">
-      <div class="signature-block"><h3>${printLabel(language, "reportedBy")}</h3><div class="printed-name">${escapeHtml(incident.reporter_name)}</div><div class="line-field"><span>${printLabel(language, "signature")}</span><span class="blank-line"></span></div><div class="line-field"><span>${printLabel(language, "date")}</span><span class="blank-line"></span></div></div>
-      <div class="signature-block"><h3>${printLabel(language, "reviewedBy")}</h3><div class="printed-name">${escapeHtml(incident.reviewer_name)}</div><div class="line-field"><span>${printLabel(language, "signature")}</span><span class="blank-line"></span></div><div class="line-field"><span>${printLabel(language, "date")}</span><span class="blank-line"></span></div></div>
+      <div class="signature-block"><h3>${printLabel(language, "reportedBy")}</h3><div class="printed-name">${escapeHtml(incidentActorName(incident, "reporter", language))}</div><div class="line-field"><span>${printLabel(language, "signature")}</span><span class="blank-line"></span></div><div class="line-field"><span>${printLabel(language, "date")}</span><span class="blank-line"></span></div></div>
+      <div class="signature-block"><h3>${printLabel(language, "reviewedBy")}</h3><div class="printed-name">${escapeHtml(incidentActorName(incident, "reviewer", language))}</div><div class="line-field"><span>${printLabel(language, "signature")}</span><span class="blank-line"></span></div><div class="line-field"><span>${printLabel(language, "date")}</span><span class="blank-line"></span></div></div>
       <div class="stamp-block"><h3>${printLabel(language, "officialStamp")}</h3><div class="stamp-box" aria-label="${printLabel(language, "officialStamp")}"></div></div>
     </div>`,
     "official-use-section",

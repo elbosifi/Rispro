@@ -133,7 +133,7 @@ function CaseTable({
               <td className="px-3 py-2">{row.caseCategory ?? "-"}</td>
               <td className="px-3 py-2">{row.requiresReport ? "Required" : "No report"}</td>
               <td className="px-3 py-2">{row.workloadPoints ?? "No rule"}</td>
-              <td className="px-3 py-2">{row.assignedDoctorName ?? "Unassigned"}</td>
+              <td className="px-3 py-2">{row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}</td>
               <td className="px-3 py-2">{row.teamName ?? "Unassigned"}</td>
               <td className="px-3 py-2">{row.rosterAssignmentId ?? "-"}</td>
               <td className="px-3 py-2">{row.expectedReportingDate ?? "-"}</td>
@@ -206,7 +206,7 @@ function QuickAssignCaseCard({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">{patientName(row)}</h3>
             <span className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
-              {row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Unassigned"}
+              {row.assignedDoctorId ? `Assigned to ${getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned"}` : "Unassigned"}
             </span>
           </div>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>

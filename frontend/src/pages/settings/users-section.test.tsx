@@ -10,6 +10,7 @@ const users = [
   { id: 1, username: "frontdesk", full_name: "مكتب الاستقبال", english_name: "Front Desk", email: "frontdesk@example.test", role: "receptionist", is_active: true, can_request_scheduling_override: true, updated_at: "2026-08-01T10:00:00.000Z" },
   { id: 2, username: "drstone", full_name: "Dr Stone", role: "doctor", is_active: false, must_change_password: true },
   { id: 3, username: "supervisor", full_name: "Supervisor", role: "supervisor", is_active: true },
+  { id: 4, username: "bilingual", full_name: "Arabic Search Name", english_name: "English Search Name", role: "doctor", is_active: true },
 ];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 let routeFailures: Record<string, string> = {};
@@ -69,6 +70,12 @@ describe("UsersSection", () => {
     await userEvent.clear(search);
     await userEvent.type(search, "frontdesk");
     expect(screen.getAllByText("Front Desk").length).toBeGreaterThan(0);
+    await userEvent.clear(search);
+    await userEvent.type(search, "Arabic Search Name");
+    expect(screen.getAllByText("English Search Name").length).toBeGreaterThan(0);
+    await userEvent.clear(search);
+    await userEvent.type(search, "English Search Name");
+    expect(screen.getAllByText("English Search Name").length).toBeGreaterThan(0);
     await userEvent.clear(search);
     await userEvent.selectOptions(screen.getByLabelText("All roles"), "doctor");
     expect(screen.queryByText("Front Desk")).toBeNull();

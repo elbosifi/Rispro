@@ -1139,9 +1139,13 @@ export async function listReportingBoardCaseCandidates(
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        assigned_doctor_user.full_name as "assignedDoctorNameAr",
+        assigned_doctor_user.english_name as "assignedDoctorNameEn",
         coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         cache.finalized_by_doctor_id as "finalizedByDoctorId",
         finalized_doctor.display_name as "finalizedByDoctorName",
+        coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorNameAr",
+        coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) as "finalizedByDoctorNameEn",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
@@ -1221,12 +1225,14 @@ export async function listReportingBoardCaseCandidates(
       ) latest_recall on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
+      left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
@@ -1361,6 +1367,8 @@ export async function listReportingBoardStatsRows(
         rp.name_en as "reportingPriorityName",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        assigned_doctor_user.full_name as "assignedDoctorNameAr",
+        assigned_doctor_user.english_name as "assignedDoctorNameEn",
         coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
@@ -1390,6 +1398,7 @@ export async function listReportingBoardStatsRows(
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
@@ -1469,9 +1478,13 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         rp.sort_order as "reportingPrioritySortOrder",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
+        assigned_doctor_user.full_name as "assignedDoctorNameAr",
+        assigned_doctor_user.english_name as "assignedDoctorNameEn",
         coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
         cache.finalized_by_doctor_id as "finalizedByDoctorId",
         finalized_doctor.display_name as "finalizedByDoctorName",
+        coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorNameAr",
+        coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) as "finalizedByDoctorNameEn",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
@@ -1525,12 +1538,14 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
+      left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at

@@ -51,6 +51,8 @@ export interface AuditLogRow {
   changed_by_user_id: NullableUserId;
   created_at: string;
   changed_by_name?: string | null;
+  changed_by_name_ar?: string | null;
+  changed_by_name_en?: string | null;
   changed_by_username?: string | null;
   category?: AuditCategory;
   outcome?: AuditOutcome;
@@ -59,6 +61,8 @@ export interface AuditLogRow {
 export interface AuditApiEntry {
   id: number;
   changedByName: string | null;
+  changedByNameAr: string | null;
+  changedByNameEn: string | null;
   changedByUsername: string | null;
   changedByUserId: NullableUserId;
   entityType: string;
@@ -99,6 +103,7 @@ export interface AuditSummary {
 export interface AuditUserOptionRow {
   id: UserId;
   full_name: string | null;
+  english_name: string | null;
   username: string | null;
 }
 
@@ -151,11 +156,19 @@ export async function logAuditEntry(
   executor: DbExecutor = pool
 ): Promise<AuditLogRow | null> {
   if (!(await isAuditEnabled(executor))) return null;
+  let actor: { full_name: string | null; english_name: string | null; username: string | null } | undefined;
+  if (changedByUserId != null) {
+    const actorResult = await executor.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+      `select full_name, english_name, username from users where id = $1 limit 1`,
+      [changedByUserId]
+    );
+    actor = actorResult.rows[0];
+  }
   const { rows } = await executor.query(
-    `insert into audit_log (entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id)
-     values ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
-     returning id, entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id, created_at`,
-    [entityType, entityId, actionType, JSON.stringify(oldValues), JSON.stringify(newValues), changedByUserId]
+    `insert into audit_log (entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id, changed_by_name_ar_snapshot, changed_by_name_en_snapshot, changed_by_username_snapshot)
+     values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9)
+     returning id, entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id, created_at, changed_by_name_ar_snapshot as changed_by_name_ar, changed_by_name_en_snapshot as changed_by_name_en, changed_by_username_snapshot as changed_by_username`,
+    [entityType, entityId, actionType, JSON.stringify(oldValues), JSON.stringify(newValues), changedByUserId, actor?.full_name ?? null, actor?.english_name ?? null, actor?.username ?? null]
   );
   return requireRow<AuditLogRow>(rows[0] as unknown as AuditLogRow | undefined, "Failed to write audit log entry.");
 }
@@ -232,7 +245,11 @@ function buildAuditWhere(filters: AuditFilters = {}): { params: unknown[]; where
     const placeholder = add(`%${search}%`);
     clauses.push(`(
       coalesce(users.full_name, '') ilike ${placeholder}
+      or coalesce(users.english_name, '') ilike ${placeholder}
       or coalesce(users.username, '') ilike ${placeholder}
+      or coalesce(audit_log.changed_by_name_ar_snapshot, '') ilike ${placeholder}
+      or coalesce(audit_log.changed_by_name_en_snapshot, '') ilike ${placeholder}
+      or coalesce(audit_log.changed_by_username_snapshot, '') ilike ${placeholder}
       or coalesce(audit_log.entity_type, '') ilike ${placeholder}
       or coalesce(audit_log.entity_id::text, '') ilike ${placeholder}
       or coalesce(audit_log.action_type, '') ilike ${placeholder}
@@ -273,7 +290,9 @@ function auditRowToApi(row: AuditLogRow): AuditApiEntry {
   });
   return {
     id: row.id,
-    changedByName: row.changed_by_name ?? null,
+    changedByName: row.changed_by_name_ar ?? row.changed_by_name ?? null,
+    changedByNameAr: row.changed_by_name_ar ?? row.changed_by_name ?? null,
+    changedByNameEn: row.changed_by_name_en ?? null,
     changedByUsername: row.changed_by_username ?? null,
     changedByUserId: row.changed_by_user_id,
     entityType: row.entity_type,
@@ -287,7 +306,7 @@ function auditRowToApi(row: AuditLogRow): AuditApiEntry {
 }
 
 function auditRowSelect(): string {
-  return `select audit_log.id, audit_log.entity_type, audit_log.entity_id, audit_log.action_type, audit_log.old_values, audit_log.new_values, audit_log.changed_by_user_id, audit_log.created_at, users.full_name as changed_by_name, users.username as changed_by_username from audit_log left join users on users.id = audit_log.changed_by_user_id`;
+  return `select audit_log.id, audit_log.entity_type, audit_log.entity_id, audit_log.action_type, audit_log.old_values, audit_log.new_values, audit_log.changed_by_user_id, audit_log.created_at, coalesce(audit_log.changed_by_name_ar_snapshot, users.full_name) as changed_by_name, coalesce(audit_log.changed_by_name_ar_snapshot, users.full_name) as changed_by_name_ar, audit_log.changed_by_name_en_snapshot as changed_by_name_en, coalesce(audit_log.changed_by_username_snapshot, users.username) as changed_by_username from audit_log left join users on users.id = audit_log.changed_by_user_id`;
 }
 
 export async function listAuditEntries(filters: AuditFilters = {}): Promise<AuditLogRow[]> {
@@ -300,7 +319,7 @@ export async function listAuditFilterOptions(): Promise<{ entityTypes: string[];
   const [entityTypeResult, actionTypeResult, userResult] = await Promise.all([
     pool.query<AuditEntityTypeRow>(`select distinct entity_type from audit_log where entity_type is not null order by entity_type asc`),
     pool.query<AuditActionTypeRow>(`select distinct action_type from audit_log where action_type is not null order by action_type asc`),
-    pool.query<AuditUserOptionRow>(`select distinct users.id, users.full_name, users.username from audit_log join users on users.id = audit_log.changed_by_user_id order by users.full_name asc nulls last, users.username asc`)
+    pool.query<AuditUserOptionRow>(`select distinct users.id, users.full_name, users.english_name, users.username from audit_log join users on users.id = audit_log.changed_by_user_id order by users.full_name asc nulls last, users.username asc`)
   ]);
   return {
     entityTypes: entityTypeResult.rows.map((row) => row.entity_type),
@@ -368,13 +387,15 @@ function escapeCsvValue(value: unknown): string {
   return `"${clean.replaceAll('"', '""')}"`;
 }
 
-const AUDIT_CSV_HEADER = "created_at,changed_by_name,changed_by_username,changed_by_user_id,entity_type,entity_id,action_type,category,outcome,old_values,new_values\n";
+const AUDIT_CSV_HEADER = "created_at,changed_by_name,changed_by_name_ar,changed_by_name_en,changed_by_username,changed_by_user_id,entity_type,entity_id,action_type,category,outcome,old_values,new_values\n";
 
 function auditRowToCsv(row: AuditLogRow): string {
   const entry = auditRowToApi(row);
   return [
     entry.createdAt,
     entry.changedByName || actorLabel({ changedByName: null, changedByUsername: entry.changedByUsername, changedByUserId: entry.changedByUserId }),
+    entry.changedByNameAr || "",
+    entry.changedByNameEn || "",
     entry.changedByUsername || "",
     entry.changedByUserId ?? "",
     entry.entityType,

@@ -326,6 +326,12 @@ export async function insertDoctorAuditEvent(
     reason: string | null;
   }
 ): Promise<void> {
+  const actor = (await db.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+    input.actorUserId != null
+      ? "select full_name, english_name, username from users where id = $1 limit 1"
+      : "select u.full_name, u.english_name, u.username from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id where dp.id = $1 limit 1",
+    [input.actorUserId ?? input.actorDoctorId]
+  )).rows[0];
   await db.query(
     `
       insert into doctor_portal.doctor_module_audit_events (
@@ -335,9 +341,12 @@ export async function insertDoctorAuditEvent(
         target_type,
         target_id,
         metadata_json,
-        reason
+        reason,
+        actor_name_ar_snapshot,
+        actor_name_en_snapshot,
+        actor_username_snapshot
       )
-      values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+      values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
     `,
     [
       input.actorUserId,
@@ -347,6 +356,9 @@ export async function insertDoctorAuditEvent(
       input.targetId,
       JSON.stringify(input.metadata),
       input.reason,
+      actor?.full_name ?? null,
+      actor?.english_name ?? null,
+      actor?.username ?? null,
     ]
   );
 }

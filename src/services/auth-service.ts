@@ -13,6 +13,7 @@ interface AuthUserRow {
   id: UserId;
   username: string;
   full_name: string;
+  english_name: string | null;
   role: Role;
   password_hash: string;
   is_active: boolean;
@@ -46,7 +47,7 @@ export async function authenticateUser(
 ): Promise<AuthUserRow> {
   const normalizedUsername = normalizeUsername(username);
   const query = `
-    select id, username, full_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password
+    select id, username, full_name, english_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password
     from users
     where lower(btrim(username)) = $1
     limit 1
@@ -66,6 +67,26 @@ export async function authenticateUser(
   }
 
   return authenticatedUser;
+}
+
+export interface CurrentSessionUser {
+  id: UserId;
+  username: string;
+  full_name: string;
+  english_name: string | null;
+  role: Role;
+  is_active: boolean;
+  must_change_password: boolean;
+}
+
+export async function findCurrentSessionUser(userId: UserId): Promise<CurrentSessionUser | null> {
+  const { rows } = await pool.query<CurrentSessionUser>(
+    `select id, username, full_name, english_name, role, is_active,
+            coalesce(must_change_password, false) as must_change_password
+       from users where id = $1 limit 1`,
+    [Number(userId)]
+  );
+  return rows[0] ?? null;
 }
 
 export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password">): string {

@@ -192,6 +192,22 @@ describe("comparison preparation worklist behavior", () => {
     await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "cancelled", q: "MRN-10" }));
   });
 
+  it("localizes current assigned and planned doctor names with legacy fallback", async () => {
+    apiMocks.fetchMany.mockResolvedValue([
+      comparison({ id: 83, status: "assigned", assignedDoctorId: 2, assignedDoctorName: "Legacy Doctor", assignedDoctorNameAr: "Arabic Doctor", assignedDoctorNameEn: "English Doctor" }),
+      comparison({ id: 84, status: "pending_upload_confirmation", plannedReportingDoctorId: 3, plannedReportingDoctorName: "Legacy Plan", plannedReportingDoctorNameAr: null, plannedReportingDoctorNameEn: null }),
+    ]);
+    renderPage();
+    expect(await screen.findByText(/Assigned doctor: English Doctor/)).toBeTruthy();
+    expect(screen.getByText(/Target doctor: Legacy Plan/)).toBeTruthy();
+
+    cleanup();
+    languageState.language = "ar";
+    apiMocks.fetchMany.mockResolvedValue([comparison({ id: 85, status: "assigned", assignedDoctorId: 2, assignedDoctorName: "Legacy Doctor", assignedDoctorNameAr: "Arabic Doctor", assignedDoctorNameEn: "English Doctor" })]);
+    renderPage();
+    expect(await screen.findByText(/Arabic Doctor/)).toBeTruthy();
+  });
+
   it("renders truthful remap evidence and launches the existing workflow with comparison context", async () => {
     apiMocks.fetchMany.mockResolvedValue([
       comparison({ id: 80, patientEnglishName: "Processing Patient", remapJobId: 501, remapJobStatus: "processing", remapProcessingStage: "rewriting" }),

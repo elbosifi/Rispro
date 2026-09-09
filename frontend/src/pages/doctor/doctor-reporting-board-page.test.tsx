@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 import { buildReportingBoardPrintUrl } from "./doctor-reporting-board-page.helpers";
 import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
+import { LanguageProvider } from "@/providers/language-provider-component";
 
 const fetchReportingBoardSettingsMock = vi.fn();
 const updateReportingBoardSettingsMock = vi.fn();
@@ -225,13 +226,15 @@ const comparisonRow: ReportingBoardCaseRow = {
 function renderPage(path = "/doctor/reporting-board", me: DoctorMe = managerMe) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/doctor/reporting-board" element={<DoctorReportingBoardPage me={me} />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>
+    <LanguageProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/doctor/reporting-board" element={<DoctorReportingBoardPage me={me} />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </LanguageProvider>
   );
 }
 
@@ -548,6 +551,26 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row).getByText("Assigned Doctor")).toBeTruthy();
     expect(within(row).getByText("Finalized by: Dr Final Doctor")).toBeTruthy();
     expect(within(row).getByText("Different reporter")).toBeTruthy();
+  });
+
+  it("localizes current assigned doctor names and falls back to the legacy name", async () => {
+    localStorage.setItem("rispro-language", "en");
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        { ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Legacy Doctor", assignedDoctorNameAr: "Arabic Doctor", assignedDoctorNameEn: "English Doctor", assignmentStatus: "assigned" },
+        { ...caseRow, caseKey: "appointment:43", appointmentId: 43, accessionNumber: "V2-000043", assignedDoctorId: 6, assignedDoctorName: "Legacy Only", assignedDoctorNameAr: null, assignedDoctorNameEn: null, assignmentStatus: "assigned" },
+      ],
+      filters: { reportStatus: "all", limit: 100, offset: 0 },
+    });
+    const view = renderPage();
+    expect(await screen.findByText("English Doctor")).toBeTruthy();
+    expect(screen.getByText("Legacy Only")).toBeTruthy();
+    view.unmount();
+
+    localStorage.setItem("rispro-language", "ar");
+    renderPage();
+    expect(await screen.findByText("Arabic Doctor")).toBeTruthy();
+    expect(screen.getByText("Legacy Only")).toBeTruthy();
   });
 
   it("does not tint draft, overdue, or unassigned routine rows", async () => {

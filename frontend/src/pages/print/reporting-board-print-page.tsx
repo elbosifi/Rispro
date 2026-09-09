@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchReportingBoardCases, fetchReportingBoardSavedViewByToken } from "@/lib/api-hooks";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { useAuth } from "@/providers/auth-provider";
+import { useLanguage } from "@/providers/language-provider";
 import type { ReportingBoardCaseRow, ReportingBoardFilters } from "@/types/api";
 
 function filtersFromParams(params: URLSearchParams): ReportingBoardFilters {
@@ -26,6 +28,7 @@ function patientName(row: ReportingBoardCaseRow): string {
 
 export default function ReportingBoardPrintPage() {
   const { user } = useAuth();
+  const { language } = useLanguage();
   const [searchParams] = useSearchParams();
   const [printed, setPrinted] = useState(false);
   const savedViewToken = searchParams.get("savedViewToken");
@@ -55,8 +58,9 @@ export default function ReportingBoardPrintPage() {
   const selectedDoctorName = useMemo(() => {
     const doctorId = filters.assignedDoctorId;
     if (!doctorId) return null;
-    return cases.find((row) => row.assignedDoctorId === doctorId)?.assignedDoctorName ?? searchParams.get("doctorName");
-  }, [cases, filters.assignedDoctorId, searchParams]);
+    const row = cases.find((candidate) => candidate.assignedDoctorId === doctorId);
+    return row?.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || searchParams.get("doctorName") : searchParams.get("doctorName");
+  }, [cases, filters.assignedDoctorId, language, searchParams]);
 
   useEffect(() => {
     if (!autoprint || printed || casesQuery.isLoading || casesQuery.error) return;
@@ -156,7 +160,7 @@ export default function ReportingBoardPrintPage() {
                   <td>{row.modalityCode}</td>
                   <td>{row.examTypeName ?? "-"}</td>
                   <td>{row.caseCategory}</td>
-                  <td>{row.assignedDoctorName ?? "Unassigned"}</td>
+                  <td>{row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}</td>
                   <td>{row.reportStatus.replaceAll("_", " ")}</td>
                   <td className="signature" />
                 </tr>

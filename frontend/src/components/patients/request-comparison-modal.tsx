@@ -4,7 +4,9 @@ import { X } from "lucide-react";
 import { Button } from "@/components/shared";
 import { createComparisonRequest, fetchComparisonReportingDoctors, fetchPreviousCompletedStudies } from "@/lib/api-hooks";
 import { pushToast } from "@/lib/toast";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { useAuth } from "@/providers/auth-provider";
+import { useLanguage } from "@/providers/language-provider";
 import type { PreviousCompletedStudy } from "@/types/api";
 
 function studyLabel(study: PreviousCompletedStudy) {
@@ -25,6 +27,7 @@ export function RequestComparisonModal({
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { language } = useLanguage();
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
   const [plannedReportingDoctorId, setPlannedReportingDoctorId] = useState<number | null>(null);
   const [reason, setReason] = useState("");
@@ -129,7 +132,7 @@ export function RequestComparisonModal({
               <span className="font-medium">Assign reporting doctor</span>
               <select aria-label="Assign reporting doctor" disabled={doctorsQuery.isLoading} value={plannedReportingDoctorId ?? ""} onChange={(event) => setPlannedReportingDoctorId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded-lg border border-border bg-background px-3">
                 <option value="">Unassigned - send to reporting pool</option>
-                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
               </select>
             </label>
           ) : null}

@@ -9,6 +9,8 @@ import {
   updateDoctorReportingWorklist,
 } from "@/lib/api-hooks";
 import type { DoctorReportingWorklistSummary } from "@/types/api";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 
 function worklistUrl(token: string): string {
   return `${window.location.origin}/reporting/worklist/${encodeURIComponent(token)}`;
@@ -113,6 +115,7 @@ export function MyReportingWorklistCard() {
 }
 
 export function DoctorWorklistsPage() {
+  const { language } = useLanguage();
   const query = useQuery({
     queryKey: ["doctor", "reporting-board", "doctor-worklists"],
     queryFn: fetchDoctorReportingWorklists,
@@ -130,7 +133,7 @@ export function DoctorWorklistsPage() {
         <table className="min-w-[1180px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Doctor</th><th className="p-3">Role/status</th><th className="p-3">Modalities</th><th className="p-3">Pending</th><th className="p-3">Link</th><th className="p-3">Notifications</th><th className="p-3">Actions</th></tr></thead>
           <tbody>{query.data.map((worklist) => <tr key={worklist.id} className="border-t align-top">
-            <td className="p-3 font-semibold">{worklist.doctorDisplayName}<span className="block text-xs font-normal text-slate-500">{worklist.username}</span><span className="block text-xs font-normal text-slate-500">{worklist.doctorEmail?.trim() || "No email on account"}</span></td>
+            <td className="p-3 font-semibold">{getDoctorDisplayName({ fullName: worklist.doctorNameAr, englishName: worklist.doctorNameEn, displayName: worklist.doctorDisplayName, username: worklist.username }, language)}<span className="block text-xs font-normal text-slate-500">{worklist.username}</span><span className="block text-xs font-normal text-slate-500">{worklist.doctorEmail?.trim() || "No email on account"}</span></td>
             <td className="p-3">{worklist.doctorRole.replaceAll("_", " ")}<span className="block text-xs text-slate-500">User {worklist.userActive ? "active" : "inactive"} · Profile {worklist.doctorActive ? "active" : "inactive"}</span></td>
             <td className="p-3">{worklist.effectiveModalityCodes.join(" / ") || "None"}</td>
             <td className="p-3">{worklist.assignedPendingCount} assigned · {worklist.eligibleUnassignedCount} available</td>

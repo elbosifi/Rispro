@@ -538,6 +538,8 @@ function doctorStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardDoctorSt
   return {
     doctorId: row.assignedDoctorId,
     doctorName: row.assignedDoctorName ?? "Unassigned",
+    doctorNameAr: row.assignedDoctorNameAr ?? null,
+    doctorNameEn: row.assignedDoctorNameEn ?? null,
     total: 0,
     requiredNotFinal: 0,
     statOrUrgent: 0,
@@ -1325,6 +1327,8 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     assignmentOrigin: row.assignmentOrigin,
     finalizedByDoctorId: row.finalizedByDoctorId,
     finalizedByDoctorName: row.finalizedByDoctorName,
+    finalizedByDoctorNameAr: row.finalizedByDoctorNameAr,
+    finalizedByDoctorNameEn: row.finalizedByDoctorNameEn,
     sonicDicomFinalizedByAccount: row.sonicDicomFinalizedByAccount,
     sonicDicomLatestDocumentId: row.sonicDicomLatestDocumentId,
     sonicDicomDocumentRemoved: row.sonicDicomDocumentRemoved ?? false,

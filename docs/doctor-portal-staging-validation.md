@@ -26,7 +26,7 @@
 ## Import / Export Workflow
 
 1. Download the doctor import template.
-2. Fill `username`, `full_name`, `temporary_password`, `core_role`, `doctor_role`, profile flags, and modality code lists.
+2. Fill `username`, `full_name` (Arabic Name), optional `english_name` (English Name), `temporary_password`, `core_role`, `doctor_role`, profile flags, and modality code lists. Older files without `english_name` remain supported.
 3. Upload CSV or XLSX.
 4. Inspect columns and row count.
 5. Preview row actions and validation errors.

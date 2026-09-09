@@ -512,6 +512,7 @@ export interface PolicyUserDto {
   id: number;
   username: string;
   fullName: string;
+  englishName?: string | null;
   role: import("@/types/api").Role;
   isActive?: boolean;
 }

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestComparisonModal } from "@/components/patients/request-comparison-modal";
 import { fetchComparisonReportingDoctors, fetchPreviousCompletedStudies } from "@/lib/api-hooks";
+import { EnglishLanguageScope } from "@/providers/language-provider-component";
 
 let currentUser: { role: string } | null = { role: "receptionist" };
 
@@ -24,7 +25,7 @@ const study = { bookingId: 42, patientId: 7, date: "2026-06-20", time: null, mod
 beforeEach(() => {
   vi.clearAllMocks(); currentUser = { role: "receptionist" };
   vi.mocked(fetchPreviousCompletedStudies).mockResolvedValue([study]);
-  vi.mocked(fetchComparisonReportingDoctors).mockResolvedValue([{ id: 55, displayName: "Dr Test" }]);
+  vi.mocked(fetchComparisonReportingDoctors).mockResolvedValue([{ id: 55, displayName: "Dr Legacy", fullName: "د. اختبار", englishName: "Dr Test", username: "doctor.test" }]);
 });
 
 describe("RequestComparisonModal", () => {
@@ -33,11 +34,13 @@ describe("RequestComparisonModal", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     render(
-      <QueryClientProvider client={queryClient}>
-        <div onClick={parentClose}>
-          <RequestComparisonModal patientId={7} onClose={vi.fn()} />
-        </div>
-      </QueryClientProvider>
+      <EnglishLanguageScope>
+        <QueryClientProvider client={queryClient}>
+          <div onClick={parentClose}>
+            <RequestComparisonModal patientId={7} onClose={vi.fn()} />
+          </div>
+        </QueryClientProvider>
+      </EnglishLanguageScope>
     );
 
     await screen.findByText(/CT Brain/);
@@ -49,7 +52,7 @@ describe("RequestComparisonModal", () => {
 
   it("shows the planned reporting-doctor selector to supervisors", async () => {
     currentUser = { role: "supervisor" }; const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><RequestComparisonModal patientId={7} onClose={vi.fn()} /></QueryClientProvider>);
+    render(<EnglishLanguageScope><QueryClientProvider client={client}><RequestComparisonModal patientId={7} onClose={vi.fn()} /></QueryClientProvider></EnglishLanguageScope>);
     await userEvent.click(await screen.findByRole("radio", { name: /CT Brain/ }));
     expect(await screen.findByRole("combobox", { name: /Assign reporting doctor/i })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Dr Test" })).toBeTruthy();
@@ -57,7 +60,7 @@ describe("RequestComparisonModal", () => {
 
   it("does not show the planned reporting-doctor selector to receptionists", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><RequestComparisonModal patientId={7} onClose={vi.fn()} /></QueryClientProvider>);
+    render(<EnglishLanguageScope><QueryClientProvider client={client}><RequestComparisonModal patientId={7} onClose={vi.fn()} /></QueryClientProvider></EnglishLanguageScope>);
     await userEvent.click(await screen.findByRole("radio", { name: /CT Brain/ }));
     expect(screen.queryByRole("combobox", { name: /Assign reporting doctor/i })).toBeNull();
     expect(fetchComparisonReportingDoctors).not.toHaveBeenCalled();

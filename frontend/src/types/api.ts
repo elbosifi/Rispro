@@ -39,6 +39,7 @@ export interface AuthSession {
   id: number;
   username: string;
   fullName: string;
+  englishName?: string | null;
   role: Role;
   recentSupervisorReauth?: boolean;
   mustChangePassword?: boolean;
@@ -147,6 +148,8 @@ export interface DoctorAvailability {
   id: number;
   doctorId: number;
   doctorName: string | null;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   date: string;
   startTime: string | null;
   endTime: string | null;
@@ -346,6 +349,8 @@ export interface DoctorCase {
   rosterAssignmentId: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr: string | null;
+  assignedDoctorNameEn: string | null;
   teamName: string | null;
   dutyType: RosterDutyType | null;
   expectedReportingDate: string | null;
@@ -472,6 +477,8 @@ export interface ReportingBoardSavedView {
 
 export interface DoctorReportingWorklistSummary extends ReportingBoardSavedView {
   doctorDisplayName: string;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   username: string;
   doctorUserId: number;
   doctorEmail: string | null;
@@ -538,9 +545,13 @@ export interface ReportingBoardCaseRow {
   reportingPrioritySortOrder: number | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr?: string | null;
+  assignedDoctorNameEn?: string | null;
   assignmentOrigin: ReportingBoardAssignmentOrigin;
   finalizedByDoctorId: number | null;
   finalizedByDoctorName: string | null;
+  finalizedByDoctorNameAr?: string | null;
+  finalizedByDoctorNameEn?: string | null;
   sonicDicomFinalizedByAccount: string | null;
   sonicDicomLatestDocumentId: string | null;
   sonicDicomDocumentRemoved?: boolean;
@@ -666,12 +677,18 @@ export interface ComparisonRequest {
   documentsDisposition?: "attached_verified" | "not_required" | null;
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
+  assignedDoctorNameAr?: string | null;
+  assignedDoctorNameEn?: string | null;
   plannedReportingDoctorId?: number | null;
   plannedReportingDoctorName?: string | null;
+  plannedReportingDoctorNameAr?: string | null;
+  plannedReportingDoctorNameEn?: string | null;
   plannedReportingDoctorSetBy?: number | null;
   plannedReportingDoctorSetAt?: string | null;
   finalizedBy: number | null;
   finalizedByName: string | null;
+  finalizedByNameAr?: string | null;
+  finalizedByNameEn?: string | null;
   finalizedAt: string | null;
   finalText: string | null;
   createdBy: number | null;
@@ -697,6 +714,8 @@ export interface ComparisonRequest {
 export interface ReportingBoardDoctorStatsRow {
   doctorId: number | null;
   doctorName: string;
+  doctorNameAr: string | null;
+  doctorNameEn: string | null;
   total: number;
   requiredNotFinal: number;
   statOrUrgent: number;
@@ -1006,6 +1025,8 @@ export interface ProtocolAuditTimelineEvent {
   eventType: "protocol_created" | "protocol_updated" | "protocol_assigned" | "clarification_requested" | "protocol_cancelled" | "protocol_corrected";
   changedByDoctorId: number | null;
   changedByDoctorName: string | null;
+  changedByDoctorNameAr?: string | null;
+  changedByDoctorNameEn?: string | null;
   createdAt: string;
   reason: string | null;
   oldSummary: string | null;
@@ -1921,6 +1942,8 @@ export interface AppointmentStatistics {
 export interface AuditEntry {
   id: number;
   changedByName: string | null;
+  changedByNameAr: string | null;
+  changedByNameEn: string | null;
   changedByUsername: string | null;
   changedByUserId: number | string | null;
   entityType: string;
@@ -1964,7 +1987,7 @@ export interface AuditSummary {
 export interface AuditFilterMeta {
   entityTypes: string[];
   actionTypes: string[];
-  users: Array<{ id: number | string; full_name?: string | null; username?: string | null; fullName?: string | null }>;
+  users: Array<{ id: number | string; full_name?: string | null; english_name?: string | null; username?: string | null; fullName?: string | null; englishName?: string | null }>;
   categories: AuditCategory[];
   outcomes: AuditOutcome[];
 }

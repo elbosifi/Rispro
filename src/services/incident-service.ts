@@ -65,7 +65,7 @@ function allowed<T extends readonly string[]>(
 }
 const contacted = (value: unknown) =>
   value === true || value === "true" || value === 1 || value === "1";
-const incidentSelect = `select i.*, e.name equipment_name, e.equipment_type, e.location, p.arabic_full_name patient_arabic_name, p.english_full_name patient_english_name, p.mrn, u.full_name reporter_name, u.username reporter_username, ru.full_name reviewer_name from department_incidents i left join equipment e on e.id=i.equipment_id left join patients p on p.id=i.patient_id left join users u on u.id=i.reported_by_user_id left join users ru on ru.id=i.reviewed_by_user_id`;
+const incidentSelect = `select i.*, e.name equipment_name, e.equipment_type, e.location, p.arabic_full_name patient_arabic_name, p.english_full_name patient_english_name, p.mrn, coalesce(i.reporter_name_ar_snapshot, u.full_name) reporter_name, coalesce(i.reporter_name_ar_snapshot, u.full_name) reporter_name_ar, i.reporter_name_en_snapshot reporter_name_en, coalesce(i.reporter_username_snapshot, u.username) reporter_username, coalesce(i.reviewer_name_ar_snapshot, ru.full_name) reviewer_name, coalesce(i.reviewer_name_ar_snapshot, ru.full_name) reviewer_name_ar, i.reviewer_name_en_snapshot reviewer_name_en, coalesce(i.reviewer_username_snapshot, ru.username) reviewer_username from department_incidents i left join equipment e on e.id=i.equipment_id left join patients p on p.id=i.patient_id left join users u on u.id=i.reported_by_user_id left join users ru on ru.id=i.reviewed_by_user_id`;
 
 export async function listIncidents(
   filters: { incidentType?: unknown; status?: unknown } = {},
@@ -156,8 +156,12 @@ export async function createIncident(input: IncidentInput, actorId: unknown) {
       throw new HttpError(404, "Patient not found.");
     const vendorContacted =
       incidentType === "equipment" && contacted(input.vendorContacted);
+    const reporter = (await client.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+      "select full_name, english_name, username from users where id = $1 limit 1",
+      [actorId]
+    )).rows[0];
     const { rows } = await client.query<{ id: number }>(
-      "insert into department_incidents(incident_type,occurred_at,equipment_id,patient_id,equipment_condition,clinical_category,harm_level,description,immediate_action,vendor_contacted,vendor_contact_person,vendor_reference,reported_by_user_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id",
+      "insert into department_incidents(incident_type,occurred_at,equipment_id,patient_id,equipment_condition,clinical_category,harm_level,description,immediate_action,vendor_contacted,vendor_contact_person,vendor_reference,reported_by_user_id,reporter_name_ar_snapshot,reporter_name_en_snapshot,reporter_username_snapshot) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id",
       [
         incidentType,
         occurredAt,
@@ -172,6 +176,9 @@ export async function createIncident(input: IncidentInput, actorId: unknown) {
         vendorContacted ? text(input.vendorContactPerson) : null,
         vendorContacted ? text(input.vendorReference) : null,
         actorId,
+        reporter?.full_name ?? null,
+        reporter?.english_name ?? null,
+        reporter?.username ?? null,
       ],
     );
     const incident = incidentNumber(
@@ -219,9 +226,20 @@ export async function reviewIncident(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const reviewer = (await client.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
+      "select full_name, english_name, username from users where id = $1 limit 1",
+      [actorId]
+    )).rows[0];
     await client.query(
-      "update department_incidents set status=$2,review_notes=$3,reviewed_by_user_id=$4,updated_at=now() where id=$1",
-      [incidentId, status, reviewNotes, actorId],
+      `update department_incidents
+         set status=$2, review_notes=$3, reviewed_by_user_id=$4,
+             reviewer_name_ar_snapshot=$5, reviewer_name_en_snapshot=$6,
+             reviewer_username_snapshot=$7, updated_at=now()
+       where id=$1`,
+      [incidentId, status, reviewNotes, actorId,
+        reviewer?.full_name ?? null,
+        reviewer?.english_name ?? null,
+        reviewer?.username ?? null],
     );
     const after = incidentNumber(
       (

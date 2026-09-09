@@ -952,12 +952,18 @@ function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
     documentsDisposition: raw.documentsDisposition === "attached_verified" || raw.documentsDisposition === "not_required" ? raw.documentsDisposition : null,
     assignedDoctorId: rawNumber(raw.assignedDoctorId),
     assignedDoctorName: rawString(raw.assignedDoctorName),
+    assignedDoctorNameAr: rawString(raw.assignedDoctorNameAr),
+    assignedDoctorNameEn: rawString(raw.assignedDoctorNameEn),
     plannedReportingDoctorId: rawNumber(raw.plannedReportingDoctorId),
     plannedReportingDoctorName: rawString(raw.plannedReportingDoctorName),
+    plannedReportingDoctorNameAr: rawString(raw.plannedReportingDoctorNameAr),
+    plannedReportingDoctorNameEn: rawString(raw.plannedReportingDoctorNameEn),
     plannedReportingDoctorSetBy: rawNumber(raw.plannedReportingDoctorSetBy),
     plannedReportingDoctorSetAt: rawString(raw.plannedReportingDoctorSetAt),
     finalizedBy: rawNumber(raw.finalizedBy),
     finalizedByName: rawString(raw.finalizedByName),
+    finalizedByNameAr: rawString(raw.finalizedByNameAr),
+    finalizedByNameEn: rawString(raw.finalizedByNameEn),
     finalizedAt: rawString(raw.finalizedAt),
     finalText: rawString(raw.finalText),
     createdBy: rawNumber(raw.createdBy),
@@ -1206,8 +1212,8 @@ export async function returnComparisonToPreparation(id: number, payload: { reaso
   return mapComparisonRequest(raw.comparisonRequest);
 }
 
-export async function fetchComparisonReportingDoctors(modalityId: number): Promise<Array<{ id: number; displayName: string }>> {
-  const raw = await api<{ doctors: Array<{ id: number; displayName: string }> }>(`/comparisons/reporting-doctors?modalityId=${encodeURIComponent(String(modalityId))}`);
+export async function fetchComparisonReportingDoctors(modalityId: number): Promise<Array<{ id: number; displayName: string; fullName?: string | null; englishName?: string | null; username?: string | null }>> {
+  const raw = await api<{ doctors: Array<{ id: number; displayName: string; fullName?: string | null; englishName?: string | null; username?: string | null }> }>(`/comparisons/reporting-doctors?modalityId=${encodeURIComponent(String(modalityId))}`);
   return raw.doctors ?? [];
 }
 

@@ -6,6 +6,7 @@ import { exportAuditCSV, fetchAuditEntries, type AuditQueryParams } from "@/lib/
 import { formatDateTimeLy } from "@/lib/date-format";
 import type { AuditCategory, AuditEntry, AuditOutcome, AuditPagination } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
+import { getUserDisplayName } from "@/lib/user-display-name";
 import { Button } from "@/components/shared/Button";
 
 type AuditTab = AuditCategory | "all";
@@ -78,10 +79,10 @@ function writeAuditUrl(state: AuditState, mode: "push" | "replace" = "push") {
   window.history[`${mode}State`]({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function entryText(entry: AuditEntry, field: "title" | "summary" | "actorLabel" | "targetLabel"): string {
+function entryText(entry: AuditEntry, field: "title" | "summary" | "actorLabel" | "targetLabel", language: "ar" | "en" = "en"): string {
+  if (field === "actorLabel") return getUserDisplayName({ fullName: entry.changedByNameAr ?? entry.changedByName, englishName: entry.changedByNameEn, username: entry.changedByUsername }, language) || entry.actorLabel || (entry.changedByUserId ? `User #${entry.changedByUserId}` : "System");
   if (entry[field]) return entry[field];
   if (field === "title") return `Performed ${entry.actionType || "unknown action"} on ${entry.entityType || "entity"}`;
-  if (field === "actorLabel") return entry.changedByName || entry.changedByUsername || (entry.changedByUserId ? `User #${entry.changedByUserId}` : "System");
   if (field === "targetLabel") return `${entry.entityType || "Entity"}${entry.entityId ? ` #${entry.entityId}` : ""}`;
   return entry.actionType || "Audit activity recorded.";
 }
@@ -119,7 +120,7 @@ function outcomeClass(outcome: AuditOutcome): string {
 }
 
 export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [state, setState] = useState<AuditState>(parseAuditUrl);
   const [searchDraft, setSearchDraft] = useState(state.search || "");
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
@@ -220,7 +221,7 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
         </label>
         <label className="text-xs font-semibold text-muted-foreground">From<input type="date" className="input-premium mt-1 h-10" value={state.dateFrom || ""} onChange={(event) => updateState({ dateFrom: event.target.value || undefined, page: 1 })} /></label>
         <label className="text-xs font-semibold text-muted-foreground">To<input type="date" className="input-premium mt-1 h-10" value={state.dateTo || ""} onChange={(event) => updateState({ dateTo: event.target.value || undefined, page: 1 })} /></label>
-        <label className="text-xs font-semibold text-muted-foreground">Actor<select className="input-premium mt-1 h-10 max-w-48" value={state.changedByUserId || ""} onChange={(event) => updateState({ changedByUserId: event.target.value || undefined, page: 1 })}><option value="">All actors</option>{(auditQuery.data?.meta.users || []).map((user) => <option key={String(user.id)} value={String(user.id)}>{user.full_name || user.fullName || user.username || `User #${user.id}`} {user.username ? `(${user.username})` : ""}</option>)}</select></label>
+        <label className="text-xs font-semibold text-muted-foreground">Actor<select className="input-premium mt-1 h-10 max-w-48" value={state.changedByUserId || ""} onChange={(event) => updateState({ changedByUserId: event.target.value || undefined, page: 1 })}><option value="">All actors</option>{(auditQuery.data?.meta.users || []).map((user) => <option key={String(user.id)} value={String(user.id)}>{getUserDisplayName({ fullName: user.full_name ?? user.fullName, englishName: user.english_name ?? user.englishName, username: user.username }, language)} {user.username ? `(${user.username})` : ""}</option>)}</select></label>
         <label className="text-xs font-semibold text-muted-foreground">Entity<select className="input-premium mt-1 h-10 max-w-44" value={state.entityType || ""} onChange={(event) => updateState({ entityType: event.target.value || undefined, page: 1 })}><option value="">All entities</option>{(auditQuery.data?.meta.entityTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
         <label className="text-xs font-semibold text-muted-foreground">Action<select className="input-premium mt-1 h-10 max-w-44" value={state.actionType || ""} onChange={(event) => updateState({ actionType: event.target.value || undefined, page: 1 })}><option value="">All actions</option>{(auditQuery.data?.meta.actionTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
         <label className="text-xs font-semibold text-muted-foreground">Outcome<select className="input-premium mt-1 h-10 max-w-40" value={state.outcome || ""} onChange={(event) => updateState({ outcome: event.target.value || undefined, page: 1 })}><option value="">All outcomes</option>{OUTCOMES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
@@ -245,7 +246,7 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
       <div ref={listRef} className="overflow-auto rounded-xl border border-border" aria-busy={auditQuery.isFetching}>
         {auditQuery.isLoading ? <p className="p-8 text-center text-sm text-muted-foreground">Loading audit log…</p> : entries.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground"><p>{emptyMessage}</p>{activeFilters ? <Button variant="secondary" size="sm" className="mt-3" onClick={clearFilters}>Clear filters</Button> : null}</div> : <>
           <div className="hidden min-w-[760px] grid-cols-[130px_1.1fr_2fr_1.2fr_120px_120px] gap-3 border-b border-border bg-muted/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground md:grid"><span>Time</span><span>Actor</span><span>Activity</span><span>Target</span><span>Category</span><span>Outcome</span></div>
-          <div className="divide-y divide-border">{entries.map((entry) => <AuditRow key={entry.id} entry={entry} onOpen={openEntry} />)}</div>
+          <div className="divide-y divide-border">{entries.map((entry) => <AuditRow key={entry.id} entry={entry} language={language} onOpen={openEntry} />)}</div>
         </>}
       </div>
 
@@ -257,7 +258,7 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
   );
 }
 
-function AuditRow({ entry, onOpen }: { entry: AuditEntry; onOpen: (entry: AuditEntry, trigger: HTMLButtonElement) => void }) {
+function AuditRow({ entry, language, onOpen }: { entry: AuditEntry; language: "ar" | "en"; onOpen: (entry: AuditEntry, trigger: HTMLButtonElement) => void }) {
   const category = entry.category || "other";
   const outcome = entry.outcome || "unknown";
   return <button type="button" className="block w-full text-start transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent/40" onClick={(event) => onOpen(entry, event.currentTarget)}>

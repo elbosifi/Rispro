@@ -1,6 +1,7 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Button, Card } from "@/components/shared";
 import { chooseLocalized } from "@/lib/i18n";
+import { getUserDisplayName } from "@/lib/user-display-name";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2ExamTypeCatalog, useV2Lookups, useV2PolicyUsers } from "../api";
 import type {
@@ -364,21 +365,21 @@ export function PolicyDraftEditor({
     for (const user of policyUsers.data ?? []) {
       byId.set(Number(user.id), {
         value: Number(user.id),
-        label: `${user.fullName || user.username} (${user.username})`,
+        label: `${getUserDisplayName(user, language)} (${user.username})`,
         disabled: false,
       });
     }
     for (const user of displayLookups?.users ?? []) {
       byId.set(Number(user.id), {
         value: Number(user.id),
-        label: `${user.fullName || user.username} (${user.username})`,
+        label: `${getUserDisplayName(user, language)} (${user.username})`,
         disabled: user.isActive === false,
       });
     }
     return [...byId.values()]
       .filter((user) => Number.isInteger(user.value) && user.value > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [displayLookups?.users, policyUsers.data]);
+  }, [displayLookups?.users, language, policyUsers.data]);
 
   const lookupStatusMessage = useMemo(() => {
     if (lookups.isLoading || examTypeCatalog.isLoading || policyUsers.isLoading) {

@@ -406,6 +406,7 @@ function DoctorWorkloadPanel({
   loading: boolean;
   onToggle: () => void;
 }) {
+  const { language } = useLanguage();
   const unassigned = rows.find((row) => row.doctorId === null)?.total ?? 0;
   const highestAssigned = useMemo(
     () => rows.filter((row) => row.doctorId !== null).sort((left, right) => right.total - left.total)[0] ?? null,
@@ -415,7 +416,7 @@ function DoctorWorkloadPanel({
     <section className="rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <button type="button" onClick={onToggle} className="flex min-h-9 w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-sm font-semibold text-foreground">
         <span>
-          Doctor workload: Unassigned {unassigned} | Highest assigned: {highestAssigned ? `${highestAssigned.doctorName} ${highestAssigned.total}` : "-"}
+          Doctor workload: Unassigned {unassigned} | Highest assigned: {highestAssigned ? `${getDoctorDisplayName({ fullName: highestAssigned.doctorNameAr, englishName: highestAssigned.doctorNameEn, displayName: highestAssigned.doctorName }, language) || highestAssigned.doctorName} ${highestAssigned.total}` : "-"}
         </span>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>{open ? "Hide" : "Show"}</span>
       </button>
@@ -432,7 +433,7 @@ function DoctorWorkloadPanel({
             <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
               {rows.map((row) => (
                 <tr key={row.doctorId ?? "unassigned"}>
-                  <td className="px-3 py-2 font-semibold text-foreground">{row.doctorName}</td>
+                  <td className="px-3 py-2 font-semibold text-foreground">{row.doctorId === null ? row.doctorName : getDoctorDisplayName({ fullName: row.doctorNameAr, englishName: row.doctorNameEn, displayName: row.doctorName }, language) || row.doctorName}</td>
                   <td className="px-3 py-2">{row.total}</td>
                   <td className="px-3 py-2">{row.requiredNotFinal}</td>
                   <td className="px-3 py-2">{row.statOrUrgent}</td>
@@ -567,7 +568,7 @@ function rowStatusLabel(row: ReportingBoardCaseRow): string {
   return labels.join(", ");
 }
 
-function rowDetailsTitle(row: ReportingBoardCaseRow): string {
+function rowDetailsTitle(row: ReportingBoardCaseRow, language: Parameters<typeof getDoctorDisplayName>[1]): string {
   if (row.caseType === "comparison") {
     return [
       `Patient: ${patientName(row)}`,
@@ -578,7 +579,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
       `Comparison reason: ${row.comparisonReason ?? "-"}`,
       `Preparation note: ${row.comparisonPreparationNote ?? "-"}`,
       `Pool: ${row.modalityCode}`,
-      `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+      `Assigned doctor: ${row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}`,
       `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
       `Report: ${reportStatusDisplay(row)}`,
       `Status: ${labelStatus(row.appointmentStatus)}`,
@@ -593,7 +594,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
     `Accession: ${row.accessionNumber}`,
     `Study: ${row.modalityCode}${row.examTypeName ? ` - ${row.examTypeName}` : ""}`,
     `Category: ${labelStatus(row.caseCategory)}`,
-    `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+    `Assigned doctor: ${row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}`,
     `Finalized by: ${sonicFinalizerLabel(row) ?? "-"}`,
     `Report: ${reportStatusDisplay(row)}`,
     `Appointment: ${labelStatus(row.appointmentStatus)}`,
@@ -617,6 +618,7 @@ function PriorityBadge({ row }: { row: ReportingBoardCaseRow }) {
 }
 
 function AssignedDoctorDisplay({ row }: { row: ReportingBoardCaseRow }) {
+  const { language } = useLanguage();
   const provenance = row.assignmentOrigin === "sonic_auto"
     ? "Assignment inferred from SonicDICOM finalizer"
     : row.assignmentOrigin === "sonic_reconciled"
@@ -624,7 +626,7 @@ function AssignedDoctorDisplay({ row }: { row: ReportingBoardCaseRow }) {
       : null;
   return (
     <span className="inline-flex items-center gap-1">
-      <span>{row.assignedDoctorName ?? "Unassigned"}</span>
+      <span>{row.assignedDoctorId ? getDoctorDisplayName({ fullName: row.assignedDoctorNameAr, englishName: row.assignedDoctorNameEn, displayName: row.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}</span>
       {provenance && (
         <span aria-label={provenance} title={provenance} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-teal-200 bg-teal-50 text-teal-700">
           <RefreshCw size={11} aria-hidden="true" />
@@ -2170,7 +2172,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     filters: effectiveFilters,
     savedViewToken: loadedSavedView?.token ?? null,
     selectedAppointmentIds,
-    selectedDoctorName: selectedAssignedDoctor?.displayName ?? null,
+    selectedDoctorName: selectedAssignedDoctor ? getDoctorDisplayName(selectedAssignedDoctor, language) : null,
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
   const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/reporting/worklist/${loadedSavedView.token}` : "";
@@ -2278,7 +2280,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ? filters.modalityCode
       : `Configured ${settingsQuery.data?.enabledModalityCodes?.join("/") || "CT/MR"}`;
   const assignmentChipValue = filters.assignedDoctorId
-    ? selectedAssignedDoctor?.displayName ?? `Doctor ${filters.assignedDoctorId}`
+    ? (selectedAssignedDoctor ? getDoctorDisplayName(selectedAssignedDoctor, language) : null) ?? `Doctor ${filters.assignedDoctorId}`
     : filters.assignmentStatus === "assigned"
       ? "Assigned"
       : filters.assignmentStatus === "unassigned"
@@ -2423,7 +2425,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <h2 className="text-xl font-semibold text-foreground">Reporting Assignment Board</h2>
-            <span className="text-xs" style={{ color: "var(--text-muted)" }}>Cutoff {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"}{selectedAssignedDoctor ? ` · ${selectedAssignedDoctor.displayName}` : ""}</span>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>Cutoff {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"}{selectedAssignedDoctor ? ` · ${getDoctorDisplayName(selectedAssignedDoctor, language)}` : ""}</span>
             {loadedSavedView && <span className="text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</span>}
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>Showing {resultCountPhrase}</span>
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>{isBoardFetching ? "Refreshing..." : `Board refreshed: ${refreshedLabel}`}</span>
@@ -2648,7 +2650,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   appointmentIds: selectedAppointmentIds,
                   comparisonRequestIds: selectedComparisonRequestIds,
                   doctorId: Number(selectedReassignDoctorId),
-                  doctorName: selectedReassignDoctor?.displayName ?? "the selected doctor",
+                  doctorName: selectedReassignDoctor ? getDoctorDisplayName(selectedReassignDoctor, language) : "the selected doctor",
                   reason: selectedReassignReason.trim() || null,
                 })}
                 title={!selectedReassignDoctorId ? "Select a destination doctor first." : undefined}
@@ -2729,7 +2731,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   {cases.map((row) => {
                     const selected = selectedCaseKeys.includes(row.caseKey);
                     return (
-                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
+                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row, language)}>
                         <td className="px-3 py-1.5"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
@@ -3103,7 +3105,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="text-lg font-semibold text-foreground">Reconcile reporting assignment?</h3>
-            <p className="mt-3 text-sm text-foreground">Current assigned doctor: <strong>{reconcileTarget.assignedDoctorName}</strong></p>
+          <p className="mt-3 text-sm text-foreground">Current assigned doctor: <strong>{reconcileTarget.assignedDoctorId ? getDoctorDisplayName({ fullName: reconcileTarget.assignedDoctorNameAr, englishName: reconcileTarget.assignedDoctorNameEn, displayName: reconcileTarget.assignedDoctorName }, language) || "Unassigned" : "Unassigned"}</strong></p>
             <p className="mt-1 text-sm text-foreground">SonicDICOM finalized by: <strong>{reconcileTarget.finalizedByDoctorName}</strong></p>
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>This preserves the previous assignment in the audit history and changes the current RISpro reporting assignment to the SonicDICOM finalizer.</p>
             <div className="mt-5 flex justify-end gap-2">

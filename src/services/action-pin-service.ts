@@ -31,6 +31,7 @@ export interface ActionPinAdminUserRow {
   userId: number;
   username: string;
   fullName: string;
+  englishName: string | null;
   role: string;
   isActive: boolean;
   hasActionPin: boolean;
@@ -106,6 +107,7 @@ interface ActionPinAdminDbRow {
   user_id: number;
   username: string;
   full_name: string;
+  english_name: string | null;
   role: string;
   is_active: boolean;
   has_action_pin: boolean;
@@ -231,6 +233,7 @@ function mapActionPinAdminUser(row: ActionPinAdminDbRow): ActionPinAdminUserRow 
     userId: Number(row.user_id),
     username: row.username,
     fullName: row.full_name,
+    englishName: row.english_name,
     role: row.role,
     isActive: row.is_active,
     hasActionPin: row.has_action_pin,
@@ -257,6 +260,7 @@ export async function listActionPinAdminUsers(
         users.id as user_id,
         users.username,
         users.full_name,
+        users.english_name,
         users.role,
         users.is_active,
         (user_action_pins.user_id is not null) as has_action_pin,

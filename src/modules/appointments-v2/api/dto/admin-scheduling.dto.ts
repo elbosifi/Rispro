@@ -228,6 +228,7 @@ export interface PolicyDisplayLookupsDto {
     id: number;
     username: string;
     fullName: string;
+    englishName: string | null;
     role: string;
     isActive: boolean;
   }>;

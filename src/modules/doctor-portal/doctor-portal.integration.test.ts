@@ -478,6 +478,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(myCases.status, 200);
     assert.equal((myCases.data as { cases: unknown[] }).cases.length, 1);
 
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [normal.id, `${TEST_PREFIX} Protocol Arabic`, `${TEST_PREFIX} Protocol English`]);
     const draft = await api(normal.cookie, `/api/doctor/protocols/${appointmentId}`, {
       method: "POST",
       body: {
@@ -511,9 +512,17 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     const audit = await api(normal.cookie, `/api/doctor/protocols/${appointmentId}/audit`);
     assert.equal(audit.status, 200);
-    const auditEvents = (audit.data as { audit: Array<{ eventType: string; newSummary: string | null; protocolStatus: string | null }> }).audit;
+    const auditEvents = (audit.data as { audit: Array<{ eventType: string; newSummary: string | null; protocolStatus: string | null; changedByDoctorNameAr?: string | null; changedByDoctorNameEn?: string | null }> }).audit;
     assert.equal(auditEvents.some((event) => event.eventType === "protocol_assigned" && event.protocolStatus === "assigned"), true);
     assert.equal(auditEvents.some((event) => /protocol text/i.test(event.newSummary ?? "")), true);
+    const assignedAudit = auditEvents.find((event) => event.eventType === "protocol_assigned");
+    assert.equal(assignedAudit?.changedByDoctorNameAr, `${TEST_PREFIX} Protocol Arabic`);
+    assert.equal(assignedAudit?.changedByDoctorNameEn, `${TEST_PREFIX} Protocol English`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [normal.id, `${TEST_PREFIX} Protocol Arabic Renamed`, `${TEST_PREFIX} Protocol English Renamed`]);
+    const historicalAudit = await api(normal.cookie, `/api/doctor/protocols/${appointmentId}/audit`);
+    const historicalAssigned = (historicalAudit.data as { audit: Array<{ eventType: string; changedByDoctorNameAr?: string | null; changedByDoctorNameEn?: string | null }> }).audit.find((event) => event.eventType === "protocol_assigned");
+    assert.equal(historicalAssigned?.changedByDoctorNameAr, `${TEST_PREFIX} Protocol Arabic`);
+    assert.equal(historicalAssigned?.changedByDoctorNameEn, `${TEST_PREFIX} Protocol English`);
 
     const assignedDetails = await api(supervisor.cookie, `/api/v2/appointments/${appointmentId}/details`);
     assert.equal((assignedDetails.data as { appointment: { protocol_status: string | null } }).appointment.protocol_status, "assigned");
@@ -925,10 +934,11 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       username: `  ${username.toUpperCase()}  `,
       email: "  doctor@nccb.ly  ",
       fullName: `${TEST_PREFIX} Created Doctor`,
+      englishName: `${TEST_PREFIX} Created Doctor EN`,
       temporaryPassword: "TempPass123",
       coreRole: "doctor",
       userActive: true,
-      doctorDisplayName: `${TEST_PREFIX} Created Display`,
+      doctorDisplayName: `${TEST_PREFIX} Compatibility Input Must Not Win`,
       doctorRole: "consultant",
       doctorProfileActive: true,
       canFinalizeReports: true,
@@ -950,6 +960,10 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(createdData.profile.active, true);
     assert.equal(createdData.profile.canSupervise, true);
     assert.equal(createdData.modalities.some((permission) => Number(permission.modalityId) === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
+    const createdUser = await pool.query<{ full_name: string; english_name: string | null }>("select full_name, english_name from users where id = $1", [createdData.user.id]);
+    assert.deepEqual(createdUser.rows[0], { full_name: `${TEST_PREFIX} Created Doctor`, english_name: `${TEST_PREFIX} Created Doctor EN` });
+    const createdDisplay = await pool.query<{ display_name: string }>("select display_name from doctor_portal.doctor_profiles where id = $1", [createdData.profile.id]);
+    assert.equal(createdDisplay.rows[0]?.display_name, `${TEST_PREFIX} Created Doctor`);
 
     const listedProfiles = await api(admin.cookie, "/api/doctor/profiles");
     assert.equal(listedProfiles.status, 200, JSON.stringify(listedProfiles.data));
@@ -966,6 +980,13 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(changed.status, 200, JSON.stringify(changed.data));
     assert.equal(((changed.data.user as { mustChangePassword: boolean }).mustChangePassword), false);
     assert.ok(changed.cookie);
+    const currentSession = await api(changed.cookie, "/api/auth/me");
+    assert.equal((currentSession.data as { user: { englishName: string | null } }).user.englishName, `${TEST_PREFIX} Created Doctor EN`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [createdData.user.id, `${TEST_PREFIX} Created Doctor Renamed`, `${TEST_PREFIX} Created Doctor EN Renamed`]);
+    const refreshedSession = await api(changed.cookie, "/api/auth/me");
+    assert.equal((refreshedSession.data as { user: { fullName: string; englishName: string | null } }).user.fullName, `${TEST_PREFIX} Created Doctor Renamed`);
+    assert.equal((refreshedSession.data as { user: { englishName: string | null } }).user.englishName, `${TEST_PREFIX} Created Doctor EN Renamed`);
+    await pool.query("update users set full_name = $2, english_name = $3 where id = $1", [createdData.user.id, body.fullName, body.englishName]);
     assert.equal((await authRequest("/api/auth/login", { username, password: body.temporaryPassword })).status, 401);
     assert.equal((await authRequest("/api/auth/login", { username: username.toUpperCase(), password: "ChangedPass456" })).status, 200);
 
@@ -1060,23 +1081,27 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const updatedUsername = `${supervisorUsername}_updated`;
     const accountUpdated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
       method: "PATCH",
-      body: { username: `  ${updatedUsername.toUpperCase()}  `, email: " new@nccb.ly ", fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+      body: { username: `  ${updatedUsername.toUpperCase()}  `, email: " new@nccb.ly ", fullName: `${TEST_PREFIX} Updated Identity`, englishName: `${TEST_PREFIX} Updated Identity EN`, coreRole: "doctor", active: true },
     });
     assert.equal(accountUpdated.status, 200, JSON.stringify(accountUpdated.data));
     assert.equal((accountUpdated.data as { user: { username: string; full_name: string; role: string; must_change_password: boolean } }).user.username, updatedUsername);
     assert.equal((accountUpdated.data as { user: { full_name: string } }).user.full_name, `${TEST_PREFIX} Updated Identity`);
+    assert.equal((accountUpdated.data as { user: { english_name: string | null } }).user.english_name, `${TEST_PREFIX} Updated Identity EN`);
     assert.equal((accountUpdated.data as { user: { role: string } }).user.role, "doctor");
     assert.equal((accountUpdated.data as { user: { email: string | null } }).user.email, "new@nccb.ly");
+    const legacyDisplayAfterIdentityUpdate = await pool.query<{ display_name: string }>("select display_name from doctor_portal.doctor_profiles where user_id = $1", [supervisorCreatedUserId]);
+    assert.equal(legacyDisplayAfterIdentityUpdate.rows[0]?.display_name, `${TEST_PREFIX} Supervisor Created Doctor`);
     const usernameOnlyUpdate = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
-      method: "PATCH", body: { username: `${updatedUsername}_again`, fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+      method: "PATCH", body: { username: `${updatedUsername}_again`, fullName: `${TEST_PREFIX} Updated Identity`, englishName: `${TEST_PREFIX} Updated Identity EN`, coreRole: "doctor", active: true },
     });
     assert.equal(usernameOnlyUpdate.status, 200);
     assert.equal((usernameOnlyUpdate.data as { user: { email: string | null } }).user.email, "new@nccb.ly");
     const clearEmail = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
-      method: "PATCH", body: { username: `${updatedUsername}_again`, email: "   ", fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+      method: "PATCH", body: { username: `${updatedUsername}_again`, email: "   ", fullName: `${TEST_PREFIX} Updated Identity`, englishName: "   ", coreRole: "doctor", active: true },
     });
     assert.equal(clearEmail.status, 200);
     assert.equal((clearEmail.data as { user: { email: string | null } }).user.email, null);
+    assert.equal((clearEmail.data as { user: { english_name: string | null } }).user.english_name, null);
     const preservedSecurity = await pool.query<{ password_hash: string; must_change_password: boolean }>("select password_hash, must_change_password from users where id = $1", [supervisorCreatedUserId]);
     assert.equal(preservedSecurity.rows[0].password_hash, originalSecurity.rows[0].password_hash);
     assert.equal(preservedSecurity.rows[0].must_change_password, originalSecurity.rows[0].must_change_password);
@@ -1157,8 +1182,8 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const modality = await pool.query<{ code: string }>(`select code from modalities where id = $1`, [testData.modalityId]);
     const modalityCode = modality.rows[0].code;
     const csv = [
-      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
-      `${username},${TEST_PREFIX} Imported Doctor,TempPass123,doctor,true,consultant,true,true,true,false,${modalityCode},,,false`,
+      "username,full_name,english_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${username},${TEST_PREFIX} Imported Doctor,${TEST_PREFIX} Imported Doctor EN,TempPass123,doctor,true,consultant,true,true,true,false,${modalityCode},,,false`,
     ].join("\n");
     const fileContentBase64 = Buffer.from(csv, "utf8").toString("base64");
 
@@ -1176,14 +1201,19 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
 
-    const imported = await pool.query<{ password_hash: string; must_change_password: boolean; email: string | null }>(
-      `select password_hash, must_change_password, email from users where username = $1 limit 1`,
+    const imported = await pool.query<{ password_hash: string; must_change_password: boolean; email: string | null; english_name: string | null }>(
+      `select password_hash, must_change_password, email, english_name from users where username = $1 limit 1`,
       [username]
     );
     assert.equal(imported.rows[0]?.must_change_password, true);
     assert.equal(imported.rows[0]?.email, null);
+    assert.equal(imported.rows[0]?.english_name, `${TEST_PREFIX} Imported Doctor EN`);
 
     const csvRow = (temporaryPassword: string, resetPassword: string) => [
+      "username,full_name,english_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${username},${TEST_PREFIX} Imported Doctor,${TEST_PREFIX} Imported Doctor EN,${temporaryPassword},doctor,true,consultant,true,true,true,false,${modalityCode},,,${resetPassword}`,
+    ].join("\n");
+    const oldCsvRow = (temporaryPassword: string, resetPassword: string) => [
       "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
       `${username},${TEST_PREFIX} Imported Doctor,${temporaryPassword},doctor,true,consultant,true,true,true,false,${modalityCode},,,${resetPassword}`,
     ].join("\n");
@@ -1217,10 +1247,11 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     const preserve = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
       method: "POST",
-      body: { fileContentBase64: Buffer.from(csvRow("", "false"), "utf8").toString("base64") },
+      body: { fileContentBase64: Buffer.from(oldCsvRow("", "false"), "utf8").toString("base64") },
     });
     assert.equal(preserve.status, 200, JSON.stringify(preserve.data));
     assert.equal((await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username])).rows[0].password_hash, resetUser.rows[0].password_hash);
+    assert.equal((await pool.query<{ english_name: string | null }>(`select english_name from users where username = $1`, [username])).rows[0].english_name, `${TEST_PREFIX} Imported Doctor EN`);
   });
 
   it("supports XLSX doctor import/export with row errors and password reset guardrails", async () => {
@@ -1231,6 +1262,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const rows = [{
       username,
       full_name: `${TEST_PREFIX} XLSX Doctor`,
+      english_name: `${TEST_PREFIX} XLSX Doctor EN`,
       temporary_password: "TempPass123",
       core_role: "doctor",
       user_active: "true",
@@ -1253,6 +1285,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const exported = XLSX.read(Buffer.from(await exportResponse.arrayBuffer()), { type: "buffer" });
     const exportedHeaders = XLSX.utils.sheet_to_json<unknown[]>(exported.Sheets[exported.SheetNames[0]], { header: 1 })[0]?.map(String) ?? [];
     assert.equal(exportedHeaders.some((header) => /password/i.test(header)), false);
+    assert.equal(exportedHeaders.includes("english_name"), true);
 
     const template = await fetch(`${app.baseUrl}/api/doctor/admin/doctors/import/template?format=xlsx`, { headers: { Cookie: admin.cookie } });
     assert.equal(template.status, 200);
@@ -1266,11 +1299,12 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(confirm.status, 200, JSON.stringify(confirm.data));
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
-    const imported = await pool.query<{ id: string; password_hash: string; must_change_password: boolean }>(
-      `select id::text, password_hash, must_change_password from users where username = $1 limit 1`,
+    const imported = await pool.query<{ id: string; password_hash: string; must_change_password: boolean; english_name: string | null }>(
+      `select id::text, password_hash, must_change_password, english_name from users where username = $1 limit 1`,
       [username]
     );
     assert.equal(imported.rows[0]?.must_change_password, true);
+    assert.equal(imported.rows[0]?.english_name, `${TEST_PREFIX} XLSX Doctor EN`);
     const originalHash = imported.rows[0].password_hash;
 
     const duplicatePreview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {

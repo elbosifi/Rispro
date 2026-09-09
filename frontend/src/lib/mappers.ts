@@ -788,6 +788,8 @@ export function mapAuditEntry(raw: RawRecord): AuditEntry {
   return {
     id: num(raw, 'id'),
     changedByName: strOrNull(raw, 'changed_by_name') ?? strOrNull(raw, 'changedByName'),
+    changedByNameAr: strOrNull(raw, 'changed_by_name_ar') ?? strOrNull(raw, 'changedByNameAr') ?? strOrNull(raw, 'changed_by_name') ?? strOrNull(raw, 'changedByName'),
+    changedByNameEn: strOrNull(raw, 'changed_by_name_en') ?? strOrNull(raw, 'changedByNameEn'),
     changedByUsername: strOrNull(raw, 'changed_by_username') ?? strOrNull(raw, 'changedByUsername'),
     changedByUserId: strOrNull(raw, 'changed_by_user_id') ?? strOrNull(raw, 'changedByUserId') ?? numOrNull(raw, 'changed_by_user_id') ?? numOrNull(raw, 'changedByUserId'),
     entityType: str(raw, 'entity_type') || str(raw, 'entityType'),

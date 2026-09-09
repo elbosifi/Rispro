@@ -356,6 +356,22 @@ describe("Navigation governance", () => {
     expect(screen.getByRole("button", { name: "Manage Security PIN" })).toBeTruthy();
   });
 
+  it("localizes the signed-in account name with a safe fallback", () => {
+    const props = {
+      user: { id: 1, username: "doctor", fullName: "الاسم العربي", englishName: "English Name", role: "doctor" as const },
+      isRtl: false,
+      onUndo: () => {},
+      onRedo: () => {},
+      onToggleLanguage: () => {},
+      onLogout: () => {},
+      onMobileNavToggle: () => {},
+    };
+    const { rerender } = render(<TopBar {...props} language="en" />);
+    expect(screen.getByText("English Name")).toBeTruthy();
+    rerender(<TopBar {...props} language="ar" isRtl />);
+    expect(screen.getByText("الاسم العربي")).toBeTruthy();
+  });
+
   it("renders supplied menu actions in the primary mobile navigation area", () => {
     render(
       <MobileDrawer

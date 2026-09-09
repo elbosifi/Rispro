@@ -465,13 +465,17 @@ export async function persistReportingBoardSonicDicomCacheResults(
       )
     ), prepared as (
       select input.*, finalizer.doctor_id as finalized_by_doctor_id,
+        finalizer.name_ar, finalizer.name_en, finalizer.username,
         coalesce(cache.failure_count, 0) + 1 as resulting_failure_count,
         case when successful then now() + case status when 'final' then make_interval(secs => "finalRecheckSeconds") when 'study_not_found' then greatest(make_interval(secs => greatest("ttlSeconds", 300)), interval '5 minutes') else make_interval(secs => greatest("ttlSeconds", 1)) end
           else now() + least(interval '30 minutes', greatest(make_interval(secs => greatest("ttlSeconds", 1)), make_interval(secs => greatest("ttlSeconds", 1) * power(2, least(coalesce(cache.failure_count, 0) + 1, 8)::int)))) end as computed_next_check_at,
         cache.report_status as previous_status
       from input left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = input."appointmentId"
       left join lateral (
-        select case when count(*) = 1 then min(dp.id) else null end as doctor_id
+        select case when count(*) = 1 then min(dp.id) else null end as doctor_id,
+          case when count(*) = 1 then min(u.full_name) else null end as name_ar,
+          case when count(*) = 1 then min(u.english_name) else null end as name_en,
+          case when count(*) = 1 then min(u.username) else null end as username
         from users u
         join doctor_portal.doctor_profiles dp on dp.user_id = u.id
         where input.successful and input.status = 'final'
@@ -479,8 +483,8 @@ export async function persistReportingBoardSonicDicomCacheResults(
           and lower(btrim(u.username)) = lower(btrim(input."finalizedByAccount"))
       ) finalizer on true
     ), upserted as (
-      insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, report_final_at, sonicdicom_latest_document_id, sonicdicom_finalized_by_account, finalized_by_doctor_id, correlation_method, sonicdicom_study_note, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, last_error, study_instance_uid_snapshot, accession_number_snapshot)
-      select "appointmentId", status, "reportFinalAt", "latestDocumentId", "finalizedByAccount", finalized_by_doctor_id, "correlationMethod", "studyNote", case when successful then 'sonicdicom' else null end, case when successful then now() else null end, now(), computed_next_check_at,
+      insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, report_final_at, sonicdicom_latest_document_id, sonicdicom_finalized_by_account, finalized_by_doctor_id, finalized_by_name_ar_snapshot, finalized_by_name_en_snapshot, finalized_by_username_snapshot, correlation_method, sonicdicom_study_note, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, last_error, study_instance_uid_snapshot, accession_number_snapshot)
+      select "appointmentId", status, "reportFinalAt", "latestDocumentId", "finalizedByAccount", finalized_by_doctor_id, name_ar, name_en, username, "correlationMethod", "studyNote", case when successful then 'sonicdicom' else null end, case when successful then now() else null end, now(), computed_next_check_at,
         case when successful and previous_status is distinct from status then now() else null end, case when successful then 0 else resulting_failure_count end, case when successful then null else "errorText" end, "studyInstanceUid", "accessionNumber"
       from prepared
       on conflict (appointment_id) do update set
@@ -489,6 +493,9 @@ export async function persistReportingBoardSonicDicomCacheResults(
         sonicdicom_latest_document_id = case when excluded.last_success_at is not null then excluded.sonicdicom_latest_document_id else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_latest_document_id end,
         sonicdicom_finalized_by_account = case when excluded.last_success_at is not null then excluded.sonicdicom_finalized_by_account else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_finalized_by_account end,
         finalized_by_doctor_id = case when excluded.last_success_at is not null then excluded.finalized_by_doctor_id else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_doctor_id end,
+        finalized_by_name_ar_snapshot = case when excluded.last_success_at is not null then excluded.finalized_by_name_ar_snapshot else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_ar_snapshot end,
+        finalized_by_name_en_snapshot = case when excluded.last_success_at is not null then excluded.finalized_by_name_en_snapshot else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_name_en_snapshot end,
+        finalized_by_username_snapshot = case when excluded.last_success_at is not null then excluded.finalized_by_username_snapshot else doctor_portal.reporting_board_sonicdicom_cache.finalized_by_username_snapshot end,
         correlation_method = case when excluded.last_success_at is not null then excluded.correlation_method else doctor_portal.reporting_board_sonicdicom_cache.correlation_method end,
         sonicdicom_study_note = case when excluded.last_success_at is not null then excluded.sonicdicom_study_note else doctor_portal.reporting_board_sonicdicom_cache.sonicdicom_study_note end,
         source = case when excluded.last_success_at is not null then 'sonicdicom' else doctor_portal.reporting_board_sonicdicom_cache.source end,

@@ -12,6 +12,8 @@ import {
   updateDoctorLeaveStatus,
 } from "@/lib/api-hooks";
 import type { AvailabilityStatus, DoctorMe, LeaveType } from "@/types/api";
+import { getDoctorDisplayName } from "@/lib/user-display-name";
+import { useLanguage } from "@/providers/language-provider";
 
 const AVAILABILITY_STATUSES: Array<{ value: AvailabilityStatus; label: string }> = [
   { value: "available", label: "Available" },
@@ -49,6 +51,7 @@ function canManage(me: DoctorMe): boolean {
 }
 
 export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
+  const { language } = useLanguage();
   const queryClient = useQueryClient();
   const [dateFrom, setDateFrom] = useState(todayIso());
   const dateTo = useMemo(() => addDays(dateFrom, 13), [dateFrom]);
@@ -242,7 +245,7 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
             >
               <select value={teamAvailabilityForm.doctorId} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Doctor</option>
-                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
               </select>
               <input type="date" value={teamAvailabilityForm.date} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               <select value={teamAvailabilityForm.availabilityStatus} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="rounded-lg border px-3 py-2 text-sm">
@@ -253,7 +256,7 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
             </form>
             <div className="mt-3 space-y-2 text-sm">
               {teamAvailability.length === 0 ? <p style={{ color: "var(--text-muted)" }}>No team availability entries.</p> : teamAvailability.map((row) => (
-                <p key={row.id}>{row.doctorName ?? "Doctor"} · {row.date} · {row.availabilityStatus.replaceAll("_", " ")}</p>
+                <p key={row.id}>{getDoctorDisplayName({ fullName: row.doctorNameAr, englishName: row.doctorNameEn, displayName: row.doctorName }, language) || "Doctor"} · {row.date} · {row.availabilityStatus.replaceAll("_", " ")}</p>
               ))}
             </div>
           </div>
