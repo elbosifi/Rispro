@@ -1079,7 +1079,9 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
 
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Place on reporting hold" }));
+    const placeHoldAction = screen.getByRole("menuitem", { name: "Place on reporting hold" });
+    expect(within(placeHoldAction).getByTestId("reporting-hold-action-pause-icon")).toBeTruthy();
+    fireEvent.click(placeHoldAction);
 
     expect(screen.getByRole("heading", { name: "Place on reporting hold" })).toBeTruthy();
     const confirm = screen.getByRole("button", { name: "Place on hold" }) as HTMLButtonElement;
@@ -1112,8 +1114,18 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     const row = await screen.findByText("V2-000042").then((value) => value.closest("tr")!);
+    expect(row.className).toContain("border-slate-300");
+    expect(row.className).toContain("bg-slate-100/70");
+    expect(row.className).not.toContain("bg-red-50/70");
+    expect(row.className).not.toContain("bg-orange-50/70");
     expect(within(row).getByText("Dr Target")).toBeTruthy();
-    fireEvent.click(within(row).getByRole("button", { name: "Reporting hold" }));
+    fireEvent.click(within(row).getByRole("checkbox", { name: "Select case V2-000042" }));
+    expect(row.className).toContain("border-teal-600");
+    expect(row.className).toContain("bg-teal-50");
+    expect(row.className).not.toContain("bg-slate-100/70");
+    const reportingHoldButton = within(row).getByRole("button", { name: "Reporting hold" });
+    expect(within(reportingHoldButton).getByTestId("reporting-hold-pause-icon")).toBeTruthy();
+    fireEvent.click(reportingHoldButton);
     const details = screen.getByRole("dialog");
     expect(within(details).getByText("Needs administrative review")).toBeTruthy();
     expect(within(details).getByText("Dr Manager")).toBeTruthy();
@@ -1122,7 +1134,9 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(within(details).getByRole("button", { name: "Close" }));
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
     expect(screen.queryByRole("menuitem", { name: "Place on reporting hold" })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Resume reporting" }));
+    const resumeAction = screen.getByRole("menuitem", { name: "Resume reporting" });
+    expect(within(resumeAction).getByTestId("reporting-hold-action-play-icon")).toBeTruthy();
+    fireEvent.click(resumeAction);
     expect(screen.getByRole("heading", { name: "Resume reporting?" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Resume reporting" }));
     await waitFor(() => expect(releaseReportingBoardCaseHoldMock).toHaveBeenCalledWith(42));
@@ -1692,7 +1706,9 @@ describe("DoctorReportingBoardPage", () => {
     await screen.findByText("CMP-000077");
     fireEvent.click(screen.getByLabelText("Select case V2-000042"));
     fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
-    fireEvent.click(screen.getByRole("button", { name: "Place selected on hold" }));
+    const placeSelectedOnHold = screen.getByRole("button", { name: "Place selected on hold" });
+    expect(within(placeSelectedOnHold).getByTestId("reporting-hold-bulk-pause-icon")).toBeTruthy();
+    fireEvent.click(placeSelectedOnHold);
     expect(await screen.findByText("Selected appointments: 1")).toBeTruthy();
     expect(within(screen.getByRole("dialog")).getByText(/1 selected comparison request is not affected/i)).toBeTruthy();
     const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Place selected on hold" }) as HTMLButtonElement;
@@ -1711,7 +1727,9 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
     await screen.findByText("V2-000042");
     fireEvent.click(screen.getByLabelText("Select case V2-000042"));
-    fireEvent.click(screen.getByRole("button", { name: "Resume held" }));
+    const resumeHeldButton = screen.getByRole("button", { name: "Resume held" });
+    expect(within(resumeHeldButton).getByTestId("reporting-hold-bulk-play-icon")).toBeTruthy();
+    fireEvent.click(resumeHeldButton);
     expect(await screen.findByRole("heading", { name: "Resume selected Reporting Holds" })).toBeTruthy();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resume held" }));
     await waitFor(() => expect(bulkResumeSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42] }));

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Pause, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
 import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { useLanguage } from "@/providers/language-provider";
@@ -516,6 +516,7 @@ function rowPriorityTone(row: ReportingBoardCaseRow): "stat" | "urgent" | "norma
 
 function reportingRowClass(row: ReportingBoardCaseRow, selected: boolean): string {
   if (selected) return "border-l-2 border-teal-600 bg-teal-50 ring-2 ring-inset ring-teal-600 transition hover:bg-teal-100";
+  if (row.reportingHold) return "border-l-2 border-slate-300 bg-slate-100/70 transition hover:bg-slate-100";
   const tone = rowPriorityTone(row);
   if (tone === "stat") return "border-l-2 border-red-300 bg-red-50/70 transition hover:bg-red-50";
   if (tone === "urgent") return "border-l-2 border-orange-300 bg-orange-50/70 transition hover:bg-orange-50";
@@ -705,7 +706,8 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
     <div className="flex max-w-40 flex-wrap items-center gap-1" title={rowStatusLabel(row)}>
       {row.workflowHold ? <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">{row.workflowHold === "waiting_for_additional_report" ? "Waiting for additional report" : row.workflowHold === "additional_imaging_ready_for_supplement" ? "Additional imaging ready for supplementation" : "Waiting for additional imaging"}</span> : null}
       {row.reportingHold ? <>
-        <button type="button" className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100" onClick={() => setHoldDetailsOpen(true)} aria-label="Reporting hold" title="Reporting hold details">
+        <button type="button" className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100" onClick={() => setHoldDetailsOpen(true)} aria-label="Reporting hold" title="Reporting hold details">
+          <Pause data-testid="reporting-hold-pause-icon" className="h-3 w-3" aria-hidden="true" />
           Reporting hold
         </button>
         <Dialog open={holdDetailsOpen} onClose={() => setHoldDetailsOpen(false)}>
@@ -989,12 +991,14 @@ function RowActionMenu({
         </button>
       )}
       {canManage && row.caseType === "appointment" && row.reportingHold ? (
-        <button type="button" role="menuitem" onClick={() => { setOpen(false); onResumeHold(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onResumeHold(row); }} className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+          <Play data-testid="reporting-hold-action-play-icon" className="h-3.5 w-3.5" aria-hidden="true" />
           Resume reporting
         </button>
       ) : null}
       {canManage && row.caseType === "appointment" && !row.reportingHold && row.reportStatus !== "final" ? (
-        <button type="button" role="menuitem" onClick={() => { setOpen(false); onPlaceHold(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onPlaceHold(row); }} className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50">
+          <Pause data-testid="reporting-hold-action-pause-icon" className="h-3.5 w-3.5" aria-hidden="true" />
           Place on reporting hold
         </button>
       ) : null}
@@ -2674,18 +2678,20 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 type="button"
                 disabled={selectedHoldDisabled}
                 onClick={() => setSelectedHoldMode("place")}
-                className="h-10 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                className="inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
                 style={{ borderColor: "#d97706", backgroundColor: "#fffbeb" }}
               >
+                <Pause data-testid="reporting-hold-bulk-pause-icon" className="h-3.5 w-3.5" aria-hidden="true" />
                 Place selected on hold
               </button>}
               {canManage && selectedHeldAppointmentRows.length > 0 && <button
                 type="button"
                 disabled={selectedHoldDisabled}
                 onClick={() => setSelectedHoldMode("resume")}
-                className="h-10 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                className="inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold text-amber-800 disabled:opacity-50"
                 style={{ borderColor: "#d97706" }}
               >
+                <Play data-testid="reporting-hold-bulk-play-icon" className="h-3.5 w-3.5" aria-hidden="true" />
                 Resume held
               </button>}
               <button type="button" onClick={() => { setSelectedCaseKeys([]); setSelectedReassignDoctorId(""); setSelectedReassignReason(""); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
