@@ -18,6 +18,8 @@ type DocumentsStorageForm = {
   authPassword: string;
   authDomain: string;
   fallbackEnabled: boolean;
+  haHotStorageEnabled: boolean;
+  haHotStorageRetentionHours: string;
   naps2WebScanEnabled: boolean;
   naps2WebScanEndpoint: string;
   scannerAppEnabled: boolean;
@@ -43,6 +45,10 @@ function normalizeDocumentsStorageForm(
     authPassword: settings?.storage_auth_password || "",
     authDomain: settings?.storage_auth_domain || "",
     fallbackEnabled: String(settings?.storage_fallback_enabled || "true").toLowerCase() === "true",
+    haHotStorageEnabled: ["true", "1", "yes", "enabled", "on"].includes(
+      String(settings?.ha_hot_storage_enabled || "true").trim().toLowerCase()
+    ),
+    haHotStorageRetentionHours: settings?.ha_hot_storage_retention_hours || "48",
     naps2WebScanEnabled: String(settings?.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled",
     naps2WebScanEndpoint: settings?.naps2_webscan_endpoint || "http://127.0.0.1:9801",
     scannerAppEnabled: String(settings?.scanner_app_enabled || "enabled").toLowerCase() === "enabled",
@@ -103,6 +109,8 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           { key: "storage_auth_password", value: { value: form.authPassword } },
           { key: "storage_auth_domain", value: { value: form.authDomain } },
           { key: "storage_fallback_enabled", value: { value: String(form.fallbackEnabled) } },
+          { key: "ha_hot_storage_enabled", value: { value: String(form.haHotStorageEnabled) } },
+          { key: "ha_hot_storage_retention_hours", value: { value: form.haHotStorageRetentionHours } },
           { key: "naps2_webscan_enabled", value: { value: form.naps2WebScanEnabled ? "enabled" : "disabled" } },
           { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint } },
           { key: "scanner_bridge_mode", value: { value: form.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
@@ -337,6 +345,48 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           <label className="block text-sm font-medium mb-1">{t("settings.documents.networkDomain")}</label>
           <input value={form.authDomain} onChange={(e) => updateForm("authDomain", e.target.value)} className="input-premium w-full" />
         </div>
+      </div>
+
+      <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
+        <h4 className="font-medium text-sm">{t("settings.documents.haRecoveryTitle")}</h4>
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={form.haHotStorageEnabled}
+            onChange={(event) => updateForm("haHotStorageEnabled", event.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <strong className="block">{t("settings.documents.haRecoveryEnabled")}</strong>
+            <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">
+              {t("settings.documents.haRecoveryEnabledHelp")}
+            </span>
+          </span>
+        </label>
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            {t("settings.documents.haRecoveryRetention")}
+            <select
+              value={form.haHotStorageRetentionHours}
+              onChange={(event) => updateForm("haHotStorageRetentionHours", event.target.value)}
+              disabled={!form.haHotStorageEnabled}
+              className="input-premium w-full mt-1"
+            >
+              <option value="24">{t("settings.documents.haRecovery24Hours")}</option>
+              <option value="48">{t("settings.documents.haRecovery48HoursRecommended")}</option>
+              <option value="72">{t("settings.documents.haRecovery72Hours")}</option>
+              <option value="168">{t("settings.documents.haRecovery168Hours")}</option>
+            </select>
+          </label>
+          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+            {t("settings.documents.haRecoveryRetentionHelp")}
+          </p>
+        </div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">
+          {form.haHotStorageEnabled
+            ? t("settings.documents.haRecoveryStatusEnabled", { hours: form.haHotStorageRetentionHours })
+            : t("settings.documents.haRecoveryStatusDisabled")}
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">

@@ -49,7 +49,73 @@ describe("Documents & Uploads protocol queue setting", () => {
     expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({
       entries: expect.arrayContaining([
         { key: "require_request_document_for_protocol_queue", value: { value: "enabled" } },
+        { key: "storage_path", value: { value: "" } },
+        { key: "ha_hot_storage_enabled", value: { value: "true" } },
+        { key: "ha_hot_storage_retention_hours", value: { value: "48" } },
       ]),
     }));
+  });
+
+  it("renders saved HA recovery settings", async () => {
+    fetchSettings.mockResolvedValue({
+      ha_hot_storage_enabled: "true",
+      ha_hot_storage_retention_hours: "72",
+    });
+
+    renderSection();
+
+    const toggle = await screen.findByRole("checkbox", { name: /Enable PostgreSQL HA recovery copy/i });
+    const retention = screen.getByLabelText("HA recovery retention") as HTMLSelectElement;
+    expect(toggle).toBeTruthy();
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    expect(retention.value).toBe("72");
+  });
+
+  it("defaults HA recovery to enabled with 48 hours when settings are missing", async () => {
+    fetchSettings.mockResolvedValue({});
+
+    renderSection();
+
+    const toggle = await screen.findByRole("checkbox", { name: /Enable PostgreSQL HA recovery copy/i });
+    const retention = screen.getByLabelText("HA recovery retention") as HTMLSelectElement;
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    expect(retention.value).toBe("48");
+  });
+
+  it("disables retention without clearing it when HA recovery is turned off", async () => {
+    fetchSettings.mockResolvedValue({
+      ha_hot_storage_enabled: "true",
+      ha_hot_storage_retention_hours: "72",
+    });
+
+    renderSection();
+
+    const toggle = await screen.findByRole("checkbox", { name: /Enable PostgreSQL HA recovery copy/i });
+    const retention = screen.getByLabelText("HA recovery retention") as HTMLSelectElement;
+    await userEvent.click(toggle);
+
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    expect(retention.disabled).toBe(true);
+    expect(retention.value).toBe("72");
+  });
+
+  it("allows HA recovery to be enabled and a different retention selected", async () => {
+    fetchSettings.mockResolvedValue({
+      ha_hot_storage_enabled: "false",
+      ha_hot_storage_retention_hours: "48",
+    });
+
+    renderSection();
+
+    const toggle = await screen.findByRole("checkbox", { name: /Enable PostgreSQL HA recovery copy/i });
+    const retention = screen.getByLabelText("HA recovery retention") as HTMLSelectElement;
+    expect(retention.disabled).toBe(true);
+
+    await userEvent.click(toggle);
+    await userEvent.selectOptions(retention, "168");
+
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    expect(retention.disabled).toBe(false);
+    expect(retention.value).toBe("168");
   });
 });
