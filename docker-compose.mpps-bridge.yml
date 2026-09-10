@@ -13,7 +13,7 @@ services:
     volumes:
       - rispro-storage:/data
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os, socket; s=socket.create_connection(('127.0.0.1', int(os.environ.get('MPPS_BRIDGE_PORT', '11113'))), 2); s.close()\""]
+      test: ["CMD-SHELL", "/app/scripts/dicom-gateway/mpps-smoke-test.sh --healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 10

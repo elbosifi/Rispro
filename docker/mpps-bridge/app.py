@@ -14,7 +14,7 @@ from urllib import request as urlrequest
 
 from pydicom.dataset import Dataset
 from pynetdicom import AE, evt
-from pynetdicom.sop_class import ModalityPerformedProcedureStep
+from pynetdicom.sop_class import ModalityPerformedProcedureStep, Verification
 
 MPPS_BRIDGE_PORT = int(os.environ.get("MPPS_BRIDGE_PORT", "11113"))
 MPPS_BRIDGE_AE_TITLE = os.environ.get("MPPS_BRIDGE_AE_TITLE", "RISPRO_MPPS").strip() or "RISPRO_MPPS"
@@ -66,28 +66,47 @@ def sequence_dataset_value(dataset: Dataset | None, sequence_keyword: str, item_
     if not sequence:
         return default
     try:
-        first_item = sequence[0]
+        for item in sequence:
+            value = dataset_value(item, item_keyword)
+            if value:
+                return value
     except Exception:
         return default
-    return dataset_value(first_item, item_keyword, default)
+    return default
 
 
 def normalize_mpps_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> dict[str, Any]:
+    scheduled_study_instance_uid = sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "StudyInstanceUID")
+    scheduled_accession_number = sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "AccessionNumber")
+    discontinuation = ""
+    discontinuation_sequence = dataset.get("PerformedProcedureStepDiscontinuationReasonCodeSequence") if dataset is not None else None
+    if discontinuation_sequence:
+        try:
+            discontinuation_item = discontinuation_sequence[0]
+            discontinuation = dataset_value(discontinuation_item, "CodeMeaning") or dataset_value(discontinuation_item, "CodeValue")
+        except Exception:
+            discontinuation = ""
+
     return {
         "eventType": event_type,
         "sourceAeTitle": calling_ae_title,
         "patientId": dataset_value(dataset, "PatientID"),
-        "accessionNumber": dataset_value(dataset, "AccessionNumber"),
-        "studyInstanceUid": dataset_value(dataset, "StudyInstanceUID"),
+        "accessionNumber": scheduled_accession_number or dataset_value(dataset, "AccessionNumber"),
+        "studyInstanceUid": scheduled_study_instance_uid or dataset_value(dataset, "StudyInstanceUID"),
         "mppsInstanceUid": sop_instance_uid,
         "performedStepStatus": dataset_value(dataset, "PerformedProcedureStepStatus"),
         "requestedProcedureId": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "RequestedProcedureID"),
         "scheduledProcedureStepId": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepID"),
-        "modality": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "Modality"),
+        "modality": dataset_value(dataset, "Modality") or sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "Modality"),
         "scheduledStartDate": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepStartDate")
-            or dataset_value(dataset, "PerformedProcedureStepStartDate"),
+            or dataset_value(dataset, "ScheduledProcedureStepStartDate"),
         "scheduledStartTime": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepStartTime")
-            or dataset_value(dataset, "PerformedProcedureStepStartTime"),
+            or dataset_value(dataset, "ScheduledProcedureStepStartTime"),
+        "performedStartDate": dataset_value(dataset, "PerformedProcedureStepStartDate"),
+        "performedStartTime": dataset_value(dataset, "PerformedProcedureStepStartTime"),
+        "performedEndDate": dataset_value(dataset, "PerformedProcedureStepEndDate"),
+        "performedEndTime": dataset_value(dataset, "PerformedProcedureStepEndTime"),
+        "discontinuationReason": discontinuation,
         "rawDatasetJson": dataset_to_json(dataset) or {},
     }
 
@@ -119,7 +138,7 @@ def deliver_to_rispro(payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(raw or "{}")
 
 
-def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> None:
+def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> dict[str, Any]:
     MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     normalized_payload = normalize_mpps_event(event_type, sop_instance_uid, dataset, calling_ae_title)
     payload = {
@@ -157,29 +176,58 @@ def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None
     if delivery_error:
         raise RuntimeError(delivery_error)
 
+    result = payload.get("rispro_delivery", {}).get("result")
+    if not isinstance(result, dict):
+        raise RuntimeError("RISpro MPPS intake returned an invalid response.")
+    return result
+
+
+def dicom_status_from_delivery(result: dict[str, Any]) -> int:
+    status = result.get("dicomStatus", 0x0110)
+    if isinstance(status, bool):
+        return 0x0110
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        return 0x0110
+    return status if 0 <= status <= 0xFFFF else 0x0110
+
+
+def handle_c_echo(_: evt.Event) -> int:
+    return 0x0000
+
 
 def handle_n_create(event: evt.Event):
-    sop_instance_uid = getattr(event.request, "AffectedSOPInstanceUID", "unknown")
+    sop_instance_uid = normalize_ae_title(getattr(event.request, "AffectedSOPInstanceUID", ""))
     dataset = event.attribute_list if hasattr(event, "attribute_list") else None
+    if not sop_instance_uid:
+        return 0x0106, None
+    performed_step_status = dataset_value(dataset, "PerformedProcedureStepStatus")
+    if not performed_step_status:
+        return 0x0120, None
+    if performed_step_status != "IN PROGRESS":
+        return 0x0106, None
     calling_ae_title = normalize_ae_title(getattr(event.assoc.requestor, "ae_title", b""))
     try:
-        record_event("n-create", sop_instance_uid, dataset, calling_ae_title)
+        result = record_event("n-create", sop_instance_uid, dataset, calling_ae_title)
     except Exception as exc:
         print(f"MPPS bridge N-CREATE failed: {exc}", flush=True)
         return 0x0110, None
-    return 0x0000, dataset
+    status = dicom_status_from_delivery(result)
+    return status, dataset if status == 0x0000 else None
 
 
 def handle_n_set(event: evt.Event):
-    sop_instance_uid = getattr(event.request, "RequestedSOPInstanceUID", "unknown")
+    sop_instance_uid = normalize_ae_title(getattr(event.request, "RequestedSOPInstanceUID", ""))
     dataset = event.modification_list if hasattr(event, "modification_list") else None
     calling_ae_title = normalize_ae_title(getattr(event.assoc.requestor, "ae_title", b""))
     try:
-        record_event("n-set", sop_instance_uid, dataset, calling_ae_title)
+        result = record_event("n-set", sop_instance_uid, dataset, calling_ae_title)
     except Exception as exc:
         print(f"MPPS bridge N-SET failed: {exc}", flush=True)
         return 0x0110, None
-    return 0x0000, dataset
+    status = dicom_status_from_delivery(result)
+    return status, dataset if status == 0x0000 else None
 
 
 class AdminHandler(BaseHTTPRequestHandler):
@@ -241,12 +289,14 @@ def main() -> None:
     admin_thread.start()
 
     handlers = [
+        (evt.EVT_C_ECHO, handle_c_echo),
         (evt.EVT_N_CREATE, handle_n_create),
         (evt.EVT_N_SET, handle_n_set),
     ]
 
     ae = AE(ae_title=MPPS_BRIDGE_AE_TITLE)
     ae.add_supported_context(ModalityPerformedProcedureStep)
+    ae.add_supported_context(Verification)
 
     print(
         json.dumps(

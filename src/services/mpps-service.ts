@@ -30,6 +30,11 @@ export interface IncomingMppsEventPayload {
   modality?: unknown;
   scheduledStartDate?: unknown;
   scheduledStartTime?: unknown;
+  performedStartDate?: unknown;
+  performedStartTime?: unknown;
+  performedEndDate?: unknown;
+  performedEndTime?: unknown;
+  discontinuationReason?: unknown;
   rawDatasetJson?: unknown;
 }
 
@@ -46,6 +51,11 @@ export interface NormalizedMppsEvent {
   modality: string;
   scheduledStartDate: string;
   scheduledStartTime: string;
+  performedStartDate: string;
+  performedStartTime: string;
+  performedEndDate: string;
+  performedEndTime: string;
+  discontinuationReason: string;
   rawDatasetJson: Record<string, unknown>;
   dedupeKey: string;
 }
@@ -59,6 +69,8 @@ export interface MppsIngestResult {
   processingError: string | null;
   previousStatus: string | null;
   updatedStatus: string | null;
+  dicomStatus: number;
+  dicomErrorComment: string | null;
 }
 
 interface StoredMppsEventRow {
@@ -72,6 +84,12 @@ interface StoredMppsEventRow {
 interface BookingCandidateRow {
   id: number;
   status: BookingWorkflowStatus;
+}
+
+interface AcceptedMppsStateRow {
+  id: number;
+  performed_step_status: NormalizedMppsEvent["performedStepStatus"];
+  correlated_appointment_id: number | null;
 }
 
 async function createAssignedToMeNotificationsForReportingIntent(
@@ -107,7 +125,7 @@ function normalizeStepStatus(value: unknown): NormalizedMppsEvent["performedStep
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ");
 
-  if (["IN PROGRESS", "STARTED", "START", "INPROGRESS"].includes(normalized)) {
+  if (normalized === "IN PROGRESS") {
     return "IN PROGRESS";
   }
   if (normalized === "COMPLETED") {
@@ -169,12 +187,20 @@ export function normalizeIncomingMppsEvent(payload: IncomingMppsEventPayload): N
   const accessionNumber = normalizeOptionalText(payload.accessionNumber);
   const studyInstanceUid = normalizeOptionalText(payload.studyInstanceUid);
   const mppsInstanceUid = normalizeOptionalText(payload.mppsInstanceUid);
-  const performedStepStatus = normalizeStepStatus(payload.performedStepStatus);
+  const suppliedPerformedStepStatus = normalizeOptionalText(payload.performedStepStatus);
+  const performedStepStatus = suppliedPerformedStepStatus
+    ? normalizeStepStatus(suppliedPerformedStepStatus)
+    : eventType === "n-set" ? "IN PROGRESS" : "UNKNOWN";
   const requestedProcedureId = normalizeOptionalText(payload.requestedProcedureId);
   const scheduledProcedureStepId = normalizeOptionalText(payload.scheduledProcedureStepId);
   const modality = normalizeModality(payload.modality);
   const scheduledStartDate = normalizeDate(payload.scheduledStartDate);
   const scheduledStartTime = normalizeTime(payload.scheduledStartTime);
+  const performedStartDate = normalizeDate(payload.performedStartDate);
+  const performedStartTime = normalizeTime(payload.performedStartTime);
+  const performedEndDate = normalizeDate(payload.performedEndDate);
+  const performedEndTime = normalizeTime(payload.performedEndTime);
+  const discontinuationReason = normalizeOptionalText(payload.discontinuationReason);
   const rawDatasetJson = normalizeRawDataset(payload.rawDatasetJson);
 
   if (!sourceAeTitle) {
@@ -198,6 +224,11 @@ export function normalizeIncomingMppsEvent(payload: IncomingMppsEventPayload): N
     modality,
     scheduledStartDate,
     scheduledStartTime,
+    performedStartDate,
+    performedStartTime,
+    performedEndDate,
+    performedEndTime,
+    discontinuationReason,
     rawDatasetJson,
     dedupeKey: buildDedupeKey({
       eventType,
@@ -280,7 +311,8 @@ async function correlateByPatientModalityDateTime(
   client: PoolClient,
   event: NormalizedMppsEvent
 ): Promise<{ bookingId: number | null; ambiguous: boolean }> {
-  if (!event.patientId || !event.scheduledStartDate) {
+  const fallbackDate = event.performedStartDate || event.scheduledStartDate;
+  if (!event.patientId || !fallbackDate) {
     return { bookingId: null, ambiguous: false };
   }
 
@@ -309,12 +341,15 @@ async function correlateByPatientModalityDateTime(
         and (
           $5 = ''
           or upper(coalesce(m.code, '')) = $5
-          or b.modality_id = coalesce(dm.modality_id, b.modality_id)
+          or (
+            dm.modality_id is not null
+            and b.modality_id = dm.modality_id
+          )
         )
       order by b.id asc
       limit 2
     `,
-    [event.patientId, event.scheduledStartDate, event.scheduledStartTime, event.sourceAeTitle, event.modality]
+    [event.patientId, fallbackDate, event.scheduledStartTime, event.sourceAeTitle, event.modality]
   );
 
   if (rows.length === 1) {
@@ -376,6 +411,98 @@ function canTransitionBookingStatus(currentStatus: BookingWorkflowStatus, target
   }
 }
 
+function acceptedResult(result: Omit<MppsIngestResult, "dicomStatus" | "dicomErrorComment">): MppsIngestResult {
+  return { ...result, dicomStatus: 0x0000, dicomErrorComment: null };
+}
+
+function lifecycleRejectedResult(dicomStatus: number, dicomErrorComment: string): MppsIngestResult {
+  return {
+    eventId: 0,
+    deduplicated: false,
+    correlatedAppointmentId: null,
+    correlationStatus: "unmatched",
+    processingStatus: "ignored",
+    processingError: dicomErrorComment,
+    previousStatus: null,
+    updatedStatus: null,
+    dicomStatus,
+    dicomErrorComment,
+  };
+}
+
+async function findAcceptedMppsState(
+  client: PoolClient,
+  mppsInstanceUid: string,
+  onlyCreate: boolean
+): Promise<AcceptedMppsStateRow | null> {
+  const result = await client.query<AcceptedMppsStateRow>(
+    `
+      select id, performed_step_status, correlated_appointment_id
+      from mpps_event_log
+      where mpps_instance_uid = $1
+        and processing_status in ('processed', 'ignored')
+        ${onlyCreate ? "and event_type = 'n-create'" : ""}
+      order by id desc
+      limit 1
+    `,
+    [mppsInstanceUid]
+  );
+  return result.rows[0] || null;
+}
+
+async function validateMppsLifecycle(
+  client: PoolClient,
+  event: NormalizedMppsEvent
+): Promise<{ rejection: MppsIngestResult | null; priorState: AcceptedMppsStateRow | null }> {
+  if (!event.mppsInstanceUid) {
+    return {
+      rejection: lifecycleRejectedResult(0x0106, "MPPS SOP Instance UID is required."),
+      priorState: null,
+    };
+  }
+
+  if (event.eventType === "n-create") {
+    if (event.performedStepStatus !== "IN PROGRESS") {
+      return {
+        rejection: lifecycleRejectedResult(0x0106, "N-CREATE requires Performed Procedure Step Status IN PROGRESS."),
+        priorState: null,
+      };
+    }
+  } else if (event.performedStepStatus === "UNKNOWN") {
+    return {
+      rejection: lifecycleRejectedResult(0x0106, "Unsupported Performed Procedure Step Status."),
+      priorState: null,
+    };
+  }
+
+  await client.query("select pg_advisory_xact_lock(hashtext($1))", [event.mppsInstanceUid]);
+  const priorState = await findAcceptedMppsState(client, event.mppsInstanceUid, event.eventType === "n-create");
+
+  if (event.eventType === "n-create" && priorState) {
+    return {
+      rejection: lifecycleRejectedResult(0x0111, "Duplicate MPPS SOP Instance."),
+      priorState,
+    };
+  }
+
+  if (event.eventType === "n-set") {
+    if (!priorState) {
+      return {
+        rejection: lifecycleRejectedResult(0x0112, "No accepted MPPS N-CREATE exists for this SOP Instance UID."),
+        priorState: null,
+      };
+    }
+    if (["COMPLETED", "DISCONTINUED"].includes(priorState.performed_step_status)) {
+      return {
+        rejection: lifecycleRejectedResult(0x0110, "MPPS instance is already final."),
+        priorState,
+      };
+    }
+  }
+
+  return { rejection: null, priorState };
+}
+
 async function insertOrLoadMppsEvent(client: PoolClient, event: NormalizedMppsEvent): Promise<{ id: number; deduplicated: boolean }> {
   const insertResult = await client.query<{ id: number }>(
     `
@@ -393,6 +520,11 @@ async function insertOrLoadMppsEvent(client: PoolClient, event: NormalizedMppsEv
         modality,
         scheduled_start_date,
         scheduled_start_time,
+        performed_start_date,
+        performed_start_time,
+        performed_end_date,
+        performed_end_time,
+        discontinuation_reason,
         payload_json,
         correlation_status,
         processing_status,
@@ -402,7 +534,8 @@ async function insertOrLoadMppsEvent(client: PoolClient, event: NormalizedMppsEv
       values (
         $1, $2, $3, nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), $8,
         nullif($9, ''), nullif($10, ''), nullif($11, ''), nullif($12, ''), nullif($13, ''),
-        $14::jsonb, 'unmatched', 'received', null, now()
+        nullif($14, ''), nullif($15, ''), nullif($16, ''), nullif($17, ''), nullif($18, ''),
+        $19::jsonb, 'unmatched', 'received', null, now()
       )
       on conflict (dedupe_key) do nothing
       returning id
@@ -421,6 +554,11 @@ async function insertOrLoadMppsEvent(client: PoolClient, event: NormalizedMppsEv
       event.modality,
       event.scheduledStartDate,
       event.scheduledStartTime,
+      event.performedStartDate,
+      event.performedStartTime,
+      event.performedEndDate,
+      event.performedEndTime,
+      event.discontinuationReason,
       JSON.stringify(event.rawDatasetJson),
     ]
   );
@@ -505,9 +643,16 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
   const insertClient = await pool.connect();
   let eventId: number | null = null;
   let deduplicated = false;
+  let priorMppsState: AcceptedMppsStateRow | null = null;
 
   try {
     await insertClient.query("begin");
+    const lifecycle = await validateMppsLifecycle(insertClient, event);
+    priorMppsState = lifecycle.priorState;
+    if (lifecycle.rejection) {
+      await insertClient.query("commit");
+      return lifecycle.rejection;
+    }
     const stored = await insertOrLoadMppsEvent(insertClient, event);
     eventId = stored.id;
     deduplicated = stored.deduplicated;
@@ -515,7 +660,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
 
     if (stored.deduplicated && ["processed", "ignored"].includes(existing.processing_status)) {
       await insertClient.query("commit");
-      return {
+      return acceptedResult({
         eventId: existing.id,
         deduplicated: true,
         correlatedAppointmentId: existing.correlated_appointment_id,
@@ -524,7 +669,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: existing.processing_error,
         previousStatus: null,
         updatedStatus: null,
-      };
+      });
     }
     await insertClient.query("commit");
   } catch (error) {
@@ -539,7 +684,9 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
   try {
     await client.query("begin");
     const storedId = Number(eventId);
-    const correlation = await correlateMppsEvent(client, event);
+    const correlation = event.eventType === "n-set" && priorMppsState?.correlated_appointment_id
+      ? { status: "matched" as const, bookingId: Number(priorMppsState.correlated_appointment_id), reason: null }
+      : await correlateMppsEvent(client, event);
     if (correlation.status !== "matched" || !correlation.bookingId) {
       await markEventProcessed(client, storedId, {
         correlatedAppointmentId: null,
@@ -548,7 +695,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: correlation.reason,
       });
       await client.query("commit");
-      return {
+      return acceptedResult({
         eventId: storedId,
         deduplicated,
         correlatedAppointmentId: null,
@@ -557,7 +704,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: correlation.reason,
         previousStatus: null,
         updatedStatus: null,
-      };
+      });
     }
 
     const bookingResult = await client.query<BookingCandidateRow>(
@@ -580,7 +727,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: "Correlated booking no longer exists.",
       });
       await client.query("commit");
-      return {
+      return acceptedResult({
         eventId: storedId,
         deduplicated,
         correlatedAppointmentId: null,
@@ -589,7 +736,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: "Correlated booking no longer exists.",
         previousStatus: null,
         updatedStatus: null,
-      };
+      });
     }
 
     const targetStatus = mapMppsStatusToBookingStatus(event.performedStepStatus);
@@ -601,7 +748,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: `Unsupported MPPS performed step status: ${event.performedStepStatus}`,
       });
       await client.query("commit");
-      return {
+      return acceptedResult({
         eventId: storedId,
         deduplicated,
         correlatedAppointmentId: booking.id,
@@ -610,7 +757,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: `Unsupported MPPS performed step status: ${event.performedStepStatus}`,
         previousStatus: booking.status,
         updatedStatus: null,
-      };
+      });
     }
 
     if (!canTransitionBookingStatus(booking.status, targetStatus)) {
@@ -622,7 +769,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: errorMessage,
       });
       await client.query("commit");
-      return {
+      return acceptedResult({
         eventId: storedId,
         deduplicated,
         correlatedAppointmentId: booking.id,
@@ -631,7 +778,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: errorMessage,
         previousStatus: booking.status,
         updatedStatus: null,
-      };
+      });
     }
 
     if (booking.status !== targetStatus) {
@@ -688,7 +835,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
     }
     await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
 
-    return {
+    return acceptedResult({
       eventId: storedId,
       deduplicated,
       correlatedAppointmentId: booking.id,
@@ -697,7 +844,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
       processingError: null,
       previousStatus: booking.status,
       updatedStatus: targetStatus,
-    };
+    });
   } catch (error) {
     await client.query("rollback");
     if (eventId) {

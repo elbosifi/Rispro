@@ -19,7 +19,7 @@ describe("mpps-service integration", () => {
   let closeServer: (() => Promise<void>) | null = null;
   let baseUrl = "";
   let testData: Awaited<ReturnType<typeof seedTestData>>;
-  let bookingIds: number[] = [];
+  const bookingIds: number[] = [];
 
   before(async (t: SuiteContext) => {
     if (!isDatabaseAvailable() || !(await canReachDatabase())) {
@@ -29,12 +29,10 @@ describe("mpps-service integration", () => {
 
     await setupTestDatabase(PREFIX);
     await pool.query(`
-      alter table appointments_v2.bookings
-      drop constraint if exists bookings_status_check
+      alter table appointments_v2.bookings drop constraint if exists bookings_status_check
     `);
     await pool.query(`
-      alter table appointments_v2.bookings
-      add constraint bookings_status_check
+      alter table appointments_v2.bookings add constraint bookings_status_check
       check (status in ('scheduled', 'arrived', 'waiting', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
     `);
     await pool.query(`
@@ -53,6 +51,11 @@ describe("mpps-service integration", () => {
         modality text,
         scheduled_start_date text,
         scheduled_start_time text,
+        performed_start_date text,
+        performed_start_time text,
+        performed_end_date text,
+        performed_end_time text,
+        discontinuation_reason text,
         payload_json jsonb not null default '{}'::jsonb,
         correlated_appointment_id bigint,
         correlation_status text not null default 'unmatched' check (correlation_status in ('matched', 'unmatched', 'ambiguous')),
@@ -65,26 +68,18 @@ describe("mpps-service integration", () => {
     `);
     testData = await seedTestData("appointments_v2", PREFIX);
 
-    const app = createApp();
-    const server = http.createServer(app);
-    await new Promise<void>((resolve) => {
-      server.listen(0, () => resolve());
-    });
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => server.listen(0, resolve));
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
     baseUrl = `http://127.0.0.1:${port}`;
-    closeServer = async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) reject(error);
-          else resolve();
-        });
-      });
-    };
+    closeServer = async () => await new Promise<void>((resolve, reject) =>
+      server.close((error) => error ? reject(error) : resolve())
+    );
   });
 
   after(async () => {
-    if (bookingIds.length > 0) {
+    if (bookingIds.length) {
       await pool.query(`delete from mpps_event_log where correlated_appointment_id = any($1::bigint[])`, [bookingIds]);
       await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
     }
@@ -92,175 +87,196 @@ describe("mpps-service integration", () => {
     if (closeServer) await closeServer();
   });
 
-  async function createBooking(status: string = "scheduled", bookingTime: string | null = "09:00:00"): Promise<number> {
+  async function createBooking(status = "scheduled", bookingTime: string | null = "09:00:00"): Promise<number> {
     const result = await pool.query<{ id: number }>(
       `
         insert into appointments_v2.bookings (
-          patient_id, modality_id, exam_type_id, reporting_priority_id,
-          booking_date, booking_time, case_category, status, notes,
-          policy_version_id, capacity_resolution_mode, uses_special_quota,
-          special_reason_code, special_reason_note, is_walk_in,
+          patient_id, modality_id, exam_type_id, reporting_priority_id, booking_date, booking_time,
+          case_category, status, notes, policy_version_id, capacity_resolution_mode,
+          uses_special_quota, special_reason_code, special_reason_note, is_walk_in,
           created_by_user_id, updated_by_user_id
-        ) values (
-          $1, $2, $3, null,
-          current_date, $4, 'non_oncology', $5, null,
-          $6, 'standard', false,
-          null, null, false,
-          $7, $7
-        )
+        ) values ($1, $2, $3, null, current_date, $4, 'non_oncology', $5, null, $6, 'standard', false, null, null, false, $7, $7)
         returning id
       `,
-      [
-        testData.patientId,
-        testData.modalityId,
-        testData.examTypeId,
-        bookingTime,
-        status,
-        testData.policyVersionId,
-        testData.userId,
-      ]
+      [testData.patientId, testData.modalityId, testData.examTypeId, bookingTime, status, testData.policyVersionId, testData.userId]
     );
     const id = Number(result.rows[0].id);
     bookingIds.push(id);
     return id;
   }
 
-  async function getBookingStatus(bookingId: number): Promise<string> {
-    const result = await pool.query<{ status: string }>(
-      `select status from appointments_v2.bookings where id = $1`,
-      [bookingId]
+  async function getPatientIdentifier(): Promise<string> {
+    const result = await pool.query<{ identifier: string }>(
+      `
+        select coalesce(nullif(national_id, ''), nullif(mrn, ''), nullif(identifier_value, '')) as identifier
+        from patients where id = $1
+      `,
+      [testData.patientId]
     );
+    return String(result.rows[0]?.identifier || "");
+  }
+
+  async function getBookingStatus(bookingId: number): Promise<string> {
+    const result = await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId]);
     return String(result.rows[0]?.status || "");
   }
 
-  async function getPatientIdentifier(): Promise<string> {
-    const result = await pool.query<{ national_id: string }>(
-      `select national_id from patients where id = $1`,
-      [testData.patientId]
+  async function getBookingFallbackValues(bookingId: number): Promise<{ date: string; modality: string }> {
+    const result = await pool.query<{ date: string; modality: string }>(
+      `
+        select to_char(b.booking_date, 'YYYYMMDD') as date, m.code as modality
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        where b.id = $1
+      `,
+      [bookingId]
     );
-    return String(result.rows[0]?.national_id || "");
+    return { date: String(result.rows[0]?.date || ""), modality: String(result.rows[0]?.modality || "") };
   }
 
-  it("validates intake endpoint secret and payload", async () => {
+  function createPayload(bookingId: number, mppsInstanceUid: string) {
+    return {
+      eventType: "n-create",
+      sourceAeTitle: "CT_AE",
+      accessionNumber: `V2-${bookingId}`,
+      studyInstanceUid: `1.2.826.0.1.3680043.10.543.${bookingId}.study`,
+      mppsInstanceUid,
+      performedStepStatus: "IN PROGRESS",
+      modality: "CT",
+      performedStartDate: "20260911",
+      performedStartTime: "091317",
+      rawDatasetJson: { AccessionNumber: `V2-${bookingId}` },
+    };
+  }
+
+  it("validates the internal intake secret and payload", async () => {
     const unauthorized = await fetch(`${baseUrl}/api/dicom/mpps/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
     });
     assert.equal(unauthorized.status, 401);
 
     const invalid = await fetch(`${baseUrl}/api/dicom/mpps/events`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-RISPRO-MPPS-SECRET": env.jwtSecret,
-      },
+      headers: { "Content-Type": "application/json", "X-RISPRO-MPPS-SECRET": env.jwtSecret },
       body: JSON.stringify({ eventType: "n-create", sourceAeTitle: "CT_AE", rawDatasetJson: {} }),
     });
     assert.equal(invalid.status, 400);
   });
 
-  it("correlates by accession number and updates waiting for in-progress", async () => {
-    const bookingId = await createBooking("scheduled", "09:00:00");
-    const result = await ingestMppsEvent({
-      eventType: "n-create",
-      sourceAeTitle: "CT_AE",
-      accessionNumber: `V2-${bookingId}`,
-      mppsInstanceUid: `1.2.826.${bookingId}.1`,
-      performedStepStatus: "IN PROGRESS",
-      rawDatasetJson: { AccessionNumber: `V2-${bookingId}` },
-    });
+  it("persists actual performed start timing separately and maps IN PROGRESS to waiting", async () => {
+    const bookingId = await createBooking();
+    const mppsInstanceUid = `1.2.826.${bookingId}.start`;
+    const result = await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    const stored = await pool.query<{ performed_start_date: string; performed_start_time: string; scheduled_start_date: string | null }>(
+      `select performed_start_date, performed_start_time, scheduled_start_date from mpps_event_log where mpps_instance_uid = $1`,
+      [mppsInstanceUid]
+    );
 
-    assert.equal(result.correlationStatus, "matched");
+    assert.equal(result.dicomStatus, 0x0000);
     assert.equal(result.updatedStatus, "waiting");
+    assert.deepEqual(stored.rows[0], { performed_start_date: "20260911", performed_start_time: "091317", scheduled_start_date: null });
     assert.equal(await getBookingStatus(bookingId), "waiting");
   });
 
-  it("marks unmatched events without changing bookings", async () => {
-    const result = await ingestMppsEvent({
-      eventType: "n-set",
-      sourceAeTitle: "CT_AE",
-      accessionNumber: "V2-9999999",
-      mppsInstanceUid: "1.2.826.unmatched",
-      performedStepStatus: "COMPLETED",
-      rawDatasetJson: { AccessionNumber: "V2-9999999" },
+  it("uses the accepted N-CREATE lifecycle record to process identifier-free N-SET completion", async () => {
+    const bookingId = await createBooking();
+    const mppsInstanceUid = `1.2.826.${bookingId}.complete`;
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    const completed = await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "COMPLETED", performedEndDate: "20260911", performedEndTime: "094501",
+      rawDatasetJson: { PerformedProcedureStepStatus: "COMPLETED" },
     });
+    const stored = await pool.query<{ performed_end_date: string; performed_end_time: string }>(
+      `select performed_end_date, performed_end_time from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'`, [mppsInstanceUid]
+    );
 
+    assert.equal(completed.dicomStatus, 0x0000);
+    assert.equal(completed.updatedStatus, "completed");
+    assert.deepEqual(stored.rows[0], { performed_end_date: "20260911", performed_end_time: "094501" });
+    assert.equal(await getBookingStatus(bookingId), "completed");
+  });
+
+  it("persists discontinuation reason and maps a valid final N-SET", async () => {
+    const bookingId = await createBooking();
+    const mppsInstanceUid = `1.2.826.${bookingId}.discontinued`;
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    const result = await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "DISCONTINUED", performedEndDate: "20260911", performedEndTime: "095500",
+      discontinuationReason: "Patient unable to continue", rawDatasetJson: {},
+    });
+    const stored = await pool.query<{ discontinuation_reason: string }>(
+      `select discontinuation_reason from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'`, [mppsInstanceUid]
+    );
+
+    assert.equal(result.updatedStatus, "discontinued");
+    assert.equal(stored.rows[0]?.discontinuation_reason, "Patient unable to continue");
+    assert.equal(await getBookingStatus(bookingId), "discontinued");
+  });
+
+  it("rejects duplicate creates, unknown N-SETs, invalid create statuses, and N-SET after final state", async () => {
+    const bookingId = await createBooking();
+    const mppsInstanceUid = `1.2.826.${bookingId}.lifecycle`;
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+
+    assert.equal((await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid, rawDatasetJson: {},
+    })).dicomStatus, 0x0000);
+
+    assert.equal((await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid))).dicomStatus, 0x0111);
+    assert.equal((await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid: "1.2.826.unknown",
+      performedStepStatus: "COMPLETED", rawDatasetJson: {},
+    })).dicomStatus, 0x0112);
+    assert.equal((await ingestMppsEvent({
+      ...createPayload(bookingId, `1.2.826.${bookingId}.invalid`), performedStepStatus: "COMPLETED",
+    })).dicomStatus, 0x0106);
+
+    assert.equal((await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "COMPLETED", rawDatasetJson: {},
+    })).dicomStatus, 0x0000);
+    assert.equal((await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "IN PROGRESS", rawDatasetJson: {},
+    })).dicomStatus, 0x0110);
+  });
+
+  it("does not match another modality through an absent device mapping", async () => {
+    await createBooking("scheduled", "14:00:00");
+    const result = await ingestMppsEvent({
+      eventType: "n-create", sourceAeTitle: "UNMAPPED_AE", patientId: await getPatientIdentifier(),
+      mppsInstanceUid: "1.2.826.modality-mismatch", performedStepStatus: "IN PROGRESS", modality: "MRI",
+      performedStartDate: new Date().toISOString().slice(0, 10), scheduledStartTime: "14:00:00", rawDatasetJson: {},
+    });
     assert.equal(result.correlationStatus, "unmatched");
     assert.equal(result.processingStatus, "ignored");
   });
 
-  it("marks ambiguous fallback events without updating the wrong booking", async () => {
-    await createBooking("scheduled", "10:00:00");
-    await createBooking("scheduled", "10:00:00");
-
+  it("keeps multi-candidate patient/date/modality fallback ambiguous", async () => {
+    const firstBookingId = await createBooking("scheduled", "15:00:00");
+    await createBooking("scheduled", "15:00:00");
+    const fallback = await getBookingFallbackValues(firstBookingId);
+    const patientId = await getPatientIdentifier();
+    const candidates = await pool.query<{ id: number }>(
+      `
+        select b.id
+        from appointments_v2.bookings b
+        join patients p on p.id = b.patient_id
+        where b.booking_date = to_date($2, 'YYYYMMDD')
+          and (p.mrn = $1 or p.national_id = $1 or coalesce(p.identifier_value, '') = $1)
+          and replace(coalesce(b.booking_time::text, ''), ':', '') like '150000%'
+      `,
+      [patientId, fallback.date]
+    );
+    assert.equal(candidates.rows.length, 2, `Expected two fallback candidates for ${patientId} on ${fallback.date}`);
     const result = await ingestMppsEvent({
-      eventType: "n-set",
-      sourceAeTitle: "CT_AE",
-      patientId: await getPatientIdentifier(),
-      mppsInstanceUid: "1.2.826.ambiguous",
-      modality: "CT",
-      scheduledStartDate: new Date().toISOString().slice(0, 10),
-      scheduledStartTime: "10:00:00",
-      performedStepStatus: "IN PROGRESS",
-      rawDatasetJson: { PatientID: "fallback" },
+      eventType: "n-create", sourceAeTitle: "CT_AE", patientId,
+      mppsInstanceUid: `1.2.826.${firstBookingId}.${Date.now()}.ambiguous`, performedStepStatus: "IN PROGRESS", modality: "",
+      performedStartDate: fallback.date, scheduledStartTime: "15:00:00", rawDatasetJson: {},
     });
-
     assert.equal(result.correlationStatus, "ambiguous");
     assert.equal(result.processingStatus, "ignored");
-  });
-
-  it("updates booking to completed", async () => {
-    const bookingId = await createBooking("arrived", "11:00:00");
-    const result = await ingestMppsEvent({
-      eventType: "n-set",
-      sourceAeTitle: "CT_AE",
-      accessionNumber: `V2-${bookingId}`,
-      mppsInstanceUid: `1.2.826.${bookingId}.2`,
-      performedStepStatus: "COMPLETED",
-      rawDatasetJson: { AccessionNumber: `V2-${bookingId}` },
-    });
-
-    assert.equal(result.updatedStatus, "completed");
-    assert.equal(await getBookingStatus(bookingId), "completed");
-  });
-
-  it("updates booking to discontinued for scanner-side discontinuation", async () => {
-    const bookingId = await createBooking("waiting", "12:00:00");
-    const result = await ingestMppsEvent({
-      eventType: "n-set",
-      sourceAeTitle: "CT_AE",
-      accessionNumber: `V2-${bookingId}`,
-      mppsInstanceUid: `1.2.826.${bookingId}.3`,
-      performedStepStatus: "DISCONTINUED",
-      rawDatasetJson: { AccessionNumber: `V2-${bookingId}` },
-    });
-
-    assert.equal(result.updatedStatus, "discontinued");
-    assert.equal(await getBookingStatus(bookingId), "discontinued");
-  });
-
-  it("is idempotent for duplicate MPPS deliveries", async () => {
-    const bookingId = await createBooking("scheduled", "13:00:00");
-    const payload = {
-      eventType: "n-set",
-      sourceAeTitle: "CT_AE",
-      accessionNumber: `V2-${bookingId}`,
-      mppsInstanceUid: `1.2.826.${bookingId}.4`,
-      performedStepStatus: "COMPLETED",
-      rawDatasetJson: { AccessionNumber: `V2-${bookingId}` },
-    };
-
-    const first = await ingestMppsEvent(payload);
-    const second = await ingestMppsEvent(payload);
-    const countResult = await pool.query<{ count: string }>(
-      `select count(*)::text as count from mpps_event_log where mpps_instance_uid = $1 and performed_step_status = 'COMPLETED'`,
-      [payload.mppsInstanceUid]
-    );
-
-    assert.equal(first.processingStatus, "processed");
-    assert.equal(second.deduplicated, true);
-    assert.equal(Number(countResult.rows[0]?.count || 0), 1);
-    assert.equal(await getBookingStatus(bookingId), "completed");
   });
 });

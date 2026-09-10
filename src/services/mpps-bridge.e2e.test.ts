@@ -186,6 +186,11 @@ describe("mpps bridge end-to-end", () => {
         modality text,
         scheduled_start_date text,
         scheduled_start_time text,
+        performed_start_date text,
+        performed_start_time text,
+        performed_end_date text,
+        performed_end_time text,
+        discontinuation_reason text,
         payload_json jsonb not null default '{}'::jsonb,
         correlated_appointment_id bigint,
         correlation_status text not null default 'unmatched' check (correlation_status in ('matched', 'unmatched', 'ambiguous')),
@@ -297,6 +302,11 @@ describe("mpps bridge end-to-end", () => {
     studyInstanceUid: string;
     scheduledDate: string;
     scheduledTime?: string;
+    performedStartDate?: string;
+    performedStartTime?: string;
+    performedEndDate?: string;
+    performedEndTime?: string;
+    discontinuationReason?: string;
     setStatus?: string;
     skipCreate?: boolean;
     skipSet?: boolean;
@@ -315,11 +325,31 @@ describe("mpps bridge end-to-end", () => {
       "--modality", "CT",
       "--scheduled-date", params.scheduledDate,
       "--scheduled-time", params.scheduledTime || "09:00:00",
+      "--performed-start-date", params.performedStartDate || params.scheduledDate,
+      "--performed-start-time", params.performedStartTime || params.scheduledTime || "09:00:00",
+      "--performed-end-date", params.performedEndDate || params.scheduledDate,
+      "--performed-end-time", params.performedEndTime || "10:00:00",
       ...(params.setStatus ? ["--set-status", params.setStatus] : []),
+      ...(params.discontinuationReason ? ["--discontinuation-reason", params.discontinuationReason] : []),
       ...(params.skipCreate ? ["--skip-create"] : []),
       ...(params.skipSet ? ["--skip-set"] : []),
     ];
   }
+
+  it("answers DICOM C-ECHO without requiring RISpro intake", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const result = await runSender([
+      "--host", "127.0.0.1",
+      "--port", String(bridgePort),
+      "--called-ae", "RISPRO_MPPS_E2E",
+      "--echo-only",
+    ]);
+    assert.equal(result.exitCode, 0, `C-ECHO failed.\nSTDERR:\n${result.stderr}`);
+  });
 
   it("processes N-CREATE and N-SET through the real bridge into RISpro", async (t) => {
     if (skipReason) {
@@ -344,6 +374,8 @@ describe("mpps bridge end-to-end", () => {
       mppsInstanceUid,
       studyInstanceUid,
       scheduledDate,
+      performedStartTime: "09:13:17",
+      performedEndTime: "09:45:01",
     }));
     assert.equal(
       senderResult.exitCode,
@@ -370,9 +402,14 @@ describe("mpps bridge end-to-end", () => {
       performed_step_status: string;
       processing_status: string;
       correlation_status: string;
+      performed_start_date: string | null;
+      performed_start_time: string | null;
+      performed_end_date: string | null;
+      performed_end_time: string | null;
     }>(
       `
-        select event_type, performed_step_status, processing_status, correlation_status
+        select event_type, performed_step_status, processing_status, correlation_status,
+          performed_start_date, performed_start_time, performed_end_date, performed_end_time
         from mpps_event_log
         where mpps_instance_uid = $1
         order by id asc
@@ -386,6 +423,13 @@ describe("mpps bridge end-to-end", () => {
       [
         ["n-create", "IN PROGRESS", "processed", "matched"],
         ["n-set", "COMPLETED", "processed", "matched"],
+      ]
+    );
+    assert.deepEqual(
+      eventRows.rows.map((row) => [row.performed_start_date, row.performed_start_time, row.performed_end_date, row.performed_end_time]),
+      [
+        [scheduledDate.replace(/-/g, ""), "091317", null, null],
+        [null, null, scheduledDate.replace(/-/g, ""), "094501"],
       ]
     );
     assert.equal(await getBookingStatus(bookingId), "completed");
@@ -412,6 +456,8 @@ describe("mpps bridge end-to-end", () => {
       scheduledDate,
       scheduledTime: "10:00:00",
       setStatus: "DISCONTINUED",
+      performedEndTime: "10:21:45",
+      discontinuationReason: "Patient unable to continue",
     }));
     assert.equal(
       senderResult.exitCode,
@@ -423,9 +469,11 @@ describe("mpps bridge end-to-end", () => {
       event_type: string;
       performed_step_status: string;
       processing_status: string;
+      performed_end_time: string | null;
+      discontinuation_reason: string | null;
     }>(
       `
-        select event_type, performed_step_status, processing_status
+        select event_type, performed_step_status, processing_status, performed_end_time, discontinuation_reason
         from mpps_event_log
         where mpps_instance_uid = $1
         order by id asc
@@ -441,6 +489,86 @@ describe("mpps bridge end-to-end", () => {
       ]
     );
     assert.equal(await getBookingStatus(bookingId), "discontinued");
+    assert.equal(eventRows.rows[1]?.performed_end_time, "102145");
+    assert.equal(eventRows.rows[1]?.discontinuation_reason, "Patient unable to continue");
+  });
+
+  it("returns duplicate SOP Instance for a duplicate successful N-CREATE", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+    const bookingId = await createBooking();
+    const patientId = await getPatientIdentifier();
+    const scheduledDate = new Date().toISOString().slice(0, 10);
+    const mppsInstanceUid = `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.7`;
+    const args = buildFixtureArgs({ bookingId, patientId, mppsInstanceUid, studyInstanceUid: `${mppsInstanceUid}.8`, scheduledDate, skipSet: true });
+    assert.equal((await runSender(args)).exitCode, 0);
+    const duplicate = await runSender(args);
+    assert.notEqual(duplicate.exitCode, 0);
+    assert.match(duplicate.stderr, /0x0111/i);
+  });
+
+  it("returns no-such-instance for N-SET with an unknown MPPS SOP Instance UID", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+    const bookingId = await createBooking();
+    const result = await runSender(buildFixtureArgs({
+      bookingId,
+      patientId: await getPatientIdentifier(),
+      mppsInstanceUid: `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.9`,
+      studyInstanceUid: `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.10`,
+      scheduledDate: new Date().toISOString().slice(0, 10),
+      skipCreate: true,
+    }));
+    assert.notEqual(result.exitCode, 0);
+    assert.match(result.stderr, /0x0112/i);
+  });
+
+  it("rejects N-CREATE statuses other than IN PROGRESS", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+    const bookingId = await createBooking();
+    const result = await runSender([
+      ...buildFixtureArgs({
+        bookingId,
+        patientId: await getPatientIdentifier(),
+        mppsInstanceUid: `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.11`,
+        studyInstanceUid: `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.12`,
+        scheduledDate: new Date().toISOString().slice(0, 10),
+        skipSet: true,
+      }),
+      "--create-status", "COMPLETED",
+    ]);
+    assert.notEqual(result.exitCode, 0);
+    assert.match(result.stderr, /0x0106/i);
+  });
+
+  it("rejects N-SET after COMPLETED and DISCONTINUED", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+    const patientId = await getPatientIdentifier();
+    const scheduledDate = new Date().toISOString().slice(0, 10);
+    for (const setStatus of ["COMPLETED", "DISCONTINUED"]) {
+      const bookingId = await createBooking();
+      const mppsInstanceUid = `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.${setStatus === "COMPLETED" ? "13" : "14"}`;
+      const base = buildFixtureArgs({
+        bookingId, patientId, mppsInstanceUid, studyInstanceUid: `${mppsInstanceUid}.15`, scheduledDate, setStatus,
+      });
+      assert.equal((await runSender(base)).exitCode, 0);
+      const afterFinal = await runSender(buildFixtureArgs({
+        bookingId, patientId, mppsInstanceUid, studyInstanceUid: `${mppsInstanceUid}.15`, scheduledDate,
+        skipCreate: true, setStatus: "IN PROGRESS",
+      }));
+      assert.notEqual(afterFinal.exitCode, 0);
+      assert.match(afterFinal.stderr, /0x0110/i);
+    }
   });
 
   it("retries safely after temporary RISpro intake unavailability", async (t) => {
