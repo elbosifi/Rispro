@@ -1,11 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizePositiveInteger } from "../utils/normalize.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 import { logAuditEntry } from "./audit-service.js";
-import { getDocumentAbsolutePath } from "./document-service.js";
+import { readDocumentContent } from "./document-service.js";
 import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesDescription, documentSeriesKind, normalizeDicomModalityValues, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
 import { createAuthoritativeOrthancClient, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
@@ -74,7 +73,7 @@ export type ClinicalDocumentExportWorkRow = ClinicalDocumentExportRow & {
 
 export type ClinicalDocumentProcessorDependencies = Readonly<{
   createOrthancClient: () => Promise<Pick<AuthoritativeOrthancClient, "findStudy" | "findInstanceBySopInstanceUid" | "uploadDicomInstance">>;
-  readDocumentBytes: (storedPath: string) => Promise<Buffer>;
+  readDocumentBytes: (document: { documentId: number; storedPath: string }) => Promise<Buffer>;
   renderDocument: typeof renderClinicalDocument;
   readRenderedPage: typeof readRenderedRgbPage;
   cleanupRenderedDocument: typeof cleanupRenderedClinicalDocument;
@@ -84,7 +83,7 @@ export type ClinicalDocumentProcessorDependencies = Readonly<{
 
 const productionClinicalDocumentProcessorDependencies: ClinicalDocumentProcessorDependencies = Object.freeze({
   createOrthancClient: createAuthoritativeOrthancClient,
-  readDocumentBytes: (storedPath) => readFile(getDocumentAbsolutePath({ stored_path: storedPath })),
+  readDocumentBytes: ({ documentId, storedPath }) => readDocumentContent({ id: documentId, stored_path: storedPath }),
   renderDocument: renderClinicalDocument,
   readRenderedPage: readRenderedRgbPage,
   cleanupRenderedDocument: cleanupRenderedClinicalDocument,
@@ -333,7 +332,7 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
   let rendered: RenderedClinicalDocument | null = null;
   let activePage: ClinicalDocumentExportInstanceRow | null = null;
   try {
-    await renewLease(row); const source = await dependencies.readDocumentBytes(row.document_stored_path); rendered = await dependencies.renderDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
+    await renewLease(row); const source = await dependencies.readDocumentBytes({ documentId: row.document_id, storedPath: row.document_stored_path }); rendered = await dependencies.renderDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
     const prepared = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = isOrthancRemoteClinicalDocumentExportDestination(row.destination_key) ? null : await dependencies.createOrthancClient();
     const pages = prepared.pages;
     for (const page of pages) {
@@ -404,7 +403,7 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
     if (instance) {
       verifyInstance(instance, row, study, identifiers);
     } else {
-      const source = await dependencies.readDocumentBytes(row.document_stored_path);
+      const source = await dependencies.readDocumentBytes({ documentId: row.document_id, storedPath: row.document_stored_path });
       const dicom = await createClinicalDocumentDicom(source, row.document_mime_type, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: identifiers.seriesInstanceUid, sopInstanceUid: identifiers.sopInstanceUid, seriesKind: documentSeriesKind(row.document_type), patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number, documentTitle: row.document_type || row.document_original_filename, originalFilename: row.document_original_filename, instanceNumber: String(row.id) });
       try {
         instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!);

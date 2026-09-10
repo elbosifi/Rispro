@@ -48,6 +48,14 @@ export function toStoredPath(absolutePath: string): string {
   return normalized;
 }
 
+export function sanitizeDocumentFileName(fileName: unknown): string {
+  const cleaned = String(fileName || "document")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_");
+
+  return cleaned || "document";
+}
+
 export function resolveStorageBasePath(storagePath: string): string {
   const raw = String(storagePath || "").trim();
   if (!raw) {

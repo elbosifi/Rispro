@@ -5,7 +5,7 @@ import { pool } from "../db/pool.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
-import { findDocumentByIdempotencyKey, getDocumentAbsolutePath, getDocumentById, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks, type DocumentRow } from "./document-service.js";
+import { findDocumentByIdempotencyKey, getDocumentById, readDocumentContent, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks, type DocumentRow } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import {
@@ -22,7 +22,7 @@ import { assertRequestScanLeaseOwned, beginRequestScanArchive, beginRequestScanA
 import { createRequestScanProgressCoalescer } from "./request-scan-progress-coalescer.js";
 import { requestRequestScanWorkerRun } from "./request-scan-worker-control-service.js";
 import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
-import { sha256File } from "./backup-v3-checksums.js";
+import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
 import { sanitizeClinicalDocumentExportError } from "./clinical-document-export-service.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "modality_mismatch" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
@@ -128,7 +128,7 @@ export async function verifyFailedRequestScanFileIdentity(
     try {
       [candidateDigest, documentDigest] = await Promise.all([
         sha256File(candidatePath),
-        sha256File(getDocumentAbsolutePath(document)),
+        readDocumentContent(document).then((content) => ({ byteSize: content.length, sha256: sha256Buffer(content) })),
       ]);
     } catch (error) {
       throw new RequestScanProcessingError("The stored Request Scan document could not be read for Failed-file identity verification. Manual review is required.", "internal_processing", { cause: error });
@@ -1003,12 +1003,12 @@ export async function manuallyAssignRequestScan(id: number, appointmentId: numbe
     return rows[0]!;
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
-type RequestScanPreviewDependencies = { readSettings: typeof readRequestScanSettings; getJob: typeof getRequestScanJob; getDocument: typeof getDocumentById; readFile: (filePath: string) => Promise<Buffer>; downloadFile: typeof downloadRequestScanFile };
+type RequestScanPreviewDependencies = { readSettings: typeof readRequestScanSettings; getJob: typeof getRequestScanJob; getDocument: typeof getDocumentById; readDocumentContent: typeof readDocumentContent; readFile: (filePath: string) => Promise<Buffer>; downloadFile: typeof downloadRequestScanFile };
 export async function downloadRequestScanJobFile(id: number, overrides: Partial<RequestScanPreviewDependencies> = {}): Promise<{ job: RequestScanJob; buffer: Buffer }> {
-  const dependencies: RequestScanPreviewDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, getDocument: getDocumentById, readFile: fs.readFile, downloadFile: downloadRequestScanFile, ...overrides };
+  const dependencies: RequestScanPreviewDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, getDocument: getDocumentById, readDocumentContent, readFile: fs.readFile, downloadFile: downloadRequestScanFile, ...overrides };
   const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id);
   if (job.document_id) {
-    try { const document = await dependencies.getDocument(job.document_id); return { job, buffer: await dependencies.readFile(getDocumentAbsolutePath(document)) }; }
+    try { const document = await dependencies.getDocument(job.document_id); return { job, buffer: await dependencies.readDocumentContent(document) }; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof HttpError && error.statusCode === 404)) throw error; }
   }
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-preview-"));

@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
@@ -8,6 +8,7 @@ import {
   getDocumentAbsolutePath,
   getDocumentById,
   listDocuments,
+  readDocumentContent,
   toPublicDocumentResponse,
   uploadDocument,
 } from "../services/document-service.js";
@@ -45,7 +46,7 @@ documentsRouter.get(
 
 documentsRouter.get(
   "/:documentId/view",
-  asyncRoute(async (req: Request, res: Response) => {
+  asyncRoute(async (req: Request, res: Response, next: NextFunction) => {
     const document = await getDocumentById(String(req.params.documentId || ""));
     const absolutePath = getDocumentAbsolutePath(document);
     res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
@@ -53,7 +54,16 @@ documentsRouter.get(
       "Content-Disposition",
       `inline; filename="${String(document.original_filename || "document").replace(/"/g, "")}"`
     );
-    res.sendFile(absolutePath);
+    res.sendFile(absolutePath, (error) => {
+      if (!error) return;
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+      void readDocumentContent(document)
+        .then((content) => res.send(content))
+        .catch(next);
+    });
   })
 );
 
@@ -65,6 +75,8 @@ documentsRouter.post(
       res.status(400).json({ error: { message: "incidentId is only supported by the incident attachment endpoint." } });
       return;
     }
+    const requestedSource = asOptionalString(body.source);
+    const source = requestedSource === "naps2_webscan" ? requestedSource : "manual_upload";
     const document = await uploadDocument(
       {
         documentType: asOptionalString(body.documentType),
@@ -83,7 +95,7 @@ documentsRouter.post(
         patientId: asOptionalUserId(body.patientId),
         appointmentId: asOptionalUserId(body.appointmentId),
         appointmentRefType: asOptionalString(body.appointmentRefType),
-        source: asOptionalString(body.source),
+        source,
       },
       req.user!.sub
     );

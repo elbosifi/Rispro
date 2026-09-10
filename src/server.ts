@@ -16,6 +16,7 @@ import type { OhifRetrievalWorker } from "./modules/ohif-viewer/worker.js";
 import type { BackupV3Worker } from "./services/backup-v3-worker.js";
 import type { RequestScanWorker } from "./services/request-scan-worker.js";
 import type { ClinicalDocumentExportWorker } from "./services/clinical-document-export-service.js";
+import type { DocumentHaHotStorageWorker } from "./services/document-ha-hot-storage-service.js";
 import type { HistoricalPacsSyncWorker } from "./services/historical-pacs-index-service.js";
 import type { PatientIdentityReconciliationWorker } from "./services/patient-identity-reconciliation-worker.js";
 import type { AuthoritativeOrthancInboundAuditWorker } from "./services/authoritative-orthanc-inbound-audit-worker.js";
@@ -39,6 +40,7 @@ let ohifRetrievalWorker: OhifRetrievalWorker | null = null;
 let backupV3Worker: BackupV3Worker | null = null;
 let requestScanWorker: RequestScanWorker | null = null;
 let clinicalDocumentExportWorker: ClinicalDocumentExportWorker | null = null;
+let documentHaHotStorageWorker: DocumentHaHotStorageWorker | null = null;
 let historicalPacsSyncWorker: HistoricalPacsSyncWorker | null = null;
 let patientIdentityReconciliationWorker: PatientIdentityReconciliationWorker | null = null;
 let authoritativeOrthancInboundAuditWorker: AuthoritativeOrthancInboundAuditWorker | null = null;
@@ -146,6 +148,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   }
   if (requestScanWorker) { try { await requestScanWorker.stop(); } catch (error) { console.error("Failed to stop Request Scan worker.", error); } }
   if (clinicalDocumentExportWorker) { try { await clinicalDocumentExportWorker.stop(); } catch (error) { console.error("Failed to stop Clinical Document Export worker.", error); } }
+  if (documentHaHotStorageWorker) { try { await documentHaHotStorageWorker.stop(); } catch (error) { console.error("Failed to stop Document HA hot storage worker.", error); } }
   if (historicalPacsSyncWorker) { try { await historicalPacsSyncWorker.stop(); } catch (error) { console.error("Failed to stop historical PACS index worker.", error); } }
   if (patientIdentityReconciliationWorker) { try { await patientIdentityReconciliationWorker.stop(); } catch (error) { console.error("Failed to stop Patient Identity Reconciliation worker.", error); } }
   if (authoritativeOrthancInboundAuditWorker) { try { await authoritativeOrthancInboundAuditWorker.stop(); } catch (error) { console.error("Failed to stop Authoritative Orthanc inbound audit worker.", error); } }
@@ -277,6 +280,18 @@ async function start(): Promise<void> {
     console.error("Clinical Document Export worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.clinical_document_export = "initialization_failed";
+  }
+
+  try {
+    await measureStartupStage("document_ha_hot_storage_worker", async () => {
+      const { startDocumentHaHotStorageWorker } = await import("./services/document-ha-hot-storage-service.js");
+      documentHaHotStorageWorker = await startDocumentHaHotStorageWorker();
+    });
+    startupSummary.document_ha_hot_storage = "started";
+  } catch (error) {
+    console.error("Document HA hot storage worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.document_ha_hot_storage = "initialization_failed";
   }
 
   try {

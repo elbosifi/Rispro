@@ -1207,7 +1207,7 @@ test("identifier checkpoint skips recognition and preview prefers document then 
 
   const previewJob = { ...(await getRequestScanJob(jobId)), document_id: 999, intended_destination_path: "Processed\\archive.pdf", source_relative_path: "Incoming\\missing.pdf" };
   const documentBytes = Buffer.from("attached document");
-  const attachedPreview = await downloadRequestScanJobFile(jobId, { readSettings: async () => settings, getJob: async () => previewJob, getDocument: async () => ({ id: 999, stored_path: "safe" } as never), readFile: async () => documentBytes, downloadFile: async () => { throw new Error("SMB must not be used"); } });
+  const attachedPreview = await downloadRequestScanJobFile(jobId, { readSettings: async () => settings, getJob: async () => previewJob, getDocument: async () => ({ id: 999, stored_path: "safe" } as never), readDocumentContent: async () => documentBytes, readFile: async () => documentBytes, downloadFile: async () => { throw new Error("SMB must not be used"); } });
   assert.deepEqual(attachedPreview.buffer, documentBytes);
   const tried: string[] = [];
   const archivePreview = await downloadRequestScanJobFile(jobId, { readSettings: async () => settings, getJob: async () => ({ ...previewJob, document_id: null }), downloadFile: async (_settings, remote, local) => { tried.push(remote); if (remote.includes("missing")) throw Object.assign(new Error("No such file"), { code: "ENOENT" }); await fs.writeFile(local, "archive"); } });

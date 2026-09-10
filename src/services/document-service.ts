@@ -8,17 +8,30 @@ import { HttpError } from "../utils/http-error.js";
 import { normalizePositiveInteger } from "../utils/normalize.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
-import { loadSettingsMap } from "./settings-service.js";
 import {
-  isUncPath,
   resolveStorageBasePath,
   resolveStoredPath,
+  sanitizeDocumentFileName,
   toStoredPath,
 } from "./document-storage-path.js";
+import {
+  buildNetworkAuthUsername,
+  ensureNetworkAuthIfNeeded,
+  loadDocumentStorageConfig,
+  type DocumentStorageConfig,
+} from "./document-storage-config.js";
+import {
+  isDocumentEligibleForHaHotStorage,
+  loadDocumentHaHotStorageSettings,
+  persistDocumentHaBlob,
+  readDocumentContent,
+} from "./document-ha-hot-storage-service.js";
 import type { UserId, OptionalUserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
 import { enqueueClinicalDocumentExportsForAppointmentAutomatically, isClinicalDocumentExportDocumentType } from "./clinical-document-export-queue-service.js";
 import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
+
+export { readDocumentContent };
 
 export interface DocumentUploadPayload {
   patientId?: UserId;
@@ -92,24 +105,8 @@ export interface DocumentsMoveResult {
   failures: Array<{ documentId: number; reason: string }>;
 }
 
-interface StorageConfig {
-  storagePath: string;
-  authUsername: string;
-  authPassword: string;
-  authDomain: string;
-  fallbackEnabled: boolean;
-}
-
 export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
-
-function sanitizeFileName(fileName: unknown): string {
-  const cleaned = String(fileName || "document")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_");
-
-  return cleaned || "document";
-}
 
 function decodeBase64File(fileContentBase64: unknown): Buffer {
   const raw = String(fileContentBase64 || "").trim();
@@ -237,10 +234,6 @@ async function resolveAppointmentReference(
   throw new HttpError(404, "Appointment not found.");
 }
 
-function isTruthyFlag(raw: string): boolean {
-  return ["true", "1", "yes", "enabled", "on"].includes(String(raw || "").trim().toLowerCase());
-}
-
 function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation" | "complementary_recall_system" {
   const normalized = String(source || "").trim();
   if (normalized === "naps2_webscan") return "naps2_webscan";
@@ -249,32 +242,6 @@ function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webs
   if (normalized === "modality_scan_automation") return "modality_scan_automation";
   if (normalized === "complementary_recall_system") return "complementary_recall_system";
   return "manual_upload";
-}
-
-async function loadDocumentStorageConfig(): Promise<StorageConfig> {
-  const settingsMap = await loadSettingsMap(["documents_and_uploads"]);
-  const settings = settingsMap.documents_and_uploads || {};
-  return {
-    storagePath: String(settings.storage_path || "").trim(),
-    authUsername: String(settings.storage_auth_username || "").trim(),
-    authPassword: String(settings.storage_auth_password || ""),
-    authDomain: String(settings.storage_auth_domain || "").trim(),
-    fallbackEnabled: isTruthyFlag(String(settings.storage_fallback_enabled || "true")),
-  };
-}
-
-function buildNetworkAuthUsername(config: StorageConfig): string {
-  if (!config.authUsername) return "";
-  if (!config.authDomain) return config.authUsername;
-  return `${config.authDomain}\\${config.authUsername}`;
-}
-
-function ensureNetworkAuthIfNeeded(config: StorageConfig): void {
-  const rawPath = String(config.storagePath || "");
-  if (!rawPath || !isUncPath(rawPath)) return;
-  if (!config.authUsername || !config.authPassword) {
-    throw new HttpError(503, "Network storage path requires authentication credentials.");
-  }
 }
 
 async function writeFileToStorageTarget(
@@ -367,11 +334,13 @@ export async function getDocumentById(documentId: UserId): Promise<DocumentRow> 
         patient_id,
         appointment_id,
         v2_booking_id,
+        incident_id,
         document_type,
         original_filename,
         stored_path,
         mime_type,
         file_size,
+        content_sha256,
         storage_location_type,
         source,
         scan_session_id,
@@ -459,7 +428,9 @@ async function findRequestScanDocumentDuplicate(
       : [patientId, profile.documentType, profile.source, fingerprint.byteSize, appointmentId],
   );
   for (const candidate of legacy.rows) {
-    const digest = await sha256File(getDocumentAbsolutePath(candidate)).catch(() => null);
+    const digest = await readDocumentContent(candidate)
+      .then((content) => ({ sha256: sha256Buffer(content), byteSize: content.length }))
+      .catch(() => null);
     if (!digest || digest.byteSize !== Number(candidate.file_size)) continue;
     await queryable.query(
       "update documents set content_sha256=$2 where id=$1 and content_sha256 is null",
@@ -551,7 +522,7 @@ type StoredDocumentFile = {
   storedPath: string;
   storageLocationType: "network" | "local_fallback";
   fallbackReason: string | null;
-  storageConfig: StorageConfig;
+  storageConfig: DocumentStorageConfig;
 };
 
 type DocumentPersistenceOptions = {
@@ -559,7 +530,7 @@ type DocumentPersistenceOptions = {
   deferPostCommit?: boolean;
 };
 
-async function stageDocumentFile(storageConfig: StorageConfig, originalFilename: string, source: { buffer?: Buffer; path?: string }): Promise<StoredDocumentFile & { stagedPath: string }> {
+async function stageDocumentFile(storageConfig: DocumentStorageConfig, originalFilename: string, source: { buffer?: Buffer; path?: string }): Promise<StoredDocumentFile & { stagedPath: string }> {
   const stage = async (basePath: string, storageLocationType: "network" | "local_fallback", fallbackReason: string | null) => {
     const stagingDirectory = path.join(basePath, ".rispro-document-staging");
     await fs.mkdir(stagingDirectory, { recursive: true });
@@ -616,7 +587,7 @@ export async function uploadDocument(
   const incidentId = normalizePositiveInteger(payload.incidentId, "incidentId", { required: false });
   const appointmentRefType = normalizeAppointmentRefType(payload.appointmentRefType);
   const documentType = String(payload.documentType || "appointment_request").trim();
-  const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
+  const originalFilename = sanitizeDocumentFileName(payload.originalFilename || "document.bin");
   const mimeType = String(payload.mimeType || "application/octet-stream").trim().toLowerCase();
   const source = normalizeDocumentSource(payload.source);
   const suppliedSources = [payload.fileContentBuffer != null, payload.fileContentBase64 != null, payload.fileSourcePath != null].filter(Boolean).length;
@@ -644,16 +615,48 @@ export async function uploadDocument(
     throw new HttpError(400, "Document type must be PDF, JPEG, or PNG.");
   }
   const fingerprintProfile = requestScanFingerprintProfile(payload);
-  const contentFingerprint = fingerprintProfile
+  const requestScanFingerprint = fingerprintProfile
     ? await requestScanContentFingerprint(fileSourcePath, fileBuffer)
     : null;
-  if (contentFingerprint && contentFingerprint.byteSize !== fileSize) {
+  if (requestScanFingerprint && requestScanFingerprint.byteSize !== fileSize) {
     throw new HttpError(400, "Document file size changed while calculating its fingerprint.");
   }
 
   await ensureRelatedRecords(patientId, appointmentId, incidentId, executor);
   const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType, executor);
   await ensureAppointmentBelongsToPatient(appointmentReference, patientId, executor);
+
+  const haEligible = isDocumentEligibleForHaHotStorage({
+    documentType,
+    source,
+    legacyAppointmentId: appointmentReference.legacyAppointmentId,
+    v2BookingId: appointmentReference.v2BookingId,
+    incidentId,
+  });
+  const haSettings = haEligible ? await loadDocumentHaHotStorageSettings() : null;
+  let haContent: Buffer | null = null;
+  if (haSettings?.enabled) {
+    const haSourcePath = options.storedFile?.absolutePath || fileSourcePath;
+    haContent = haSourcePath
+      ? await fs.readFile(haSourcePath).catch(() => null)
+      : fileBuffer;
+    if (!haContent) {
+      throw new HttpError(503, "HA hot storage could not read the uploaded document.");
+    }
+    if (haContent.length !== fileSize) {
+      throw new HttpError(400, "Document file changed while preparing HA hot storage.");
+    }
+  }
+  const haContentFingerprint = haContent
+    ? { sha256: sha256Buffer(haContent), byteSize: haContent.length }
+    : null;
+  if (requestScanFingerprint && haContentFingerprint && requestScanFingerprint.sha256 !== haContentFingerprint.sha256) {
+    throw new HttpError(400, "Document file changed while preparing HA hot storage.");
+  }
+  const contentFingerprint = haContentFingerprint ?? requestScanFingerprint;
+  const storageSource = haContent
+    ? { buffer: haContent }
+    : { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined };
 
   const storageConfig = options.storedFile?.storageConfig ?? await loadDocumentStorageConfig();
   let storedPath = options.storedFile?.storedPath ?? ""; let absoluteStoredPath = options.storedFile?.absolutePath ?? "";
@@ -664,7 +667,7 @@ export async function uploadDocument(
     try {
       ensureNetworkAuthIfNeeded(storageConfig);
       const preferredBasePath = resolveStorageBasePath(storageConfig.storagePath);
-      const written = await writeFileToStorageTarget(preferredBasePath, originalFilename, { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined });
+      const written = await writeFileToStorageTarget(preferredBasePath, originalFilename, storageSource);
       storedPath = written.relativePath;
       absoluteStoredPath = written.absolutePath;
       storageLocationType = "network";
@@ -678,15 +681,21 @@ export async function uploadDocument(
       throw new HttpError(503, fallbackReason || "Preferred storage is unavailable and fallback is disabled.");
     }
     const fallbackBasePath = resolveStorageBasePath(env.uploadsDir);
-    const written = await writeFileToStorageTarget(fallbackBasePath, originalFilename, { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined });
+    const written = await writeFileToStorageTarget(fallbackBasePath, originalFilename, storageSource);
     storedPath = written.relativePath;
     absoluteStoredPath = written.absolutePath;
     storageLocationType = "local_fallback";
   }
 
-  let rows: DocumentRow[];
+  let savedDocument: DocumentRow | undefined;
+  let databaseClient: PoolClient | null = null;
   try {
-    const insertResult = (await executor.query(
+    if (executor === pool) {
+      databaseClient = await pool.connect();
+      await databaseClient.query("begin");
+    }
+    const databaseExecutor = databaseClient ?? executor;
+    const insertResult = (await databaseExecutor.query(
     `
       insert into documents (
         patient_id,
@@ -759,13 +768,19 @@ export async function uploadDocument(
       requestScanJobId,
     ]
     )) as DbQueryResult<DocumentRow>;
-    rows = insertResult.rows;
+    savedDocument = insertResult.rows[0];
+    if (haContent && haSettings?.enabled && savedDocument) {
+      await persistDocumentHaBlob(databaseExecutor, savedDocument.id, haContent, haSettings.retentionHours);
+    }
+    if (databaseClient) await databaseClient.query("commit");
   } catch (error) {
+    if (databaseClient) await databaseClient.query("rollback").catch(() => undefined);
     const cleanup = absoluteStoredPath ? await safeUnlink(absoluteStoredPath) : { ok: true };
     if (!cleanup.ok) console.error("Document upload database write failed and orphan-file cleanup also failed.");
     throw error;
+  } finally {
+    databaseClient?.release();
   }
-  const savedDocument = rows[0];
 
   if (!savedDocument) {
     throw new HttpError(500, "Failed to save document.");
@@ -817,7 +832,7 @@ export async function uploadDocumentIdempotently(payload: DocumentUploadPayload,
     };
     const winner = await inspect();
     if (winner) return { document: winner, created: false };
-    const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
+    const originalFilename = sanitizeDocumentFileName(payload.originalFilename || "document.bin");
     const staged = await stageDocumentFile(await loadDocumentStorageConfig(), originalFilename, fileSource);
     let storedFile: StoredDocumentFile | null = null;
     let client: PoolClient | null = null;

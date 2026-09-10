@@ -38,6 +38,17 @@ function extractSettingScalar(settingValue: unknown): string {
   return String(settingValue ?? "");
 }
 
+const DOCUMENT_HA_RETENTION_MIN_HOURS = 24;
+const DOCUMENT_HA_RETENTION_MAX_HOURS = 168;
+
+function validateSettingValue(category: string, key: string, value: unknown): void {
+  if (category !== "documents_and_uploads" || key !== "ha_hot_storage_retention_hours") return;
+  const parsed = Number(extractSettingScalar(value).trim());
+  if (!Number.isInteger(parsed) || parsed < DOCUMENT_HA_RETENTION_MIN_HOURS || parsed > DOCUMENT_HA_RETENTION_MAX_HOURS) {
+    throw new HttpError(400, `ha_hot_storage_retention_hours must be an integer between ${DOCUMENT_HA_RETENTION_MIN_HOURS} and ${DOCUMENT_HA_RETENTION_MAX_HOURS}.`);
+  }
+}
+
 export async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
   const { rows } = await pool.query(
     `
@@ -121,6 +132,7 @@ export async function upsertSettings(
       if (!entry.key) {
         throw new HttpError(400, "Each settings entry must include a key.");
       }
+      validateSettingValue(category, entry.key, entry.value);
 
       const previousResult = await client.query(
         `
