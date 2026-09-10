@@ -43,7 +43,7 @@ function readZipEntries(zip: Buffer): Map<string, Buffer> {
   return entries;
 }
 
-maybeTest("Backup V3 preserves HA table metadata while writing empty table data", async () => {
+maybeTest("Backup V3 excludes HA data normally but retains it for safety snapshots", async () => {
   const [{ pool }, { env }, { sha256Buffer }, { streamBackupV3Archive }] = await Promise.all([
     import("../db/pool.js"),
     import("../config/env.js"),
@@ -90,6 +90,32 @@ maybeTest("Backup V3 preserves HA table metadata while writing empty table data"
     assert.deepEqual(JSON.parse(entries.get(haTable.archivePath)!.toString("utf8")), []);
     assert.equal(entries.get("database/tables/public.document_ha_blobs.json")!.includes(content), false);
     assert.equal(result.manifest.database.tables.find((table) => table.name === "document_ha_blobs")?.rowCount, 0);
+
+    const safetyOutput = new PassThrough();
+    const safetyArchivePromise = collectStream(safetyOutput);
+    const safetyResult = await streamBackupV3Archive({
+      currentUserId: null,
+      passphrase: "backup-passphrase",
+      output: safetyOutput,
+      backupName: "ephemeral-safety-test.rispro.zip",
+      includeEphemeralTableData: true,
+    });
+    const safetyEntries = readZipEntries(await safetyArchivePromise);
+    const safetySchema = JSON.parse(safetyEntries.get("database/schema.json")!.toString("utf8")) as {
+      tables: Array<{ schema: string; name: string; archivePath: string; rowCount: number }>;
+    };
+    const safetyHaTable = safetySchema.tables.find((table) => table.schema === "public" && table.name === "document_ha_blobs");
+    assert.ok(safetyHaTable);
+    assert.equal(safetyHaTable.rowCount, 1);
+    const safetyRows = JSON.parse(safetyEntries.get(safetyHaTable.archivePath)!.toString("utf8")) as Array<{
+      document_id: string;
+      content: { type: string; data: number[] };
+    }>;
+    assert.equal(safetyRows.length, 1);
+    assert.equal(safetyRows[0]!.document_id, String(documentId));
+    assert.equal(safetyRows[0]!.content.type, "Buffer");
+    assert.deepEqual(Buffer.from(safetyRows[0]!.content.data), content);
+    assert.equal(safetyResult.manifest.database.tables.find((table) => table.name === "document_ha_blobs")?.rowCount, 1);
   } finally {
     if (documentId !== null) await pool.query("delete from documents where id=$1", [documentId]).catch(() => undefined);
     env.uploadsDir = originalUploadsDir;

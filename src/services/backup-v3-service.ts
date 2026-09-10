@@ -40,6 +40,8 @@ export interface StreamBackupV3Options {
   limits?: Partial<BackupV3ArchiveLimits>;
   /** Required by automated jobs; omitted for the existing emergency browser download. */
   includePostgresDump?: boolean;
+  /** Only pre-restore safety snapshots retain derived HA blob rows; normal archives default to false. */
+  includeEphemeralTableData?: boolean;
 }
 
 export interface BackupV3ArchiveResult {
@@ -194,6 +196,7 @@ function archiveEntryForBuffer(archivePath: string, content: Buffer): BackupV3Ar
 export async function streamBackupV3Archive(options: StreamBackupV3Options): Promise<BackupV3ArchiveResult> {
   const passphrase = requirePassphrase(options.passphrase);
   const limits = { ...DEFAULT_BACKUP_V3_ARCHIVE_LIMITS, ...options.limits };
+  const includeEphemeralTableData = options.includeEphemeralTableData === true;
   const client = await pool.connect();
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-stage-"));
   const createdAt = new Date().toISOString();
@@ -218,7 +221,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
   try {
     await client.query("begin isolation level repeatable read read only");
     const settings = await readSettingValues(client);
-    const database = await buildBackupV3DatabaseMetadata(client);
+    const database = await buildBackupV3DatabaseMetadata(client, { includeEphemeralTableData });
     const packageMetadata = await readPackageMetadata();
     const gitCommit = await readGitCommit();
     const storageRoots = resolveBackupV3StorageRoots({
@@ -261,7 +264,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     }
 
     for (const table of database.tables) {
-      const rows = isBackupV3EphemeralTableData(table.schema, table.name)
+      const rows = !includeEphemeralTableData && isBackupV3EphemeralTableData(table.schema, table.name)
         ? []
         : await listRows(client, table.schema, table.name);
       const tableBuffer = Buffer.from(JSON.stringify(rows));

@@ -12,7 +12,15 @@ function tableArchivePath(schema: string, table: string): string {
   return `database/tables/${schema}.${table}.json`;
 }
 
-export async function buildBackupV3DatabaseMetadata(client: PoolClient): Promise<BackupV3SchemaMetadata> {
+export interface BuildBackupV3DatabaseMetadataOptions {
+  includeEphemeralTableData?: boolean;
+}
+
+export async function buildBackupV3DatabaseMetadata(
+  client: PoolClient,
+  options: BuildBackupV3DatabaseMetadataOptions = {}
+): Promise<BackupV3SchemaMetadata> {
+  const ephemeralTables = options.includeEphemeralTableData ? [] : [...BACKUP_V3_EPHEMERAL_TABLE_DATA];
   const { rows: tableRows } = await client.query<{
     table_schema: string;
     table_name: string;
@@ -32,7 +40,7 @@ export async function buildBackupV3DatabaseMetadata(client: PoolClient): Promise
         and t.table_name <> all($2::text[])
       order by t.table_schema, t.table_name
     `,
-    [[...BACKUP_V3_TABLE_SCHEMAS], [...BACKUP_V3_EXCLUDED_TABLES], [...BACKUP_V3_EPHEMERAL_TABLE_DATA]]
+    [[...BACKUP_V3_TABLE_SCHEMAS], [...BACKUP_V3_EXCLUDED_TABLES], ephemeralTables]
   );
 
   const { rows: columnRows } = await client.query<{
