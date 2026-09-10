@@ -5,6 +5,7 @@ import { HttpError } from "../utils/http-error.js";
 import type { UnknownRecord } from "../types/http.js";
 import {
   BACKUP_V3_TABLE_SCHEMAS,
+  isBackupV3EphemeralTableData,
   type BackupV3Manifest,
   type BackupV3TableMetadata,
 } from "./backup-v3-types.js";
@@ -319,6 +320,11 @@ export async function restoreBackupV3DatabaseOnly(
   const tableRows = new Map<string, UnknownRecord[]>();
   for (const table of manifest.database.tables) {
     const ref = toTableRef(table);
+    if (isBackupV3EphemeralTableData(table.schema, table.name)) {
+      await fs.stat(path.join(stagingDir, table.archivePath));
+      tableRows.set(ref.key, []);
+      continue;
+    }
     const rows = await readTableRows(stagingDir, table);
     validateTableRowsBeforeMutation(ref, rows, runtimeColumns);
     tableRows.set(ref.key, rows);

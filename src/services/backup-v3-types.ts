@@ -4,6 +4,16 @@ export const BACKUP_V3_TABLE_SCHEMAS = ["public", "appointments_v2", "doctor_por
 
 export const BACKUP_V3_EXCLUDED_TABLES = ["schema_migrations"] as const;
 
+/** Tables whose schema remains part of V3 compatibility, but whose data is derived and ephemeral. */
+export const BACKUP_V3_EPHEMERAL_TABLE_DATA = ["public.document_ha_blobs"] as const;
+export const BACKUP_V3_EPHEMERAL_TABLE_DATA_PG_DUMP_ARGS = BACKUP_V3_EPHEMERAL_TABLE_DATA.map(
+  (table) => `--exclude-table-data=${table}`
+);
+
+export function isBackupV3EphemeralTableData(schema: string, table: string): boolean {
+  return (BACKUP_V3_EPHEMERAL_TABLE_DATA as readonly string[]).includes(`${schema}.${table}`);
+}
+
 export type BackupV3StorageRootKind =
   | "project_storage"
   | "uploads"

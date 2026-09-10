@@ -43,6 +43,18 @@ const allTables = [
   table("public", "strict_child", ["id", "user_id"], 1),
   table("appointments_v2", "bookings", ["id", "patient_id", "auto_completion_check_id"], 1),
   table("appointments_v2", "pacs_auto_completion_verification_history", ["id", "booking_id"], 1),
+  {
+    schema: "public",
+    name: "document_ha_blobs",
+    archivePath: "database/tables/public.document_ha_blobs.json",
+    rowCount: 0,
+    columns: [
+      { name: "document_id", dataType: "bigint", udtName: "int8", isNullable: false, hasDefault: false, ordinalPosition: 1 },
+      { name: "content", dataType: "bytea", udtName: "bytea", isNullable: false, hasDefault: false, ordinalPosition: 2 },
+      { name: "byte_size", dataType: "bigint", udtName: "int8", isNullable: false, hasDefault: false, ordinalPosition: 3 },
+      { name: "content_sha256", dataType: "text", udtName: "text", isNullable: false, hasDefault: false, ordinalPosition: 4 },
+    ],
+  },
 ];
 
 function manifest(tables = allTables): BackupV3Manifest {
@@ -87,17 +99,24 @@ async function setupDatabase(pool: pg.Pool): Promise<void> {
   await pool.query("create table appointments_v2.bookings (id bigserial primary key, patient_id bigint references public.patients(id) deferrable initially immediate, auto_completion_check_id bigint)");
   await pool.query("create table appointments_v2.pacs_auto_completion_verification_history (id bigserial primary key, booking_id bigint references appointments_v2.bookings(id) on delete cascade deferrable initially immediate)");
   await pool.query("alter table appointments_v2.bookings add constraint bookings_auto_completion_check_fk foreign key (auto_completion_check_id) references appointments_v2.pacs_auto_completion_verification_history(id) on delete set null deferrable initially immediate");
+  await pool.query("create table public.document_ha_blobs (document_id bigint primary key, content bytea not null, byte_size bigint not null, content_sha256 text not null)");
   await pool.query("insert into public.users (id, username) values (10, 'old')");
   await pool.query("insert into public.patients (id, created_by_user_id) values (10, 10)");
   await pool.query("insert into public.strict_child (id, user_id) values (10, 10)");
   await pool.query("insert into appointments_v2.bookings (id, patient_id) values (10, 10)");
   await pool.query("insert into appointments_v2.pacs_auto_completion_verification_history (id, booking_id) values (10, 10)");
   await pool.query("update appointments_v2.bookings set auto_completion_check_id = 10 where id = 10");
+  await pool.query("insert into public.document_ha_blobs (document_id, content, byte_size, content_sha256) values (999, $1, $2, $3)", [Buffer.from("stale"), 5, "a".repeat(64)]);
   await pool.query("select setval('public.users_id_seq', 10, true)");
 }
 
 async function countUsers(pool: pg.Pool): Promise<number> {
   const result = await pool.query<{ count: string }>("select count(*)::text as count from public.users");
+  return Number(result.rows[0]?.count || 0);
+}
+
+async function countHaRows(pool: pg.Pool): Promise<number> {
+  const result = await pool.query<{ count: string }>("select count(*)::text as count from public.document_ha_blobs");
   return Number(result.rows[0]?.count || 0);
 }
 
@@ -145,11 +164,12 @@ maybeTest("live v3 DB restore validates before mutation, restores, reseeds, defe
     try {
       const result = await restoreBackupV3DatabaseOnly(client, manifest(), validStaging);
       assert.equal(result.tablesRestored, allTables.length);
-      assert.equal(result.rowsRestored, allTables.length);
+      assert.equal(result.rowsRestored, allTables.length - 1);
     } finally {
       client.release();
     }
     assert.equal(await countUsers(pool), 1);
+    assert.equal(await countHaRows(pool), 0);
     const nextId = await pool.query<{ id: string }>("insert into public.users (username) values ('after') returning id::text as id");
     assert.equal(Number(nextId.rows[0]?.id), 2);
 

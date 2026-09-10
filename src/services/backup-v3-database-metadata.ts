@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import {
   BACKUP_V3_EXCLUDED_TABLES,
+  BACKUP_V3_EPHEMERAL_TABLE_DATA,
   BACKUP_V3_TABLE_SCHEMAS,
   type BackupV3ColumnMetadata,
   type BackupV3SchemaMetadata,
@@ -21,14 +22,17 @@ export async function buildBackupV3DatabaseMetadata(client: PoolClient): Promise
       select
         t.table_schema,
         t.table_name,
-        (xpath('/row/count/text()', query_to_xml(format('select count(*) from %I.%I', t.table_schema, t.table_name), false, true, '')))[1]::text as row_count
+        case
+          when t.table_schema || '.' || t.table_name = any($3::text[]) then '0'
+          else (xpath('/row/count/text()', query_to_xml(format('select count(*) from %I.%I', t.table_schema, t.table_name), false, true, '')))[1]::text
+        end as row_count
       from information_schema.tables t
       where t.table_type = 'BASE TABLE'
         and t.table_schema = any($1::text[])
         and t.table_name <> all($2::text[])
       order by t.table_schema, t.table_name
     `,
-    [[...BACKUP_V3_TABLE_SCHEMAS], [...BACKUP_V3_EXCLUDED_TABLES]]
+    [[...BACKUP_V3_TABLE_SCHEMAS], [...BACKUP_V3_EXCLUDED_TABLES], [...BACKUP_V3_EPHEMERAL_TABLE_DATA]]
   );
 
   const { rows: columnRows } = await client.query<{

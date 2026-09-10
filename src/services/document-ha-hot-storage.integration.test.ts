@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
-import { sha256Buffer } from "./backup-v3-checksums.js";
+import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
 import {
   getDocumentAbsolutePath,
   readDocumentContent,
@@ -16,6 +16,7 @@ import {
 } from "./document-service.js";
 import { upsertSettings } from "./settings-service.js";
 import {
+  __setDocumentHaReconciliationHooksForTests,
   isDocumentEligibleForHaHotStorage,
   normalizeDocumentHaRetentionHours,
   runDocumentHaStorageReconciliation,
@@ -23,6 +24,7 @@ import {
 
 const originalUploadsDir = env.uploadsDir;
 const tempUploadsDir = path.join(os.tmpdir(), `rispro-document-ha-${crypto.randomUUID()}`);
+const tempNetworkDir = path.join(os.tmpdir(), `rispro-document-ha-network-${crypto.randomUUID()}`);
 const createdDocumentIds: number[] = [];
 const createdBookingIds: number[] = [];
 const createdPatientIds: number[] = [];
@@ -127,6 +129,7 @@ async function uploadFixture(overrides: Partial<Parameters<typeof uploadDocument
 
 before(async () => {
   await fs.mkdir(tempUploadsDir, { recursive: true });
+  await fs.mkdir(tempNetworkDir, { recursive: true });
   env.uploadsDir = tempUploadsDir;
   for (const key of settingKeys) {
     const result = await pool.query<{ setting_value: unknown }>("select setting_value from system_settings where category='documents_and_uploads' and setting_key=$1", [key]);
@@ -155,6 +158,7 @@ after(async () => {
   }
   env.uploadsDir = originalUploadsDir;
   await fs.rm(tempUploadsDir, { recursive: true, force: true });
+  await fs.rm(tempNetworkDir, { recursive: true, force: true });
 });
 
 test("HA eligibility accepts the eight intended type/source combinations and excludes unrelated documents", () => {
@@ -241,6 +245,77 @@ test("eligible upload stores an atomic HA copy, is idempotent, falls back for re
   assert.equal(second.created, false);
   assert.equal(second.document.id, first.document.id);
   assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [first.document.id])).rowCount, 1);
+});
+
+test("reconciliation detects same-size canonical corruption and releases HA only after verified rebuild", async () => {
+  assert.ok(fixture);
+  const document = await uploadFixture();
+  const blob = (await pool.query<{ content: Buffer; content_sha256: string }>("select content,content_sha256 from document_ha_blobs where document_id=$1", [document.id])).rows[0]!;
+  const canonicalPath = getDocumentAbsolutePath(document);
+  const corrupted = Buffer.from(blob.content);
+  corrupted[0] = corrupted[0]! ^ 0xff;
+  assert.equal(corrupted.length, blob.content.length);
+  assert.notEqual(sha256Buffer(corrupted), blob.content_sha256);
+  await fs.writeFile(canonicalPath, corrupted);
+  await markDue(document.id);
+
+  const summary = await runDocumentHaStorageReconciliation({ batchSize: 50, workerId: `corrupt-${crypto.randomUUID()}` });
+  assert.equal(summary.repaired, 1);
+  const repaired = (await pool.query<{ stored_path: string; file_size: number; content_sha256: string }>("select stored_path,file_size,content_sha256 from documents where id=$1", [document.id])).rows[0]!;
+  const repairedDigest = await sha256File(getDocumentAbsolutePath(repaired));
+  assert.equal(Number(repaired.file_size), blob.content.length);
+  assert.equal(repaired.content_sha256, blob.content_sha256);
+  assert.equal(repairedDigest.byteSize, blob.content.length);
+  assert.equal(repairedDigest.sha256, blob.content_sha256);
+  assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [document.id])).rowCount, 0);
+});
+
+test("reconciliation prefers available configured network storage and verifies the restored copy", async () => {
+  assert.ok(fixture);
+  const document = await uploadFixture();
+  await fs.unlink(getDocumentAbsolutePath(document));
+  await setDocumentSetting("storage_path", tempNetworkDir);
+  await setDocumentSetting("storage_fallback_enabled", "false");
+  await markDue(document.id);
+  try {
+    const summary = await runDocumentHaStorageReconciliation({ batchSize: 50, workerId: `network-${crypto.randomUUID()}` });
+    assert.equal(summary.repaired, 1);
+    const restored = (await pool.query<{ stored_path: string; storage_location_type: string; file_size: number; content_sha256: string }>("select stored_path,storage_location_type,file_size,content_sha256 from documents where id=$1", [document.id])).rows[0]!;
+    assert.equal(restored.storage_location_type, "network");
+    assert.ok(restored.stored_path.startsWith(tempNetworkDir));
+    const restoredDigest = await sha256File(getDocumentAbsolutePath(restored));
+    assert.equal(restoredDigest.byteSize, Number(restored.file_size));
+    assert.equal(restoredDigest.sha256, restored.content_sha256);
+    assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [document.id])).rowCount, 0);
+  } finally {
+    await setDocumentSetting("storage_path", "");
+    await setDocumentSetting("storage_fallback_enabled", "true");
+  }
+});
+
+test("reconciliation removes a recovered file when the document is deleted before metadata update", async () => {
+  assert.ok(fixture);
+  const document = await uploadFixture();
+  await fs.unlink(getDocumentAbsolutePath(document));
+  await markDue(document.id);
+  let recoveryPath = "";
+  __setDocumentHaReconciliationHooksForTests({
+    async beforeDocumentMetadataUpdate({ documentId, recoveryPath: writtenPath }) {
+      recoveryPath = writtenPath;
+      await pool.query("delete from documents where id=$1", [documentId]);
+    },
+  });
+  try {
+    const summary = await runDocumentHaStorageReconciliation({ batchSize: 50, workerId: `delete-race-${crypto.randomUUID()}` });
+    assert.equal(summary.released, 1);
+    assert.equal(summary.failed, 0);
+    assert.equal((await pool.query("select 1 from documents where id=$1", [document.id])).rowCount, 0);
+    assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [document.id])).rowCount, 0);
+    assert.ok(recoveryPath);
+    await assert.rejects(() => fs.stat(recoveryPath), { code: "ENOENT" });
+  } finally {
+    __setDocumentHaReconciliationHooksForTests(null);
+  }
 });
 
 test("reconciliation repairs through local fallback and retains HA bytes when every destination fails", async () => {

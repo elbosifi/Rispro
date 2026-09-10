@@ -22,6 +22,10 @@ import type {
   BackupV3ArchiveManifestEntry,
   BackupV3ArchiveLimits,
 } from "./backup-v3-types.js";
+import {
+  BACKUP_V3_EPHEMERAL_TABLE_DATA_PG_DUMP_ARGS,
+  isBackupV3EphemeralTableData,
+} from "./backup-v3-types.js";
 import { BackupV3ZipWriter } from "./backup-v3-zip-writer.js";
 import { HttpError } from "../utils/http-error.js";
 import type { NullableUserId } from "../types/http.js";
@@ -83,7 +87,7 @@ export async function createBackupV3PostgresCustomDump(
   dependencies: BackupV3PostgresDumpDependencies = defaultPostgresDumpDependencies
 ): Promise<{ byteSize: number; sha256: string; crc32: number }> {
   try {
-    await dependencies.execFile("pg_dump", ["-Fc", "--file", targetPath], {
+    await dependencies.execFile("pg_dump", ["-Fc", ...BACKUP_V3_EPHEMERAL_TABLE_DATA_PG_DUMP_ARGS, "--file", targetPath], {
       env: postgresDumpEnvironment(env.databaseUrl),
     });
     const stat = await fs.stat(targetPath);
@@ -257,7 +261,9 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     }
 
     for (const table of database.tables) {
-      const rows = await listRows(client, table.schema, table.name);
+      const rows = isBackupV3EphemeralTableData(table.schema, table.name)
+        ? []
+        : await listRows(client, table.schema, table.name);
       const tableBuffer = Buffer.from(JSON.stringify(rows));
       trackArchiveEntry(table.archivePath, tableBuffer.length);
       archiveEntries.push(archiveEntryForBuffer(table.archivePath, tableBuffer));

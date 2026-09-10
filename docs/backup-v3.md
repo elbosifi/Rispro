@@ -1,6 +1,12 @@
 # RISpro v3 Backup Archive Notes
 
 v3 backup and restore preview support RISpro-generated stored ZIP archives only.
+
+`public.document_ha_blobs` remains present in Backup V3 schema metadata for
+runtime-table compatibility, but its temporary derived data is excluded from
+both the JSON table snapshot and PostgreSQL custom dumps. Its table-data entry
+is archived as an empty JSON array, and restores truncate/recreate the table
+empty so stale HA recovery rows do not survive a full database restore.
 Arbitrary compressed ZIP archives are rejected.
 
 Current V3 archives are ZIP64 archives, not fully encrypted archive containers.

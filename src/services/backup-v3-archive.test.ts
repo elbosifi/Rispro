@@ -238,7 +238,7 @@ test("automated Backup V3 PostgreSQL dump uses process environment instead of cr
         await fs.writeFile(target, "PGDMP custom-format fixture");
       },
     });
-    assert.deepEqual(receivedArgs, ["-Fc", "--file", target]);
+    assert.deepEqual(receivedArgs, ["-Fc", "--exclude-table-data=public.document_ha_blobs", "--file", target]);
     assert.ok(receivedEnvironment?.PGHOST);
     assert.ok(receivedEnvironment?.PGDATABASE);
     assert.ok(receivedEnvironment?.PGPASSWORD);

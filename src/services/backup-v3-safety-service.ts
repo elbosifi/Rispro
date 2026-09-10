@@ -14,6 +14,7 @@ import type { NullableUserId } from "../types/http.js";
 import { HttpError } from "../utils/http-error.js";
 import type { BackupV3Manifest } from "./backup-v3-types.js";
 import { restoreBackupV3DatabaseOnly } from "./backup-v3-db-restore.js";
+import { BACKUP_V3_EPHEMERAL_TABLE_DATA_PG_DUMP_ARGS } from "./backup-v3-types.js";
 
 const execFileAsync = promisify(execFile);
 export const BACKUP_V3_RESTORE_LOCK_KEY = "rispro_restore_v3";
@@ -114,7 +115,7 @@ async function createDbSafetyBackup(
   const method = selectBackupV3DbSafetyMethod(await isPgDumpAvailable());
   if (method === "pg_dump_custom") {
     try {
-      await execFileAsync("pg_dump", ["-Fc", "--file", dumpPath], {
+      await execFileAsync("pg_dump", ["-Fc", ...BACKUP_V3_EPHEMERAL_TABLE_DATA_PG_DUMP_ARGS, "--file", dumpPath], {
         env: { ...process.env, ...pgDumpConnectionEnv(env.databaseUrl) },
       });
       return { method: "pg_dump_custom", path: dumpPath };

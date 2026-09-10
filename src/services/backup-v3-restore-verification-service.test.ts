@@ -35,6 +35,54 @@ test("restore verification uses only the supplied disposable targets and cleans 
   } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
 });
 
+test("restore verification keeps the HA recovery table in the contract with zero expected rows", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-restore-verify-ha-test-"));
+  const archive = path.join(tempDir, "backup.rispro.zip");
+  await fs.writeFile(archive, "archive");
+  const haTable = {
+    schema: "public",
+    name: "document_ha_blobs",
+    archivePath: "database/tables/public.document_ha_blobs.json",
+    rowCount: 0,
+    columns: [],
+  };
+  const archiveManifest = {
+    ...manifest,
+    database: { ...manifest.database, tables: [...manifest.database.tables, haTable] },
+  } as BackupV3Manifest;
+  try {
+    const result = await verifyBackupV3Restore(
+      {
+        archivePath: archive,
+        expectedSha256: "not-used-by-mock",
+        passphrase: "safe-passphrase",
+        environment: {
+          databaseUrl: "postgresql://verify:verify@verify-db:5432/rispro_restore_verify",
+          storageRoot: path.join(tempDir, "restore-verify"),
+        },
+      },
+      {
+        async validateArchive() {
+          return archiveManifest;
+        },
+        async restoreDatabase() {},
+        async verifyDatabase(candidate) {
+          assert.equal(candidate.database.tables.find((table) => table.name === "document_ha_blobs")?.rowCount, 0);
+          return { tables: candidate.database.tables.length, rows: 2 };
+        },
+        async restoreAndVerifyFiles() {
+          return 0;
+        },
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.databaseTablesVerified, 2);
+    assert.equal(result.databaseRowsVerified, 2);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("restore verification environment rejects production database and non-dedicated storage targets", () => {
   const oldDatabase = process.env.BACKUP_V3_RESTORE_VERIFY_DATABASE_URL;
   const oldStorage = process.env.BACKUP_V3_RESTORE_VERIFY_STORAGE_ROOT;

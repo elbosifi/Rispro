@@ -231,6 +231,16 @@ export interface DocumentHaReconciliationSummary {
   failed: number;
 }
 
+export interface DocumentHaReconciliationTestHooks {
+  beforeDocumentMetadataUpdate?: (input: { documentId: number; recoveryPath: string }) => Promise<void>;
+}
+
+let documentHaReconciliationTestHooks: DocumentHaReconciliationTestHooks = {};
+
+export function __setDocumentHaReconciliationHooksForTests(hooks: DocumentHaReconciliationTestHooks | null): void {
+  documentHaReconciliationTestHooks = hooks || {};
+}
+
 async function claimNextDocumentHaBlob(workerId: string, excludedDocumentIds: number[] = []): Promise<DocumentHaWorkRow | null> {
   const claim = await pool.query<{ document_id: number }>(
     `
@@ -351,6 +361,12 @@ async function writeVerifiedRecoveryFile(basePath: string, originalFilename: str
   }
 }
 
+async function removeRecoveredFile(absolutePath: string): Promise<void> {
+  await fs.unlink(absolutePath).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  });
+}
+
 async function repairDocumentFromHaBlob(work: DocumentHaWorkRow, config: DocumentStorageConfig, content: Buffer): Promise<{ absolutePath: string; storedPath: string; storageLocationType: "network" | "local_fallback" }> {
   const expectedSize = Number(work.byte_size);
   const expectedSha256 = work.content_sha256;
@@ -454,7 +470,11 @@ async function reconcileClaimedDocumentHaBlob(work: DocumentHaWorkRow, workerId:
       file_size: expectedSize,
       content_sha256: work.content_sha256,
     };
-    await pool.query(
+    await documentHaReconciliationTestHooks.beforeDocumentMetadataUpdate?.({
+      documentId: work.document_id,
+      recoveryPath: restored.absolutePath,
+    });
+    const metadataUpdate = await pool.query<{ id: number }>(
       `
         update documents
         set stored_path=$2,
@@ -464,9 +484,20 @@ async function reconcileClaimedDocumentHaBlob(work: DocumentHaWorkRow, workerId:
             last_move_attempt_at=now(),
             last_move_error=null
         where id=$1
+        returning id
       `,
       [work.document_id, restored.storedPath, restored.storageLocationType, expectedSize, work.content_sha256],
     );
+    if (Number(metadataUpdate.rowCount || 0) !== 1) {
+      await removeRecoveredFile(restored.absolutePath);
+      await releaseDocumentHaBlob(work, workerId).catch(() => undefined);
+      logDocumentHaEvent("document_ha_document_deleted_during_repair", {
+        documentId: work.document_id,
+        recoveryPath: restored.storedPath,
+        recoveryFileRemoved: true,
+      });
+      return "released";
+    }
     const finalVerification = await verifyStoredDocumentFile({ ...work, ...metadata, storage_location_type: restored.storageLocationType }, config, restored.storedPath, expectedSize, work.content_sha256);
     if (!finalVerification.valid) throw new Error(`Final recovered document verification failed: ${finalVerification.reason || "unknown"}.`);
     const released = await releaseDocumentHaBlob(work, workerId);
