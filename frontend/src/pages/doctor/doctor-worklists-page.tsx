@@ -33,6 +33,7 @@ function QrDialog({ dataUrl, onClose }: { dataUrl: string; onClose: () => void }
 
 function WorklistActions({ worklist, management = false }: { worklist: DoctorReportingWorklistSummary; management?: boolean }) {
   const queryClient = useQueryClient();
+  const [now] = useState(() => Date.now());
   const [qr, setQr] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: (payload: { active?: boolean; expiresAt?: string | null; rotate?: boolean }) => updateDoctorReportingWorklist(worklist.id, payload),
@@ -50,7 +51,7 @@ function WorklistActions({ worklist, management = false }: { worklist: DoctorRep
     && worklist.active
     && !worklist.revokedAt
     && !worklist.adminDisabledAt
-    && (!worklist.expiresAt || new Date(worklist.expiresAt).getTime() > Date.now());
+    && (!worklist.expiresAt || new Date(worklist.expiresAt).getTime() > now);
   return (
     <div className="flex flex-wrap gap-2">
       <a href={link} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold"><ExternalLink size={14} />Open worklist</a>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { CheckCircle2, ExternalLink, ImageUp, Search, XCircle } from "lucide-react";
@@ -151,17 +151,18 @@ function CancelComparisonDialog({ row, open, onClose }: { row: ComparisonRequest
   );
 }
 
-function EditComparisonDialog({ row, manager, open, onClose }: { row: ComparisonRequest; manager: boolean; open: boolean; onClose: () => void }) {
+type EditComparisonDialogProps = { row: ComparisonRequest; manager: boolean; open: boolean; onClose: () => void };
+
+function EditComparisonDialog(props: EditComparisonDialogProps) {
+  const { row, open } = props;
+  return <EditComparisonDialogContent key={`${open}-${row.id}-${row.reason}-${row.linkedPreviousBookingId}-${row.plannedReportingDoctorId ?? "none"}`} {...props} />;
+}
+
+function EditComparisonDialogContent({ row, manager, open, onClose }: EditComparisonDialogProps) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState(row.reason);
   const [bookingId, setBookingId] = useState(row.linkedPreviousBookingId);
   const [doctorId, setDoctorId] = useState<number | null>(row.plannedReportingDoctorId ?? null);
-  useEffect(() => {
-    if (!open) return;
-    setReason(row.reason);
-    setBookingId(row.linkedPreviousBookingId);
-    setDoctorId(row.plannedReportingDoctorId ?? null);
-  }, [open, row.id, row.reason, row.linkedPreviousBookingId, row.plannedReportingDoctorId]);
   const studies = useQuery({ queryKey: ["comparison-previous-studies", row.patientId], queryFn: () => fetchPreviousCompletedStudies(row.patientId), enabled: open && manager });
   const selectedStudy = (studies.data ?? []).find((study) => study.bookingId === bookingId);
   const doctors = useQuery({ queryKey: ["comparison-reporting-doctors", selectedStudy?.modalityId], queryFn: () => fetchComparisonReportingDoctors(selectedStudy!.modalityId), enabled: open && manager && Boolean(selectedStudy) });

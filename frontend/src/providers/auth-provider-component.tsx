@@ -35,7 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const logoutMutation = useMutation({
-    mutationFn: (_returnTo: string) => logoutApi(),
+    mutationFn: (returnTo: string) => {
+      void returnTo;
+      return logoutApi();
+    },
     meta: {
       suppressGlobalToast: true
     },

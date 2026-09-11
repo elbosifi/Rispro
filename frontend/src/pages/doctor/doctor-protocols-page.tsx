@@ -1021,10 +1021,6 @@ function effectiveCtPhaseCoverage(row: CtPhaseDisplayRow): string | null { retur
 function effectiveCtPhaseReconstruction(row: CtPhaseDisplayRow): string | null { return row.reconstructionOverride ?? row.presetReconstructionNotes ?? null; }
 function effectiveCtPhaseInstructions(row: CtPhaseDisplayRow): string | null { return row.instructionsOverride ?? row.presetInstructions ?? null; }
 
-function CtProtocolSummary({ detail }: { detail: ProtocolLibraryVersionDetail }) {
-  return <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)" }}><h3 className="font-semibold">CT protocol summary</h3><p className="mt-1">{detail.protocol.name} · Version {detail.version.versionNumber} · {detail.version.status}</p>{detail.protocol.indication ? <p>Indication: {detail.protocol.indication}</p> : null}{detail.version.protocolNotes ? <p>Notes: {detail.version.protocolNotes}</p> : null}<ol className="mt-2 list-decimal space-y-1 ps-5">{detail.ctPhases.map((phase) => <li key={phase.id}>{phase.customPhaseName ?? phase.ctPhasePresetName ?? "Unnamed phase"} — {formatCtPhaseTiming(phase)}{effectiveCtPhaseCoverage(phase) ? ` — ${effectiveCtPhaseCoverage(phase)}` : ""}</li>)}</ol>{detail.ctTechniques.length ? <p className="mt-2">Techniques: {detail.ctTechniques.map((technique) => [technique.scannerName, technique.kvMode, technique.tubeCurrentMode, technique.reconstructionMethod].filter(Boolean).join(" · ")).join("; ")}</p> : null}</section>;
-}
-
 function techniquePayloadFromRow(row: ProtocolLibraryCtTechniqueRow): ProtocolLibraryCtTechniquePayload {
   return {
     scannerId: row.scannerId,
@@ -1385,8 +1381,14 @@ function PhaseActions({ phaseName, first, last, editing, onEdit, onRemove, onMov
 
 function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }: { loading: boolean; error: unknown; onRetry: () => void; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/45 p-2 sm:p-4" onClick={() => { if (!loading) onClose(); }} role="presentation" data-testid="protocoling-appointment-workspace-shell">
-      <section className="relative flex max-h-[94vh] w-[96vw] max-w-2xl min-w-0 flex-col overflow-hidden rounded-lg border bg-background shadow-2xl" role="dialog" aria-modal="true" aria-label="Protocoling workspace" onClick={(event) => event.stopPropagation()}>
+    <Dialog open onClose={() => { if (!loading) onClose(); }}>
+      <DialogContent
+        maxWidth="672px"
+        scrollable={false}
+        aria-label="Protocoling workspace"
+        data-testid="protocoling-appointment-workspace-shell"
+        className="!m-0 !h-[94vh] !max-h-[94vh] !w-[96vw] max-w-2xl min-w-0 !overflow-hidden !p-0"
+      >
         <header className="flex shrink-0 items-center justify-between border-b px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
           <h2 className="text-lg font-bold text-foreground">Protocoling workspace</h2>
           <button type="button" onClick={onClose} className="rounded border p-1.5 font-semibold" aria-label="Close workspace" title="Close workspace"><X size={16} aria-hidden="true" /></button>
@@ -1402,8 +1404,8 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
             </div>
           </div>
         )}
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

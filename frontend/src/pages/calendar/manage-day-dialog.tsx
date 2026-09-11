@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Alert,
   AlertDescription,
@@ -232,7 +232,12 @@ function buildInteractionWarnings({
   return warnings;
 }
 
-export function ManageDayDialog({
+export function ManageDayDialog(props: ManageDayDialogProps) {
+  const { open, date, modalityId } = props;
+  return <ManageDayDialogContent key={`${open}-${date}-${modalityId ?? "none"}`} {...props} />;
+}
+
+function ManageDayDialogContent({
   open,
   onClose,
   language,
@@ -309,20 +314,6 @@ export function ManageDayDialog({
     resetEditorState();
     setFeedback(null);
   };
-
-  useEffect(() => {
-    setAction(null);
-    setRemoveTarget(null);
-    setConfirmation(null);
-    setReason("");
-    setExamTypeIds([]);
-    setExamSearch("");
-    setIsOverridable(false);
-    setEffectMode("hard_restriction");
-    setDailyLimit("");
-    setError(null);
-    setFeedback(null);
-  }, [open, date, modalityId]);
 
   const handleClose = () => {
     if (mutationPending) return;

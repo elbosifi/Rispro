@@ -25,12 +25,12 @@ import {
 
 describe("Manage Day mutation invalidation", () => {
   it("awaits all authoritative invalidations for every Manage Day mutation hook", async () => {
-    const hooks = [
+    [
       useCreateV2DayModalityBlock,
       useCreateV2DayExamRestriction,
       useCreateV2DayExamMixQuota,
       useRemoveV2DayManagementRule,
-    ].map((useDayMutation) => useDayMutation());
+    ].forEach((useDayMutation) => useDayMutation());
 
     expect(mocks.mutationOptions).toHaveLength(4);
 

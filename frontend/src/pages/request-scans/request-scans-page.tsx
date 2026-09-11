@@ -534,6 +534,44 @@ function RequestScanRow({ language, job, userRole, showClinicalExport, canRetryC
   </TableRow>;
 }
 
+function AssignmentPreview({ job, language, scopeQuery, onError }: { job: Job; language: Language; scopeQuery: string; onError: (message: string) => void }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const url = useRef<string | null>(null);
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    const currentRequestId = ++requestId.current;
+    const fileUrl = job.scoped_file_url || (scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id));
+    void fetch(fileUrl, { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await message(response, t(language, "requestScans.preview.failed")));
+        return URL.createObjectURL(await response.blob());
+      })
+      .then((nextUrl) => {
+        if (currentRequestId !== requestId.current) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+        url.current = nextUrl;
+        setPreviewUrl(nextUrl);
+      })
+      .catch((error: unknown) => {
+        if (currentRequestId !== requestId.current) return;
+        const failure = error instanceof Error ? error.message : t(language, "requestScans.preview.failed");
+        setPreviewError(failure);
+        onError(failure);
+      });
+    return () => {
+      requestId.current += 1;
+      if (url.current) URL.revokeObjectURL(url.current);
+      url.current = null;
+    };
+  }, [job, language, onError, scopeQuery]);
+
+  return <div className="mt-3 min-h-[360px] flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white sm:min-h-[460px] lg:min-h-0">{previewUrl ? (job.filename.toLowerCase().endsWith(".pdf") ? <iframe className="h-full w-full" src={`${previewUrl}#view=FitH`} title={t(language, "requestScans.assignment.scannedPreview")} /> : <div className="flex h-full w-full items-center justify-center"><img className="h-full w-full object-contain" src={previewUrl} alt={job.filename} /></div>) : previewError ? <p role="alert" className="flex h-full items-center justify-center p-4 text-sm text-red-700">{previewError}</p> : <p className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</p>}</div>;
+}
+
 export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void; orthancState?: "connected" | "disabled" | "unavailable" } }) {
   const { language, isArabic } = useLanguage();
   const { user } = useAuth();
@@ -548,8 +586,6 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const [selected, setSelected] = useState<number[]>([]);
   const [preview, setPreview] = useState<Job | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [assignmentPreviewUrl, setAssignmentPreviewUrl] = useState<string | null>(null);
-  const [assignmentPreviewError, setAssignmentPreviewError] = useState<string | null>(null);
   const [details, setDetails] = useState<Job | null>(null);
   const [archiveDetailsOpen, setArchiveDetailsOpen] = useState(false);
   const [openMenuJobId, setOpenMenuJobId] = useState<number | null>(null);
@@ -573,37 +609,16 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const [notice, setNotice] = useState<string | null>(null);
   const [manageAppointmentId, setManageAppointmentId] = useState<number | null>(null);
   const url = useRef<string | null>(null);
-  const assignmentUrl = useRef<string | null>(null);
   const previewRequest = useRef(0);
-  const assignmentPreviewRequest = useRef(0);
   const client = useQueryClient();
   const revokePreviewUrl = () => { if (url.current) URL.revokeObjectURL(url.current); url.current = null; };
-  const revokeAssignmentPreviewUrl = () => { if (assignmentUrl.current) URL.revokeObjectURL(assignmentUrl.current); assignmentUrl.current = null; };
   const closePreview = () => { previewRequest.current += 1; revokePreviewUrl(); setPreviewUrl(null); setPreview(null); };
   const loadRequestScanPreviewBlob = async (job: Job) => {
     const response = await fetch(job.scoped_file_url || (scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id)), { credentials: "include" });
     if (!response.ok) throw new Error(await message(response, t(language, "requestScans.preview.failed")));
     return URL.createObjectURL(await response.blob());
   };
-  useEffect(() => () => { previewRequest.current += 1; assignmentPreviewRequest.current += 1; revokePreviewUrl(); revokeAssignmentPreviewUrl(); }, []);
-  useEffect(() => {
-    if (!assign) { assignmentPreviewRequest.current += 1; revokeAssignmentPreviewUrl(); setAssignmentPreviewUrl(null); setAssignmentPreviewError(null); return; }
-    const requestId = ++assignmentPreviewRequest.current;
-    revokeAssignmentPreviewUrl();
-    setAssignmentPreviewUrl(null);
-    setAssignmentPreviewError(null);
-    void loadRequestScanPreviewBlob(assign).then((nextUrl) => {
-      if (requestId !== assignmentPreviewRequest.current) { URL.revokeObjectURL(nextUrl); return; }
-      assignmentUrl.current = nextUrl;
-      setAssignmentPreviewUrl(nextUrl);
-    }).catch((error: unknown) => {
-      if (requestId !== assignmentPreviewRequest.current) return;
-      const failure = error instanceof Error ? error.message : t(language, "requestScans.preview.failed");
-      setAssignmentPreviewError(failure);
-      setNotice(failure);
-    });
-    return () => { assignmentPreviewRequest.current += 1; revokeAssignmentPreviewUrl(); };
-  }, [assign]);
+  useEffect(() => () => { previewRequest.current += 1; revokePreviewUrl(); }, []);
 
   const status = useQuery({ queryKey: ["request-scans-status", scopeKey], queryFn: () => request<RequestScanStatus>("/status"), refetchInterval: (q) => requestScanStatusPollInterval(q.state.data), refetchIntervalInBackground: false });
   const jobs = useQuery({ queryKey: ["request-scans", scopeKey, tab, category], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}${category ? `&category=${category}` : ""}`), refetchInterval: () => requestScanJobsPollInterval(tab, status.data), refetchIntervalInBackground: false });
@@ -696,7 +711,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
         {assign ? <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto text-sm lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:overflow-hidden">
           <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-3 lg:flex lg:min-h-0 lg:flex-col">
             {extractFilenameAccession(assign.filename) ? <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs font-semibold text-amber-950"><span>{t(language, "requestScans.assignment.filenameSuggestion")}</span>: <TechnicalValue>{extractFilenameAccession(assign.filename)}</TechnicalValue></p> : null}
-            <div className="mt-3 min-h-[360px] flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white sm:min-h-[460px] lg:min-h-0">{assignmentPreviewUrl ? (assign.filename.toLowerCase().endsWith(".pdf") ? <iframe className="h-full w-full" src={`${assignmentPreviewUrl}#view=FitH`} title={t(language, "requestScans.assignment.scannedPreview")} /> : <div className="flex h-full w-full items-center justify-center"><img className="h-full w-full object-contain" src={assignmentPreviewUrl} alt={assign.filename} /></div>) : assignmentPreviewError ? <p role="alert" className="flex h-full items-center justify-center p-4 text-sm text-red-700">{assignmentPreviewError}</p> : <p className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</p>}</div>
+            <AssignmentPreview key={`${assign.id}-${language}-${scopeQuery}`} job={assign} language={language} scopeQuery={scopeQuery} onError={setNotice} />
           </section>
           <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden">
             <label htmlFor="request-scan-appointment-search" className="shrink-0 font-semibold">{t(language, "requestScans.assignment.find")}</label>

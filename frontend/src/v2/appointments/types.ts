@@ -615,7 +615,7 @@ export interface CreateDayModalityBlockDto extends DayManagementMutationBaseDto 
 export interface CreateDayExamRestrictionDto extends DayManagementMutationBaseDto { examTypeIds: number[]; effectMode: "hard_restriction" | "restriction_overridable"; }
 export interface CreateDayExamMixQuotaDto extends DayManagementMutationBaseDto { examTypeIds: number[]; dailyLimit: number; }
 export type DayManagementRemovableRuleFamily = DayManagementRuleType;
-export interface RemoveDayManagementRuleDto extends DayManagementMutationBaseDto {}
+export type RemoveDayManagementRuleDto = DayManagementMutationBaseDto;
 export interface DayManagementMutationResultDto { action: "created" | "removed"; ruleType: DayManagementRuleType; modalityId: number; date: string; previousPublishedVersionId: number; published: PolicyVersionDto; }
 
 export interface PolicyDisplayLookupsDto {
