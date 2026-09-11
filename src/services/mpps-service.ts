@@ -6,11 +6,9 @@ import { normalizeOptionalText } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleBookingWorklistSync } from "./dicom-service.js";
 import {
-  activatePendingReportingAssignmentIntent,
-  cancelPendingReportingAssignmentIntent,
-  type ReportingAssignmentActivationNotification,
-} from "../modules/doctor-portal/reporting-assignment-intents-service.js";
-import { createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
+  applyBookingTerminalTransition,
+  runBookingTerminalTransitionPostCommit,
+} from "../modules/appointments-v2/booking/services/booking-terminal-transition.service.js";
 
 export type MppsEventType = "n-create" | "n-set";
 export type MppsCorrelationStatus = "matched" | "unmatched" | "ambiguous";
@@ -90,25 +88,6 @@ interface AcceptedMppsStateRow {
   id: number;
   performed_step_status: NormalizedMppsEvent["performedStepStatus"];
   correlated_appointment_id: number | null;
-}
-
-async function createAssignedToMeNotificationsForReportingIntent(
-  notification: ReportingAssignmentActivationNotification | null
-): Promise<void> {
-  if (!notification) return;
-  try {
-    await createAssignedToMeNotifications({
-      doctorId: notification.doctorId,
-      appointmentIds: [notification.bookingId],
-    });
-  } catch (error) {
-    console.warn(JSON.stringify({
-      type: "reporting_assignment_intent_notification_failed",
-      bookingId: notification.bookingId,
-      doctorId: notification.doctorId,
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
 }
 
 function normalizeEventType(value: unknown): MppsEventType {
@@ -659,7 +638,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
   let deduplicated = false;
   let priorMppsState: AcceptedMppsStateRow | null = null;
   let committed = false;
-  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
+  let terminalTransition: Awaited<ReturnType<typeof applyBookingTerminalTransition>> | null = null;
 
   try {
     await client.query("begin");
@@ -792,43 +771,50 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
       });
     }
 
-    if (booking.status !== targetStatus) {
-      await client.query(
-        `
-          update appointments_v2.bookings
-          set status = $2, updated_at = now(), updated_by_user_id = null
-          where id = $1
-        `,
-        [booking.id, targetStatus]
-      );
-
-      await logAuditEntry(
-        {
-          entityType: "appointments_v2_booking",
-          entityId: booking.id,
-          actionType: "mpps_status_update",
-          oldValues: { status: booking.status },
-          newValues: {
-            status: targetStatus,
+    const transitioned = booking.status !== targetStatus;
+    if (transitioned) {
+      if (targetStatus === "completed" || targetStatus === "discontinued") {
+        terminalTransition = await applyBookingTerminalTransition({
+          client,
+          bookingId: booking.id,
+          previousStatus: booking.status,
+          targetStatus,
+          actorUserId: null,
+          source: "mpps",
+          auditNewValues: {
             mppsPerformedStepStatus: event.performedStepStatus,
             accessionNumber: event.accessionNumber,
             studyInstanceUid: event.studyInstanceUid,
             mppsInstanceUid: event.mppsInstanceUid,
           },
-          changedByUserId: null,
-        },
-        client
-      );
-      if (targetStatus === "completed") {
-        reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, booking.id, {
-          actorUserId: null,
-          actionType: "mpps_status_completion",
         });
-      } else if (targetStatus === "discontinued") {
-        await cancelPendingReportingAssignmentIntent(client, booking.id, {
-          reason: "status_discontinued",
-          actorUserId: null,
-        });
+      } else {
+        await client.query(
+          `
+            update appointments_v2.bookings
+            set status = $2, updated_at = now(), updated_by_user_id = null
+            where id = $1
+          `,
+          [booking.id, targetStatus]
+        );
+
+        await logAuditEntry(
+          {
+            entityType: "appointment_v2_booking",
+            entityId: booking.id,
+            actionType: "mpps_status_update",
+            oldValues: { status: booking.status },
+            newValues: {
+              status: targetStatus,
+              mppsPerformedStepStatus: event.performedStepStatus,
+              accessionNumber: event.accessionNumber,
+              studyInstanceUid: event.studyInstanceUid,
+              mppsInstanceUid: event.mppsInstanceUid,
+            },
+            changedByUserId: null,
+          },
+          client
+        );
       }
     }
 
@@ -852,17 +838,19 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
       previousStatus: booking.status,
       updatedStatus: targetStatus,
     });
-    if (booking.status !== targetStatus) {
+    if (terminalTransition?.transitioned && (targetStatus === "completed" || targetStatus === "discontinued")) {
+      await runBookingTerminalTransitionPostCommit({
+        bookingId: booking.id,
+        targetStatus,
+        actorUserId: null,
+        reportingIntentNotification: terminalTransition.reportingIntentNotification,
+      });
+    } else if (transitioned) {
       try {
         scheduleBookingWorklistSync(booking.id);
       } catch (error) {
         console.error("MPPS worklist synchronization scheduling failed after commit.", error);
       }
-    }
-    try {
-      await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
-    } catch (error) {
-      console.error("MPPS reporting notification failed after commit.", error);
     }
 
     return result;

@@ -1,10 +1,13 @@
 import { after, before, describe, it, type SuiteContext } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import { pool } from "../db/pool.js";
 import { createApp } from "../app.js";
 import { env } from "../config/env.js";
 import { ingestMppsEvent } from "./mpps-service.js";
+import { createPendingReportingAssignmentIntent } from "../modules/doctor-portal/reporting-assignment-intents-service.js";
+import { createComplementaryRecall, linkComplementaryRecallBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 import {
   canReachDatabase,
   cleanupTestData,
@@ -19,6 +22,8 @@ describe("mpps-service integration", () => {
   let closeServer: (() => Promise<void>) | null = null;
   let baseUrl = "";
   let testData: Awaited<ReturnType<typeof seedTestData>>;
+  let reportingDoctorId: number | null = null;
+  let priorClinicalExportSettings: Array<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | null }> = [];
   const bookingIds: number[] = [];
 
   before(async (t: SuiteContext) => {
@@ -67,6 +72,37 @@ describe("mpps-service integration", () => {
       )
     `);
     testData = await seedTestData("appointments_v2", PREFIX);
+    priorClinicalExportSettings = (await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | null }>(
+      `select setting_key, setting_value, updated_by_user_id from system_settings where category = 'clinical_document_export'`
+    )).rows;
+    await pool.query(
+      `insert into system_settings (category, setting_key, setting_value, updated_by_user_id) values ('clinical_document_export', 'enabled', '{"value":"enabled"}'::jsonb, $1), ('clinical_document_export', 'destination_key', '{"value":"MPPS_TEST_PACS"}'::jsonb, $1) on conflict (category, setting_key) do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()`,
+      [testData.userId]
+    );
+    await pool.query("update modalities set name_en = 'Computed tomography' where id = $1", [testData.modalityId]);
+    reportingDoctorId = Number((await pool.query<{ id: number }>(
+      `
+        insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports)
+        values ($1, 'MPPS Test Reporting Doctor', 'consultant', true, true)
+        returning id
+      `,
+      [testData.userId]
+    )).rows[0]!.id);
+    await pool.query(
+      `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_report, active) values ($1, $2, true, true)`,
+      [reportingDoctorId, testData.modalityId]
+    );
+    await pool.query<{ id: number }>(
+      `
+        insert into doctor_portal.reporting_board_saved_views (
+          owner_user_id, owner_doctor_id, name, token, filters_json, notification_settings_json,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1, $2, 'MPPS test reporting view', $3, '{}'::jsonb, '{"notifyAssignedToMe":true}'::jsonb, $1, $1)
+        returning id
+      `,
+      [testData.userId, reportingDoctorId, `mpps-test-${randomUUID()}`]
+    );
 
     const server = http.createServer(createApp());
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -79,9 +115,64 @@ describe("mpps-service integration", () => {
   });
 
   after(async () => {
-    if (bookingIds.length) {
-      await pool.query(`delete from mpps_event_log where correlated_appointment_id = any($1::bigint[])`, [bookingIds]);
-      await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
+    const suiteBookingRows = await pool.query<{ id: number }>(
+      `
+        select b.id
+        from appointments_v2.bookings b
+        join appointments_v2.policy_versions pv on pv.id = b.policy_version_id
+        join appointments_v2.policy_sets ps on ps.id = pv.policy_set_id
+        where ps.key like 'mpps%'
+      `
+    );
+    const allBookingIds = [...new Set([...bookingIds, ...suiteBookingRows.rows.map((row) => Number(row.id))])];
+    if (allBookingIds.length) {
+      await pool.query(`delete from mpps_event_log where correlated_appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from appointment_protocol_assignments where appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(
+        `delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id in (select id from appointments_v2.complementary_recall_requests where original_appointment_id = any($1::bigint[]) or recall_appointment_id = any($1::bigint[]))`,
+        [allBookingIds]
+      );
+      await pool.query(
+        `delete from appointments_v2.complementary_recall_requests where original_appointment_id = any($1::bigint[]) or recall_appointment_id = any($1::bigint[])`,
+        [allBookingIds]
+      );
+      await pool.query(`delete from appointments_v2.special_quota_consumptions where booking_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from clinical_document_exports where appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from document_appointment_links where appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from documents where v2_booking_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from doctor_portal.reporting_assignment_intents where appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[])`, [allBookingIds]);
+      await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [allBookingIds]);
+    }
+    const suiteUserRows = await pool.query<{ id: number }>(`select id from users where username like 'mpps%'`);
+    const suiteUserIds = suiteUserRows.rows.map((row) => Number(row.id));
+    if (suiteUserIds.length) {
+      const suiteDoctorRows = await pool.query<{ id: number }>(
+        `select id from doctor_portal.doctor_profiles where user_id = any($1::bigint[])`,
+        [suiteUserIds]
+      );
+      const suiteDoctorIds = suiteDoctorRows.rows.map((row) => Number(row.id));
+      if (suiteDoctorIds.length) {
+        const suiteSavedViewRows = await pool.query<{ id: number }>(
+          `select id from doctor_portal.reporting_board_saved_views where owner_user_id = any($1::bigint[]) or owner_doctor_id = any($2::bigint[]) or target_doctor_id = any($2::bigint[])`,
+          [suiteUserIds, suiteDoctorIds]
+        );
+        const suiteSavedViewIds = suiteSavedViewRows.rows.map((row) => Number(row.id));
+        if (suiteSavedViewIds.length) {
+          await pool.query(`delete from doctor_portal.reporting_board_notification_events where saved_view_id = any($1::bigint[])`, [suiteSavedViewIds]);
+          await pool.query(`delete from doctor_portal.reporting_board_saved_views where id = any($1::bigint[])`, [suiteSavedViewIds]);
+        }
+        await pool.query(`delete from doctor_portal.case_team_assignments where assigned_doctor_id = any($1::bigint[])`, [suiteDoctorIds]);
+        await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [suiteDoctorIds]);
+        await pool.query(`delete from doctor_portal.doctor_profiles where id = any($1::bigint[])`, [suiteDoctorIds]);
+      }
+    }
+    await pool.query(`delete from system_settings where category = 'clinical_document_export'`);
+    for (const setting of priorClinicalExportSettings) {
+      await pool.query(
+        `insert into system_settings (category, setting_key, setting_value, updated_by_user_id) values ('clinical_document_export', $1, $2::jsonb, $3)`,
+        [setting.setting_key, JSON.stringify(setting.setting_value), setting.updated_by_user_id]
+      );
     }
     await cleanupTestData(PREFIX);
     if (closeServer) await closeServer();
@@ -119,6 +210,55 @@ describe("mpps-service integration", () => {
   async function getBookingStatus(bookingId: number): Promise<string> {
     const result = await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId]);
     return String(result.rows[0]?.status || "");
+  }
+
+  async function transaction<T>(run: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const result = await run(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function createPendingReportingIntent(bookingId: number): Promise<void> {
+    await pool.query("update appointments_v2.bookings set requires_report = true where id = $1", [bookingId]);
+    await transaction((client) => createPendingReportingAssignmentIntent(client, {
+      bookingId,
+      intendedDoctorId: reportingDoctorId!,
+      actor: { userId: testData.userId, role: "supervisor" },
+      reason: "MPPS integration test",
+      createdFromContext: "mpps_integration_test",
+    }));
+  }
+
+  async function createLinkedRecall(recallBookingId: number): Promise<{ originalBookingId: number; recallId: number }> {
+    const originalBookingId = await createBooking("completed");
+    const recall = await transaction((client) => createComplementaryRecall(client, {
+      originalAppointmentId: originalBookingId,
+      receptionInstruction: null,
+      technologistInstruction: "Repeat acquisition for MPPS integration test",
+      reasonCode: "technical_equipment_problem",
+      qaClassification: "technical_repeat",
+      urgency: "routine",
+      dueAt: null,
+      reportingDisposition: "supplement_original_report",
+      originalReportDependency: "imaging_completed",
+      notifyOnImagingCompleted: true,
+      requestedByUserId: testData.userId,
+    }));
+    await transaction((client) => linkComplementaryRecallBooking(client, recall, recallBookingId, testData.userId));
+    await pool.query(
+      `insert into doctor_portal.case_team_assignments (appointment_id, assigned_doctor_id, modality_id, assignment_type, status) values ($1, $2, $3, 'reporting', 'active')`,
+      [originalBookingId, reportingDoctorId, testData.modalityId]
+    );
+    return { originalBookingId, recallId: Number(recall.id) };
   }
 
   async function getBookingFallbackValues(bookingId: number): Promise<{ date: string; modality: string }> {
@@ -244,6 +384,101 @@ describe("mpps-service integration", () => {
     assert.equal(await getBookingStatus(bookingId), "completed");
   });
 
+  it("runs canonical completion bookkeeping and post-commit effects", async () => {
+    const bookingId = await createBooking("in-progress");
+    const { originalBookingId, recallId } = await createLinkedRecall(bookingId);
+    await createPendingReportingIntent(bookingId);
+    const documentId = Number((await pool.query<{ id: number }>(
+      `insert into documents (patient_id, v2_booking_id, document_type, original_filename, stored_path, mime_type, file_size, source) values ($1, $2, 'clinical_document', $3, $4, 'application/pdf', 10, 'manual_upload') returning id`,
+      [testData.patientId, bookingId, `mpps-${bookingId}.pdf`, `tests/${PREFIX}${bookingId}.pdf`]
+    )).rows[0]!.id);
+    const mppsInstanceUid = `1.2.826.${bookingId}.canonical-complete`;
+
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    const completed = await ingestMppsEvent({
+      eventType: "n-set",
+      sourceAeTitle: "CT_AE",
+      mppsInstanceUid,
+      performedStepStatus: "COMPLETED",
+      studyInstanceUid: `1.2.826.${bookingId}.completed-study`,
+      performedEndDate: "20260911",
+      performedEndTime: "094501",
+      rawDatasetJson: { PerformedProcedureStepStatus: "COMPLETED" },
+    });
+
+    const booking = await pool.query<{ status: string; completed_at: Date | null; updated_by_user_id: number | null }>(
+      `select status, completed_at, updated_by_user_id from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    const event = await pool.query<{ processing_status: string }>(
+      `select processing_status from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'`,
+      [mppsInstanceUid]
+    );
+    const audit = await pool.query<{ entity_type: string; action_type: string; new_values: Record<string, unknown> }>(
+      `select entity_type, action_type, new_values from audit_log where entity_id = $1 and action_type = 'mpps_status_update' order by id desc limit 1`,
+      [bookingId]
+    );
+    const recall = await pool.query<{ status: string; recall_appointment_id: number | null }>(
+      `select status, recall_appointment_id from appointments_v2.complementary_recall_requests where id = $1`,
+      [recallId]
+    );
+    const intent = await pool.query<{ status: string; activated_assignment_id: number | null }>(
+      `select status, activated_assignment_id from doctor_portal.reporting_assignment_intents where appointment_id = $1`,
+      [bookingId]
+    );
+    const assignedNotifications = await pool.query(
+      `select id from doctor_portal.reporting_board_notification_events where appointment_id = $1 and event_type = 'reporting_case_assigned_to_me'`,
+      [bookingId]
+    );
+    const additionalImagingNotifications = await pool.query(
+      `select id from doctor_portal.reporting_board_notification_events where appointment_id = $1 and event_type = 'additional_imaging_completed'`,
+      [bookingId]
+    );
+    const clinicalExports = await pool.query<{ destination_key: string; status: string }>(
+      `select destination_key, status from clinical_document_exports where appointment_id = $1 and document_id = $2`,
+      [bookingId, documentId]
+    );
+
+    assert.equal(completed.processingStatus, "processed");
+    assert.equal(booking.rows[0]?.status, "completed");
+    assert.ok(booking.rows[0]?.completed_at);
+    assert.equal(booking.rows[0]?.updated_by_user_id, null);
+    assert.equal(event.rows[0]?.processing_status, "processed");
+    assert.equal(recall.rows[0]?.status, "completed");
+    assert.equal(Number(recall.rows[0]?.recall_appointment_id), bookingId);
+    assert.equal(intent.rows[0]?.status, "activated");
+    assert.ok(intent.rows[0]?.activated_assignment_id);
+    assert.ok(assignedNotifications.rows.length >= 1);
+    assert.ok(additionalImagingNotifications.rows.length >= 1);
+    assert.equal(clinicalExports.rows.length, 1);
+    assert.equal(clinicalExports.rows[0]?.destination_key, "orthanc_remote:MPPS_TEST_PACS");
+    assert.equal(clinicalExports.rows[0]?.status, "pending");
+    assert.equal(audit.rows[0]?.entity_type, "appointment_v2_booking");
+    assert.equal(audit.rows[0]?.action_type, "mpps_status_update");
+    assert.equal(audit.rows[0]?.new_values.mppsPerformedStepStatus, "COMPLETED");
+    assert.equal(audit.rows[0]?.new_values.mppsInstanceUid, mppsInstanceUid);
+    assert.equal(await getBookingStatus(originalBookingId), "completed");
+  });
+
+  it("preserves an existing completed_at when MPPS completes a booking", async () => {
+    const bookingId = await createBooking("in-progress");
+    await pool.query(`update appointments_v2.bookings set completed_at = '2030-01-02T03:04:05Z' where id = $1`, [bookingId]);
+    const before = await pool.query<{ completed_at: Date }>(`select completed_at from appointments_v2.bookings where id = $1`, [bookingId]);
+    const mppsInstanceUid = `1.2.826.${bookingId}.existing-completed-at`;
+
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    await ingestMppsEvent({
+      eventType: "n-set",
+      sourceAeTitle: "CT_AE",
+      mppsInstanceUid,
+      performedStepStatus: "COMPLETED",
+      rawDatasetJson: {},
+    });
+
+    const after = await pool.query<{ completed_at: Date }>(`select completed_at from appointments_v2.bookings where id = $1`, [bookingId]);
+    assert.equal(after.rows[0]?.completed_at.getTime(), before.rows[0]?.completed_at.getTime());
+  });
+
   it("stores distinct IN PROGRESS N-SET modifications and deduplicates exact retries", async () => {
     const bookingId = await createBooking();
     const mppsInstanceUid = `1.2.826.${bookingId}.updates`;
@@ -306,6 +541,109 @@ describe("mpps-service integration", () => {
     assert.equal(result.updatedStatus, "discontinued");
     assert.equal(stored.rows[0]?.discontinuation_reason, "Patient unable to continue");
     assert.equal(await getBookingStatus(bookingId), "discontinued");
+  });
+
+  it("runs canonical discontinuation bookkeeping for MPPS", async () => {
+    const bookingId = await createBooking("in-progress");
+    const { recallId } = await createLinkedRecall(bookingId);
+    await createPendingReportingIntent(bookingId);
+    const logicalKey = randomUUID();
+    const quotaRule = await pool.query<{ id: number }>(
+      `insert into appointments_v2.special_quota_rules (logical_key, policy_version_id, modality_id, daily_extra_slots, is_active) values ($1, $2, $3, 1, true) returning id`,
+      [logicalKey, testData.policyVersionId, testData.modalityId]
+    );
+    await pool.query(
+      `insert into appointments_v2.special_quota_rule_exam_types (quota_rule_id, exam_type_id) values ($1, $2)`,
+      [quotaRule.rows[0]!.id, testData.examTypeId]
+    );
+    await pool.query(
+      `insert into appointments_v2.special_quota_consumptions (booking_id, quota_rule_id, quota_logical_key, policy_version_id, booking_date, exam_type_id, consumed_by_user_id) values ($1, $2, $3, $4, current_date, $5, $6)`,
+      [bookingId, quotaRule.rows[0]!.id, logicalKey, testData.policyVersionId, testData.examTypeId, testData.userId]
+    );
+    const mppsInstanceUid = `1.2.826.${bookingId}.canonical-discontinued`;
+
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+    const discontinued = await ingestMppsEvent({
+      eventType: "n-set",
+      sourceAeTitle: "CT_AE",
+      mppsInstanceUid,
+      performedStepStatus: "DISCONTINUED",
+      discontinuationReason: "Patient unable to continue",
+      rawDatasetJson: { PerformedProcedureStepStatus: "DISCONTINUED" },
+    });
+
+    const consumption = await pool.query<{ released_at: Date | null; released_by_user_id: number | null; release_reason: string | null }>(
+      `select released_at, released_by_user_id, release_reason from appointments_v2.special_quota_consumptions where booking_id = $1`,
+      [bookingId]
+    );
+    const recall = await pool.query<{ status: string; recall_appointment_id: number | null }>(
+      `select status, recall_appointment_id from appointments_v2.complementary_recall_requests where id = $1`,
+      [recallId]
+    );
+    const intent = await pool.query<{ status: string; cancelled_reason: string | null }>(
+      `select status, cancelled_reason from doctor_portal.reporting_assignment_intents where appointment_id = $1`,
+      [bookingId]
+    );
+    const event = await pool.query<{ processing_status: string }>(
+      `select processing_status from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'`,
+      [mppsInstanceUid]
+    );
+
+    assert.equal(discontinued.processingStatus, "processed");
+    assert.equal(await getBookingStatus(bookingId), "discontinued");
+    assert.ok(consumption.rows[0]?.released_at);
+    assert.equal(consumption.rows[0]?.released_by_user_id, null);
+    assert.equal(consumption.rows[0]?.release_reason, "discontinued");
+    assert.equal(recall.rows[0]?.status, "pending_scheduling");
+    assert.equal(recall.rows[0]?.recall_appointment_id, null);
+    assert.equal(intent.rows[0]?.status, "cancelled");
+    assert.equal(event.rows[0]?.processing_status, "processed");
+  });
+
+  it("rolls back an MPPS completion when a terminal side effect fails", async () => {
+    const bookingId = await createBooking("in-progress");
+    await createLinkedRecall(bookingId);
+    const mppsInstanceUid = `1.2.826.${bookingId}.terminal-rollback`;
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+
+    await pool.query(`
+      create or replace function mpps_test_fail_recall_completion()
+      returns trigger
+      language plpgsql
+      as $$
+      begin
+        if new.status = 'completed' then
+          raise exception 'mpps test terminal side effect failure';
+        end if;
+        return new;
+      end;
+      $$
+    `);
+    await pool.query(`drop trigger if exists mpps_test_fail_recall_completion on appointments_v2.complementary_recall_requests`);
+    await pool.query(`create trigger mpps_test_fail_recall_completion before update on appointments_v2.complementary_recall_requests for each row execute function mpps_test_fail_recall_completion()`);
+
+    try {
+      await assert.rejects(
+        () => ingestMppsEvent({
+          eventType: "n-set",
+          sourceAeTitle: "CT_AE",
+          mppsInstanceUid,
+          performedStepStatus: "COMPLETED",
+          rawDatasetJson: {},
+        }),
+        /mpps test terminal side effect failure/
+      );
+    } finally {
+      await pool.query(`drop trigger if exists mpps_test_fail_recall_completion on appointments_v2.complementary_recall_requests`);
+      await pool.query(`drop function if exists mpps_test_fail_recall_completion()`);
+    }
+
+    assert.equal(await getBookingStatus(bookingId), "in-progress");
+    const event = await pool.query(
+      `select id from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'`,
+      [mppsInstanceUid]
+    );
+    assert.equal(event.rows.length, 0);
   });
 
   it("does not reopen completed or other terminal bookings on MPPS IN PROGRESS", async () => {

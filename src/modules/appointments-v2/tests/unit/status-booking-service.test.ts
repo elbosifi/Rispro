@@ -6,6 +6,10 @@ const source = readFileSync(
   new URL("../../booking/services/status-booking.service.ts", import.meta.url),
   "utf8"
 );
+const terminalTransitionSource = readFileSync(
+  new URL("../../booking/services/booking-terminal-transition.service.ts", import.meta.url),
+  "utf8"
+);
 const readV2RoutesSource = readFileSync(
   new URL("../../api/routes/read-v2-routes.ts", import.meta.url),
   "utf8"
@@ -44,10 +48,11 @@ describe("status booking service source guards", () => {
   });
 
   it("locks and releases active special quota consumption when discontinuing", () => {
-    assert.match(source, /targetStatus === "discontinued"[\s\S]*findActiveSpecialQuotaConsumption/);
-    assert.match(source, /acquireSpecialQuotaBucketLocks/);
-    assert.match(source, /findActiveSpecialQuotaConsumption\(client, bookingId, \{ forUpdate: true \}\)/);
-    assert.match(source, /releaseActiveSpecialQuotaConsumption\(client, \{[\s\S]*releaseReason: "discontinued"/);
+    assert.match(source, /targetStatus === "completed" \|\| targetStatus === "discontinued"[\s\S]*applyBookingTerminalTransition/);
+    assert.match(terminalTransitionSource, /findActiveSpecialQuotaConsumption/);
+    assert.match(terminalTransitionSource, /acquireSpecialQuotaBucketLocks/);
+    assert.match(terminalTransitionSource, /findActiveSpecialQuotaConsumption\(input\.client, input\.bookingId, \{ forUpdate: true \}\)/);
+    assert.match(terminalTransitionSource, /releaseActiveSpecialQuotaConsumption\(input\.client, \{[\s\S]*releaseReason: "discontinued"/);
   });
 
   it("rejects cancellation through the generic manual status path", () => {
@@ -124,15 +129,17 @@ describe("status booking service source guards", () => {
   });
 
   it("manual status completion activates pending reporting intents inside the transaction", () => {
-    assert.match(source, /activatePendingReportingAssignmentIntent/);
-    assert.match(source, /targetStatus === "completed"[\s\S]*activatePendingReportingAssignmentIntent/);
-    assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
-    assert.match(source, /reporting_assignment_intent_notification_failed/);
+    assert.match(source, /applyBookingTerminalTransition/);
+    assert.match(terminalTransitionSource, /activatePendingReportingAssignmentIntent/);
+    assert.match(terminalTransitionSource, /actionType: input\.source === "mpps" \? "mpps_status_completion" : "manual_status_completion"/);
+    assert.match(terminalTransitionSource, /runBookingTerminalTransitionPostCommit/);
+    assert.match(terminalTransitionSource, /createAssignedToMeNotifications/);
+    assert.match(terminalTransitionSource, /reporting_assignment_intent_notification_failed/);
   });
 
   it("manual terminal invalidation cancels pending reporting intents", () => {
-    assert.match(source, /cancelPendingReportingAssignmentIntent/);
-    assert.match(source, /targetStatus === "discontinued"[\s\S]*cancelPendingReportingAssignmentIntent/);
+    assert.match(terminalTransitionSource, /cancelPendingReportingAssignmentIntent/);
+    assert.match(terminalTransitionSource, /reopenComplementaryRecallForUncompletedBooking[\s\S]*cancelPendingReportingAssignmentIntent/);
   });
 
   it("cancel and void workflows cancel pending reporting intents", () => {

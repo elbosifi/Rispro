@@ -44,11 +44,11 @@ describe("mpps-service normalization", () => {
     );
   });
 
-  it("activates or cancels pending reporting intents after MPPS status updates commit", () => {
-    assert.match(source, /activatePendingReportingAssignmentIntent/);
-    assert.match(source, /targetStatus === "completed"[\s\S]*activatePendingReportingAssignmentIntent/);
-    assert.match(source, /targetStatus === "discontinued"[\s\S]*cancelPendingReportingAssignmentIntent/);
-    assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
-    assert.match(source, /reporting_assignment_intent_notification_failed/);
+  it("routes MPPS terminal transitions through the shared transactional workflow", () => {
+    assert.match(source, /applyBookingTerminalTransition/);
+    assert.match(source, /targetStatus === "completed" \|\| targetStatus === "discontinued"[\s\S]*applyBookingTerminalTransition/);
+    assert.match(source, /runBookingTerminalTransitionPostCommit/);
+    assert.doesNotMatch(source, /updateBookingStatusManual/);
+    assert.match(source, /entityType: "appointment_v2_booking"/);
   });
 });

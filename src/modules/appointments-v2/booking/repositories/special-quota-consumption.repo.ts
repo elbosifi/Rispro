@@ -92,7 +92,7 @@ export async function releaseActiveSpecialQuotaConsumption(
   client: PoolClient,
   params: {
     bookingId: number;
-    releasedByUserId: number;
+    releasedByUserId: number | null;
     releaseReason: string;
   }
 ): Promise<SpecialQuotaConsumptionRow | null> {

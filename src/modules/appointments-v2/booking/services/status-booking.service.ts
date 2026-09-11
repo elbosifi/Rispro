@@ -8,18 +8,11 @@ import { activateNoShowRestrictionForBooking } from "../../../../services/patien
 import type { Role } from "../../../../types/domain.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import {
-  activatePendingReportingAssignmentIntent,
-  cancelPendingReportingAssignmentIntent,
-  type ReportingAssignmentActivationNotification,
-} from "../../../doctor-portal/reporting-assignment-intents-service.js";
-import { createAdditionalImagingNotification, createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
-import { queueClinicalDocumentExportForCompletedAppointment } from "../../../../services/clinical-document-export-service.js";
-import { acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
-import {
-  findActiveSpecialQuotaConsumption,
-  releaseActiveSpecialQuotaConsumption,
-} from "../repositories/special-quota-consumption.repo.js";
-import { completeComplementaryRecallForBooking, reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
+  applyBookingTerminalTransition,
+  notifyComplementaryRecallBookingEvent,
+  runBookingTerminalTransitionPostCommit,
+} from "./booking-terminal-transition.service.js";
+import { reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -36,33 +29,6 @@ const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
 ]);
 const REASON_REQUIRED_STATUSES = new Set<BookingStatus>(["no-show", "discontinued"]);
 const DEDICATED_CANCELLATION_MESSAGE = "Appointment cancellation must use the dedicated cancellation workflow.";
-
-async function notifyComplementaryRecallBookingEvent(bookingId: number, eventType: "additional_imaging_patient_arrived" | "additional_imaging_completed"): Promise<void> {
-  const rows = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1", [bookingId]);
-  await Promise.all(rows.rows.map((row) =>
-    createAdditionalImagingNotification({ recallRequestId: Number(row.id), recallAppointmentId: bookingId, eventType })
-      .catch((error) => console.warn(JSON.stringify({ type: "additional_imaging_notification_failed", bookingId, eventType, error: error instanceof Error ? error.message : String(error) })))
-  ));
-}
-
-async function createAssignedToMeNotificationsForReportingIntent(
-  notification: ReportingAssignmentActivationNotification | null
-): Promise<void> {
-  if (!notification) return;
-  try {
-    await createAssignedToMeNotifications({
-      doctorId: notification.doctorId,
-      appointmentIds: [notification.bookingId],
-    });
-  } catch (error) {
-    console.warn(JSON.stringify({
-      type: "reporting_assignment_intent_notification_failed",
-      bookingId: notification.bookingId,
-      doctorId: notification.doctorId,
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
-}
 
 interface SettingsRow {
   setting_key: string;
@@ -426,7 +392,7 @@ export async function updateBookingStatusManual(
   }
 
   const client = await pool.connect();
-  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
+  let terminalTransition: Awaited<ReturnType<typeof applyBookingTerminalTransition>> | null = null;
   try {
     await client.query("begin");
     const { rows } = await client.query<BookingStatusRow>(
@@ -476,103 +442,98 @@ export async function updateBookingStatusManual(
         ? "PACS auto-completion has been disabled for this booking because staff manually changed the status after Orthanc completed it."
         : undefined;
 
-      if (targetStatus === "discontinued") {
-        const consumption = await findActiveSpecialQuotaConsumption(client, bookingId);
-        if (consumption) {
-          await acquireSpecialQuotaBucketLocks(client, [{
-            logicalKey: consumption.quotaLogicalKey,
-            date: consumption.bookingDate,
-          }]);
-          await findActiveSpecialQuotaConsumption(client, bookingId, { forUpdate: true });
-        }
-      }
-
-      await client.query(
-        `
-          update appointments_v2.bookings
-          set
-            status = $2,
-            arrived_at = case
-              when $2 in ('arrived', 'waiting') then coalesce(arrived_at, now())
-              else arrived_at
-            end,
-            waiting_started_at = case
-              when $2 = 'waiting' then coalesce(waiting_started_at, now())
-              else waiting_started_at
-            end,
-            completed_at = case
-              when $2 = 'completed' then coalesce(completed_at, now())
-              else completed_at
-            end,
-            -- A direct completion does not prove the patient entered the queue.
-            -- Preserve arrived_at unless the workflow already recorded arrival/waiting.
-            updated_at = now(),
-            updated_by_user_id = $3,
-            pacs_auto_completion_disabled_at = case when $4 then now() else pacs_auto_completion_disabled_at end,
-            pacs_auto_completion_disabled_by_user_id = case when $4 then $3 else pacs_auto_completion_disabled_by_user_id end,
-            pacs_auto_completion_disabled_reason = case when $4 then $5 else pacs_auto_completion_disabled_reason end
-          where id = $1
-        `,
-        [bookingId, targetStatus, userId, autoCompletionDisabled, autoCompletionDisabledMessage ?? null]
-      );
-      if (targetStatus === "discontinued") {
-        await releaseActiveSpecialQuotaConsumption(client, {
+      if (targetStatus === "completed" || targetStatus === "discontinued") {
+        terminalTransition = await applyBookingTerminalTransition({
+          client,
           bookingId,
-          releasedByUserId: userId,
-          releaseReason: "discontinued",
+          previousStatus: booking.status,
+          targetStatus,
+          actorUserId: userId,
+          source: "manual",
+          auditReason: cleanReason || null,
+          auditOldValues: { booking_date: booking.booking_date },
         });
-      }
-      await auditStatusChange(client, booking, targetStatus, cleanReason || null, userId, "manual_status_change");
-      if (autoCompletionDisabled) {
-        await logAuditEntry(
-          {
-            entityType: "appointment_v2_booking",
-            entityId: bookingId,
-            actionType: "orthanc_auto_completion_disabled",
-            oldValues: {
-              status: booking.status,
-              auto_completed_by: booking.auto_completed_by,
-              auto_completed_at: booking.auto_completed_at,
+        if (autoCompletionDisabled) {
+          await client.query(
+            `
+              update appointments_v2.bookings
+              set
+                pacs_auto_completion_disabled_at = now(),
+                pacs_auto_completion_disabled_by_user_id = $2,
+                pacs_auto_completion_disabled_reason = $3
+              where id = $1
+            `,
+            [bookingId, userId, autoCompletionDisabledMessage ?? null]
+          );
+          await logAuditEntry(
+            {
+              entityType: "appointment_v2_booking",
+              entityId: bookingId,
+              actionType: "orthanc_auto_completion_disabled",
+              oldValues: {
+                status: booking.status,
+                auto_completed_by: booking.auto_completed_by,
+                auto_completed_at: booking.auto_completed_at,
+              },
+              newValues: {
+                status: targetStatus,
+                reason: autoCompletionDisabledMessage,
+                manualReason: cleanReason || null,
+              },
+              changedByUserId: userId,
             },
-            newValues: {
-              status: targetStatus,
-              reason: autoCompletionDisabledMessage,
-              manualReason: cleanReason || null,
-            },
-            changedByUserId: userId,
-          },
-          client
+            client
+          );
+        }
+      } else {
+        await client.query(
+          `
+            update appointments_v2.bookings
+            set
+              status = $2,
+              arrived_at = case
+                when $2 in ('arrived', 'waiting') then coalesce(arrived_at, now())
+                else arrived_at
+              end,
+              waiting_started_at = case
+                when $2 = 'waiting' then coalesce(waiting_started_at, now())
+                else waiting_started_at
+              end,
+              completed_at = case
+                when $2 = 'completed' then coalesce(completed_at, now())
+                else completed_at
+              end,
+              -- A direct completion does not prove the patient entered the queue.
+              -- Preserve arrived_at unless the workflow already recorded arrival/waiting.
+              updated_at = now(),
+              updated_by_user_id = $3,
+              pacs_auto_completion_disabled_at = case when $4 then now() else pacs_auto_completion_disabled_at end,
+              pacs_auto_completion_disabled_by_user_id = case when $4 then $3 else pacs_auto_completion_disabled_by_user_id end,
+              pacs_auto_completion_disabled_reason = case when $4 then $5 else pacs_auto_completion_disabled_reason end
+            where id = $1
+          `,
+          [bookingId, targetStatus, userId, autoCompletionDisabled, autoCompletionDisabledMessage ?? null]
         );
-      }
-      if (targetStatus === "no-show") {
-        await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
-        await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "no-show");
-      }
-      if (targetStatus === "completed") {
-        await completeComplementaryRecallForBooking(client, bookingId, userId);
-        reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, bookingId, {
-          actorUserId: userId,
-          actionType: "manual_status_completion",
-        });
-      } else if (targetStatus === "discontinued") {
-        await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "discontinued");
-        await cancelPendingReportingAssignmentIntent(client, bookingId, {
-          reason: "status_discontinued",
-          actorUserId: userId,
-        });
+        await auditStatusChange(client, booking, targetStatus, cleanReason || null, userId, "manual_status_change");
+        if (targetStatus === "no-show") {
+          await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
+          await reopenComplementaryRecallForUncompletedBooking(client, bookingId, userId, "no-show");
+        }
       }
     }
 
     await client.query("commit");
-    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
     if (targetStatus === "arrived") await notifyComplementaryRecallBookingEvent(bookingId, "additional_imaging_patient_arrived");
-    if (targetStatus === "completed") await notifyComplementaryRecallBookingEvent(bookingId, "additional_imaging_completed");
-    if (targetStatus === "completed") {
-      await queueClinicalDocumentExportForCompletedAppointment(bookingId, userId).catch((error) => {
-        console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));
+    if (terminalTransition?.transitioned && (targetStatus === "completed" || targetStatus === "discontinued")) {
+      await runBookingTerminalTransitionPostCommit({
+        bookingId,
+        targetStatus,
+        actorUserId: userId,
+        reportingIntentNotification: terminalTransition.reportingIntentNotification,
       });
+    } else {
+      scheduleBookingWorklistSync(bookingId);
     }
-    scheduleBookingWorklistSync(bookingId);
     return {
       id: bookingId,
       previousStatus: booking.status,
