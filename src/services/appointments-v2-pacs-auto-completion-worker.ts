@@ -134,6 +134,15 @@ export interface AppointmentsV2PacsAutoCompletionWorker {
 let workerIntervalHandle: NodeJS.Timeout | null = null;
 let workerTickRunning = false;
 let workerStopped = false;
+let schedulePacsStartWorklistSync: typeof scheduleBookingWorklistSync = scheduleBookingWorklistSync;
+
+export function __setPacsStartWorklistSyncForTests(sync: typeof scheduleBookingWorklistSync): void {
+  schedulePacsStartWorklistSync = sync;
+}
+
+export function __resetPacsStartWorklistSyncForTests(): void {
+  schedulePacsStartWorklistSync = scheduleBookingWorklistSync;
+}
 
 function normalizeBoolean(value: unknown): boolean {
   return String(value ?? "").trim().toLowerCase() === "true" ||
@@ -553,8 +562,14 @@ function isPacsStartEligible(status: string): status is typeof PACS_START_ELIGIB
   return PACS_START_ELIGIBLE_STATUSES.includes(status as typeof PACS_START_ELIGIBLE_STATUSES[number]);
 }
 
-function isSafePacsObservation(result: OrthancVerificationResult): boolean {
-  return result.status === "matched" || isBelowMinimumSeriesResult(result);
+function isSafePacsStartObservation(result: OrthancVerificationResult): boolean {
+  return result.instanceCount !== 0 &&
+    (result.status === "matched" || isBelowMinimumSeriesResult(result));
+}
+
+function isTrackablePacsObservation(result: OrthancVerificationResult): boolean {
+  return result.status === "matched" || isBelowMinimumSeriesResult(result) ||
+    (result.status === "insufficient_evidence" && result.lastError === "instance_count_zero");
 }
 
 function hasMeasurablePacsActivity(result: OrthancVerificationResult): boolean {
@@ -578,12 +593,6 @@ function samePacsTimestamp(left: unknown, right: unknown): boolean {
   return String(left) === String(right);
 }
 
-function pacsInactivityElapsed(lastActivityAt: string | null): boolean {
-  if (!lastActivityAt) return false;
-  const lastActivity = new Date(lastActivityAt).getTime();
-  return Number.isFinite(lastActivity) && Date.now() >= lastActivity + PACS_INACTIVITY_COMPLETION_MINUTES * 60_000;
-}
-
 async function processPacsObservation({
   booking,
   setting,
@@ -595,10 +604,6 @@ async function processPacsObservation({
   result: OrthancVerificationResult;
   historyId: number;
 }): Promise<boolean> {
-  if (!isSafePacsObservation(result)) {
-    return false;
-  }
-
   const bookingId = Number(booking.id);
   if (!Number.isInteger(bookingId) || bookingId <= 0) {
     return false;
@@ -614,7 +619,7 @@ async function processPacsObservation({
       "id" | "status" | "acquisition_status_source" | "pacs_auto_completion_disabled_at" |
       "pacs_last_activity_at" | "pacs_last_observed_instance_count" | "pacs_last_observed_series_count" |
       "pacs_last_observed_orthanc_update_at"
-    >>(
+    > & { pacs_inactivity_elapsed: boolean }>(
       `
         select
           id,
@@ -624,12 +629,16 @@ async function processPacsObservation({
           pacs_last_activity_at,
           pacs_last_observed_instance_count,
           pacs_last_observed_series_count,
-          pacs_last_observed_orthanc_update_at
+          pacs_last_observed_orthanc_update_at,
+          (
+            pacs_last_activity_at is not null
+            and current_timestamp >= pacs_last_activity_at + make_interval(mins => $2::int)
+          ) as pacs_inactivity_elapsed
         from appointments_v2.bookings
         where id = $1
         for update
       `,
-      [bookingId]
+      [bookingId, PACS_INACTIVITY_COMPLETION_MINUTES]
     );
     const current = rows[0];
     if (
@@ -641,6 +650,10 @@ async function processPacsObservation({
     }
 
     if (isPacsStartEligible(current.status)) {
+      if (!isSafePacsStartObservation(result)) {
+        await client.query("commit");
+        return false;
+      }
       await client.query(
         `
           update appointments_v2.bookings
@@ -683,6 +696,10 @@ async function processPacsObservation({
       }, client);
       started = true;
     } else if (current.status === "in-progress" && current.acquisition_status_source === "pacs") {
+      if (!isTrackablePacsObservation(result)) {
+        await client.query("commit");
+        return false;
+      }
       const activityChanged = pacsActivityChanged(current, result);
       await client.query(
         `
@@ -704,8 +721,12 @@ async function processPacsObservation({
         [bookingId, activityChanged, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt, result.studyStartedAt, result.pacsFirstSeenAt, result.timingSource, result.timingConfidence]
       );
 
-      if (!activityChanged && hasMeasurablePacsActivity(result) && pacsInactivityElapsed(current.pacs_last_activity_at)) {
-        targetStatus = isBelowMinimumSeriesResult(result) ? "discontinued" : "completed";
+      if (!activityChanged && hasMeasurablePacsActivity(result) && current.pacs_inactivity_elapsed) {
+        targetStatus = isBelowMinimumSeriesResult(result)
+          ? "discontinued"
+          : result.status === "matched" && result.instanceCount !== 0
+            ? "completed"
+            : null;
         if (targetStatus === "discontinued" && setting.below_minimum_series_action !== "discontinue") {
           targetStatus = null;
         }
@@ -754,7 +775,9 @@ async function processPacsObservation({
               verificationCheckId: historyId,
             },
           });
-          await markHistoryCompleted(historyId, client);
+          if (targetStatus === "completed") {
+            await markHistoryCompleted(historyId, client);
+          }
         }
       }
     } else {
@@ -763,7 +786,17 @@ async function processPacsObservation({
     }
 
     await client.query("commit");
-    if (started) scheduleBookingWorklistSync(bookingId);
+    if (started) {
+      try {
+        schedulePacsStartWorklistSync(bookingId);
+      } catch (error) {
+        console.error(JSON.stringify({
+          type: "appointments_v2_pacs_auto_start_worklist_sync_schedule_failed",
+          bookingId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }
     if (terminalTransition?.transitioned && targetStatus) {
       await runBookingTerminalTransitionPostCommit({
         bookingId,

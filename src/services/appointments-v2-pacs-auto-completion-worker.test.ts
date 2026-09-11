@@ -38,7 +38,9 @@ test("worker excludes bookings after manual or MPPS PACS override", () => {
 test("worker completes only PACS-owned inactive bookings through the canonical transition service", () => {
   assert.match(source, /applyBookingTerminalTransition/);
   assert.match(source, /source: "pacs"/);
-  assert.match(source, /pacsInactivityElapsed/);
+  assert.match(source, /current_timestamp >= pacs_last_activity_at \+ make_interval\(mins => \$2::int\)/);
+  assert.match(source, /PACS_INACTIVITY_COMPLETION_MINUTES/);
+  assert.doesNotMatch(source, /Date\.now\(\).*PACS_INACTIVITY_COMPLETION_MINUTES/);
   assert.match(source, /entityType: "appointment_v2_booking"/);
   assert.doesNotMatch(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
@@ -70,10 +72,29 @@ test("worker runs shared terminal post-commit effects after PACS completion", ()
 test("worker defers below-minimum discontinuation until PACS inactivity", () => {
   assert.match(source, /below_minimum_series_action/);
   assert.match(source, /series_count_below_minimum/);
-  assert.match(source, /pacsInactivityElapsed\(current\.pacs_last_activity_at\)/);
+  assert.match(source, /current\.pacs_inactivity_elapsed/);
   assert.match(source, /targetStatus === "discontinued" && setting\.below_minimum_series_action !== "discontinue"/);
   assert.match(source, /source: "pacs"/);
   assert.match(source, /applyBookingTerminalTransition/);
+});
+
+test("worker marks only completed PACS verification history as completed", () => {
+  assert.match(source, /if \(targetStatus === "completed"\) \{\s*await markHistoryCompleted\(historyId, client\);/);
+});
+
+test("worker isolates post-commit PACS-start MWL scheduling failures", () => {
+  assert.match(source, /schedulePacsStartWorklistSync/);
+  assert.match(source, /appointments_v2_pacs_auto_start_worklist_sync_schedule_failed/);
+  assert.match(source, /try \{\s*schedulePacsStartWorklistSync\(bookingId\);\s*\} catch/);
+});
+
+test("worker distinguishes strict start evidence from zero-instance tracking evidence", () => {
+  assert.match(source, /function isSafePacsStartObservation/);
+  assert.match(source, /function isTrackablePacsObservation/);
+  assert.match(source, /result\.lastError === "instance_count_zero"/);
+  assert.match(source, /if \(!isSafePacsStartObservation\(result\)\)/);
+  assert.match(source, /if \(!isTrackablePacsObservation\(result\)\)/);
+  assert.match(source, /result\.status === "matched"\s*\? "completed"\s*:\s*null/);
 });
 
 test("worker does not auto-discontinue unavailable series counts", () => {

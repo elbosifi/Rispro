@@ -7,7 +7,11 @@ import {
   __setOrthancFetchForTests,
   __setOrthancSettingsForTests,
 } from "./orthanc-study-verification-service.js";
-import { runAppointmentsV2PacsAutoCompletionTick } from "./appointments-v2-pacs-auto-completion-worker.js";
+import {
+  __resetPacsStartWorklistSyncForTests,
+  __setPacsStartWorklistSyncForTests,
+  runAppointmentsV2PacsAutoCompletionTick,
+} from "./appointments-v2-pacs-auto-completion-worker.js";
 import { updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
 import {
   canReachDatabase,
@@ -64,6 +68,7 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
   });
 
   after(async () => {
+    __resetPacsStartWorklistSyncForTests();
     __resetOrthancFetchForTests();
     __resetOrthancSettingsForTests();
     await cleanupTestData(PREFIX);
@@ -88,6 +93,36 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     await pool.query(`delete from appointments_v2.pacs_auto_completion_verification_history where booking_id = $1`, [bookingId]);
   }
 
+  it("keeps a committed PACS start when post-commit MWL scheduling throws", async () => {
+    observation = { series: 1, instances: 10, lastUpdate: "20260911T085500" };
+    const bookingId = await createBooking();
+    let schedulingCalls = 0;
+    __setPacsStartWorklistSyncForTests(() => {
+      schedulingCalls += 1;
+      throw new Error("forced MWL scheduling failure");
+    });
+    try {
+      const tick = await runAppointmentsV2PacsAutoCompletionTick();
+      const booking = await pool.query<{
+        status: string;
+        source: string | null;
+        activity: Date | null;
+        instances: number | null;
+      }>(
+        `select status, acquisition_status_source as source, pacs_last_activity_at as activity, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+        [bookingId]
+      );
+      assert.equal(tick.checked, 1);
+      assert.equal(schedulingCalls, 1);
+      assert.equal(booking.rows[0]?.status, "in-progress");
+      assert.equal(booking.rows[0]?.source, "pacs");
+      assert.ok(booking.rows[0]?.activity);
+      assert.equal(booking.rows[0]?.instances, 10);
+    } finally {
+      __resetPacsStartWorklistSyncForTests();
+    }
+  });
+
   it("starts, tracks activity, waits for inactivity, and uses the canonical completed state", async () => {
     observation = { series: 1, instances: 10, lastUpdate: "20260911T090000" };
     const bookingId = await createBooking();
@@ -106,15 +141,65 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     assert.ok(trackedBooking.rows[0]?.activity && trackedBooking.rows[0].activity.getTime() >= firstActivity);
 
     await clearThrottle(bookingId);
-    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = now() - interval '11 minutes' where id = $1`, [bookingId]);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '9 minutes' where id = $1`, [bookingId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId])).rows[0]?.status, "in-progress");
+
+    await clearThrottle(bookingId);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [bookingId]);
     await runAppointmentsV2PacsAutoCompletionTick();
     const completedBooking = await pool.query<{ status: string; completed_at: Date | null; auto_completed_by: string | null }>(`select status, completed_at, auto_completed_by from appointments_v2.bookings where id = $1`, [bookingId]);
     assert.equal(completedBooking.rows[0]?.status, "completed");
     assert.ok(completedBooking.rows[0]?.completed_at);
     assert.equal(completedBooking.rows[0]?.auto_completed_by, "orthanc_pacs_auto_completion");
+    const completedHistory = await pool.query<{ completed_booking: boolean }>(
+      `select completed_booking from appointments_v2.pacs_auto_completion_verification_history where booking_id = $1 order by id desc limit 1`,
+      [bookingId]
+    );
+    assert.equal(completedHistory.rows[0]?.completed_booking, true);
   });
 
   it("activity, missing measurements, below-minimum studies, and MPPS ownership cannot be incorrectly completed", async () => {
+    observation = { series: 1, instances: 0, lastUpdate: "20260911T085000" };
+    const scheduledZeroId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [scheduledZeroId])).rows[0]?.status, "scheduled");
+
+    const zeroTrackingId = await createBooking("in-progress");
+    await pool.query(
+      `update appointments_v2.bookings set acquisition_status_source = 'pacs', pacs_last_activity_at = current_timestamp - interval '11 minutes', pacs_last_observed_instance_count = 10, pacs_last_observed_series_count = 1, pacs_last_observed_orthanc_update_at = '2026-09-11T08:00:00Z' where id = $1`,
+      [zeroTrackingId]
+    );
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const zeroChanged = await pool.query<{ status: string; activity: Date | null; instances: number | null }>(
+      `select status, pacs_last_activity_at as activity, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [zeroTrackingId]
+    );
+    assert.equal(zeroChanged.rows[0]?.status, "in-progress");
+    assert.equal(zeroChanged.rows[0]?.instances, 0);
+    const zeroActivity = zeroChanged.rows[0]?.activity?.getTime();
+
+    await clearThrottle(zeroTrackingId);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const zeroUnchanged = await pool.query<{ status: string; activity: Date | null }>(
+      `select status, pacs_last_activity_at as activity from appointments_v2.bookings where id = $1`,
+      [zeroTrackingId]
+    );
+    assert.equal(zeroUnchanged.rows[0]?.status, "in-progress");
+    assert.equal(zeroUnchanged.rows[0]?.activity?.getTime(), zeroActivity);
+
+    await clearThrottle(zeroTrackingId);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [zeroTrackingId]);
+    observation = { series: 1, instances: 5, lastUpdate: "20260911T085100" };
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const zeroIncreased = await pool.query<{ status: string; activity: Date | null; instances: number | null }>(
+      `select status, pacs_last_activity_at as activity, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [zeroTrackingId]
+    );
+    assert.equal(zeroIncreased.rows[0]?.status, "in-progress");
+    assert.equal(zeroIncreased.rows[0]?.instances, 5);
+    assert.ok((zeroIncreased.rows[0]?.activity?.getTime() || 0) > (zeroActivity || 0));
+
     observation = { series: 1, instances: 15, lastUpdate: "20260911T091000" };
     const changedId = await createBooking("in-progress");
     await pool.query(`update appointments_v2.bookings set acquisition_status_source = 'pacs', pacs_last_activity_at = now() - interval '11 minutes', pacs_last_observed_instance_count = 10, pacs_last_observed_series_count = 1, pacs_last_observed_orthanc_update_at = '2026-09-11T09:00:00Z' where id = $1`, [changedId]);
@@ -138,6 +223,11 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = now() - interval '11 minutes' where id = $1`, [belowMinimumId]);
     await runAppointmentsV2PacsAutoCompletionTick();
     assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [belowMinimumId])).rows[0]?.status, "discontinued");
+    const discontinuedHistory = await pool.query<{ completed_booking: boolean }>(
+      `select completed_booking from appointments_v2.pacs_auto_completion_verification_history where booking_id = $1 order by id desc limit 1`,
+      [belowMinimumId]
+    );
+    assert.equal(discontinuedHistory.rows[0]?.completed_booking, false);
 
     const mppsOwnedId = await createBooking("in-progress");
     await pool.query(`update appointments_v2.bookings set acquisition_status_source = 'mpps' where id = $1`, [mppsOwnedId]);
