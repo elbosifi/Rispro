@@ -158,6 +158,18 @@ function normalizeRawDataset(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function stableJson(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : "null";
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(String(value));
+}
+
 function buildDedupeKey(input: {
   eventType: MppsEventType;
   sourceAeTitle: string;
@@ -166,6 +178,7 @@ function buildDedupeKey(input: {
   studyInstanceUid: string;
   patientId: string;
   performedStepStatus: string;
+  rawDatasetJson: Record<string, unknown>;
 }): string {
   const stableInstance = input.mppsInstanceUid || [
     input.sourceAeTitle,
@@ -176,7 +189,7 @@ function buildDedupeKey(input: {
 
   return crypto
     .createHash("sha256")
-    .update(`${input.eventType}|${stableInstance}|${input.performedStepStatus}`)
+    .update(`${input.eventType}|${input.sourceAeTitle}|${stableInstance}|${input.performedStepStatus}|${stableJson(input.rawDatasetJson)}`)
     .digest("hex");
 }
 
@@ -238,6 +251,7 @@ export function normalizeIncomingMppsEvent(payload: IncomingMppsEventPayload): N
       studyInstanceUid,
       patientId,
       performedStepStatus,
+      rawDatasetJson,
     }),
   };
 }
@@ -640,28 +654,32 @@ async function markEventProcessed(
 
 export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promise<MppsIngestResult> {
   const event = normalizeIncomingMppsEvent(payload);
-  const insertClient = await pool.connect();
+  const client = await pool.connect();
   let eventId: number | null = null;
   let deduplicated = false;
   let priorMppsState: AcceptedMppsStateRow | null = null;
+  let committed = false;
+  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
 
   try {
-    await insertClient.query("begin");
-    const lifecycle = await validateMppsLifecycle(insertClient, event);
+    await client.query("begin");
+    const lifecycle = await validateMppsLifecycle(client, event);
     priorMppsState = lifecycle.priorState;
     if (lifecycle.rejection) {
-      await insertClient.query("commit");
+      await client.query("commit");
+      committed = true;
       return lifecycle.rejection;
     }
-    const stored = await insertOrLoadMppsEvent(insertClient, event);
+    const stored = await insertOrLoadMppsEvent(client, event);
     eventId = stored.id;
     deduplicated = stored.deduplicated;
-    const existing = await loadStoredEvent(insertClient, stored.id);
+    const existing = await loadStoredEvent(client, stored.id);
 
     if (stored.deduplicated && ["processed", "ignored"].includes(existing.processing_status)) {
-      await insertClient.query("commit");
+      await client.query("commit");
+      committed = true;
       return acceptedResult({
-        eventId: existing.id,
+        eventId: Number(existing.id),
         deduplicated: true,
         correlatedAppointmentId: existing.correlated_appointment_id,
         correlationStatus: existing.correlation_status,
@@ -671,18 +689,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         updatedStatus: null,
       });
     }
-    await insertClient.query("commit");
-  } catch (error) {
-    await insertClient.query("rollback");
-    throw error;
-  } finally {
-    insertClient.release();
-  }
 
-  const client = await pool.connect();
-  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
-  try {
-    await client.query("begin");
     const storedId = Number(eventId);
     const correlation = event.eventType === "n-set" && priorMppsState?.correlated_appointment_id
       ? { status: "matched" as const, bookingId: Number(priorMppsState.correlated_appointment_id), reason: null }
@@ -695,6 +702,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: correlation.reason,
       });
       await client.query("commit");
+      committed = true;
       return acceptedResult({
         eventId: storedId,
         deduplicated,
@@ -727,6 +735,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: "Correlated booking no longer exists.",
       });
       await client.query("commit");
+      committed = true;
       return acceptedResult({
         eventId: storedId,
         deduplicated,
@@ -748,6 +757,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: `Unsupported MPPS performed step status: ${event.performedStepStatus}`,
       });
       await client.query("commit");
+      committed = true;
       return acceptedResult({
         eventId: storedId,
         deduplicated,
@@ -769,6 +779,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         processingError: errorMessage,
       });
       await client.query("commit");
+      committed = true;
       return acceptedResult({
         eventId: storedId,
         deduplicated,
@@ -829,13 +840,9 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
     });
 
     await client.query("commit");
+    committed = true;
 
-    if (booking.status !== targetStatus) {
-      scheduleBookingWorklistSync(booking.id);
-    }
-    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
-
-    return acceptedResult({
+    const result = acceptedResult({
       eventId: storedId,
       deduplicated,
       correlatedAppointmentId: booking.id,
@@ -845,17 +852,23 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
       previousStatus: booking.status,
       updatedStatus: targetStatus,
     });
+    if (booking.status !== targetStatus) {
+      try {
+        scheduleBookingWorklistSync(booking.id);
+      } catch (error) {
+        console.error("MPPS worklist synchronization scheduling failed after commit.", error);
+      }
+    }
+    try {
+      await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
+    } catch (error) {
+      console.error("MPPS reporting notification failed after commit.", error);
+    }
+
+    return result;
   } catch (error) {
-    await client.query("rollback");
-    if (eventId) {
-      await pool.query(
-        `
-          update mpps_event_log
-          set processing_status = 'failed', processing_error = $2, updated_at = now()
-          where id = $1
-        `,
-        [eventId, error instanceof Error ? error.message : String(error)]
-      ).catch(() => undefined);
+    if (!committed) {
+      await client.query("rollback").catch(() => undefined);
     }
     throw error;
   } finally {

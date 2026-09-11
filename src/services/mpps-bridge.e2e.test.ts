@@ -95,6 +95,7 @@ async function startBridge(options: {
   bridgePort: number;
   adminPort: number;
   aeTitle?: string;
+  bridgeLogs?: string[];
 }): Promise<ChildProcess> {
   const startedBridge = spawn(pythonCommand, [bridgeScript], {
     cwd: repoRoot,
@@ -105,16 +106,22 @@ async function startBridge(options: {
       MPPS_BRIDGE_AE_TITLE: options.aeTitle || "RISPRO_MPPS_E2E",
       MPPS_STORAGE_DIR: options.storageDir,
       RISPRO_BASE_URL: options.baseUrl,
-      RISPRO_INTERNAL_SECRET: env.jwtSecret,
+      RISPRO_INTERNAL_SECRET: env.risproInternalSecret || env.jwtSecret,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const stderr: string[] = [];
-  startedBridge.stderr?.on("data", (chunk: Buffer | string) => stderr.push(chunk.toString()));
+  const bridgeOutput: string[] = [];
+  const captureOutput = (chunk: Buffer | string) => {
+    const output = chunk.toString();
+    bridgeOutput.push(output);
+    options.bridgeLogs?.push(output);
+  };
+  startedBridge.stdout?.on("data", captureOutput);
+  startedBridge.stderr?.on("data", captureOutput);
   startedBridge.on("exit", (code) => {
     if (code !== null && code !== 0) {
-      process.stderr.write(`MPPS bridge exited early with code ${code}\n${stderr.join("")}`);
+      process.stderr.write(`MPPS bridge exited early with code ${code}\n${bridgeOutput.join("")}`);
     }
   });
 
@@ -349,6 +356,65 @@ describe("mpps bridge end-to-end", () => {
       "--echo-only",
     ]);
     assert.equal(result.exitCode, 0, `C-ECHO failed.\nSTDERR:\n${result.stderr}`);
+  });
+
+  it("keeps successful MPPS delivery successful when diagnostic storage is unavailable", async (t) => {
+    if (skipReason) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const diagnosticFile = path.join(bridgeStorageDir, "diagnostic-storage-file");
+    const bridgeLogs: string[] = [];
+    const previousInternalSecret = env.risproInternalSecret;
+    const dedicatedSecret = "mpps-bridge-e2e-dedicated-secret";
+    await fs.writeFile(diagnosticFile, "not a directory", "utf8");
+
+    try {
+      await stopProcess(bridge);
+      bridge = null;
+      env.risproInternalSecret = dedicatedSecret;
+      bridge = await startBridge({
+        baseUrl,
+        storageDir: diagnosticFile,
+        bridgePort,
+        adminPort: bridgeAdminPort,
+        bridgeLogs,
+      });
+
+      const echo = await runSender([
+        "--host", "127.0.0.1",
+        "--port", String(bridgePort),
+        "--called-ae", "RISPRO_MPPS_E2E",
+        "--echo-only",
+      ]);
+      assert.equal(echo.exitCode, 0, `C-ECHO failed with unavailable diagnostics.\n${echo.stderr}`);
+
+      const bookingId = await createBooking("scheduled", "08:00:00");
+      const mppsInstanceUid = `1.2.826.0.1.3680043.10.543.${bookingId}${Date.now()}.diagnostic`;
+      const senderResult = await runSender(buildFixtureArgs({
+        bookingId,
+        patientId: await getPatientIdentifier(),
+        mppsInstanceUid,
+        studyInstanceUid: `${mppsInstanceUid}.study`,
+        scheduledDate: new Date().toISOString().slice(0, 10),
+        scheduledTime: "08:00:00",
+        skipSet: true,
+      }));
+      assert.equal(senderResult.exitCode, 0, `MPPS delivery failed.\n${senderResult.stderr}`);
+      assert.equal(await getBookingStatus(bookingId), "waiting");
+      assert.match(bridgeLogs.join(""), /diagnostic storage warning/i);
+    } finally {
+      await stopProcess(bridge);
+      env.risproInternalSecret = previousInternalSecret;
+      await fs.rm(diagnosticFile, { force: true }).catch(() => undefined);
+      bridge = await startBridge({
+        baseUrl,
+        storageDir: bridgeStorageDir,
+        bridgePort,
+        adminPort: bridgeAdminPort,
+      });
+    }
   });
 
   it("processes N-CREATE and N-SET through the real bridge into RISpro", async (t) => {

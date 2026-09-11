@@ -163,6 +163,41 @@ describe("mpps-service integration", () => {
     assert.equal(invalid.status, 400);
   });
 
+  it("uses the configured internal MPPS secret and falls back to JWT_SECRET", async () => {
+    const previousInternalSecret = env.risproInternalSecret;
+    const previousJwtSecret = env.jwtSecret;
+    const invalidPayload = { eventType: "n-create", sourceAeTitle: "CT_AE", rawDatasetJson: {} };
+
+    try {
+      env.risproInternalSecret = "mpps-dedicated-test-secret";
+      const dedicatedAccepted = await fetch(`${baseUrl}/api/dicom/mpps/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-RISPRO-MPPS-SECRET": env.risproInternalSecret },
+        body: JSON.stringify(invalidPayload),
+      });
+      assert.equal(dedicatedAccepted.status, 400);
+
+      const wrongSecret = await fetch(`${baseUrl}/api/dicom/mpps/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-RISPRO-MPPS-SECRET": "wrong-secret" },
+        body: JSON.stringify(invalidPayload),
+      });
+      assert.equal(wrongSecret.status, 401);
+
+      env.risproInternalSecret = "";
+      env.jwtSecret = "mpps-jwt-fallback-test-secret";
+      const fallbackAccepted = await fetch(`${baseUrl}/api/dicom/mpps/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-RISPRO-MPPS-SECRET": env.jwtSecret },
+        body: JSON.stringify(invalidPayload),
+      });
+      assert.equal(fallbackAccepted.status, 400);
+    } finally {
+      env.risproInternalSecret = previousInternalSecret;
+      env.jwtSecret = previousJwtSecret;
+    }
+  });
+
   it("persists actual performed start timing separately and maps IN PROGRESS to waiting", async () => {
     const bookingId = await createBooking();
     const mppsInstanceUid = `1.2.826.${bookingId}.start`;
@@ -195,6 +230,52 @@ describe("mpps-service integration", () => {
     assert.equal(completed.updatedStatus, "completed");
     assert.deepEqual(stored.rows[0], { performed_end_date: "20260911", performed_end_time: "094501" });
     assert.equal(await getBookingStatus(bookingId), "completed");
+  });
+
+  it("stores distinct IN PROGRESS N-SET modifications and deduplicates exact retries", async () => {
+    const bookingId = await createBooking();
+    const mppsInstanceUid = `1.2.826.${bookingId}.updates`;
+    await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+
+    const modificationA = {
+      PerformedProcedureStepStatus: "IN PROGRESS",
+      PerformedSeriesSequence: [{ SeriesInstanceUID: `${mppsInstanceUid}.series-a`, Modality: "CT" }],
+    };
+    const modificationB = {
+      PerformedSeriesSequence: [{ Modality: "CT", SeriesInstanceUID: `${mppsInstanceUid}.series-b` }],
+      PerformedProcedureStepStatus: "IN PROGRESS",
+    };
+    const firstUpdate = await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "IN PROGRESS", rawDatasetJson: modificationA,
+    });
+    const secondUpdate = await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "IN PROGRESS", rawDatasetJson: modificationB,
+    });
+    const exactRetry = await ingestMppsEvent({
+      eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid,
+      performedStepStatus: "IN PROGRESS",
+      rawDatasetJson: {
+        PerformedProcedureStepStatus: "IN PROGRESS",
+        PerformedSeriesSequence: [{ SeriesInstanceUID: `${mppsInstanceUid}.series-b`, Modality: "CT" }],
+      },
+    });
+    const rows = await pool.query<{ id: number }>(
+      `select id from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set' order by id asc`,
+      [mppsInstanceUid]
+    );
+
+    assert.equal(firstUpdate.dicomStatus, 0x0000);
+    assert.equal(secondUpdate.dicomStatus, 0x0000);
+    assert.equal(firstUpdate.deduplicated, false);
+    assert.equal(secondUpdate.deduplicated, false);
+    assert.notEqual(firstUpdate.eventId, secondUpdate.eventId);
+    assert.equal(exactRetry.dicomStatus, 0x0000);
+    assert.equal(exactRetry.deduplicated, true);
+    assert.equal(exactRetry.eventId, secondUpdate.eventId);
+    assert.equal(rows.rows.length, 2);
+    assert.equal(await getBookingStatus(bookingId), "waiting");
   });
 
   it("persists discontinuation reason and maps a valid final N-SET", async () => {

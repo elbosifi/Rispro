@@ -110,6 +110,7 @@ export interface EnvConfig {
   databaseSslRejectUnauthorized: boolean;
   dbPoolMax: number;
   jwtSecret: string;
+  risproInternalSecret: string;
   cookieName: string;
   reauthCookieName: string;
   cookieSecure: boolean;
@@ -205,6 +206,7 @@ export const env: EnvConfig = {
   databaseSslRejectUnauthorized: readBoolean("DATABASE_SSL_REJECT_UNAUTHORIZED", false),
   dbPoolMax: readPositiveInteger("DB_POOL_MAX", 10),
   jwtSecret: requireEnv("JWT_SECRET"),
+  risproInternalSecret: String(process.env.RISPRO_INTERNAL_SECRET || "").trim(),
   cookieName: process.env.COOKIE_NAME || "rispro_session",
   reauthCookieName: process.env.REAUTH_COOKIE_NAME || "rispro_supervisor_reauth",
   cookieSecure: readBoolean("COOKIE_SECURE", isProduction),

@@ -24,7 +24,7 @@ MPPS_USERNAME = os.environ.get("MPPS_USERNAME", "")
 MPPS_PASSWORD = os.environ.get("MPPS_PASSWORD", "")
 MPPS_ADMIN_PORT = int(os.environ.get("MPPS_ADMIN_PORT", "18080"))
 RISPRO_BASE_URL = os.environ.get("RISPRO_BASE_URL", "http://app:3000").rstrip("/")
-RISPRO_MPPS_SECRET = os.environ.get("RISPRO_INTERNAL_SECRET", os.environ.get("JWT_SECRET", ""))
+RISPRO_MPPS_SECRET = os.environ.get("RISPRO_INTERNAL_SECRET", "").strip() or os.environ.get("JWT_SECRET", "")
 
 STATE = {
     "started_at": datetime.now(timezone.utc).isoformat(),
@@ -138,8 +138,17 @@ def deliver_to_rispro(payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(raw or "{}")
 
 
+def write_diagnostic_event(payload: dict[str, Any]) -> None:
+    """Best-effort local diagnostics; RISpro/PostgreSQL remains authoritative."""
+    try:
+        MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{payload['timestamp'].replace(':', '-')}-{payload['event_type']}-{payload['sop_instance_uid']}.json"
+        (MPPS_STORAGE_DIR / filename).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"MPPS bridge diagnostic storage warning for {MPPS_STORAGE_DIR}: {exc}", flush=True)
+
+
 def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> dict[str, Any]:
-    MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     normalized_payload = normalize_mpps_event(event_type, sop_instance_uid, dataset, calling_ae_title)
     payload = {
         "event_type": event_type,
@@ -157,8 +166,7 @@ def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None
         delivery_error = str(exc)
         payload["rispro_delivery_error"] = delivery_error
 
-    filename = f"{payload['timestamp'].replace(':', '-')}-{event_type}-{sop_instance_uid}.json"
-    (MPPS_STORAGE_DIR / filename).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_diagnostic_event(payload)
 
     with STATE_LOCK:
         STATE["last_event_at"] = payload["timestamp"]
@@ -283,7 +291,10 @@ def run_admin_server() -> None:
 
 
 def main() -> None:
-    MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        print(f"MPPS bridge diagnostic storage warning for {MPPS_STORAGE_DIR}: {exc}", flush=True)
 
     admin_thread = threading.Thread(target=run_admin_server, daemon=True)
     admin_thread.start()

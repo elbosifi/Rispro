@@ -58,7 +58,7 @@ function requireSuperAdminUser(request: Request & { user?: AuthenticatedUserCont
 
 function hasValidInternalMppsSecret(req: Request): boolean {
   const provided = String(req.headers["x-rispro-mpps-secret"] || "");
-  const expected = String(env.jwtSecret || "");
+  const expected = String(env.risproInternalSecret || env.jwtSecret || "");
 
   if (!provided || !expected) {
     return false;
