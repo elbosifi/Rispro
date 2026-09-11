@@ -17,7 +17,7 @@ import {
 import { completeComplementaryRecallForBooking, reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
 
 export type TerminalBookingStatus = "completed" | "discontinued";
-export type TerminalTransitionSource = "manual" | "mpps";
+export type TerminalTransitionSource = "manual" | "mpps" | "pacs";
 
 export interface BookingTerminalTransitionResult {
   transitioned: boolean;
@@ -78,7 +78,13 @@ export async function applyBookingTerminalTransition(input: {
     {
       entityType: "appointment_v2_booking",
       entityId: input.bookingId,
-      actionType: input.source === "mpps" ? "mpps_status_update" : "manual_status_change",
+      actionType: input.source === "mpps"
+        ? "mpps_status_update"
+        : input.source === "pacs"
+          ? input.targetStatus === "completed"
+            ? "orthanc_auto_complete"
+            : "orthanc_auto_discontinue_below_minimum_series"
+          : "manual_status_change",
       oldValues: {
         status: input.previousStatus,
         ...input.auditOldValues,
@@ -97,7 +103,11 @@ export async function applyBookingTerminalTransition(input: {
     await completeComplementaryRecallForBooking(input.client, input.bookingId, input.actorUserId);
     const reportingIntentNotification = await activatePendingReportingAssignmentIntent(input.client, input.bookingId, {
       actorUserId: input.actorUserId,
-      actionType: input.source === "mpps" ? "mpps_status_completion" : "manual_status_completion",
+      actionType: input.source === "mpps"
+        ? "mpps_status_completion"
+        : input.source === "pacs"
+          ? "orthanc_auto_complete"
+          : "manual_status_completion",
     });
     return { transitioned: true, reportingIntentNotification };
   }

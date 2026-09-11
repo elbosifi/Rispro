@@ -1,12 +1,10 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
-import { completeComplementaryRecallForBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
 import { requireRow } from "../utils/records.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleBookingWorklistSync } from "./dicom-service.js";
-import { queueClinicalDocumentExportForCompletedAppointment } from "./clinical-document-export-service.js";
 import {
   listOrthancVerificationTargets,
   verifyBookingStudyWithOrthanc,
@@ -23,13 +21,12 @@ import {
 import type { UserId } from "../types/http.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 import {
-  activatePendingReportingAssignmentIntent,
-  cancelPendingReportingAssignmentIntent,
-  type ReportingAssignmentActivationNotification,
-} from "../modules/doctor-portal/reporting-assignment-intents-service.js";
-import { createAdditionalImagingNotification, createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
+  applyBookingTerminalTransition,
+  runBookingTerminalTransitionPostCommit,
+} from "../modules/appointments-v2/booking/services/booking-terminal-transition.service.js";
 
-const ELIGIBLE_BOOKING_STATUSES = ["scheduled", "arrived", "waiting"] as const;
+const PACS_START_ELIGIBLE_STATUSES = ["scheduled", "arrived", "waiting"] as const;
+const PACS_INACTIVITY_COMPLETION_MINUTES = 10;
 const DEFAULT_WORKER_INTERVAL_MS = 60_000;
 const DEFAULT_BATCH_SIZE = 20;
 
@@ -69,6 +66,12 @@ interface EligibleBookingRow extends OrthancBookingVerificationContext {
   appointment_date: string;
   booking_date: string;
   status: string;
+  acquisition_status_source: "pacs" | "mpps" | null;
+  pacs_auto_completion_disabled_at: string | null;
+  pacs_last_activity_at: string | null;
+  pacs_last_observed_instance_count: number | null;
+  pacs_last_observed_series_count: number | null;
+  pacs_last_observed_orthanc_update_at: string | null;
   modality_code: string;
   national_id: string | null;
   mrn: string | null;
@@ -131,25 +134,6 @@ export interface AppointmentsV2PacsAutoCompletionWorker {
 let workerIntervalHandle: NodeJS.Timeout | null = null;
 let workerTickRunning = false;
 let workerStopped = false;
-
-async function createAssignedToMeNotificationsForReportingIntent(
-  notification: ReportingAssignmentActivationNotification | null
-): Promise<void> {
-  if (!notification) return;
-  try {
-    await createAssignedToMeNotifications({
-      doctorId: notification.doctorId,
-      appointmentIds: [notification.bookingId],
-    });
-  } catch (error) {
-    console.warn(JSON.stringify({
-      type: "reporting_assignment_intent_notification_failed",
-      bookingId: notification.bookingId,
-      doctorId: notification.doctorId,
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
-}
 
 function normalizeBoolean(value: unknown): boolean {
   return String(value ?? "").trim().toLowerCase() === "true" ||
@@ -391,6 +375,12 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
         b.booking_date::text as appointment_date,
         b.booking_date::text as booking_date,
         b.status,
+        b.acquisition_status_source,
+        b.pacs_auto_completion_disabled_at,
+        b.pacs_last_activity_at,
+        b.pacs_last_observed_instance_count,
+        b.pacs_last_observed_series_count,
+        b.pacs_last_observed_orthanc_update_at,
         m.code as modality_code,
         p.national_id,
         p.mrn,
@@ -415,7 +405,7 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
       order by b.booking_date desc, b.id desc
       limit 1
     `,
-    [modalityId, ELIGIBLE_BOOKING_STATUSES]
+    [modalityId, PACS_START_ELIGIBLE_STATUSES]
   );
 
   if (rows[0]) {
@@ -430,6 +420,12 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
     appointment_date: "",
     booking_date: "",
     status: "scheduled",
+    acquisition_status_source: null,
+    pacs_auto_completion_disabled_at: null,
+    pacs_last_activity_at: null,
+    pacs_last_observed_instance_count: null,
+    pacs_last_observed_series_count: null,
+    pacs_last_observed_orthanc_update_at: null,
     modality_code: "",
     national_id: null,
     mrn: null,
@@ -553,96 +549,42 @@ function isBelowMinimumSeriesResult(result: OrthancVerificationResult): boolean 
   return result.status === "insufficient_evidence" && result.lastError === "series_count_below_minimum";
 }
 
-async function discontinueBookingForBelowMinimumSeries({
-  booking,
-  setting,
-  result,
-  historyId,
-}: {
-  booking: OrthancBookingVerificationContext;
-  setting: OrthancAutoCompletionSettingLike;
-  result: OrthancVerificationResult;
-  historyId: number;
-}): Promise<boolean> {
-  if (!isBelowMinimumSeriesResult(result) || setting.below_minimum_series_action !== "discontinue") {
-    return false;
-  }
-
-  const bookingId = Number(booking.id);
-  if (!Number.isInteger(bookingId) || bookingId <= 0) {
-    return false;
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    const { rows } = await client.query<{ id: number; status: string; pacs_auto_completion_disabled_at: string | null }>(
-      `
-        select id, status, pacs_auto_completion_disabled_at
-        from appointments_v2.bookings
-        where id = $1
-        for update
-      `,
-      [bookingId]
-    );
-    const current = rows[0];
-    if (
-      !current ||
-      current.pacs_auto_completion_disabled_at ||
-      !ELIGIBLE_BOOKING_STATUSES.includes(current.status as typeof ELIGIBLE_BOOKING_STATUSES[number])
-    ) {
-      await client.query("commit");
-      return false;
-    }
-
-    await client.query(
-      `
-        update appointments_v2.bookings
-        set
-          status = 'discontinued',
-          updated_at = now(),
-          updated_by_user_id = null
-        where id = $1
-      `,
-      [bookingId]
-    );
-
-    await logAuditEntry(
-      {
-        entityType: "appointment_v2_booking",
-        entityId: bookingId,
-        actionType: "orthanc_auto_discontinue_below_minimum_series",
-        oldValues: { status: current.status },
-        newValues: {
-          status: "discontinued",
-          reason: "Orthanc matched the study, but series count was below the configured minimum.",
-          minimumSeriesCount: setting.minimum_series_count ?? 2,
-          belowMinimumSeriesAction: setting.below_minimum_series_action,
-          seriesCount: result.seriesCount,
-          instanceCount: result.instanceCount,
-          verificationCheckId: historyId,
-        },
-        changedByUserId: null,
-      },
-      client
-    );
-    await cancelPendingReportingAssignmentIntent(client, bookingId, {
-      reason: "status_discontinued",
-      actorUserId: null,
-    });
-
-    await client.query("commit");
-    scheduleBookingWorklistSync(bookingId);
-    return true;
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
+function isPacsStartEligible(status: string): status is typeof PACS_START_ELIGIBLE_STATUSES[number] {
+  return PACS_START_ELIGIBLE_STATUSES.includes(status as typeof PACS_START_ELIGIBLE_STATUSES[number]);
 }
 
-async function completeBookingIfStillEligible({
+function isSafePacsObservation(result: OrthancVerificationResult): boolean {
+  return result.status === "matched" || isBelowMinimumSeriesResult(result);
+}
+
+function hasMeasurablePacsActivity(result: OrthancVerificationResult): boolean {
+  return result.instanceCount != null || result.seriesCount != null || result.orthancLastUpdateAt != null;
+}
+
+function pacsActivityChanged(
+  current: Pick<EligibleBookingRow, "pacs_last_observed_instance_count" | "pacs_last_observed_series_count" | "pacs_last_observed_orthanc_update_at">,
+  result: OrthancVerificationResult
+): boolean {
+  return current.pacs_last_observed_instance_count !== result.instanceCount ||
+    current.pacs_last_observed_series_count !== result.seriesCount ||
+    !samePacsTimestamp(current.pacs_last_observed_orthanc_update_at, result.orthancLastUpdateAt);
+}
+
+function samePacsTimestamp(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return left == null && right == null;
+  const leftTime = new Date(left instanceof Date ? left : String(left)).getTime();
+  const rightTime = new Date(right instanceof Date ? right : String(right)).getTime();
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime === rightTime;
+  return String(left) === String(right);
+}
+
+function pacsInactivityElapsed(lastActivityAt: string | null): boolean {
+  if (!lastActivityAt) return false;
+  const lastActivity = new Date(lastActivityAt).getTime();
+  return Number.isFinite(lastActivity) && Date.now() >= lastActivity + PACS_INACTIVITY_COMPLETION_MINUTES * 60_000;
+}
+
+async function processPacsObservation({
   booking,
   setting,
   result,
@@ -653,7 +595,7 @@ async function completeBookingIfStillEligible({
   result: OrthancVerificationResult;
   historyId: number;
 }): Promise<boolean> {
-  if (result.status !== "matched") {
+  if (!isSafePacsObservation(result)) {
     return false;
   }
 
@@ -663,12 +605,26 @@ async function completeBookingIfStillEligible({
   }
 
   const client = await pool.connect();
-  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
+  let terminalTransition: Awaited<ReturnType<typeof applyBookingTerminalTransition>> | null = null;
+  let targetStatus: "completed" | "discontinued" | null = null;
+  let started = false;
   try {
     await client.query("begin");
-    const { rows } = await client.query<{ id: number; status: string; pacs_auto_completion_disabled_at: string | null }>(
+    const { rows } = await client.query<Pick<EligibleBookingRow,
+      "id" | "status" | "acquisition_status_source" | "pacs_auto_completion_disabled_at" |
+      "pacs_last_activity_at" | "pacs_last_observed_instance_count" | "pacs_last_observed_series_count" |
+      "pacs_last_observed_orthanc_update_at"
+    >>(
       `
-        select id, status, pacs_auto_completion_disabled_at
+        select
+          id,
+          status,
+          acquisition_status_source,
+          pacs_auto_completion_disabled_at,
+          pacs_last_activity_at,
+          pacs_last_observed_instance_count,
+          pacs_last_observed_series_count,
+          pacs_last_observed_orthanc_update_at
         from appointments_v2.bookings
         where id = $1
         for update
@@ -678,87 +634,146 @@ async function completeBookingIfStillEligible({
     const current = rows[0];
     if (
       !current ||
-      current.pacs_auto_completion_disabled_at ||
-      !ELIGIBLE_BOOKING_STATUSES.includes(current.status as typeof ELIGIBLE_BOOKING_STATUSES[number])
+      current.pacs_auto_completion_disabled_at
     ) {
       await client.query("commit");
       return false;
     }
 
-    await client.query(
-      `
-        update appointments_v2.bookings
-        set
-          status = 'completed',
-          auto_completed_by = 'orthanc_pacs_auto_completion',
-          auto_completed_at = now(),
-          completed_at = coalesce(completed_at, now()),
-          auto_completion_check_id = $2,
-          pacs_study_started_at = $3::timestamptz,
-          pacs_first_seen_at = $4::timestamptz,
-          pacs_timing_source = $5,
-          pacs_timing_confidence = $6,
-          pacs_timing_checked_at = now(),
-          updated_at = now(),
-          updated_by_user_id = null
-        where id = $1
-      `,
-      [
-        bookingId,
-        historyId,
-        result.studyStartedAt,
-        result.pacsFirstSeenAt,
-        result.timingSource,
-        result.timingConfidence,
-      ]
-    );
-    await completeComplementaryRecallForBooking(client, bookingId, null);
-
-    await markHistoryCompleted(historyId, client);
-
-    await logAuditEntry(
-      {
+    if (isPacsStartEligible(current.status)) {
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set
+            status = 'in-progress',
+            acquisition_status_source = 'pacs',
+            pacs_last_activity_at = now(),
+            pacs_last_observed_instance_count = $2,
+            pacs_last_observed_series_count = $3,
+            pacs_last_observed_orthanc_update_at = $4::timestamptz,
+            pacs_study_started_at = coalesce(pacs_study_started_at, $5::timestamptz),
+            pacs_first_seen_at = coalesce(pacs_first_seen_at, $6::timestamptz),
+            pacs_timing_source = $7,
+            pacs_timing_confidence = $8,
+            pacs_timing_checked_at = now(),
+            updated_at = now(),
+            updated_by_user_id = null
+          where id = $1
+        `,
+        [bookingId, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt, result.studyStartedAt, result.pacsFirstSeenAt, result.timingSource, result.timingConfidence]
+      );
+      await logAuditEntry({
         entityType: "appointment_v2_booking",
         entityId: bookingId,
-        actionType: "orthanc_auto_complete",
+        actionType: "orthanc_auto_start",
         oldValues: { status: current.status },
         newValues: {
-          status: "completed",
-          orthancTargetType: setting.orthanc_target_type,
-          orthancTargetKey: setting.orthanc_target_key || null,
+          status: "in-progress",
+          acquisitionStatusSource: "pacs",
           matchKey: result.matchKey,
           matchValue: result.matchValue,
           studyInstanceUid: result.studyInstanceUid,
           accessionNumber: result.accessionNumber,
           seriesCount: result.seriesCount,
           instanceCount: result.instanceCount,
-          pacsStudyStartedAt: result.studyStartedAt,
-          pacsFirstSeenAt: result.pacsFirstSeenAt,
-          pacsTimingSource: result.timingSource,
-          pacsTimingConfidence: result.timingConfidence,
+          orthancLastUpdateAt: result.orthancLastUpdateAt,
           verificationCheckId: historyId,
         },
         changedByUserId: null,
-      },
-      client
-    );
-    reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, bookingId, {
-      actorUserId: null,
-      actionType: "orthanc_auto_complete",
-    });
+      }, client);
+      started = true;
+    } else if (current.status === "in-progress" && current.acquisition_status_source === "pacs") {
+      const activityChanged = pacsActivityChanged(current, result);
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set
+            pacs_last_activity_at = case when $2 then now() else pacs_last_activity_at end,
+            pacs_last_observed_instance_count = $3,
+            pacs_last_observed_series_count = $4,
+            pacs_last_observed_orthanc_update_at = $5::timestamptz,
+            pacs_study_started_at = coalesce(pacs_study_started_at, $6::timestamptz),
+            pacs_first_seen_at = coalesce(pacs_first_seen_at, $7::timestamptz),
+            pacs_timing_source = $8,
+            pacs_timing_confidence = $9,
+            pacs_timing_checked_at = now(),
+            updated_at = now(),
+            updated_by_user_id = null
+          where id = $1
+        `,
+        [bookingId, activityChanged, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt, result.studyStartedAt, result.pacsFirstSeenAt, result.timingSource, result.timingConfidence]
+      );
+
+      if (!activityChanged && hasMeasurablePacsActivity(result) && pacsInactivityElapsed(current.pacs_last_activity_at)) {
+        targetStatus = isBelowMinimumSeriesResult(result) ? "discontinued" : "completed";
+        if (targetStatus === "discontinued" && setting.below_minimum_series_action !== "discontinue") {
+          targetStatus = null;
+        }
+        if (targetStatus) {
+          if (targetStatus === "completed") {
+            await client.query(
+              `
+                update appointments_v2.bookings
+                set
+                  auto_completed_by = 'orthanc_pacs_auto_completion',
+                  auto_completed_at = now(),
+                  auto_completion_check_id = $2,
+                  pacs_last_observed_instance_count = $3,
+                  pacs_last_observed_series_count = $4,
+                  pacs_last_observed_orthanc_update_at = $5::timestamptz,
+                  pacs_timing_checked_at = now()
+                where id = $1
+              `,
+              [bookingId, historyId, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt]
+            );
+          }
+          terminalTransition = await applyBookingTerminalTransition({
+            client,
+            bookingId,
+            previousStatus: current.status,
+            targetStatus,
+            actorUserId: null,
+            source: "pacs",
+            auditReason: targetStatus === "discontinued"
+              ? "Orthanc study activity remained below the configured minimum after PACS inactivity."
+              : null,
+            auditNewValues: {
+              orthancTargetType: setting.orthanc_target_type,
+              orthancTargetKey: setting.orthanc_target_key || null,
+              matchKey: result.matchKey,
+              matchValue: result.matchValue,
+              studyInstanceUid: result.studyInstanceUid,
+              accessionNumber: result.accessionNumber,
+              seriesCount: result.seriesCount,
+              instanceCount: result.instanceCount,
+              orthancLastUpdateAt: result.orthancLastUpdateAt,
+              pacsStudyStartedAt: result.studyStartedAt,
+              pacsFirstSeenAt: result.pacsFirstSeenAt,
+              pacsTimingSource: result.timingSource,
+              pacsTimingConfidence: result.timingConfidence,
+              verificationCheckId: historyId,
+            },
+          });
+          await markHistoryCompleted(historyId, client);
+        }
+      }
+    } else {
+      await client.query("commit");
+      return false;
+    }
 
     await client.query("commit");
-    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
-    const recalls = await pool.query<{ id: number }>("select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1", [bookingId]);
-    await Promise.all(recalls.rows.map((recall) =>
-      createAdditionalImagingNotification({ recallRequestId: Number(recall.id), recallAppointmentId: bookingId, eventType: "additional_imaging_completed" })
-        .catch((error) => console.warn(JSON.stringify({ type: "additional_imaging_notification_failed", bookingId, eventType: "additional_imaging_completed", error: error instanceof Error ? error.message : String(error) })))
-    ));
-    await queueClinicalDocumentExportForCompletedAppointment(bookingId).catch((error) => {
-      console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));
-    });
-    scheduleBookingWorklistSync(bookingId);
-    return true;
+    if (started) scheduleBookingWorklistSync(bookingId);
+    if (terminalTransition?.transitioned && targetStatus) {
+      await runBookingTerminalTransitionPostCommit({
+        bookingId,
+        targetStatus,
+        actorUserId: null,
+        reportingIntentNotification: terminalTransition.reportingIntentNotification,
+      });
+      return targetStatus === "completed";
+    }
+    return false;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -777,16 +792,7 @@ async function runVerificationForBooking(booking: EligibleBookingRow): Promise<{
     completedBooking: false,
   });
   await updateSettingLastCheck(setting.id, result);
-  const discontinued = await discontinueBookingForBelowMinimumSeries({
-    booking: mapBooking(booking),
-    setting,
-    result,
-    historyId: history.id,
-  });
-  if (discontinued) {
-    return { result, history, completed: false };
-  }
-  const completed = await completeBookingIfStillEligible({
+  const completed = await processPacsObservation({
     booking: mapBooking(booking),
     setting,
     result,
@@ -825,6 +831,12 @@ export async function testPacsAutoCompletionForModality({
           b.booking_date::text as appointment_date,
           b.booking_date::text as booking_date,
           b.status,
+          b.acquisition_status_source,
+          b.pacs_auto_completion_disabled_at,
+          b.pacs_last_activity_at,
+          b.pacs_last_observed_instance_count,
+          b.pacs_last_observed_series_count,
+          b.pacs_last_observed_orthanc_update_at,
           m.code as modality_code,
           p.national_id,
           p.mrn,
@@ -891,6 +903,12 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
         b.booking_date::text as appointment_date,
         b.booking_date::text as booking_date,
         b.status,
+        b.acquisition_status_source,
+        b.pacs_auto_completion_disabled_at,
+        b.pacs_last_activity_at,
+        b.pacs_last_observed_instance_count,
+        b.pacs_last_observed_series_count,
+        b.pacs_last_observed_orthanc_update_at,
         m.code as modality_code,
         p.national_id,
         p.mrn,
@@ -911,8 +929,14 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
       join modalities m on m.id = b.modality_id
       join appointments_v2.pacs_auto_completion_settings s on s.modality_id = b.modality_id
       where s.enabled = true
-        and b.status = any($1::text[])
         and b.pacs_auto_completion_disabled_at is null
+        and (
+          b.status = any($1::text[])
+          or (
+            b.status = 'in-progress'
+            and b.acquisition_status_source = 'pacs'
+          )
+        )
         and b.booking_date::timestamptz <= now()
         and b.booking_date::timestamptz >= now() - make_interval(hours => s.lookback_hours)
         and b.booking_date::timestamptz >= now() - make_interval(hours => s.stop_after_hours)
@@ -925,7 +949,7 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
       order by b.booking_date desc, b.id desc
       limit $2
     `,
-    [ELIGIBLE_BOOKING_STATUSES, batchSize]
+    [PACS_START_ELIGIBLE_STATUSES, batchSize]
   );
 
   return rows as EligibleBookingRow[];

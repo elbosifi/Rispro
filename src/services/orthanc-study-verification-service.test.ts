@@ -299,6 +299,26 @@ test("modality conflict blocks completion", async () => {
   assert.equal(result.lastError, "modality_conflict");
 });
 
+test("exposes Orthanc LastUpdate independently when a higher-confidence DICOM timestamp starts the study", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({
+        LastUpdate: "20260504T112233",
+        MainDicomTags: { AcquisitionDateTime: "20260504T101112" },
+      }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.studyStartedAt, "2026-05-04T10:11:12.000Z");
+  assert.equal(result.timingSource, "study_acquisition_datetime");
+  assert.equal(result.orthancLastUpdateAt, "2026-05-04T11:22:33.000Z");
+});
+
 test("study-level multi-valued modalities accept the appointment modality despite a derived series modality", async () => {
   service.__setOrthancFetchForTests(async (path) => {
     if (path === "/tools/find") return orthancResponse(["study-1"]);

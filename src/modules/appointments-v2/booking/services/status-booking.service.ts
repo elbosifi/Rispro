@@ -42,6 +42,7 @@ interface BookingStatusRow {
   booking_date?: string;
   auto_completed_by?: string | null;
   auto_completed_at?: string | null;
+  acquisition_status_source?: "pacs" | "mpps" | null;
   pacs_auto_completion_disabled_at?: string | null;
 }
 
@@ -404,6 +405,7 @@ export async function updateBookingStatusManual(
           booking_date::text,
           auto_completed_by,
           auto_completed_at,
+          acquisition_status_source,
           pacs_auto_completion_disabled_at
         from appointments_v2.bookings
         where id = $1
@@ -433,14 +435,21 @@ export async function updateBookingStatusManual(
         await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
       }
 
-      autoCompletionDisabled =
+      const reversingOrthancCompletion =
         booking.status === "completed" &&
         targetStatus !== "completed" &&
-        booking.auto_completed_by === "orthanc_pacs_auto_completion" &&
-        !booking.pacs_auto_completion_disabled_at;
-      autoCompletionDisabledMessage = autoCompletionDisabled
-        ? "PACS auto-completion has been disabled for this booking because staff manually changed the status after Orthanc completed it."
-        : undefined;
+        booking.auto_completed_by === "orthanc_pacs_auto_completion";
+      const overridingPacsAcquisition =
+        booking.status === "in-progress" &&
+        booking.acquisition_status_source === "pacs";
+      autoCompletionDisabled =
+        !booking.pacs_auto_completion_disabled_at &&
+        (reversingOrthancCompletion || overridingPacsAcquisition);
+      autoCompletionDisabledMessage = !autoCompletionDisabled
+        ? undefined
+        : overridingPacsAcquisition
+          ? "PACS automatic status updates have been disabled for this booking because staff manually changed its status."
+          : "PACS auto-completion has been disabled for this booking because staff manually changed the status after Orthanc completed it.";
 
       if (targetStatus === "completed" || targetStatus === "discontinued") {
         terminalTransition = await applyBookingTerminalTransition({

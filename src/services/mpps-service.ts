@@ -82,6 +82,10 @@ interface StoredMppsEventRow {
 interface BookingCandidateRow {
   id: number;
   status: BookingWorkflowStatus;
+  acquisition_status_source: "pacs" | "mpps" | null;
+  pacs_auto_completion_disabled_at: string | null;
+  pacs_auto_completion_disabled_by_user_id: number | null;
+  pacs_auto_completion_disabled_reason: string | null;
 }
 
 interface AcceptedMppsStateRow {
@@ -639,6 +643,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
   let priorMppsState: AcceptedMppsStateRow | null = null;
   let committed = false;
   let terminalTransition: Awaited<ReturnType<typeof applyBookingTerminalTransition>> | null = null;
+  let mppsAcquisitionClaimed = false;
 
   try {
     await client.query("begin");
@@ -696,7 +701,13 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
 
     const bookingResult = await client.query<BookingCandidateRow>(
       `
-        select id, status
+        select
+          id,
+          status,
+          acquisition_status_source,
+          pacs_auto_completion_disabled_at,
+          pacs_auto_completion_disabled_by_user_id,
+          pacs_auto_completion_disabled_reason
         from appointments_v2.bookings
         where id = $1
         limit 1
@@ -772,7 +783,65 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
     }
 
     const transitioned = booking.status !== targetStatus;
-    if (transitioned) {
+    const mppsInProgress = event.performedStepStatus === "IN PROGRESS";
+    const acquisitionSourceChanged = mppsInProgress && booking.acquisition_status_source !== "mpps";
+    const pacsProtectionNeeded = mppsInProgress && !booking.pacs_auto_completion_disabled_at;
+    if (mppsInProgress) {
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set
+            status = $2,
+            acquisition_status_source = 'mpps',
+            pacs_auto_completion_disabled_at = case when pacs_auto_completion_disabled_at is null then now() else pacs_auto_completion_disabled_at end,
+            pacs_auto_completion_disabled_by_user_id = case when pacs_auto_completion_disabled_at is null then null else pacs_auto_completion_disabled_by_user_id end,
+            pacs_auto_completion_disabled_reason = case when pacs_auto_completion_disabled_at is null then $3 else pacs_auto_completion_disabled_reason end,
+            updated_at = now(),
+            updated_by_user_id = null
+          where id = $1
+        `,
+        [booking.id, targetStatus, "MPPS IN PROGRESS received; MPPS is authoritative for this booking."]
+      );
+      mppsAcquisitionClaimed = acquisitionSourceChanged || pacsProtectionNeeded;
+      if (transitioned) {
+        await logAuditEntry(
+          {
+            entityType: "appointment_v2_booking",
+            entityId: booking.id,
+            actionType: "mpps_status_update",
+            oldValues: { status: booking.status, acquisitionStatusSource: booking.acquisition_status_source },
+            newValues: {
+              status: targetStatus,
+              acquisitionStatusSource: "mpps",
+              pacsAutoCompletionDisabled: true,
+              mppsPerformedStepStatus: event.performedStepStatus,
+              accessionNumber: event.accessionNumber,
+              studyInstanceUid: event.studyInstanceUid,
+              mppsInstanceUid: event.mppsInstanceUid,
+            },
+            changedByUserId: null,
+          },
+          client
+        );
+      } else if (acquisitionSourceChanged) {
+        await logAuditEntry(
+          {
+            entityType: "appointment_v2_booking",
+            entityId: booking.id,
+            actionType: "mpps_acquisition_claim",
+            oldValues: { acquisitionStatusSource: booking.acquisition_status_source },
+            newValues: {
+              acquisitionStatusSource: "mpps",
+              mppsInstanceUid: event.mppsInstanceUid,
+              accessionNumber: event.accessionNumber,
+              studyInstanceUid: event.studyInstanceUid,
+            },
+            changedByUserId: null,
+          },
+          client
+        );
+      }
+    } else if (transitioned) {
       if (targetStatus === "completed" || targetStatus === "discontinued") {
         terminalTransition = await applyBookingTerminalTransition({
           client,
@@ -845,7 +914,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         actorUserId: null,
         reportingIntentNotification: terminalTransition.reportingIntentNotification,
       });
-    } else if (transitioned) {
+    } else if (transitioned || mppsAcquisitionClaimed) {
       try {
         scheduleBookingWorklistSync(booking.id);
       } catch (error) {

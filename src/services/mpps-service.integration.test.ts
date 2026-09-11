@@ -6,6 +6,7 @@ import { pool } from "../db/pool.js";
 import { createApp } from "../app.js";
 import { env } from "../config/env.js";
 import { ingestMppsEvent } from "./mpps-service.js";
+import { updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
 import { createPendingReportingAssignmentIntent } from "../modules/doctor-portal/reporting-assignment-intents-service.js";
 import { createComplementaryRecall, linkComplementaryRecallBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 import {
@@ -348,6 +349,73 @@ describe("mpps-service integration", () => {
       assert.equal(result.updatedStatus, "in-progress");
       assert.equal(await getBookingStatus(bookingId), "in-progress");
     }
+  });
+
+  it("claims acquisition authority for MPPS starts and PACS-started bookings without overwriting manual protection", async () => {
+    const mppsFirstId = await createBooking("waiting");
+    await ingestMppsEvent(createPayload(mppsFirstId, `1.2.826.${mppsFirstId}.authority-first`));
+    const mppsFirst = await pool.query<{
+      status: string;
+      acquisition_status_source: string | null;
+      pacs_auto_completion_disabled_at: Date | null;
+      pacs_auto_completion_disabled_by_user_id: number | null;
+    }>(`select status, acquisition_status_source, pacs_auto_completion_disabled_at, pacs_auto_completion_disabled_by_user_id from appointments_v2.bookings where id = $1`, [mppsFirstId]);
+    assert.equal(mppsFirst.rows[0]?.status, "in-progress");
+    assert.equal(mppsFirst.rows[0]?.acquisition_status_source, "mpps");
+    assert.ok(mppsFirst.rows[0]?.pacs_auto_completion_disabled_at);
+    assert.equal(mppsFirst.rows[0]?.pacs_auto_completion_disabled_by_user_id, null);
+
+    const pacsFirstId = await createBooking("in-progress");
+    await pool.query(`update appointments_v2.bookings set acquisition_status_source = 'pacs' where id = $1`, [pacsFirstId]);
+    await ingestMppsEvent(createPayload(pacsFirstId, `1.2.826.${pacsFirstId}.authority-pacs`));
+    const pacsFirst = await pool.query<{ status: string; acquisition_status_source: string | null; pacs_auto_completion_disabled_at: Date | null }>(
+      `select status, acquisition_status_source, pacs_auto_completion_disabled_at from appointments_v2.bookings where id = $1`, [pacsFirstId]
+    );
+    const claims = await pool.query<{ count: string }>(
+      `select count(*)::text as count from audit_log where entity_type = 'appointment_v2_booking' and entity_id = $1 and action_type = 'mpps_acquisition_claim'`, [pacsFirstId]
+    );
+    assert.equal(pacsFirst.rows[0]?.status, "in-progress");
+    assert.equal(pacsFirst.rows[0]?.acquisition_status_source, "mpps");
+    assert.ok(pacsFirst.rows[0]?.pacs_auto_completion_disabled_at);
+    assert.equal(claims.rows[0]?.count, "1");
+
+    const manuallyProtectedId = await createBooking("in-progress");
+    await pool.query(
+      `update appointments_v2.bookings set acquisition_status_source = 'pacs', pacs_auto_completion_disabled_at = '2030-01-02T03:04:05Z', pacs_auto_completion_disabled_by_user_id = $2, pacs_auto_completion_disabled_reason = 'Manual override preserved' where id = $1`,
+      [manuallyProtectedId, testData.userId]
+    );
+    await ingestMppsEvent(createPayload(manuallyProtectedId, `1.2.826.${manuallyProtectedId}.authority-manual`));
+    const manuallyProtected = await pool.query<{ acquisition_status_source: string | null; disabled_at: Date | null; disabled_by: number | null; disabled_reason: string | null }>(
+      `select acquisition_status_source, pacs_auto_completion_disabled_at as disabled_at, pacs_auto_completion_disabled_by_user_id as disabled_by, pacs_auto_completion_disabled_reason as disabled_reason from appointments_v2.bookings where id = $1`,
+      [manuallyProtectedId]
+    );
+    assert.equal(manuallyProtected.rows[0]?.acquisition_status_source, "mpps");
+    assert.equal(manuallyProtected.rows[0]?.disabled_at?.toISOString(), "2030-01-02T03:04:05.000Z");
+    assert.equal(Number(manuallyProtected.rows[0]?.disabled_by), Number(testData.userId));
+    assert.equal(manuallyProtected.rows[0]?.disabled_reason, "Manual override preserved");
+  });
+
+  it("permanently disables PACS tracking when staff changes a PACS-owned in-progress booking", async () => {
+    const bookingId = await createBooking("in-progress");
+    await pool.query(`update appointments_v2.bookings set acquisition_status_source = 'pacs' where id = $1`, [bookingId]);
+
+    await updateBookingStatusManual(bookingId, "waiting", null, testData.userId, "supervisor");
+
+    const booking = await pool.query<{
+      status: string;
+      acquisition_status_source: string | null;
+      pacs_auto_completion_disabled_at: Date | null;
+      pacs_auto_completion_disabled_by_user_id: number | null;
+      pacs_auto_completion_disabled_reason: string | null;
+    }>(
+      `select status, acquisition_status_source, pacs_auto_completion_disabled_at, pacs_auto_completion_disabled_by_user_id, pacs_auto_completion_disabled_reason from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    assert.equal(booking.rows[0]?.status, "waiting");
+    assert.equal(booking.rows[0]?.acquisition_status_source, "pacs");
+    assert.ok(booking.rows[0]?.pacs_auto_completion_disabled_at);
+    assert.equal(Number(booking.rows[0]?.pacs_auto_completion_disabled_by_user_id), Number(testData.userId));
+    assert.match(booking.rows[0]?.pacs_auto_completion_disabled_reason || "", /staff manually changed/);
   });
 
   it("persists actual performed start timing separately for IN PROGRESS", async () => {

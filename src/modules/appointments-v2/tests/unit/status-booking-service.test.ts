@@ -123,6 +123,13 @@ describe("status booking service source guards", () => {
     assert.match(source, /autoCompletionDisabledMessage/);
   });
 
+  it("manual changes to PACS-owned in-progress bookings permanently disable PACS tracking", () => {
+    assert.match(source, /acquisition_status_source/);
+    assert.match(source, /booking\.status === "in-progress"[\s\S]*booking\.acquisition_status_source === "pacs"/);
+    assert.match(source, /PACS automatic status updates have been disabled for this booking because staff manually changed its status\./);
+    assert.match(source, /pacs_auto_completion_disabled_by_user_id = case when \$4 then \$3/);
+  });
+
   it("manual status changes still audit through the existing status path", () => {
     assert.match(source, /await auditStatusChange\(client, booking, targetStatus, cleanReason \|\| null, userId, "manual_status_change"\)/);
     assert.match(source, /await client\.query\("commit"\)/);
@@ -131,7 +138,7 @@ describe("status booking service source guards", () => {
   it("manual status completion activates pending reporting intents inside the transaction", () => {
     assert.match(source, /applyBookingTerminalTransition/);
     assert.match(terminalTransitionSource, /activatePendingReportingAssignmentIntent/);
-    assert.match(terminalTransitionSource, /actionType: input\.source === "mpps" \? "mpps_status_completion" : "manual_status_completion"/);
+    assert.match(terminalTransitionSource, /input\.source === "pacs"[\s\S]*\? "orthanc_auto_complete"/);
     assert.match(terminalTransitionSource, /runBookingTerminalTransitionPostCommit/);
     assert.match(terminalTransitionSource, /createAssignedToMeNotifications/);
     assert.match(terminalTransitionSource, /reporting_assignment_intent_notification_failed/);

@@ -43,6 +43,7 @@ export interface OrthancVerificationResult {
   accessionNumber: string | null;
   seriesCount: number | null;
   instanceCount: number | null;
+  orthancLastUpdateAt: string | null;
   studyStartedAt: string | null;
   pacsFirstSeenAt: string | null;
   timingSource: string | null;
@@ -82,6 +83,7 @@ interface StudyCandidate {
   studyDate: string | null;
   seriesCount: number | null;
   instanceCount: number | null;
+  orthancLastUpdateAt: string | null;
   reliableSeriesCount: boolean;
   reliableInstanceCount: boolean;
   studyStartedAt: string | null;
@@ -305,6 +307,7 @@ function makeResult(
     accessionNumber: patch.accessionNumber ?? null,
     seriesCount: patch.seriesCount ?? null,
     instanceCount: patch.instanceCount ?? null,
+    orthancLastUpdateAt: patch.orthancLastUpdateAt ?? null,
     studyStartedAt: patch.studyStartedAt ?? null,
     pacsFirstSeenAt: patch.pacsFirstSeenAt ?? null,
     timingSource: patch.timingSource ?? null,
@@ -336,7 +339,8 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
   const instanceCount = parseCount(record.InstanceCount ?? record.CountInstances ?? tags.NumberOfStudyRelatedInstances ?? tags["00201208"]);
   const acquisitionDateTime = parseDicomDateTime(tags.AcquisitionDateTime ?? tags["0008002A"]);
   const studyDateTime = parseDicomDateAndTime(tags.StudyDate ?? tags["00080020"], tags.StudyTime ?? tags["00080030"]);
-  const lastUpdate = parseOrthancTimestamp(record.LastUpdate ?? record.LastUpdateTime ?? record.FirstSeen ?? record.CreatedAt);
+  const orthancLastUpdateAt = parseOrthancTimestamp(record.LastUpdate ?? record.LastUpdateTime);
+  const lastUpdate = orthancLastUpdateAt ?? parseOrthancTimestamp(record.FirstSeen ?? record.CreatedAt);
   const studyStartedAt = acquisitionDateTime ?? studyDateTime ?? lastUpdate;
   const timingSource = acquisitionDateTime
     ? "study_acquisition_datetime"
@@ -367,6 +371,7 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
     studyDate: normalizeDicomDate(tags.StudyDate ?? tags["00080020"]),
     seriesCount,
     instanceCount,
+    orthancLastUpdateAt,
     reliableSeriesCount: !options.remote && seriesCount != null,
     reliableInstanceCount: !options.remote && instanceCount != null,
     studyStartedAt,
@@ -522,6 +527,7 @@ function evaluateCandidates({
       accessionNumber: candidate.accessionNumber,
       seriesCount: candidate.seriesCount,
       instanceCount: candidate.instanceCount,
+      orthancLastUpdateAt: candidate.orthancLastUpdateAt,
       studyStartedAt: candidate.studyStartedAt,
       pacsFirstSeenAt: candidate.pacsFirstSeenAt,
       timingSource: candidate.timingSource,
@@ -540,6 +546,7 @@ function evaluateCandidates({
       accessionNumber: candidate.accessionNumber,
       seriesCount: candidate.seriesCount,
       instanceCount: candidate.instanceCount,
+      orthancLastUpdateAt: candidate.orthancLastUpdateAt,
       studyStartedAt: candidate.studyStartedAt,
       pacsFirstSeenAt: candidate.pacsFirstSeenAt,
       timingSource: candidate.timingSource,
@@ -561,6 +568,7 @@ function evaluateCandidates({
     accessionNumber: candidate.accessionNumber,
     seriesCount: candidate.seriesCount,
     instanceCount: candidate.instanceCount,
+    orthancLastUpdateAt: candidate.orthancLastUpdateAt,
     studyStartedAt: candidate.studyStartedAt,
     pacsFirstSeenAt: candidate.pacsFirstSeenAt,
     timingSource: candidate.timingSource,
@@ -568,6 +576,7 @@ function evaluateCandidates({
     resultJson: {
       candidate: candidate.raw,
       timing: {
+        orthancLastUpdateAt: candidate.orthancLastUpdateAt,
         studyStartedAt: candidate.studyStartedAt,
         pacsFirstSeenAt: candidate.pacsFirstSeenAt,
         source: candidate.timingSource,

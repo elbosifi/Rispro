@@ -4,46 +4,50 @@ import fs from "node:fs";
 
 const source = fs.readFileSync(new URL("./appointments-v2-pacs-auto-completion-worker.ts", import.meta.url), "utf8");
 
-test("worker completes only scheduled, arrived, and waiting bookings", () => {
-  assert.match(source, /ELIGIBLE_BOOKING_STATUSES = \["scheduled", "arrived", "waiting"\]/);
-  assert.match(source, /b\.status = any\(\$1::text\[\]\)/);
+test("worker separates PACS start eligibility from PACS-owned in-progress tracking", () => {
+  assert.match(source, /PACS_START_ELIGIBLE_STATUSES = \["scheduled", "arrived", "waiting"\]/);
+  assert.match(source, /b\.status = any\(\$1::text\[\]\)[\s\S]*b\.status = 'in-progress'[\s\S]*b\.acquisition_status_source = 'pacs'/);
+  assert.match(source, /PACS_INACTIVITY_COMPLETION_MINUTES = 10/);
 });
 
 test("worker excludes completed and other terminal statuses by allow-listing eligibility", () => {
-  assert.ok(!source.includes(`ELIGIBLE_BOOKING_STATUSES = ["completed"`));
-  assert.match(source, /status = 'completed'/);
+  assert.ok(!source.includes(`PACS_START_ELIGIBLE_STATUSES = ["completed"`));
+  assert.match(source, /b\.status = any\(\$1::text\[\]\)[\s\S]*b\.status = 'in-progress'/);
 });
 
-test("worker preserves manually or MPPS completed rows after for update re-check", () => {
+test("worker preserves manually disabled and MPPS-owned rows after for update re-check", () => {
   assert.match(source, /for update/);
-  assert.match(source, /!ELIGIBLE_BOOKING_STATUSES\.includes/);
+  assert.match(source, /current\.status === "in-progress" && current\.acquisition_status_source === "pacs"/);
+  assert.match(source, /current\.pacs_auto_completion_disabled_at/);
   assert.match(source, /return false/);
 });
 
-test("worker does not persist PACS timing for non-matched Orthanc results", () => {
-  assert.match(source, /if \(result\.status !== "matched"\) \{\s*return false;\s*\}/);
+test("worker starts safe PACS evidence instead of immediately completing it", () => {
+  assert.match(source, /result\.status === "matched" \|\| isBelowMinimumSeriesResult/);
+  assert.match(source, /status = 'in-progress'/);
+  assert.match(source, /actionType: "orthanc_auto_start"/);
   assert.match(source, /pacs_timing_checked_at = now\(\)/);
 });
 
-test("worker excludes bookings after manual PACS auto-completion override", () => {
+test("worker excludes bookings after manual or MPPS PACS override", () => {
   assert.match(source, /b\.pacs_auto_completion_disabled_at is null/);
-  assert.match(source, /select id, status, pacs_auto_completion_disabled_at/);
+  assert.match(source, /acquisition_status_source/);
   assert.match(source, /current\.pacs_auto_completion_disabled_at/);
 });
 
-test("worker writes completed_at without overwriting an existing value and uses the canonical audit entity", () => {
-  assert.match(source, /actionType: "orthanc_auto_complete"/);
-  assert.match(source, /completed_at = coalesce\(completed_at, now\(\)\)/);
+test("worker completes only PACS-owned inactive bookings through the canonical transition service", () => {
+  assert.match(source, /applyBookingTerminalTransition/);
+  assert.match(source, /source: "pacs"/);
+  assert.match(source, /pacsInactivityElapsed/);
   assert.match(source, /entityType: "appointment_v2_booking"/);
   assert.doesNotMatch(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
 });
 
-test("worker persists PACS timing only when a booking is auto-completed", () => {
-  assert.match(source, /pacs_study_started_at = \$3::timestamptz/);
-  assert.match(source, /pacs_first_seen_at = \$4::timestamptz/);
-  assert.match(source, /pacs_timing_source = \$5/);
-  assert.match(source, /pacs_timing_confidence = \$6/);
+test("worker persists PACS timing while it starts and tracks acquisition", () => {
+  assert.match(source, /pacs_study_started_at = coalesce\(pacs_study_started_at/);
+  assert.match(source, /pacs_first_seen_at = coalesce\(pacs_first_seen_at/);
+  assert.match(source, /pacs_timing_source = \$7/);
   assert.match(source, /pacs_timing_checked_at = now\(\)/);
   assert.match(source, /result\.studyStartedAt/);
   assert.match(source, /result\.pacsFirstSeenAt/);
@@ -51,27 +55,25 @@ test("worker persists PACS timing only when a booking is auto-completed", () => 
   assert.match(source, /result\.timingConfidence/);
 });
 
-test("worker audit payload records persisted PACS timing fields", () => {
+test("worker audit payload records persisted PACS timing and activity fields", () => {
   assert.match(source, /pacsStudyStartedAt: result\.studyStartedAt/);
   assert.match(source, /pacsFirstSeenAt: result\.pacsFirstSeenAt/);
   assert.match(source, /pacsTimingSource: result\.timingSource/);
   assert.match(source, /pacsTimingConfidence: result\.timingConfidence/);
 });
 
-test("worker activates pending reporting assignment intents after PACS completion commit", () => {
-  assert.match(source, /activatePendingReportingAssignmentIntent/);
-  assert.match(source, /status = 'completed'[\s\S]*activatePendingReportingAssignmentIntent/);
-  assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
-  assert.match(source, /reporting_assignment_intent_notification_failed/);
+test("worker runs shared terminal post-commit effects after PACS completion", () => {
+  assert.match(source, /runBookingTerminalTransitionPostCommit/);
+  assert.match(source, /reportingIntentNotification: terminalTransition\.reportingIntentNotification/);
 });
 
-test("worker can auto-discontinue below-minimum matched studies", () => {
+test("worker defers below-minimum discontinuation until PACS inactivity", () => {
   assert.match(source, /below_minimum_series_action/);
   assert.match(source, /series_count_below_minimum/);
-  assert.match(source, /setting\.below_minimum_series_action !== "discontinue"/);
-  assert.match(source, /status = 'discontinued'/);
-  assert.match(source, /orthanc_auto_discontinue_below_minimum_series/);
-  assert.match(source, /cancelPendingReportingAssignmentIntent/);
+  assert.match(source, /pacsInactivityElapsed\(current\.pacs_last_activity_at\)/);
+  assert.match(source, /targetStatus === "discontinued" && setting\.below_minimum_series_action !== "discontinue"/);
+  assert.match(source, /source: "pacs"/);
+  assert.match(source, /applyBookingTerminalTransition/);
 });
 
 test("worker does not auto-discontinue unavailable series counts", () => {
