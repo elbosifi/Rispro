@@ -990,7 +990,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(confirmedSelection.checked).toBe(true);
   });
 
-  it("fails closed when the confirmed preliminary UID is absent from the completed scan", async () => {
+  it("fails closed without staging or processing when a deferred Review confirmation's UID is absent from the completed scan", async () => {
     const fullScan = deferred<ReturnType<typeof result>>();
     const confirmedStudy = study("study-a", "Study A");
     previewMock.mockResolvedValue({ ...result([confirmedStudy]), previewOnly: true });
@@ -1000,19 +1000,33 @@ describe("PacsRemapPage five-step wizard", () => {
     await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }));
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
 
     fullScan.resolve(result([study("study-b", "Study B")]));
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("The confirmed preliminary study was not found after the complete source scan.");
     expect(FakeXHR.instances).toHaveLength(0);
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
   });
 
-  it("does not allow normal final upload while preliminary confirmation awaits the complete scan", async () => {
+  it("records Review confirmation during an incomplete preliminary scan and automatically stages then confirms it after the scan", async () => {
     const fullScan = deferred<ReturnType<typeof result>>();
+    let scanOptions: { signal: AbortSignal } | undefined;
+    const selectedFile = new File(["selected"], "selected.dcm", { type: "application/dicom" });
+    const otherCandidate = new File(["other"], "other-candidate.dcm", { type: "application/dicom" });
     previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(fullScan.promise);
+    scanMock.mockImplementation((_files: File[], options: typeof scanOptions) => {
+      scanOptions = options;
+      return fullScan.promise;
+    });
     renderPage();
-    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [selectedFile, otherCandidate] } });
     await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
@@ -1022,10 +1036,30 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
 
-    const submitButton = screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }) as HTMLButtonElement;
-    expect(submitButton.disabled).toBe(true);
+    const submitButton = screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(false);
     fireEvent.click(submitButton);
+    expect(scanOptions?.signal.aborted).toBe(false);
     expect(FakeXHR.instances).toHaveLength(0);
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+
+    fullScan.resolve(result());
+
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    const stagingRequest = FakeXHR.instances[0]!;
+    expect(stagingRequest.url).toBe("/api/pacs/remap/jobs/stage-multipart");
+    expect((stagingRequest.sentBody?.getAll("files") as File[]).map((file) => file.name)).toEqual(["selected.dcm", "other-candidate.dcm"]);
+    expect(stagingRequest.sentBody?.get("selectedStudyInstanceUID")).toBe("1.2.3");
+    await waitFor(() => expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")).toHaveLength(1));
+    const confirmation = apiMock.mock.calls.find(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")?.[1] as { body: string };
+    expect(JSON.parse(confirmation.body)).toEqual({
+      selectedStudyInstanceUID: "1.2.3",
+      risproPatientId: "10",
+      destinationPacsKey: "1",
+      confirm: true,
+    });
+    expect(FakeXHR.instances.some((xhr) => xhr.url.includes("/process-multipart"))).toBe(false);
   });
 
   it("continues to the authoritative scan when the preview reports zero studies", async () => {

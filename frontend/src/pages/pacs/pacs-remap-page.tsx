@@ -1305,6 +1305,7 @@ export default function PacsRemapPage() {
   const fastStagedWorkflow = secureStagingStatus !== "idle"
     || isAwaitingStagedJob(currentJob)
     || Number(currentJob?.staged_manifest_version) === 2;
+  const deferredStagingWorkflow = fastStagedWorkflow || Boolean(preliminaryConfirmedStudyUid);
   const directoryPatients = patientQuery.data?.patients || [];
   const appointmentPatientOptions = useMemo(() => {
     const combinedAppointments = [
@@ -1363,9 +1364,9 @@ export default function PacsRemapPage() {
     ? currentJob.destination_pacs_key || ""
     : currentJob?.destination_pacs_key || effectiveSelectedDestinationKey;
   const stagingCompleted = secureStagingStatus === "awaiting_confirmation" || isAwaitingStagedJob(currentJob);
-  const canContinueStudy = fastStagedWorkflow
+  const canContinueStudy = deferredStagingWorkflow
     ? Boolean(selectedStudy)
-    : Boolean(selectedStudy) && (Boolean(preliminaryConfirmedStudyUid) || completeScanStatus === "complete");
+    : completeScanStatus === "complete" && Boolean(selectedStudy);
   const canContinuePatient = !!scopedPatientId
     && !replacementPreviewQuery.isLoading
     && !replacementPreviewQuery.isError
@@ -1374,13 +1375,11 @@ export default function PacsRemapPage() {
   const stagingCanAcceptConfirmation = !fastStagedWorkflow
     || stagingCompleted
     || secureStagingStatus === "uploading";
-  const preliminaryStagingPending = Boolean(preliminaryConfirmedStudyUid) && !fastStagedWorkflow;
   const canSubmit = canContinueStudy
     && canContinuePatient
     && canContinueDestination
     && scopedConfirmChecked
     && stagingCanAcceptConfirmation
-    && !preliminaryStagingPending
     && !pendingStagedConfirmation
     && !processMutation.isPending
     && !confirmStagedMutation.isPending;
@@ -2367,11 +2366,11 @@ export default function PacsRemapPage() {
                   <button type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
                   <button
                     type="button"
-                    onClick={() => fastStagedWorkflow ? requestStagedConfirmation() : processMutation.mutate()}
+                    onClick={() => deferredStagingWorkflow ? requestStagedConfirmation() : processMutation.mutate()}
                     disabled={!canSubmit}
                     className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto"
                   >
-                    {fastStagedWorkflow
+                    {deferredStagingWorkflow
                       ? (language === "ar" ? "تأكيد المريض والوجهة وبدء إعادة الربط" : "Confirm patient and destination; begin remap")
                       : t(language, "pacs.remap.uploadSelectedStudy")}
                   </button>
