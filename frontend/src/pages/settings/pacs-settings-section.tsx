@@ -38,6 +38,7 @@ interface PacsAutoCompletionSetting {
   minimum_series_count: number;
   below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
+  inactivity_completion_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
   last_check_status: string | null;
@@ -97,6 +98,7 @@ type AutoCompletionDraft = {
   minimumSeriesCount: number | "";
   belowMinimumSeriesAction: BelowMinimumSeriesAction;
   pollIntervalMinutes: number | "";
+  inactivityCompletionMinutes: number | "";
   lookbackHours: number | "";
   stopAfterHours: number | "";
 };
@@ -110,7 +112,8 @@ function toAutoCompletionDraft(setting: PacsAutoCompletionSetting): AutoCompleti
     completionThreshold: setting.completion_threshold,
     minimumSeriesCount: Number(setting.minimum_series_count || 2),
     belowMinimumSeriesAction: setting.below_minimum_series_action || "leave_unchanged",
-    pollIntervalMinutes: Number(setting.poll_interval_minutes || 15),
+    pollIntervalMinutes: Number(setting.poll_interval_minutes || 2),
+    inactivityCompletionMinutes: Number(setting.inactivity_completion_minutes || 10),
     lookbackHours: Number(setting.lookback_hours || 24),
     stopAfterHours: Number(setting.stop_after_hours || 72)
   };
@@ -279,6 +282,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           ...draft,
           minimumSeriesCount: Math.max(1, Number(draft.minimumSeriesCount) || 2),
           pollIntervalMinutes: Math.max(1, Number(draft.pollIntervalMinutes) || 1),
+          inactivityCompletionMinutes: Math.max(2, Number(draft.inactivityCompletionMinutes) || 2),
           lookbackHours: Math.max(0, Number(draft.lookbackHours) || 0),
           stopAfterHours: Math.max(1, Number(draft.stopAfterHours) || 1)
         })
@@ -511,7 +515,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
               completionThreshold: "study_exists" as const,
               minimumSeriesCount: 2,
               belowMinimumSeriesAction: "leave_unchanged" as const,
-              pollIntervalMinutes: 15,
+              pollIntervalMinutes: 2,
+              inactivityCompletionMinutes: 10,
               lookbackHours: 24,
               stopAfterHours: 72
             };
@@ -623,6 +628,17 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     />
                   </label>
                   <label className="space-y-1">
+                    <span className="block text-xs text-stone-500">{t(language, "settings.pacs.inactivityCompletionMinutes")}</span>
+                    <input
+                      type="number"
+                      min={2}
+                      step={1}
+                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      value={draft.inactivityCompletionMinutes}
+                      onChange={(event) => updateDraft({ inactivityCompletionMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.lookbackHours")}</span>
                     <input
                       type="number"
@@ -643,12 +659,24 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     />
                   </label>
                 </div>
+                <p className="text-xs text-stone-500 dark:text-stone-400">{t(language, "settings.pacs.inactivityCompletionHelp")}</p>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors"
                     disabled={saveAutoMutation.isPending}
-                    onClick={() => saveAutoMutation.mutate({ modalityId: setting.modality_id, draft })}
+                    onClick={() => {
+                      const pollIntervalMinutes = Math.max(1, Number(draft.pollIntervalMinutes) || 1);
+                      const inactivityCompletionMinutes = Math.max(2, Number(draft.inactivityCompletionMinutes) || 2);
+                      if (pollIntervalMinutes >= inactivityCompletionMinutes) {
+                        setAutoMessage(t(language, "settings.pacs.pollMustBeShorterThanInactivity"));
+                        return;
+                      }
+                      saveAutoMutation.mutate({
+                        modalityId: setting.modality_id,
+                        draft: { ...draft, pollIntervalMinutes, inactivityCompletionMinutes },
+                      });
+                    }}
                   >
                     {saveAutoMutation.isPending ? t(language, "settings.pacs.saving") : t(language, "settings.pacs.saveAutoCompletion")}
                   </button>

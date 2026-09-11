@@ -11,6 +11,7 @@ import {
   __resetPacsStartWorklistSyncForTests,
   __setPacsStartWorklistSyncForTests,
   runAppointmentsV2PacsAutoCompletionTick,
+  upsertPacsAutoCompletionSetting,
 } from "./appointments-v2-pacs-auto-completion-worker.js";
 import { updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
 import {
@@ -60,9 +61,9 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     });
     modalityCode = String((await pool.query<{ code: string }>(`select code from modalities where id = $1`, [testData.modalityId])).rows[0]?.code || "");
     await pool.query(
-      `insert into appointments_v2.pacs_auto_completion_settings (modality_id, enabled, orthanc_target_type, matching_strategy, completion_threshold, minimum_series_count, below_minimum_series_action, poll_interval_minutes, lookback_hours, stop_after_hours)
-       values ($1, true, 'local', 'study_uid_preferred_accession_fallback', 'study_exists', 2, 'leave_unchanged', 1, 24, 72)
-       on conflict (modality_id) do update set enabled = true, completion_threshold = 'study_exists', minimum_series_count = 2, below_minimum_series_action = 'leave_unchanged', poll_interval_minutes = 1, lookback_hours = 24, stop_after_hours = 72`,
+      `insert into appointments_v2.pacs_auto_completion_settings (modality_id, enabled, orthanc_target_type, matching_strategy, completion_threshold, minimum_series_count, below_minimum_series_action, poll_interval_minutes, inactivity_completion_minutes, lookback_hours, stop_after_hours)
+       values ($1, true, 'local', 'study_uid_preferred_accession_fallback', 'study_exists', 2, 'leave_unchanged', 1, 10, 24, 72)
+       on conflict (modality_id) do update set enabled = true, completion_threshold = 'study_exists', minimum_series_count = 2, below_minimum_series_action = 'leave_unchanged', poll_interval_minutes = 1, inactivity_completion_minutes = 10, lookback_hours = 24, stop_after_hours = 72`,
       [testData.modalityId]
     );
   });
@@ -249,6 +250,69 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     assert.equal(manuallyOverridden.rows[0]?.status, "waiting");
     assert.ok(manuallyOverridden.rows[0]?.disabled_at);
     assert.equal(Number(manuallyOverridden.rows[0]?.disabled_by), Number(testData.userId));
+  });
+
+  it("uses each modality's configured inactivity timeout instead of a fixed operational timeout", async () => {
+    await pool.query(
+      `update appointments_v2.pacs_auto_completion_settings
+       set completion_threshold = 'study_exists', minimum_series_count = 2,
+           below_minimum_series_action = 'leave_unchanged', poll_interval_minutes = 1,
+           inactivity_completion_minutes = 20
+       where modality_id = $1`,
+      [testData.modalityId]
+    );
+    observation = { series: 1, instances: 10, lastUpdate: "20260911T093000" };
+    const bookingId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+
+    await clearThrottle(bookingId);
+    await pool.query(
+      `update appointments_v2.bookings
+       set pacs_last_activity_at = current_timestamp - interval '11 minutes'
+       where id = $1`,
+      [bookingId]
+    );
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId])).rows[0]?.status, "in-progress");
+
+    await clearThrottle(bookingId);
+    await pool.query(
+      `update appointments_v2.bookings
+       set pacs_last_activity_at = current_timestamp - interval '21 minutes'
+       where id = $1`,
+      [bookingId]
+    );
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId])).rows[0]?.status, "completed");
+  });
+
+  it("validates PACS poll and inactivity settings while retaining stale-client compatibility", async () => {
+    const save = (payload: Record<string, unknown>) => upsertPacsAutoCompletionSetting(
+      testData.modalityId,
+      payload,
+      testData.userId as never
+    );
+
+    const valid = await save({ pollIntervalMinutes: 2, inactivityCompletionMinutes: 10 });
+    assert.equal(valid.poll_interval_minutes, 2);
+    assert.equal(valid.inactivity_completion_minutes, 10);
+
+    await assert.rejects(
+      () => save({ pollIntervalMinutes: 10, inactivityCompletionMinutes: 10 }),
+      { name: "HttpError", statusCode: 400, message: "pollIntervalMinutes must be less than inactivityCompletionMinutes." }
+    );
+    await assert.rejects(
+      () => save({ pollIntervalMinutes: 15, inactivityCompletionMinutes: 10 }),
+      { name: "HttpError", statusCode: 400, message: "pollIntervalMinutes must be less than inactivityCompletionMinutes." }
+    );
+
+    const boundary = await save({ pollIntervalMinutes: 9, inactivityCompletionMinutes: 10 });
+    assert.equal(boundary.poll_interval_minutes, 9);
+    assert.equal(boundary.inactivity_completion_minutes, 10);
+
+    const staleClient = await save({ pollIntervalMinutes: 15 });
+    assert.equal(staleClient.poll_interval_minutes, 15);
+    assert.equal(staleClient.inactivity_completion_minutes, 16);
   });
 });
 

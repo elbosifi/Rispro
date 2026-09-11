@@ -72,7 +72,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
               completion_threshold: "study_exists",
               minimum_series_count: 2,
               below_minimum_series_action: "leave_unchanged",
-              poll_interval_minutes: 15,
+              poll_interval_minutes: 2,
+              inactivity_completion_minutes: 10,
               lookback_hours: 24,
               stop_after_hours: 72,
               last_check_status: "not_found",
@@ -185,6 +186,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(screen.getAllByText("CT").length).toBeGreaterThan(0);
     expect(screen.getByText(/Last result: not_found/)).toBeTruthy();
     expect(screen.getByText(/No matching study/)).toBeTruthy();
+    expect((screen.getByLabelText("Poll interval minutes") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Inactivity timeout (minutes)") as HTMLInputElement).value).toBe("10");
 
     await user.click(screen.getByRole("checkbox", { name: "Enable" }));
     await user.selectOptions(screen.getByLabelText("Orthanc target"), "CT_REMOTE");
@@ -193,7 +196,9 @@ describe("PacsSettingsSection auto-completion controls", () => {
     await user.type(screen.getByLabelText("Minimum series count"), "3");
     await user.selectOptions(screen.getByLabelText("When series count is below minimum"), "discontinue");
     await user.clear(screen.getByLabelText("Poll interval minutes"));
-    await user.type(screen.getByLabelText("Poll interval minutes"), "5");
+    await user.type(screen.getByLabelText("Poll interval minutes"), "3");
+    await user.clear(screen.getByLabelText("Inactivity timeout (minutes)"));
+    await user.type(screen.getByLabelText("Inactivity timeout (minutes)"), "15");
     await user.clear(screen.getByLabelText("Lookback hours"));
     await user.type(screen.getByLabelText("Lookback hours"), "12");
     await user.clear(screen.getByLabelText("Stop after hours"));
@@ -216,9 +221,28 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(payload.completionThreshold).toBe("series_exists");
     expect(payload.minimumSeriesCount).toBe(3);
     expect(payload.belowMinimumSeriesAction).toBe("discontinue");
-    expect(payload.pollIntervalMinutes).toBe(5);
+    expect(payload.pollIntervalMinutes).toBe(3);
+    expect(payload.inactivityCompletionMinutes).toBe(15);
     expect(payload.lookbackHours).toBe(12);
     expect(payload.stopAfterHours).toBe(36);
+  });
+
+  it("prevents saving a poll interval that is not shorter than inactivity", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByText("Orthanc PACS auto-completion");
+    await user.clear(screen.getByLabelText("Poll interval minutes"));
+    await user.type(screen.getByLabelText("Poll interval minutes"), "10");
+    await user.clear(screen.getByLabelText("Inactivity timeout (minutes)"));
+    await user.type(screen.getByLabelText("Inactivity timeout (minutes)"), "10");
+    await user.click(screen.getByRole("button", { name: "Save auto-completion" }));
+
+    expect(await screen.findByText("Poll interval must be shorter than the inactivity timeout.")).toBeTruthy();
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith(
+      "/pacs/auto-completion-settings/7",
+      expect.objectContaining({ method: "PUT" })
+    );
   });
 
   it("manages Orthanc remote modalities", async () => {

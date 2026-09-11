@@ -7,7 +7,7 @@ const source = fs.readFileSync(new URL("./appointments-v2-pacs-auto-completion-w
 test("worker separates PACS start eligibility from PACS-owned in-progress tracking", () => {
   assert.match(source, /PACS_START_ELIGIBLE_STATUSES = \["scheduled", "arrived", "waiting"\]/);
   assert.match(source, /b\.status = any\(\$1::text\[\]\)[\s\S]*b\.status = 'in-progress'[\s\S]*b\.acquisition_status_source = 'pacs'/);
-  assert.match(source, /PACS_INACTIVITY_COMPLETION_MINUTES = 10/);
+  assert.match(source, /inactivity_completion_minutes: number/);
 });
 
 test("worker excludes completed and other terminal statuses by allow-listing eligibility", () => {
@@ -39,8 +39,8 @@ test("worker completes only PACS-owned inactive bookings through the canonical t
   assert.match(source, /applyBookingTerminalTransition/);
   assert.match(source, /source: "pacs"/);
   assert.match(source, /current_timestamp >= pacs_last_activity_at \+ make_interval\(mins => \$2::int\)/);
-  assert.match(source, /PACS_INACTIVITY_COMPLETION_MINUTES/);
-  assert.doesNotMatch(source, /Date\.now\(\).*PACS_INACTIVITY_COMPLETION_MINUTES/);
+  assert.match(source, /\[bookingId, setting\.inactivity_completion_minutes\]/);
+  assert.doesNotMatch(source, /Date\.now\(\).*inactivity_completion_minutes/);
   assert.match(source, /entityType: "appointment_v2_booking"/);
   assert.doesNotMatch(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
