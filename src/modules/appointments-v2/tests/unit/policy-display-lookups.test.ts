@@ -76,7 +76,7 @@ describe("policy display lookups", () => {
           return { rows: [{ id: 101, name: "Brain MRI", nameAr: "Brain MRI AR", nameEn: "Brain MRI EN", code: "BMRI", modalityId: 10, isActive: false }] };
         }
         if (_sql.includes("from users")) {
-          return { rows: [{ id: 201, username: "inactive_user", fullName: "Inactive User", role: "supervisor", isActive: false, password_hash: "secret" }] };
+          return { rows: [{ id: 201, username: "inactive_user", fullName: "Inactive User", englishName: "Inactive User EN", role: "supervisor", isActive: false, password_hash: "secret" }] };
         }
         return { rows: [] };
       },
@@ -91,7 +91,8 @@ describe("policy display lookups", () => {
     assert.equal(lookups.modalities[0]?.isActive, false);
     assert.equal(lookups.examTypes[0]?.isActive, false);
     assert.equal(lookups.users[0]?.isActive, false);
-    assert.deepEqual(Object.keys(lookups.users[0]!).sort(), ["fullName", "id", "isActive", "role", "username"]);
+    assert.equal(lookups.users[0]?.englishName, "Inactive User EN");
+    assert.deepEqual(Object.keys(lookups.users[0]!).sort(), ["englishName", "fullName", "id", "isActive", "role", "username"]);
     assert.equal(queries.length, 3);
   });
 });

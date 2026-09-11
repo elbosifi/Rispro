@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { tripoliDateTimeLocalToIso } from "@/lib/date-format";
 import { fetchV2ExamTypes, fetchV2Modalities } from "@/v2/appointments/api";
@@ -9,7 +9,14 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 type Plan = "supplement_original_report" | "separate_report";
 const display = (item: { name?: string; nameEn?: string | null; code?: string }) => item.nameEn ?? item.name ?? item.code ?? "Unnamed";
 
-export function ComplementaryRecallRequestDialog({ open, onClose, examLabel, submitting, error, onSubmit }: { open: boolean; onClose: () => void; examLabel: string; submitting: boolean; error?: string | null; onSubmit: (payload: ComplementaryRecallRequestPayload) => void; }) {
+type ComplementaryRecallRequestDialogProps = { open: boolean; onClose: () => void; examLabel: string; submitting: boolean; error?: string | null; onSubmit: (payload: ComplementaryRecallRequestPayload) => void };
+
+export function ComplementaryRecallRequestDialog(props: ComplementaryRecallRequestDialogProps) {
+  const formKey = props.open ? `open:${props.examLabel}` : "closed";
+  return <ComplementaryRecallRequestDialogForm key={formKey} {...props} />;
+}
+
+function ComplementaryRecallRequestDialogForm({ open, onClose, examLabel, submitting, error, onSubmit }: ComplementaryRecallRequestDialogProps) {
   const [reasonCode, setReasonCode] = useState<ComplementaryRecallReasonCode | "">("");
   const [qaClassification, setQaClassification] = useState<ComplementaryRecallQaClassification | "">("");
   const [urgency, setUrgency] = useState<ComplementaryRecallUrgency>("routine");
@@ -25,13 +32,6 @@ export function ComplementaryRecallRequestDialog({ open, onClose, examLabel, sub
   const [showHelp, setShowHelp] = useState(false);
   const modalities = useQuery({ queryKey: ["v2-modalities", "additional-imaging"], queryFn: fetchV2Modalities, staleTime: 300_000, enabled: open && plan === "separate_report" });
   const examTypes = useQuery({ queryKey: ["v2-exam-types", "additional-imaging", requestedModalityId], queryFn: () => fetchV2ExamTypes(requestedModalityId!), staleTime: 300_000, enabled: open && plan === "separate_report" && requestedModalityId != null });
-
-  useEffect(() => {
-    if (!open) return;
-    setReasonCode(""); setQaClassification(""); setUrgency("routine"); setDueAt(""); setPlan(null);
-    setRequestedModalityId(null); setRequestedExamTypeId(null); setDependency(null); setNotifyOnArrival(false);
-    setNotifyOnImagingCompleted(false); setReceptionInstruction(""); setTechnologistInstruction(""); setShowHelp(false);
-  }, [examLabel, open]);
 
   const requiredCompletionNotice = plan === "supplement_original_report" || dependency === "imaging_completed";
   const effectiveDependency = plan === "supplement_original_report" ? "imaging_completed" : dependency;
