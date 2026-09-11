@@ -94,7 +94,7 @@ test("worker distinguishes strict start evidence from zero-instance tracking evi
   assert.match(source, /result\.lastError === "instance_count_zero"/);
   assert.match(source, /if \(!isSafePacsStartObservation\(result\)\)/);
   assert.match(source, /if \(!isTrackablePacsObservation\(result\)\)/);
-  assert.match(source, /result\.status === "matched"\s*\? "completed"\s*:\s*null/);
+  assert.match(source, /result\.status === "matched"\s*&&\s*result\.instanceCount !== 0\s*\?\s*"completed"\s*:\s*null/);
 });
 
 test("worker does not auto-discontinue unavailable series counts", () => {
