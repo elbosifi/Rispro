@@ -29,7 +29,12 @@ import {
   prepareAppointmentSlipHtml,
 } from "@/lib/print-utils";
 import { directPrintRegistrationRows } from "@/lib/registration-list-printing";
-import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams } from "./registration-query";
+import {
+  buildRegistrationAppointmentQuery,
+  parseRegistrationFiltersFromSearchParams,
+  REGISTRATION_DEFAULT_STATUSES,
+  REGISTRATION_FILTER_STATUSES,
+} from "./registration-query";
 import type { RegistrationSort, RegistrationsFilters } from "./registration-query";
 import type { WhatsappTemplate } from "@/lib/whatsapp";
 
@@ -40,7 +45,7 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
   dateTo: "",
   modalityId: "",
   query: "",
-  statuses: ["scheduled", "arrived", "waiting"],
+  statuses: [...REGISTRATION_DEFAULT_STATUSES],
   sort: "booking-desc",
 };
 
@@ -234,7 +239,9 @@ export default function RegistrationsPage() {
     (summary, appointment) => {
       if (appointment.caseCategory === "oncology") summary.oncology += 1;
       if (appointment.caseCategory === "non_oncology") summary.nonOncology += 1;
-      if (appointment.status === "arrived" || appointment.status === "waiting") summary.inDepartment += 1;
+      if (appointment.status === "arrived" || appointment.status === "waiting" || appointment.status === "in-progress") {
+        summary.inDepartment += 1;
+      }
       if (appointment.patientWebPushSubscribed) summary.notifiable += 1;
       return summary;
     },
@@ -915,7 +922,7 @@ export default function RegistrationsPage() {
               </span>
             </div>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued", ...(canReviewVoided ? ["voided"] : [])].map(
+              {[...REGISTRATION_FILTER_STATUSES, ...(canReviewVoided ? ["voided"] : [])].map(
                 (status) => (
                   <button
                     key={status}

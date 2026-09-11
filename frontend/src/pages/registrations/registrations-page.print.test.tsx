@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import RegistrationsPage from "./registrations-page";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { todayIsoDateLy } from "@/lib/date-format";
+import { REGISTRATION_DEFAULT_STATUSES } from "./registration-query";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -346,8 +347,10 @@ describe("RegistrationsPage print actions", () => {
         dateFrom: todayIsoDateLy(),
         dateTo: todayIsoDateLy(),
         sort: "booking-desc",
+        status: [...REGISTRATION_DEFAULT_STATUSES],
       })
     );
+    expect(screen.getByRole("button", { name: "In Progress" })).toBeTruthy();
   });
 
   it("requests the selected server-side sort and preserves it for Today and Tomorrow", async () => {
@@ -434,7 +437,7 @@ describe("RegistrationsPage print actions", () => {
           dateTo: todayIsoDateLy(),
           modalityId: "",
           q: "",
-          status: ["scheduled", "arrived", "waiting"],
+          status: ["scheduled", "arrived", "waiting", "in-progress"],
         })
       );
     });
@@ -609,7 +612,7 @@ describe("RegistrationsPage print actions", () => {
     expect(screen.queryByRole("button", { name: "Voided" })).toBeNull();
     await waitFor(() => {
       expect(fetchAppointmentsMock).toHaveBeenCalledWith(
-        expect.objectContaining({ status: ["scheduled", "arrived", "waiting"] }),
+        expect.objectContaining({ status: ["scheduled", "arrived", "waiting", "in-progress"] }),
       );
     });
   });

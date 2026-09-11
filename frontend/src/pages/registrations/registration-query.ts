@@ -12,6 +12,21 @@ export interface RegistrationsFilters {
   sort: RegistrationSort;
 }
 
+export const REGISTRATION_DEFAULT_STATUSES = [
+  "scheduled",
+  "arrived",
+  "waiting",
+  "in-progress",
+] as const;
+
+export const REGISTRATION_FILTER_STATUSES = [
+  ...REGISTRATION_DEFAULT_STATUSES,
+  "completed",
+  "no-show",
+  "cancelled",
+  "discontinued",
+] as const;
+
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isIsoDate(value: string | null): value is string {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { todayIsoDateLy } from "../../lib/date-format";
-import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams, type RegistrationsFilters } from "./registration-query";
+import {
+  buildRegistrationAppointmentQuery,
+  parseRegistrationFiltersFromSearchParams,
+  REGISTRATION_DEFAULT_STATUSES,
+  REGISTRATION_FILTER_STATUSES,
+  type RegistrationsFilters,
+} from "./registration-query";
 
 const defaults: RegistrationsFilters = {
   dateMode: "single",
@@ -9,11 +15,25 @@ const defaults: RegistrationsFilters = {
   dateTo: "",
   modalityId: "",
   query: "",
-  statuses: ["scheduled"],
+  statuses: [...REGISTRATION_DEFAULT_STATUSES],
   sort: "booking-desc",
 };
 
 describe("buildRegistrationAppointmentQuery", () => {
+  it("defines the active and selectable Registration status sets in order", () => {
+    expect(REGISTRATION_DEFAULT_STATUSES).toEqual(["scheduled", "arrived", "waiting", "in-progress"]);
+    expect(REGISTRATION_FILTER_STATUSES).toEqual([
+      "scheduled",
+      "arrived",
+      "waiting",
+      "in-progress",
+      "completed",
+      "no-show",
+      "cancelled",
+      "discontinued",
+    ]);
+  });
+
   it("single date bounds the appointment query", () => {
     const selected = "2026-04-27";
 
@@ -74,7 +94,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         modalityId: "",
         patientId: "11",
         query: "",
-        statuses: ["scheduled", "arrived", "waiting"],
+        statuses: [...REGISTRATION_DEFAULT_STATUSES],
         sort: "patient-asc",
       })
     ).toEqual({
@@ -83,7 +103,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       modalityId: "",
       patientId: "11",
       q: "",
-      status: ["scheduled", "arrived", "waiting"],
+      status: ["scheduled", "arrived", "waiting", "in-progress"],
       sort: "patient-asc",
     });
   });
@@ -116,5 +136,17 @@ describe("buildRegistrationAppointmentQuery", () => {
 
   it("falls back to the default sort for an invalid URL value", () => {
     expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("sort=unknown"), defaults).sort).toBe("booking-desc");
+  });
+
+  it("preserves an explicit in-progress URL status", () => {
+    expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("status=in-progress"), defaults).statuses).toEqual([
+      "in-progress",
+    ]);
+  });
+
+  it("preserves multiple URL status filters", () => {
+    expect(
+      parseRegistrationFiltersFromSearchParams(new URLSearchParams("status=waiting&status=in-progress"), defaults).statuses,
+    ).toEqual(["waiting", "in-progress"]);
   });
 });
