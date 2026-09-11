@@ -175,7 +175,7 @@ describe("mpps bridge end-to-end", () => {
     await pool.query(`
       alter table appointments_v2.bookings
       add constraint bookings_status_check
-      check (status in ('scheduled', 'arrived', 'waiting', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
+      check (status in ('scheduled', 'arrived', 'waiting', 'in-progress', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
     `);
     await pool.query(`
       create table if not exists mpps_event_log (
@@ -402,7 +402,7 @@ describe("mpps bridge end-to-end", () => {
         skipSet: true,
       }));
       assert.equal(senderResult.exitCode, 0, `MPPS delivery failed.\n${senderResult.stderr}`);
-      assert.equal(await getBookingStatus(bookingId), "waiting");
+      assert.equal(await getBookingStatus(bookingId), "in-progress");
       assert.match(bridgeLogs.join(""), /diagnostic storage warning/i);
     } finally {
       await stopProcess(bridge);
@@ -441,12 +441,30 @@ describe("mpps bridge end-to-end", () => {
       studyInstanceUid,
       scheduledDate,
       performedStartTime: "09:13:17",
-      performedEndTime: "09:45:01",
+      skipSet: true,
     }));
     assert.equal(
       senderResult.exitCode,
       0,
       `MPPS fixture sender failed.\nSTDOUT:\n${senderResult.stdout}\nSTDERR:\n${senderResult.stderr}`
+    );
+
+    assert.equal(await getBookingStatus(bookingId), "in-progress");
+
+    const completionResult = await runSender(buildFixtureArgs({
+      bookingId,
+      patientId,
+      mppsInstanceUid,
+      studyInstanceUid,
+      scheduledDate,
+      performedEndTime: "09:45:01",
+      skipCreate: true,
+      setStatus: "COMPLETED",
+    }));
+    assert.equal(
+      completionResult.exitCode,
+      0,
+      `MPPS completion fixture sender failed.\nSTDOUT:\n${completionResult.stdout}\nSTDERR:\n${completionResult.stderr}`
     );
 
     const eventsResponse = await fetch(`http://127.0.0.1:${bridgeAdminPort}/events`);
@@ -709,6 +727,6 @@ describe("mpps bridge end-to-end", () => {
       [mppsInstanceUid]
     );
     assert.equal(Number(countResult.rows[0]?.count || 0), 1);
-    assert.equal(await getBookingStatus(bookingId), "waiting");
+    assert.equal(await getBookingStatus(bookingId), "in-progress");
   });
 });

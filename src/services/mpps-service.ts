@@ -15,7 +15,7 @@ import { createAssignedToMeNotifications } from "../modules/doctor-portal/report
 export type MppsEventType = "n-create" | "n-set";
 export type MppsCorrelationStatus = "matched" | "unmatched" | "ambiguous";
 export type MppsProcessingStatus = "received" | "processed" | "ignored" | "failed";
-export type BookingWorkflowStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
+export type BookingWorkflowStatus = "scheduled" | "arrived" | "waiting" | "in-progress" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
 
 export interface IncomingMppsEventPayload {
   eventType?: unknown;
@@ -404,7 +404,7 @@ async function correlateMppsEvent(
 }
 
 function mapMppsStatusToBookingStatus(status: NormalizedMppsEvent["performedStepStatus"]): BookingWorkflowStatus | null {
-  if (status === "IN PROGRESS") return "waiting";
+  if (status === "IN PROGRESS") return "in-progress";
   if (status === "COMPLETED") return "completed";
   if (status === "DISCONTINUED") return "discontinued";
   return null;
@@ -414,12 +414,12 @@ function canTransitionBookingStatus(currentStatus: BookingWorkflowStatus, target
   if (currentStatus === targetStatus) return true;
 
   switch (targetStatus) {
-    case "waiting":
-      return ["scheduled", "arrived", "waiting"].includes(currentStatus);
+    case "in-progress":
+      return ["scheduled", "arrived", "waiting", "in-progress"].includes(currentStatus);
     case "completed":
-      return ["scheduled", "arrived", "waiting", "completed"].includes(currentStatus);
+      return ["in-progress", "completed"].includes(currentStatus);
     case "discontinued":
-      return ["scheduled", "arrived", "waiting", "discontinued"].includes(currentStatus);
+      return ["in-progress", "discontinued"].includes(currentStatus);
     default:
       return false;
   }

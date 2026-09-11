@@ -777,7 +777,7 @@ router.get(
             count(distinct b.patient_id)::int as unique_patients,
             count(distinct b.modality_id)::int as unique_modalities,
             count(*) filter (where b.status = 'scheduled')::int as scheduled_count,
-            count(*) filter (where b.status in ('arrived', 'waiting'))::int as in_queue_count,
+            count(*) filter (where b.status in ('arrived', 'waiting', 'in-progress'))::int as in_queue_count,
             count(*) filter (where b.status = 'completed')::int as completed_count,
             count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count,
@@ -820,7 +820,7 @@ router.get(
             m.name_en as modality_name_en,
             count(*)::int as total_count,
             count(*) filter (where b.status = 'scheduled')::int as scheduled_count,
-            count(*) filter (where b.status in ('arrived', 'waiting'))::int as in_queue_count,
+            count(*) filter (where b.status in ('arrived', 'waiting', 'in-progress'))::int as in_queue_count,
             count(*) filter (where b.status = 'completed')::int as completed_count,
             count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count,
@@ -957,18 +957,22 @@ router.get(
             join modalities rm on rm.id = rb.modality_id
             left join exam_types ret on ret.id = rb.exam_type_id
             where rb.booking_date = $1::date
-              and rb.status in ('scheduled', 'arrived', 'waiting')
+              and rb.status in ('scheduled', 'arrived', 'waiting', 'in-progress')
             group by rb.patient_id, rb.booking_date
           )
           select
             row_number() over (order by b.created_at asc, b.id asc)::int as queue_number,
             b.id,
             b.booking_date::text as queue_date,
-            case when b.status = 'arrived' then 'called' else 'waiting' end as queue_status,
+            case
+              when b.status = 'in-progress' then 'in-progress'
+              when b.status = 'arrived' then 'called'
+              else 'waiting'
+            end as queue_status,
             b.arrived_at,
             b.waiting_started_at,
             b.completed_at,
-            case when b.status in ('arrived', 'waiting') then b.arrived_at else null end as scanned_at,
+            case when b.status in ('arrived', 'waiting', 'in-progress') then b.arrived_at else null end as scanned_at,
             b.id as appointment_id,
             ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
             b.requires_report,
@@ -1004,7 +1008,7 @@ router.get(
           left join doctor_portal.doctor_profiles dp on dp.id = ap.assigned_by_doctor_id
           left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
           where b.booking_date = $1::date
-            and b.status in ('scheduled', 'arrived', 'waiting')
+            and b.status in ('scheduled', 'arrived', 'waiting', 'in-progress')
           order by b.created_at asc, b.id asc
         `,
         [today]
@@ -1014,7 +1018,7 @@ router.get(
           select
             count(*)::int as total_appointments,
             count(*) filter (where status = 'scheduled')::int as scheduled_count,
-            count(*) filter (where status in ('arrived', 'waiting'))::int as waiting_count,
+            count(*) filter (where status in ('arrived', 'waiting', 'in-progress'))::int as waiting_count,
             count(*) filter (where status = 'no-show')::int as no_show_count,
             count(*) filter (where status = 'arrived')::int as arrived_count
           from appointments_v2.bookings
@@ -1255,7 +1259,7 @@ router.get(
         select wb.id, wb.patient_id, wb.booking_date
         from appointments_v2.bookings wb
         where wb.modality_id = $1
-          and wb.status in ('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued')
+          and wb.status in ('scheduled', 'waiting', 'arrived', 'in-progress', 'completed', 'no-show', 'cancelled', 'discontinued')
           ${worklistDateClause}
       ),
       worklist_document_ids as (
@@ -1298,7 +1302,7 @@ router.get(
         from appointments_v2.bookings rb
         join modalities rm on rm.id = rb.modality_id
         left join exam_types ret on ret.id = rb.exam_type_id
-        where rb.status in ('scheduled', 'arrived', 'waiting')
+        where rb.status in ('scheduled', 'arrived', 'waiting', 'in-progress')
           and exists (
             select 1
             from worklist_rows wr
@@ -1375,7 +1379,7 @@ router.get(
         protocol_assignment.protocol_notes as assigned_protocol_notes,
         protocol_assignment.contrast_notes as assigned_contrast_notes,
         row_number() over (partition by b.booking_date, b.modality_id order by b.created_at asc, b.id asc)::int as modality_slot_number,
-        coalesce(asd.same_day_appointment_count, case when b.status in ('scheduled', 'arrived', 'waiting') then 1 else 0 end)::int as same_day_appointment_count,
+        coalesce(asd.same_day_appointment_count, case when b.status in ('scheduled', 'arrived', 'waiting', 'in-progress') then 1 else 0 end)::int as same_day_appointment_count,
         (coalesce(asd.same_day_appointment_count, 0) > 1) as has_multiple_appointments,
         coalesce(asd.related_appointments, '[]'::jsonb) as related_appointments
         ,coalesce(cd_summary.successful_count, 0)::int as cd_successful_count
@@ -1509,15 +1513,16 @@ router.get(
         where d.booking_id = b.id
       ) cd_summary on true
       where b.modality_id = $1
-        and b.status in ('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued')
+        and b.status in ('scheduled', 'waiting', 'arrived', 'in-progress', 'completed', 'no-show', 'cancelled', 'discontinued')
       ${dateClause}
       order by
         b.booking_date desc,
         case
-          when b.status in ('arrived', 'waiting') then 1
-          when b.status = 'scheduled' then 2
-          when b.status = 'completed' then 3
-          else 4
+          when b.status = 'in-progress' then 1
+          when b.status in ('arrived', 'waiting') then 2
+          when b.status = 'scheduled' then 3
+          when b.status = 'completed' then 4
+          else 5
         end asc,
         coalesce(b.arrived_at, status_times.arrived_at) asc nulls last,
         b.booking_time asc nulls last,

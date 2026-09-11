@@ -17,7 +17,7 @@ import {
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "QUEUEARR_";
 
-type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
+type BookingStatus = "scheduled" | "arrived" | "waiting" | "in-progress" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
 
 describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
@@ -316,5 +316,21 @@ describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
     const related = row.related_appointments as Array<Record<string, unknown>>;
     assert.deepEqual(related.map((entry) => Number(entry.appointment_id)).sort((a, b) => a - b), [firstId, secondId].sort((a, b) => a - b));
     assert.ok(related.every((entry) => typeof entry.accession_number === "string"));
+  });
+
+  it("keeps an MPPS in-progress booking visible with a derived queue in-progress status", async () => {
+    guard();
+    const today = getTripoliToday();
+    const patientId = await createPatient();
+    const bookingId = await createBooking(patientId, today, "in-progress");
+
+    const response = await fetchJson<{ queue_entries?: Array<Record<string, unknown>> }>(app.baseUrl, "/api/v2/read/queue", {
+      cookie: authCookie,
+    });
+
+    assert.equal(response.status, 200);
+    const row = response.data.queue_entries?.find((entry) => Number(entry.appointment_id) === bookingId);
+    assert.equal(row?.appointment_status, "in-progress");
+    assert.equal(row?.queue_status, "in-progress");
   });
 });

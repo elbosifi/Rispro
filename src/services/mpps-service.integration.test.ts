@@ -33,7 +33,7 @@ describe("mpps-service integration", () => {
     `);
     await pool.query(`
       alter table appointments_v2.bookings add constraint bookings_status_check
-      check (status in ('scheduled', 'arrived', 'waiting', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
+      check (status in ('scheduled', 'arrived', 'waiting', 'in-progress', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
     `);
     await pool.query(`
       create table if not exists mpps_event_log (
@@ -198,7 +198,19 @@ describe("mpps-service integration", () => {
     }
   });
 
-  it("persists actual performed start timing separately and maps IN PROGRESS to waiting", async () => {
+  it("maps IN PROGRESS to the existing in-progress workflow state from every normal pre-scan state", async () => {
+    for (const initialStatus of ["scheduled", "arrived", "waiting", "in-progress"] as const) {
+      const bookingId = await createBooking(initialStatus);
+      const mppsInstanceUid = `1.2.826.${bookingId}.start`;
+      const result = await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+
+      assert.equal(result.dicomStatus, 0x0000);
+      assert.equal(result.updatedStatus, "in-progress");
+      assert.equal(await getBookingStatus(bookingId), "in-progress");
+    }
+  });
+
+  it("persists actual performed start timing separately for IN PROGRESS", async () => {
     const bookingId = await createBooking();
     const mppsInstanceUid = `1.2.826.${bookingId}.start`;
     const result = await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
@@ -208,9 +220,9 @@ describe("mpps-service integration", () => {
     );
 
     assert.equal(result.dicomStatus, 0x0000);
-    assert.equal(result.updatedStatus, "waiting");
+    assert.equal(result.updatedStatus, "in-progress");
     assert.deepEqual(stored.rows[0], { performed_start_date: "20260911", performed_start_time: "091317", scheduled_start_date: null });
-    assert.equal(await getBookingStatus(bookingId), "waiting");
+    assert.equal(await getBookingStatus(bookingId), "in-progress");
   });
 
   it("uses the accepted N-CREATE lifecycle record to process identifier-free N-SET completion", async () => {
@@ -275,10 +287,10 @@ describe("mpps-service integration", () => {
     assert.equal(exactRetry.deduplicated, true);
     assert.equal(exactRetry.eventId, secondUpdate.eventId);
     assert.equal(rows.rows.length, 2);
-    assert.equal(await getBookingStatus(bookingId), "waiting");
+    assert.equal(await getBookingStatus(bookingId), "in-progress");
   });
 
-  it("persists discontinuation reason and maps a valid final N-SET", async () => {
+  it("maps valid final N-SET events from in-progress", async () => {
     const bookingId = await createBooking();
     const mppsInstanceUid = `1.2.826.${bookingId}.discontinued`;
     await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
@@ -294,6 +306,18 @@ describe("mpps-service integration", () => {
     assert.equal(result.updatedStatus, "discontinued");
     assert.equal(stored.rows[0]?.discontinuation_reason, "Patient unable to continue");
     assert.equal(await getBookingStatus(bookingId), "discontinued");
+  });
+
+  it("does not reopen completed or other terminal bookings on MPPS IN PROGRESS", async () => {
+    for (const terminalStatus of ["completed", "cancelled", "no-show", "discontinued", "voided"] as const) {
+      const bookingId = await createBooking(terminalStatus);
+      const mppsInstanceUid = `1.2.826.${bookingId}.terminal`;
+      const result = await ingestMppsEvent(createPayload(bookingId, mppsInstanceUid));
+
+      assert.equal(result.processingStatus, "ignored");
+      assert.equal(result.updatedStatus, null);
+      assert.equal(await getBookingStatus(bookingId), terminalStatus);
+    }
   });
 
   it("rejects duplicate creates, unknown N-SETs, invalid create statuses, and N-SET after final state", async () => {

@@ -29,6 +29,7 @@ export type BookingStatus =
   | "scheduled"
   | "arrived"
   | "waiting"
+  | "in-progress"
   | "completed"
   | "discontinued"
   | "no-show"

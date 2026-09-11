@@ -191,11 +191,11 @@ describe("status booking service source guards", () => {
     assert.match(readV2RoutesSource, /b\.arrived_at/);
     assert.match(readV2RoutesSource, /b\.waiting_started_at/);
     assert.match(readV2RoutesSource, /b\.completed_at/);
-    assert.match(readV2RoutesSource, /case when b\.status in \('arrived', 'waiting'\) then b\.arrived_at else null end as scanned_at/);
+    assert.match(readV2RoutesSource, /case when b\.status in \('arrived', 'waiting', 'in-progress'\) then b\.arrived_at else null end as scanned_at/);
   });
 
   it("V2 modality worklist includes operational and review statuses but excludes voided", () => {
-    assert.match(readV2RoutesSource, /b\.status in \('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued'\)/);
+    assert.match(readV2RoutesSource, /b\.status in \('scheduled', 'waiting', 'arrived', 'in-progress', 'completed', 'no-show', 'cancelled', 'discontinued'\)/);
     assert.doesNotMatch(readV2RoutesSource, /modality\/worklist[\s\S]*b\.status in \([^)]*'voided'/);
   });
 

@@ -225,6 +225,22 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(typeof row(directBookingId)?.latest_document_at, "string");
   });
 
+  it("keeps an in-progress MPPS booking visible in the modality worklist", async () => {
+    guard();
+    const bookingId = await createBooking(testData.patientId);
+    await pool.query("update appointments_v2.bookings set status = 'in-progress' where id = $1", [bookingId]);
+
+    const response = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(
+      app.baseUrl,
+      `/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`,
+      { cookie: authCookie }
+    );
+
+    assert.equal(response.status, 200);
+    const row = response.data.appointments.find((appointment) => Number(appointment.id) === bookingId);
+    assert.equal(row?.status, "in-progress");
+  });
+
   it("returns active free-text MR protocol assignments in the worklist and detail read", async () => {
     guard();
     const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = 'MRI' limit 1");

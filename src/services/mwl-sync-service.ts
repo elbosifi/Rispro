@@ -12,7 +12,7 @@ import { PROTOCOLING_MODALITY_SQL } from "./protocoling-modality.js";
 
 export type OrthancMwlOperation = "upsert" | "delete";
 
-type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
+type BookingStatus = "scheduled" | "arrived" | "waiting" | "in-progress" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
 const ORTHANC_QUEUE_STATUSES = new Set(["arrived", "waiting"]);
 
 interface BookingSyncSnapshot {
