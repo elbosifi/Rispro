@@ -143,10 +143,21 @@ export async function notifyComplementaryRecallBookingEvent(
   bookingId: number,
   eventType: "additional_imaging_patient_arrived" | "additional_imaging_completed"
 ): Promise<void> {
-  const rows = await pool.query<{ id: number }>(
-    "select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1",
-    [bookingId]
-  );
+  let rows: { rows: Array<{ id: number }> };
+  try {
+    rows = await pool.query<{ id: number }>(
+      "select id from appointments_v2.complementary_recall_requests where recall_appointment_id=$1",
+      [bookingId]
+    );
+  } catch (error) {
+    console.warn(JSON.stringify({
+      type: "additional_imaging_notification_lookup_failed",
+      bookingId,
+      eventType,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return;
+  }
   await Promise.all(
     rows.rows.map((row) =>
       createAdditionalImagingNotification({ recallRequestId: Number(row.id), recallAppointmentId: bookingId, eventType })

@@ -144,6 +144,15 @@ describe("status booking service source guards", () => {
     assert.match(terminalTransitionSource, /reporting_assignment_intent_notification_failed/);
   });
 
+  it("isolates complementary-recall notification lookup failures after commit", () => {
+    assert.match(terminalTransitionSource, /additional_imaging_notification_lookup_failed/);
+    assert.match(
+      terminalTransitionSource,
+      /try \{\s*rows = await pool\.query<[\s\S]*?\} catch \(error\) \{[\s\S]*?additional_imaging_notification_lookup_failed[\s\S]*?return;/
+    );
+    assert.match(terminalTransitionSource, /additional_imaging_notification_failed/);
+  });
+
   it("manual terminal invalidation cancels pending reporting intents", () => {
     assert.match(terminalTransitionSource, /cancelPendingReportingAssignmentIntent/);
     assert.match(terminalTransitionSource, /reopenComplementaryRecallForUncompletedBooking[\s\S]*cancelPendingReportingAssignmentIntent/);
