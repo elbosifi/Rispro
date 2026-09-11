@@ -139,15 +139,18 @@ async function submitStandardProcessUpload() {
 }
 
 async function reachReviewDuringUnresolvedSecureStaging() {
+  const fullScan = deferred<ReturnType<typeof result>>();
   FakeXHR.autoRespond = false;
   previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-  scanMock.mockReturnValue(new Promise(() => undefined));
+  scanMock.mockReturnValue(fullScan.promise);
   renderPage();
   await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
   fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
-  await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
+  await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
   fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-  fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+  fullScan.resolve(result());
+  await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
   fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
   await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
@@ -453,8 +456,9 @@ describe("PacsRemapPage five-step wizard", () => {
       processed_file_count: 5,
       send_attempt_count: 0,
     };
+    const fullScan = deferred<ReturnType<typeof result>>();
     previewMock.mockResolvedValue({ ...result([workflowStudy]), previewOnly: true });
-    scanMock.mockReturnValue(new Promise(() => undefined));
+    scanMock.mockReturnValue(fullScan.promise);
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-B", name: "Viewed Destination B" }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
@@ -467,10 +471,12 @@ describe("PacsRemapPage five-step wizard", () => {
 
     renderPage();
     fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [new File(["a"], "a.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
     await screen.findByRole("heading", { name: "Patient" });
+    fullScan.resolve(result([workflowStudy]));
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
     fireEvent.click(screen.getByText("Remap History"));
     fireEvent.click(await screen.findByRole("button", { name: /#202.*Processing/i }));
     expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Viewed^SourceB");
@@ -917,21 +923,25 @@ describe("PacsRemapPage five-step wizard", () => {
     fullScan.resolve(result());
   });
 
-  it("offers selected-study-only secure staging as soon as the local scan finds a study after preview failure", async () => {
+  it("continues the complete scan after preliminary confirmation and stages every DICOM-like candidate only after completion", async () => {
     const fullScan = deferred<ReturnType<typeof result>>();
     let scanOptions: { signal: AbortSignal; onPartialResult?: (partial: DicomStudyScanResult) => void } | undefined;
     const selectedFile = new File(["selected"], "selected.dcm", { type: "application/dicom" });
+    const laterCandidate = new File(["later"], "later-candidate.dcm", { type: "application/dicom" });
     const otherStudyFile = new File(["other"], "other-study.dcm", { type: "application/dicom" });
     const partialStudy = study("selected-study", "Discovered Study");
+    partialStudy.files[0]!.file = selectedFile;
+    partialStudy.files[0]!.fileName = selectedFile.name;
+    partialStudy.files[0]!.fileSize = selectedFile.size;
+    partialStudy.totalBytes = selectedFile.size;
     previewMock.mockRejectedValue(new Error("Preview API unavailable"));
     scanMock.mockImplementation((_files: File[], options: typeof scanOptions) => {
       scanOptions = options;
       return fullScan.promise;
     });
-    buildPlanMock.mockReturnValue({ files: [selectedFile], selectedStudyInstanceUid: "selected-study", usesFallback: false });
     renderPage();
     await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [selectedFile, otherStudyFile] } });
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [selectedFile, laterCandidate, otherStudyFile] } });
     await screen.findByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.");
 
     act(() => scanOptions?.onPartialResult?.({
@@ -942,15 +952,80 @@ describe("PacsRemapPage five-step wizard", () => {
     }));
 
     expect(await screen.findByText("Discovered Study")).toBeTruthy();
-    expect(buildPlanMock).toHaveBeenCalledWith(expect.objectContaining({ scanIncomplete: true }), "selected-study", false);
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
 
-    expect(scanOptions?.signal.aborted).toBe(true);
+    expect(scanOptions?.signal.aborted).toBe(false);
+    expect(FakeXHR.instances).toHaveLength(0);
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+
+    fullScan.resolve(result([
+      partialStudy,
+      study("other-study", "Other Study"),
+    ]));
     await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
     const stagedBody = FakeXHR.instances[0]?.sentBody;
-    expect((stagedBody?.getAll("files") as File[]).map((file) => file.name)).toEqual(["selected.dcm"]);
+    expect((stagedBody?.getAll("files") as File[]).map((file) => file.name)).toEqual(["selected.dcm", "later-candidate.dcm", "other-study.dcm"]);
     expect(stagedBody?.get("selectedStudyInstanceUID")).toBe("selected-study");
+    expect(buildPlanMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the confirmed preliminary UID when the completed scan contains multiple studies", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    const confirmedStudy = study("study-a", "Study A");
+    const otherStudy = study("study-b", "Study B");
+    previewMock.mockResolvedValue({ ...result([confirmedStudy]), previewOnly: true });
+    scanMock.mockReturnValue(fullScan.promise);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [confirmedStudy.files[0]!.file, otherStudy.files[0]!.file] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+
+    fullScan.resolve(result([confirmedStudy, otherStudy]));
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    expect(FakeXHR.instances[0]?.sentBody?.get("selectedStudyInstanceUID")).toBe("study-a");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    const confirmedSelection = screen.getAllByRole("radio").find((radio) => (radio as HTMLInputElement).value === "study-a") as HTMLInputElement;
+    expect(confirmedSelection.checked).toBe(true);
+  });
+
+  it("fails closed when the confirmed preliminary UID is absent from the completed scan", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    const confirmedStudy = study("study-a", "Study A");
+    previewMock.mockResolvedValue({ ...result([confirmedStudy]), previewOnly: true });
+    scanMock.mockReturnValue(fullScan.promise);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [confirmedStudy.files[0]!.file] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+
+    fullScan.resolve(result([study("study-b", "Study B")]));
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("The confirmed preliminary study was not found after the complete source scan.");
+    expect(FakeXHR.instances).toHaveLength(0);
+  });
+
+  it("does not allow normal final upload while preliminary confirmation awaits the complete scan", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
+    scanMock.mockReturnValue(fullScan.promise);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+
+    const submitButton = screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+    fireEvent.click(submitButton);
+    expect(FakeXHR.instances).toHaveLength(0);
   });
 
   it("continues to the authoritative scan when the preview reports zero studies", async () => {
@@ -1239,7 +1314,7 @@ describe("PacsRemapPage five-step wizard", () => {
     await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
 
-    expect(await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Confirm study and continue to Patient" })).toBeTruthy();
     expect(screen.getAllByText("One^Patient").length).toBeGreaterThan(0);
     expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("19900101").length).toBeGreaterThan(0);
@@ -1255,43 +1330,24 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
 
     expect(await screen.findByText("Multiple studies detected. Select one study to remap.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Confirm this source study and begin secure staging" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm study and continue to Patient" })).toBeNull();
     fireEvent.click(screen.getAllByRole("radio")[1]!);
-    expect(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" })).toBeTruthy();
-  });
-
-  it("fast verification cancels the complete scan and starts durable staging before patient selection", async () => {
-    let resolveScan: ((value: ReturnType<typeof result>) => void) = () => undefined;
-    const pendingScan = new Promise<ReturnType<typeof result>>((resolve) => { resolveScan = resolve; });
-    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(pendingScan);
-    renderPage();
-    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm"), new File(["y"], "b.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
-    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
-
-    expect((scanMock.mock.calls[0]?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true);
-    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
-    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
-    expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/stage-multipart");
-    expect(FakeXHR.instances[0]?.sentBody).toBeInstanceOf(FormData);
-    expect(FakeXHR.instances[0]?.sentBody?.getAll("files")).toHaveLength(2);
-    resolveScan(result([study("stale-study", "Stale")]));
-    await waitFor(() => expect(screen.queryByText("Stale")).toBeNull());
+    expect(screen.getByRole("button", { name: "Confirm study and continue to Patient" })).toBeTruthy();
   });
 
   it("keeps patient and destination selection usable while secure staging is still uploading", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
     FakeXHR.autoRespond = false;
     previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(new Promise(() => undefined));
+    scanMock.mockReturnValue(fullScan.promise);
     renderPage();
     await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    fullScan.resolve(result());
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
 
     fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
@@ -1358,20 +1414,9 @@ describe("PacsRemapPage five-step wizard", () => {
   });
 
   it("final fast confirmation uses the small confirm-staged API without a second full-file upload", async () => {
-    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(new Promise(() => undefined));
-    renderPage();
-    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
-    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    const { stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
+    stagingRequest.respond();
     await screen.findByText(/Complete.*awaiting final confirmation/i);
-    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
     const confirmButton = screen.getByRole("button", { name: "Confirm patient and destination; begin remap" });
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
@@ -1393,32 +1438,16 @@ describe("PacsRemapPage five-step wizard", () => {
   });
 
   it("reset aborts an active secure staging upload", async () => {
-    FakeXHR.autoRespond = false;
-    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(new Promise(() => undefined));
-    renderPage();
-    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
-    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
-    await screen.findByRole("heading", { name: "Patient" });
-    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    const { stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
     fireEvent.click(screen.getByRole("button", { name: "Cancel secure staging and reset" }));
 
-    expect(FakeXHR.instances[0]?.abortCalled).toBe(true);
+    expect(stagingRequest.abortCalled).toBe(true);
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
   });
 
   it("reset cancels a completed awaiting-confirmation staging job", async () => {
-    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
-    scanMock.mockReturnValue(new Promise(() => undefined));
-    renderPage();
-    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
-    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
-    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    const { stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
+    stagingRequest.respond();
     await screen.findByText(/Complete.*awaiting final confirmation/i);
     fireEvent.click(screen.getByRole("button", { name: "Cancel secure staging and reset" }));
 

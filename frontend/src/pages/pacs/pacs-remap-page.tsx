@@ -46,6 +46,12 @@ interface StagedConfirmationSnapshot {
   readonly destinationPacsKey: string;
 }
 
+interface SourceStagingInput {
+  study: DicomStudyScanResult["studies"][number];
+  uploadFiles: File[];
+  acknowledged: boolean;
+}
+
 interface ResumedJobSelection {
   studyInstanceUid: string;
   patientId: string;
@@ -492,6 +498,7 @@ export default function PacsRemapPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
+  const [preliminaryConfirmedStudyUid, setPreliminaryConfirmedStudyUid] = useState("");
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
   const [patientLookupMode, setPatientLookupMode] = useState<PatientLookupMode>("filtered_appointments");
@@ -538,6 +545,9 @@ export default function PacsRemapPage() {
   const completedFullScanRunIdRef = useRef<number | null>(null);
   const previewUnavailableRunIdRef = useRef<number | null>(null);
   const latestPartialScanResultRef = useRef<DicomStudyScanResult | null>(null);
+  const preliminaryConfirmedStudyUidRef = useRef("");
+  const stagingStartedScanRunIdRef = useRef<number | null>(null);
+  const stageSourceMutationRef = useRef<{ mutate: (input: SourceStagingInput) => void } | null>(null);
   const pendingStagedConfirmationRef = useRef<StagedConfirmationSnapshot | null>(null);
   const localWorkflowStepBeforeRecentRef = useRef<RemapWizardUiStep>("source");
   const localResumedJobIdBeforeRecentRef = useRef<number | null>(null);
@@ -545,6 +555,21 @@ export default function PacsRemapPage() {
   const clearPendingStagedConfirmation = useCallback((): void => {
     pendingStagedConfirmationRef.current = null;
     setPendingStagedConfirmation(null);
+  }, []);
+
+  const clearPreliminaryConfirmedStudy = useCallback((): void => {
+    preliminaryConfirmedStudyUidRef.current = "";
+    setPreliminaryConfirmedStudyUid("");
+  }, []);
+
+  const confirmPreliminaryStudy = useCallback((studyInstanceUid: string): void => {
+    const confirmedUid = String(studyInstanceUid || "").trim();
+    if (!confirmedUid) return;
+    preliminaryConfirmedStudyUidRef.current = confirmedUid;
+    setPreliminaryConfirmedStudyUid(confirmedUid);
+    setSelectedStudyInstanceUid(confirmedUid);
+    focusHeadingAfterNavigationRef.current = true;
+    setUiStep("patient");
   }, []);
 
   const resumedJobSelection = activeResumedJobId == null ? null : resumedJobSelections[activeResumedJobId] || null;
@@ -772,9 +797,12 @@ export default function PacsRemapPage() {
         latestPartialScanResultRef.current = result;
         if (previewUnavailableRunIdRef.current !== runId || result.studies.length === 0) return;
         setScanResult(result);
-        setSelectedStudyInstanceUid((current) => result.studies.some((study) => study.studyInstanceUid === current)
-          ? current
-          : result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
+        const confirmedUid = preliminaryConfirmedStudyUidRef.current;
+        setSelectedStudyInstanceUid((current) => confirmedUid
+          ? confirmedUid
+          : result.studies.some((study) => study.studyInstanceUid === current)
+            ? current
+            : result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
       },
     }).then((result) => {
       if (runId !== scanRunIdRef.current || controller.signal.aborted) return;
@@ -786,12 +814,34 @@ export default function PacsRemapPage() {
       setCompleteScanStatus("complete");
       setPreviewWarning("");
       setScanProgress({ candidateFileCount: result.dicomLikeFileCount, processedFileCount: result.dicomLikeFileCount, parsedDicomFileCount: result.parsedDicomFileCount, unparsedCount: result.unparsedCount, studyCount: result.studies.length });
+      const confirmedUid = preliminaryConfirmedStudyUidRef.current;
+      if (confirmedUid) {
+        const confirmedStudy = result.studies.find((study) => study.studyInstanceUid === confirmedUid) || null;
+        if (!confirmedStudy) {
+          clearPreliminaryConfirmedStudy();
+          setSelectedStudyInstanceUid("");
+          setErrorMessage("The confirmed preliminary study was not found after the complete source scan. Please review the source studies again.");
+          setUiStep("source");
+          return;
+        }
+        setSelectedStudyInstanceUid(confirmedUid);
+        if (stagingStartedScanRunIdRef.current !== runId) {
+          stagingStartedScanRunIdRef.current = runId;
+          stageSourceMutationRef.current?.mutate({
+            study: confirmedStudy,
+            uploadFiles: sourceFiles.filter(isLikelyDicomCandidate),
+            acknowledged: true,
+          });
+        }
+        return;
+      }
       setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
     }).catch((error: unknown) => {
       if (error instanceof DicomStudyScanCancelledError || controller.signal.aborted || runId !== scanRunIdRef.current) return;
       fullScanControllerRef.current = null;
       setPreviewWarning("");
       setCompleteScanStatus("failed");
+      clearPreliminaryConfirmedStudy();
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
       setUiStep("source");
     });
@@ -807,6 +857,8 @@ export default function PacsRemapPage() {
       completedFullScanRunIdRef.current = null;
       previewUnavailableRunIdRef.current = null;
       latestPartialScanResultRef.current = null;
+      stagingStartedScanRunIdRef.current = null;
+      clearPreliminaryConfirmedStudy();
       setUiStep("source");
       setErrorMessage("");
       setErrorDetails("");
@@ -823,7 +875,9 @@ export default function PacsRemapPage() {
       if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context.runId) return;
       previewUnavailableRunIdRef.current = null;
       setScanResult(result);
-      if (result.studies.length === 1) setSelectedStudyInstanceUid(result.studies[0]!.studyInstanceUid);
+      const confirmedUid = preliminaryConfirmedStudyUidRef.current;
+      if (confirmedUid) setSelectedStudyInstanceUid(confirmedUid);
+      else if (result.studies.length === 1) setSelectedStudyInstanceUid(result.studies[0]!.studyInstanceUid);
       setPreviewWarning("");
     },
     onError: (_error: unknown, _sourceFiles, context) => {
@@ -832,39 +886,33 @@ export default function PacsRemapPage() {
       const partialResult = latestPartialScanResultRef.current;
       if (partialResult?.studies.length) {
         setScanResult(partialResult);
-        setSelectedStudyInstanceUid(partialResult.studies.length === 1 ? partialResult.studies[0]!.studyInstanceUid : "");
+        const confirmedUid = preliminaryConfirmedStudyUidRef.current;
+        setSelectedStudyInstanceUid(confirmedUid || (partialResult.studies.length === 1 ? partialResult.studies[0]!.studyInstanceUid : ""));
       }
       setPreviewWarning(t(language, "pacs.remap.fastPreviewUnavailable"));
     },
   });
 
-  const canStartFastStaging = completeScanStatus === "running"
+  const canConfirmPreliminaryStudy = completeScanStatus === "running"
     && (scanResult?.previewOnly === true || scanResult?.scanIncomplete === true)
     && scanResult.parsedDicomFileCount > 0
     && Boolean(selectedScannedStudy?.studyInstanceUid.trim())
-    && provisionalIdentityIsConsistent;
+    && provisionalIdentityIsConsistent
+    && !preliminaryConfirmedStudyUid;
 
   const stageSourceMutation = useMutation({
     onMutate: ({ uploadFiles }) => {
-      cancelActiveFullScan();
-      focusHeadingAfterNavigationRef.current = true;
-      setCompleteScanStatus("skipped");
       setSecureStagingStatus("uploading");
       setUploadLoaded(0);
       setUploadTotal(uploadFiles.reduce((sum, file) => sum + file.size, 0));
       setErrorMessage("");
       setErrorDetails("");
-      setUiStep("patient");
     },
     mutationFn: async ({
       study,
       uploadFiles,
       acknowledged,
-    }: {
-      study: DicomStudyScanResult["studies"][number];
-      uploadFiles: File[];
-      acknowledged: boolean;
-    }) => {
+    }: SourceStagingInput) => {
       if (!acknowledged || !study.studyInstanceUid.trim()) {
         throw new Error("Confirm a valid preliminary source study before secure staging.");
       }
@@ -931,6 +979,7 @@ export default function PacsRemapPage() {
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
   });
+  stageSourceMutationRef.current = stageSourceMutation;
 
   const processMutation = useMutation({
     onMutate: () => {
@@ -942,6 +991,9 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
     },
     mutationFn: async () => {
+      if (preliminaryConfirmedStudyUidRef.current && secureStagingStatus === "idle") {
+        throw new Error("Complete source scan must finish before secure staging can begin.");
+      }
       if (!scopedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
       const plan = buildDicomUploadSelectionPlan(scanResult, scopedStudyInstanceUid, false);
       const uploadFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : plan.files;
@@ -1313,7 +1365,7 @@ export default function PacsRemapPage() {
   const stagingCompleted = secureStagingStatus === "awaiting_confirmation" || isAwaitingStagedJob(currentJob);
   const canContinueStudy = fastStagedWorkflow
     ? Boolean(selectedStudy)
-    : completeScanStatus === "complete" && Boolean(selectedStudy);
+    : Boolean(selectedStudy) && (Boolean(preliminaryConfirmedStudyUid) || completeScanStatus === "complete");
   const canContinuePatient = !!scopedPatientId
     && !replacementPreviewQuery.isLoading
     && !replacementPreviewQuery.isError
@@ -1322,11 +1374,13 @@ export default function PacsRemapPage() {
   const stagingCanAcceptConfirmation = !fastStagedWorkflow
     || stagingCompleted
     || secureStagingStatus === "uploading";
+  const preliminaryStagingPending = Boolean(preliminaryConfirmedStudyUid) && !fastStagedWorkflow;
   const canSubmit = canContinueStudy
     && canContinuePatient
     && canContinueDestination
     && scopedConfirmChecked
     && stagingCanAcceptConfirmation
+    && !preliminaryStagingPending
     && !pendingStagedConfirmation
     && !processMutation.isPending
     && !confirmStagedMutation.isPending;
@@ -1360,9 +1414,6 @@ export default function PacsRemapPage() {
   const reviewFiles = skippedScanMode
     ? (scanResult?.scanIncomplete ? selectedStudy?.files || [] : files.filter(isLikelyDicomCandidate))
     : selectedStudy?.files || [];
-  const fastStagingFiles = scanResult?.scanIncomplete
-    ? buildDicomUploadSelectionPlan(scanResult, scopedStudyInstanceUid, false).files
-    : files.filter(isLikelyDicomCandidate);
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
   const recoveryIsProcessing = currentJob?.orthanc_recovery_status === "processing" || orthancRecoveryMutation.isPending;
@@ -1505,6 +1556,8 @@ export default function PacsRemapPage() {
     cancelActiveFullScan();
     clearPendingStagedConfirmation();
     cancelActiveStagingUpload();
+    clearPreliminaryConfirmedStudy();
+    stagingStartedScanRunIdRef.current = null;
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -1718,6 +1771,13 @@ export default function PacsRemapPage() {
           </section>
         )}
 
+        {preliminaryConfirmedStudyUid && completeScanStatus === "running" && !fastStagedWorkflow && effectiveUiStep !== "source" && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="status">
+            <strong>{t(language, "pacs.remap.preliminaryStudyConfirmedScanContinuing")}</strong>
+            {scanProgress && <span className="ms-2">{scanProgress.processedFileCount} / {scanProgress.candidateFileCount}</span>}
+          </div>
+        )}
+
         <div {...activeCardProps}>
           {effectiveUiStep === "source" && <>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -1751,6 +1811,8 @@ export default function PacsRemapPage() {
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
+                    clearPreliminaryConfirmedStudy();
+                    stagingStartedScanRunIdRef.current = null;
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
@@ -1783,6 +1845,8 @@ export default function PacsRemapPage() {
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
+                    clearPreliminaryConfirmedStudy();
+                    stagingStartedScanRunIdRef.current = null;
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
@@ -1863,9 +1927,9 @@ export default function PacsRemapPage() {
               )}
               {(scanResult.previewOnly || scanResult.scanIncomplete) && completeScanStatus === "running" && (
                 <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                  <p className="text-sm font-semibold">{language === "ar" ? "تحقق سريع على الخادم" : "Fast server verification"}</p>
+                  <p className="text-sm font-semibold">{language === "ar" ? "تأكيد الدراسة الأولية" : "Preliminary study confirmation"}</p>
                   <p>{t(language, "pacs.remap.preliminaryScanNotice")}</p>
-                  {canStartFastStaging && selectedScannedStudy && (
+                  {canConfirmPreliminaryStudy && selectedScannedStudy && (
                      <>
                       <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-white/80 p-3 sm:grid-cols-4">
                         <div><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientName")}</span><strong>{selectedScannedStudy.patientName || "—"}</strong></div>
@@ -1885,21 +1949,17 @@ export default function PacsRemapPage() {
                         <input type="checkbox" checked={skipAcknowledged} onChange={(event) => setSkipAcknowledged(event.target.checked)} />
                         <span>
                           {language === "ar"
-                            ? "أؤكد أن بطاقة الدراسة الأولية هذه هي المصدر المقصود وأريد بدء الرفع الآمن الآن."
-                            : "I confirm this preliminary source study and want to begin secure staging now."}
+                            ? "أؤكد أن بطاقة الدراسة الأولية هذه هي المصدر المقصود."
+                            : "I confirm this preliminary source study."}
                         </span>
                       </label>
                       <button
                         type="button"
-                        onClick={() => stageSourceMutation.mutate({
-                          study: selectedScannedStudy,
-                          uploadFiles: fastStagingFiles,
-                          acknowledged: skipAcknowledged,
-                        })}
-                        disabled={!skipAcknowledged || stageSourceMutation.isPending}
+                        onClick={() => confirmPreliminaryStudy(selectedScannedStudy.studyInstanceUid)}
+                        disabled={!skipAcknowledged}
                         className="btn-primary px-3 py-2 rounded-lg disabled:opacity-50"
                       >
-                        {language === "ar" ? "تأكيد هذه الدراسة وبدء الرفع الآمن" : "Confirm this source study and begin secure staging"}
+                        {language === "ar" ? "تأكيد الدراسة والمتابعة إلى المريض" : "Confirm study and continue to Patient"}
                       </button>
                     </>
                   )}
@@ -1930,6 +1990,7 @@ export default function PacsRemapPage() {
                         value={study.studyInstanceUid}
                         checked={selectedStudyInstanceUid === study.studyInstanceUid}
                         onChange={(e) => setSelectedStudyInstanceUid(e.target.value)}
+                        disabled={Boolean(preliminaryConfirmedStudyUid)}
                         className="mt-1"
                       />
                       <div className="min-w-0 flex-1 space-y-3">
