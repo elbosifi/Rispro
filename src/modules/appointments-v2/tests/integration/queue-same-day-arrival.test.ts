@@ -196,6 +196,44 @@ describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
     assert.deepEqual(await statuses([scheduledId, waitingId]), { [scheduledId]: "arrived", [waitingId]: "arrived" });
   });
 
+  it("keeps in-progress siblings active without regressing them to arrived", async () => {
+    guard();
+    const today = getTripoliToday();
+    const patientId = await createPatient();
+    const inProgressId = await createBooking(patientId, today, "in-progress");
+    const scheduledId = await createBooking(patientId, today, "scheduled");
+
+    const { status, data } = await scan(inProgressId);
+
+    assert.equal(status, 200);
+    assert.deepEqual(await statuses([inProgressId, scheduledId]), {
+      [inProgressId]: "in-progress",
+      [scheduledId]: "arrived",
+    });
+    assert.deepEqual(data.updatedBookingIds, [scheduledId]);
+    assert.deepEqual((data.relatedBookingIds as number[]).sort((a, b) => a - b), [inProgressId, scheduledId].sort((a, b) => a - b));
+    assert.equal(data.sameDayAppointmentCount, 2);
+    assert.equal(data.hasMultipleAppointments, true);
+  });
+
+  it("arrives waiting siblings while preserving in-progress siblings", async () => {
+    guard();
+    const today = getTripoliToday();
+    const patientId = await createPatient();
+    const waitingId = await createBooking(patientId, today, "waiting");
+    const inProgressId = await createBooking(patientId, today, "in-progress");
+
+    const { status, data } = await scan(waitingId);
+
+    assert.equal(status, 200);
+    assert.deepEqual(await statuses([waitingId, inProgressId]), {
+      [waitingId]: "arrived",
+      [inProgressId]: "in-progress",
+    });
+    assert.deepEqual(data.updatedBookingIds, [waitingId]);
+    assert.deepEqual((data.relatedBookingIds as number[]).sort((a, b) => a - b), [waitingId, inProgressId].sort((a, b) => a - b));
+  });
+
   it("includes already-arrived siblings without re-updating them", async () => {
     guard();
     const today = getTripoliToday();

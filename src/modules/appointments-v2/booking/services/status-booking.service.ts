@@ -16,7 +16,7 @@ import { reopenComplementaryRecallForUncompletedBooking } from "../../recall/com
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
-const SAME_DAY_QUEUE_ACTIVE_STATUSES = new Set<BookingStatus>(["scheduled", "arrived", "waiting"]);
+const SAME_DAY_QUEUE_ACTIVE_STATUSES = new Set<BookingStatus>(["scheduled", "arrived", "waiting", "in-progress"]);
 const SAME_DAY_QUEUE_ARRIVAL_STATUSES = new Set<BookingStatus>(["scheduled", "waiting"]);
 const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
   "scheduled",
