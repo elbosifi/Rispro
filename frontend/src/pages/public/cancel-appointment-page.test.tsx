@@ -335,6 +335,20 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.queryByText("العودة للرئيسية")).toBeNull();
   });
 
+  it("renders in-progress as imaging in progress and keeps cancellation unavailable", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({ currentStatus: "in-progress" })
+    );
+
+    renderPage();
+
+    const statusPill = await screen.findByText("جارٍ التصوير", { exact: true });
+    expect(statusPill.textContent).toBe("جارٍ التصوير");
+    expect(statusPill.textContent).not.toContain("مكتمل");
+    expect(screen.getByText("إلغاء الموعد غير متاح")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "إلغاء الموعد" })).toBeNull();
+  });
+
   it("opens a finalized report in a protected new tab without navigating the patient page", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const currentHref = window.location.href;

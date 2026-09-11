@@ -212,7 +212,7 @@ function formatBookingStatusAr(status: string): string {
     scheduled: "مجدول",
     arrived: "مجدول",
     waiting: "مجدول",
-    "in-progress": "مكتمل",
+    "in-progress": "جارٍ التصوير",
     completed: "مكتمل",
     cancelled: "ملغى",
     "no-show": "لم يحضر",
