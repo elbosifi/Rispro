@@ -21,12 +21,17 @@ describe("Personal Reporting Desk", () => {
     assert.match(page, /enabled: Boolean\(token\) && Boolean\(user\) && browserPushSupported/);
   });
 
-  it("reuses the passkey control and keeps personal claim actions gated", () => {
+  it("reuses the passkey control and keeps personal claim and finalization actions gated", () => {
     assert.match(page, /PasskeySettingsButton/);
     assert.match(page, /selected\.canAssignToMe && ownDesk/);
     assert.match(page, /Claim case/);
-    assert.match(page, /Finalize report\?/);
-    assert.match(page, /Finalized manually by assigned doctor from Personal Reporting Desk/);
+    assert.match(page, /const canFinalizeOwnReports = Boolean\(user && data\.allowedActions\.authenticated && ownDesk && data\.allowedActions\.finalizeOwnReports\)/);
+    assert.match(page, /appointmentFinalEligible = canFinalizeOwnReports && selected\?\.caseType === "appointment"/);
+    assert.match(page, /selected\.assignmentStatus === "assigned" && selected\.assignedDoctorId === data\.currentDoctorId/);
+    assert.match(page, /Mark final in RISpro/);
+    assert.match(page, /markReportingBoardCaseManualFinal\(appointmentId, \{ reason \}\)/);
+    assert.match(page, /This creates an audited RISpro manual-final override/);
+    assert.match(page, /finalizeReason\.trim\(\)/);
     assert.match(page, /Finalize comparison report\?/);
     assert.match(page, /finalizeComparisonRequest/);
   });
@@ -44,10 +49,11 @@ describe("Personal Reporting Desk", () => {
     assert.match(api, /withdrawReportingBoardComplementaryRecall[\s\S]*?\/doctor\/reporting-board\/complementary-recalls/);
   });
 
-  it("renders human-readable assignment ages and keeps category in details", () => {
+  it("renders human-readable assignment ages and keeps category in the case summary", () => {
     assert.match(page, /\$\{hours\} h \$\{rest\} min/);
     assert.match(page, /\$\{days\} d \$\{remainingHours\} h/);
-    assert.match(page, /<b>Category:<\/b>/);
+    assert.match(page, /aria-label="Case summary"/);
+    assert.match(page, /caseCategoryLabel\(selected\.category\)/);
     assert.doesNotMatch(page, /Clinical Indication/);
     assert.match(viewer, /open-sonicdicom\?scope=study/);
     assert.match(viewer, /window\.open\("about:blank", "_blank"\)/);

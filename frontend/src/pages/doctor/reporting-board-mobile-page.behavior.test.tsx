@@ -646,7 +646,8 @@ describe("Personal Reporting Desk case presentation", () => {
     const dialog = screen.getByRole("heading", { name: "Request additional imaging" }).closest<HTMLElement>('[role="dialog"]')!;
     await user.selectOptions(within(dialog).getByLabelText("Recall reason"), "missing_sequence_phase");
     await user.selectOptions(within(dialog).getByLabelText("QA classification"), "acquisition_error");
-    await user.type(within(dialog).getByRole("textbox", { name: "Technologist instruction" }), "Repeat the delayed phase");
+    await user.type(within(dialog).getByRole("textbox", { name: "What additional imaging is needed?" }), "Repeat the delayed phase");
+    await user.click(within(dialog).getByRole("button", { name: /^Add to this report/ }));
     await user.click(within(dialog).getByRole("button", { name: "Request additional imaging" }));
 
     await waitFor(() => expect(testState.createRecall).toHaveBeenCalledWith(42, {
@@ -655,6 +656,11 @@ describe("Personal Reporting Desk case presentation", () => {
       urgency: "routine",
       dueAt: null,
       reportingDisposition: "supplement_original_report",
+      requestedModalityId: null,
+      requestedExamTypeId: null,
+      originalReportDependency: "imaging_completed",
+      notifyOnArrival: false,
+      notifyOnImagingCompleted: false,
       receptionInstruction: null,
       technologistInstruction: "Repeat the delayed phase",
     }));
