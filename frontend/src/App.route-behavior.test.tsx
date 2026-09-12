@@ -68,6 +68,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPageVisibilityMatrix: testState.fetchPageVisibilityMatrix,
   fetchNoShowSummary: vi.fn().mockResolvedValue({ pendingCount: 0, mode: "manual", lastAutomaticProcessedCount: 0 }),
   fetchComplementaryRecallReceptionSummary: vi.fn().mockResolvedValue({ pendingCount: 0, unseenPendingCount: 0 }),
+  fetchRequestScanReceptionSummary: vi.fn().mockResolvedValue({ needsAttentionCount: 0, latestProcessedAt: null, latestFailedAt: null }),
   searchPatients: vi.fn(),
   fetchAppointments: vi.fn(),
 }));
