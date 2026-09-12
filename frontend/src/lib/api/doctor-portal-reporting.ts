@@ -1326,6 +1326,25 @@ export type MriSequenceImportSummary = {
   unchangedAliases: number;
 };
 
+export type ProtocolImportInspect = {
+  format: "xlsx";
+  sheets: Array<{ sheetName: string; columns: string[]; requiredColumns: string[]; missingRequiredColumns: string[]; rowCount: number }>;
+  unknownSheets: string[];
+};
+
+export type ProtocolImportPreviewRow = { rowNumber: number; protocolKey: string; action: "create" | "invalid"; errors: string[] };
+
+export type ProtocolImportPreview = {
+  protocolRows: Array<Omit<ProtocolImportPreviewRow, "action"> & { protocolName: string; modality: string; action: "create_protocol" | "invalid" | "conflict_existing_protocol" }>;
+  ctPhaseRows: ProtocolImportPreviewRow[];
+  ctTechniqueRows: ProtocolImportPreviewRow[];
+  mriSequenceRows: ProtocolImportPreviewRow[];
+  summary: { protocols: number; ctPhases: number; ctTechniques: number; mriSequences: number; errors: number };
+  canConfirm: boolean;
+};
+
+export type ProtocolImportSummary = { createdProtocols: number; createdCtProtocols: number; createdMriProtocols: number; createdCtPhases: number; createdCtTechniques: number; createdMriSequenceRows: number };
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -1345,6 +1364,22 @@ async function downloadProtocolLibraryWorkbook(path: string, fallbackFilename: s
 
 export function downloadMriSequenceImportTemplate() {
   return downloadProtocolLibraryWorkbook("mri-sequence-presets/import-template.xlsx", "rispro-mri-sequence-import-template.xlsx");
+}
+
+export function downloadProtocolImportTemplate() {
+  return downloadProtocolLibraryWorkbook("protocols/import/template.xlsx", "rispro-protocol-import-template.xlsx");
+}
+
+export function exportAllProtocolLibraryWorkbooks() {
+  return downloadProtocolLibraryWorkbook("protocols/export.xlsx", "rispro-protocols.xlsx");
+}
+
+export function exportProtocolLibraryProtocolWorkbook(protocolId: number) {
+  return downloadProtocolLibraryWorkbook(`protocols/${protocolId}/export.xlsx`, "rispro-protocol.xlsx");
+}
+
+export function exportProtocolLibraryVersionWorkbook(versionId: number) {
+  return downloadProtocolLibraryWorkbook(`protocol-versions/${versionId}/export.xlsx`, "rispro-protocol-version.xlsx");
 }
 
 export function exportMriSequencePresetsWorkbook() {
@@ -1370,6 +1405,19 @@ export async function confirmMriSequenceImport(payload: { fileContentBase64: str
     method: "POST",
     body: JSON.stringify(payload),
   }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+  return raw.summary;
+}
+
+export async function inspectProtocolImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<ProtocolImportInspect> {
+  return api<ProtocolImportInspect>("/doctor/protocol-library/protocols/import/inspect", { method: "POST", body: JSON.stringify(payload) }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+}
+
+export async function previewProtocolImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<ProtocolImportPreview> {
+  return api<ProtocolImportPreview>("/doctor/protocol-library/protocols/import/preview", { method: "POST", body: JSON.stringify(payload) }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+}
+
+export async function confirmProtocolImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<ProtocolImportSummary> {
+  const raw = await api<{ summary: ProtocolImportSummary }>("/doctor/protocol-library/protocols/import/confirm", { method: "POST", body: JSON.stringify(payload) }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
   return raw.summary;
 }
 

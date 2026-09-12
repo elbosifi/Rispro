@@ -31,6 +31,16 @@ Doctor Portal contains doctor-facing cases, reporting worklists, rosters, availa
 - Frontend: `cd frontend && npm run test -- src/pages/doctor`
 - Typechecks: `npm run typecheck` and `npm run typecheck:frontend`
 
+## Protocol Workbook Import
+
+Protocol Library administrators can download the **Full Protocol Workbook XLSX** from Doctor Workspace → Protocol Library → Protocols. The workbook has `Protocols`, `CT Phases`, `CT Techniques`, `MRI Sequences`, and a read-only `Instructions` sheet. `protocol_key` is a trimmed, workbook-local join key; users never enter PostgreSQL IDs.
+
+Use the active anatomy-region, CT/MRI scanner, and MRI `sequence_key` lookup values supplied on `Instructions`. The importer does not create anatomy regions, scanners, MRI sequence presets, or CT phase presets. CT detail sheets can only reference CT protocols; MRI sequences can only reference MRI protocols.
+
+After selection, inspect and preview run before confirmation. Preview exposes all row and cross-sheet errors, including duplicate keys/orders, unresolved lookups, modality mismatches, invalid enum/number values, and same-modality existing protocol names. Existing protocols are never overwritten.
+
+Confirmation reparses and revalidates the workbook and writes the complete import in one database transaction. Every imported protocol/version is DRAFT-only: a radiologist must review and explicitly activate it before clinical use. An Orthanc-generated workbook may be cleaned against this template and imported later; Orthanc extraction itself is outside this workflow.
+
 ## Follow-Up Gaps
 
 - Needs inspection: authoritative ownership boundaries between roster planning, workload rules, and assignment rules.

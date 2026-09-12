@@ -64,6 +64,8 @@ vi.mock("@/lib/api-hooks", () => ({
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
   deleteProtocolLibraryCtTechnique: vi.fn(), duplicateProtocolLibraryCtVersion: vi.fn(),
   confirmMriSequenceImport: vi.fn(), downloadMriSequenceImportTemplate: vi.fn(), exportMriSequencePresetsWorkbook: vi.fn(),
+  confirmProtocolImport: vi.fn(), downloadProtocolImportTemplate: vi.fn(), inspectProtocolImport: vi.fn(), previewProtocolImport: vi.fn(),
+  exportAllProtocolLibraryWorkbooks: vi.fn(), exportProtocolLibraryProtocolWorkbook: vi.fn(), exportProtocolLibraryVersionWorkbook: vi.fn(),
   fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
   fetchRequestDocumentProtocolPolicy: mockFetchProtocolPolicy,
@@ -1065,6 +1067,16 @@ describe("Doctor protocoling request documents", () => {
   });
 });
 
+describe("Protocol workbook import controls", () => {
+  it("shows the full-protocol XLSX controls only in Protocol Library administration", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    expect(await screen.findByRole("button", { name: "Download XLSX template" })).toBeTruthy();
+    expect(screen.getByText("Import protocols XLSX")).toBeTruthy();
+    expect(screen.getByText(/saved as drafts and must be reviewed/i)).toBeTruthy();
+  });
+});
+
 const libraryProtocol = {
   id: 101,
   name: "Liver Multiphasic CT",
@@ -1139,6 +1151,28 @@ describe("CT protocol library workbench", () => {
     vi.mocked(apiHooks.createProtocolLibraryProtocol).mockResolvedValue({ protocol: libraryProtocol, version: draftVersion });
     vi.mocked(apiHooks.activateProtocolLibraryVersion).mockResolvedValue(libraryDetail(activeVersion));
     vi.mocked(apiHooks.deleteProtocolLibraryCtPhaseRow).mockResolvedValue(libraryDetail());
+  });
+
+  it("offers all, protocol, and exact-version XLSX exports through the typed download helpers", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Export all protocols XLSX" }));
+    expect(apiHooks.exportAllProtocolLibraryWorkbooks).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Export XLSX" }));
+    expect(vi.mocked(apiHooks.exportProtocolLibraryProtocolWorkbook).mock.calls[0]?.[0]).toBe(101);
+    await userEvent.click(screen.getByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Export this version XLSX" }));
+    expect(vi.mocked(apiHooks.exportProtocolLibraryVersionWorkbook).mock.calls[0]?.[0]).toBe(201);
+  });
+
+  it("shows download failures instead of silently ignoring them", async () => {
+    vi.mocked(apiHooks.exportAllProtocolLibraryWorkbooks).mockRejectedValueOnce(new Error("Workbook download failed"));
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Export all protocols XLSX" }));
+
+    expect(await screen.findByText("Workbook download failed")).toBeTruthy();
   });
 
   it("renders the empty draft as a phase-first workspace with disabled publish", async () => {

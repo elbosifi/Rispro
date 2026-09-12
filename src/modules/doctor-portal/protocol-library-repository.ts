@@ -182,6 +182,7 @@ export interface ProtocolMriSequenceRow {
   scannerName: string | null;
   orderIndex: number;
   mriSequencePresetId: number | null;
+  mriSequencePresetKey: string | null;
   mriSequencePresetName: string | null;
   presetGenericFamily: string | null;
   presetWeighting: string | null;
@@ -533,6 +534,7 @@ function mapProtocolMriSequence(row: RawRecord): ProtocolMriSequenceRow {
     scannerName: stringOrNull(row.scanner_name),
     orderIndex: Number(row.order_index),
     mriSequencePresetId: numberOrNull(row.mri_sequence_preset_id),
+    mriSequencePresetKey: stringOrNull(row.mri_sequence_preset_key),
     mriSequencePresetName: stringOrNull(row.mri_sequence_preset_name),
     presetGenericFamily: stringOrNull(row.preset_generic_family),
     presetWeighting: stringOrNull(row.preset_weighting),
@@ -956,7 +958,7 @@ async function mriSequencesForVersion(client: DbClient, versionId: number): Prom
   const result = await client.query(
     `
       select pms.id, pms.protocol_version_id, pms.scanner_id, s.name as scanner_name,
-             pms.order_index, pms.mri_sequence_preset_id, msp.name as mri_sequence_preset_name,
+             pms.order_index, pms.mri_sequence_preset_id, msp.sequence_key as mri_sequence_preset_key, msp.name as mri_sequence_preset_name,
              msp.generic_family as preset_generic_family, msp.weighting as preset_weighting,
              msp.default_plane as preset_default_plane, msp.fat_suppression as preset_fat_suppression,
              msp.acquisition_type as preset_acquisition_type, msp.contrast_relation as preset_contrast_relation,
