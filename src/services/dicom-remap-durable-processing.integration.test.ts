@@ -1084,9 +1084,21 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(historicalResponse.status, 202);
     const historical = await historicalResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>;
     assert.equal(Number(historical.job.id), jobId);
-    assert.equal(historical.job.status, "sending");
     assert.equal(historical.job.orthanc_recovery_attempt_count, 5);
-    assert.equal(historical.job.orthanc_recovery_status, "completed");
+    assert.equal(historical.job.orthanc_recovery_status, "processing");
+    let historicalCompleted: { status: string; orthanc_recovery_status: string; orthanc_recovery_attempt_count: number; orthanc_send_job_id: string | null } | null = null;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const row = await pool.query<{ status: string; orthanc_recovery_status: string; orthanc_recovery_attempt_count: number; orthanc_send_job_id: string | null }>(`select status, orthanc_recovery_status, orthanc_recovery_attempt_count, orthanc_send_job_id from dicom_remap_jobs where id = $1`, [jobId]);
+      if (row.rows[0]?.status === "sending" && row.rows[0]?.orthanc_recovery_status === "completed") {
+        historicalCompleted = row.rows[0];
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(historicalCompleted, "historical Orthanc recovery continuation did not complete");
+    assert.equal(historicalCompleted.status, "sending");
+    assert.equal(historicalCompleted.orthanc_recovery_attempt_count, 5);
+    assert.equal(historicalCompleted.orthanc_recovery_status, "completed");
     assert.equal(Number((await pool.query<{ count: string }>(`select count(*)::text as count from dicom_remap_jobs where created_by_user_id = $1`, [userId])).rows[0]?.count || 0), jobCountBeforeHistoricalRetry);
     assert.equal(fake.state.sendCount, 1);
     assert.equal(fake.state.uploadRecords.length, 2);
@@ -1097,7 +1109,7 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     for (const staged of stagedFilesBeforeRecovery) assert.equal(Buffer.compare(await fs.readFile(path.join(stagingRoot, storageKey, staged.relativePath)), staged.body), 0);
     const repeatedHistoricalResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
     assert.equal(repeatedHistoricalResponse.status, 202);
-    assert.equal((await repeatedHistoricalResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>).job.orthanc_send_job_id, historical.job.orthanc_send_job_id);
+    assert.equal((await repeatedHistoricalResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>).job.orthanc_send_job_id, historicalCompleted.orthanc_send_job_id);
     assert.equal(fake.state.sendCount, 1);
   } finally {
     __dicomRemapTestables.resetTestOverrides();
