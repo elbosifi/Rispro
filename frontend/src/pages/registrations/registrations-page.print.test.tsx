@@ -770,13 +770,13 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(getAppointmentRow("ACC-7"));
     const dialog = await screen.findByRole("dialog", { name: "Manage" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Additional workflow timestamps" }));
-
-    expect(within(dialog).getByText("Arrival time")).toBeTruthy();
-    expect(within(dialog).getByText("Waiting duration")).toBeTruthy();
-    expect(within(dialog).getByText("Completion time")).toBeTruthy();
-    expect(within(dialog).getByText(/10:15/)).toBeTruthy();
-    expect(within(dialog).getByText(/11:30/)).toBeTruthy();
+    const workflow = within(dialog).getByTestId("appointment-workflow-timeline");
+    expect(within(workflow).getByRole("heading", { name: "Workflow" })).toBeTruthy();
+    expect(within(workflow).getByText("Arrived")).toBeTruthy();
+    expect(within(workflow).getByText("Waiting")).toBeTruthy();
+    expect(within(workflow).getByText("Completed")).toBeTruthy();
+    expect(within(workflow).getByText(/10:15/)).toBeTruthy();
+    expect(within(workflow).getByText(/11:30/)).toBeTruthy();
   });
 
   it("shows assigned protocol status and compact summary in the appointment list", async () => {
@@ -1204,6 +1204,9 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("checks report status from the row action and shows open report only when allowed", async () => {
+    const appointment = registrationAppointment({ requiresReport: true });
+    fetchAppointmentsMock.mockResolvedValue([appointment]);
+    getAppointmentByIdMock.mockResolvedValue(appointment);
     renderRegistrationsPage();
 
     await waitFor(() => {
@@ -1223,6 +1226,7 @@ describe("RegistrationsPage print actions", () => {
 
   it("shows PACS note above report status in the appointment drawer Report tab only when a note exists", async () => {
     const appointment = registrationAppointment({
+      requiresReport: true,
         sonicDicomStudyNote: "mwa prior study note with enough text to preview compactly",
         sonicDicomStudyNoteCheckedAt: "2026-07-04T08:00:00.000Z",
       });
@@ -1244,7 +1248,13 @@ describe("RegistrationsPage print actions", () => {
     const pacsNote = screen.getByTitle("PACS note: mwa prior study note with enough text to preview compactly");
     expect(within(pacsNote).getByText("PACS note")).toBeTruthy();
     expect(pacsNote.textContent).toContain("mwa prior study note");
-
+    const reportStatusMessage = screen.getByText("Report is ready.");
+    expect(
+      Boolean(
+        pacsNote.compareDocumentPosition(reportStatusMessage) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
   });
 
   it("does not render an empty PACS note placeholder in the Report tab", async () => {
@@ -1259,6 +1269,9 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("does not show open report when status cannot be viewed", async () => {
+    const appointment = registrationAppointment({ requiresReport: true });
+    fetchAppointmentsMock.mockResolvedValue([appointment]);
+    getAppointmentByIdMock.mockResolvedValue(appointment);
     fetchPublicAppointmentReportStatusMock.mockResolvedValue({
       enabled: true,
       state: "draft",
