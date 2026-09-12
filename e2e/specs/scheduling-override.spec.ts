@@ -12,7 +12,7 @@ test("a reception capacity block requires supervisor approval and persists the a
     await reception.goto("/appointments");
     await reception.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill("E2E Similar Patient Two");
     await reception.getByRole("button", { name: /e2e similar patient two/i }).click();
-    await reception.getByPlaceholder("Enter identifier").fill("100000000002");
+    await reception.getByRole("textbox", { name: /enter complete national id/i }).fill("100000000002");
     await reception.getByRole("button", { name: "Verify and select" }).click();
     const modalitySelect = reception.getByLabel(/modality/i);
     const modalityValue = await modalitySelect.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value");

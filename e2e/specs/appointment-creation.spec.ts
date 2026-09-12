@@ -8,7 +8,7 @@ test("reception creates a capacity-compliant appointment through the real schedu
   await page.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill("E2E Similar Patient One");
   await page.getByRole("button", { name: /e2e similar patient one/i }).click();
   await expect(page.getByRole("heading", { name: "Verify patient identity" })).toBeVisible();
-  await page.getByPlaceholder("Enter identifier").fill("100000000001");
+  await page.getByRole("textbox", { name: /enter complete national id/i }).fill("100000000001");
   await page.getByRole("button", { name: "Verify and select" }).click();
   const modalitySelect = page.getByLabel(/modality/i);
   const modalityValue = await modalitySelect.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value");
