@@ -2274,7 +2274,7 @@ test("dicom helper: strict recovery timeout accepts only one exact ModifiedFrom 
   }
 });
 
-test("dicom helper: recovery provenance polling reuses a delayed exact ModifiedFrom child without real waits", async () => {
+test("dicom helper: recovery provenance discovery retries an initially empty search without real waits", async () => {
   let probes = 0;
   let sleptMs = 0;
   __dicomRemapTestables.setSleepForTests(async (ms) => { sleptMs += ms; });
@@ -2298,6 +2298,116 @@ test("dicom helper: recovery provenance polling reuses a delayed exact ModifiedF
   assert.equal(studyId, "modified-study");
   assert.equal(probes, 31);
   assert.equal(sleptMs, 30_000);
+});
+
+test("dicom helper: recovery provenance polling reuses a delayed exact ModifiedFrom child", async () => {
+  let findCalls = 0;
+  let provenanceCalls = 0;
+  let sleptMs = 0;
+  __dicomRemapTestables.setSleepForTests(async (ms) => { sleptMs += ms; });
+  __dicomRemapTestables.setOrthancFetchForTests(async (requestPath) => {
+    if (requestPath === "/studies/source-study") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "SOURCE" } } });
+    }
+    if (requestPath === "/tools/find") {
+      findCalls += 1;
+      return orthancResult({ json: ["modified-study"] });
+    }
+    if (requestPath === "/studies/modified-study") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "P1" } } });
+    }
+    if (requestPath === "/studies/modified-study/metadata/ModifiedFrom") {
+      provenanceCalls += 1;
+      return provenanceCalls < 4
+        ? orthancResult({ status: 404, ok: false })
+        : orthancResult({ json: "source-study", text: '"source-study"' });
+    }
+    throw new Error(`Unexpected Orthanc request: ${requestPath}`);
+  });
+
+  const studyId = await __dicomRemapTestables.waitForProvenOrthancRecoveryModifiedChild(
+    remapJob({ replacement_patient_id: "P1" }),
+    "source-study",
+    { renewLease: async () => {} },
+  );
+
+  assert.equal(studyId, "modified-study");
+  assert.equal(findCalls, 1);
+  assert.equal(provenanceCalls, 4);
+  assert.equal(sleptMs, 3_000);
+});
+
+test("dicom helper: recovery provenance refreshes conclusively unrelated candidates to find a late exact child", async () => {
+  let findCalls = 0;
+  __dicomRemapTestables.setSleepForTests(async () => {});
+  __dicomRemapTestables.setOrthancFetchForTests(async (requestPath) => {
+    if (requestPath === "/studies/source-study") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "SOURCE" } } });
+    }
+    if (requestPath === "/tools/find") {
+      findCalls += 1;
+      return orthancResult({ json: findCalls === 1 ? ["unrelated-study"] : ["unrelated-study", "real-modified-child"] });
+    }
+    if (requestPath === "/studies/unrelated-study" || requestPath === "/studies/real-modified-child") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "P1" } } });
+    }
+    if (requestPath === "/studies/unrelated-study/metadata/ModifiedFrom") return orthancResult({ json: "unrelated-source", text: '"unrelated-source"' });
+    if (requestPath === "/studies/real-modified-child/metadata/ModifiedFrom") return orthancResult({ json: "source-study", text: '"source-study"' });
+    throw new Error(`Unexpected Orthanc request: ${requestPath}`);
+  });
+
+  const studyId = await __dicomRemapTestables.waitForProvenOrthancRecoveryModifiedChild(
+    remapJob({ replacement_patient_id: "P1" }),
+    "source-study",
+    { renewLease: async () => {} },
+  );
+
+  assert.equal(studyId, "real-modified-child");
+  assert.equal(findCalls, 2);
+});
+
+test("dicom helper: recovery provenance fails closed when discovery is non-conclusive", async () => {
+  __dicomRemapTestables.setOrthancFetchForTests(async (requestPath) => {
+    if (requestPath === "/studies/source-study") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "SOURCE" } } });
+    }
+    if (requestPath === "/tools/find") return orthancResult({ status: 500, ok: false });
+    throw new Error(`Unexpected Orthanc request: ${requestPath}`);
+  });
+
+  await assert.rejects(
+    () => __dicomRemapTestables.waitForProvenOrthancRecoveryModifiedChild(
+      remapJob({ replacement_patient_id: "P1" }),
+      "source-study",
+      { renewLease: async () => {} },
+    ),
+    (error: unknown) => error instanceof HttpError && (error.details as { code?: string })?.code === "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+  );
+});
+
+test("dicom helper: recovery provenance fails closed for multiple exact children", async () => {
+  __dicomRemapTestables.setOrthancFetchForTests(async (requestPath) => {
+    if (requestPath === "/studies/source-study") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "SOURCE" } } });
+    }
+    if (requestPath === "/tools/find") return orthancResult({ json: ["modified-study-1", "modified-study-2"] });
+    if (requestPath === "/studies/modified-study-1" || requestPath === "/studies/modified-study-2") {
+      return orthancResult({ json: { MainDicomTags: { StudyDate: "20260831", AccessionNumber: "ACC-1" }, PatientMainDicomTags: { PatientID: "P1" } } });
+    }
+    if (requestPath === "/studies/modified-study-1/metadata/ModifiedFrom" || requestPath === "/studies/modified-study-2/metadata/ModifiedFrom") {
+      return orthancResult({ json: "source-study", text: '"source-study"' });
+    }
+    throw new Error(`Unexpected Orthanc request: ${requestPath}`);
+  });
+
+  await assert.rejects(
+    () => __dicomRemapTestables.waitForProvenOrthancRecoveryModifiedChild(
+      remapJob({ replacement_patient_id: "P1" }),
+      "source-study",
+      { renewLease: async () => {} },
+    ),
+    (error: unknown) => error instanceof HttpError && (error.details as { code?: string })?.code === "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN",
+  );
 });
 
 test("dicom helper: verifySendCompletionAfterTimeout finds completed job when available", async () => {
