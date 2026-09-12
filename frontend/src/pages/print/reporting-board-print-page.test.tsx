@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { t as translate, type TranslationKey } from "@/lib/i18n";
 import ReportingBoardPrintPage from "./reporting-board-print-page";
 
 const fetchReportingBoardCasesMock = vi.fn();
@@ -14,6 +15,16 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({ user: { fullName: "Dr Manager", username: "manager" } }),
+}));
+
+vi.mock("@/providers/language-provider", () => ({
+  useLanguage: () => ({
+    language: "en",
+    isArabic: false,
+    setLanguage: vi.fn(),
+    toggleLanguage: vi.fn(),
+    t: (key: TranslationKey, params?: Record<string, string | number>) => translate("en", key, params),
+  }),
 }));
 
 function renderPage(path: string) {
