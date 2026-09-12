@@ -22,7 +22,7 @@ export async function claimRequestScanJob(jobId: number, workerId: string): Prom
 export async function claimNextRequestScanJob(workerId: string): Promise<ClaimedRequestScanJob | null> {
   const token = crypto.randomUUID();
   const { rows } = await pool.query(`with reset_gate as (
-    select pg_try_advisory_xact_lock(1421421) as allowed
+    select pg_try_advisory_xact_lock_shared(1421421) as allowed
   ), active_owner as (
     select 1 from request_scan_worker_runtime
     where singleton_key=1 and worker_id=$1 and worker_heartbeat_at >= now()-($4::int * interval '1 millisecond') and exists(select 1 from reset_gate where allowed)

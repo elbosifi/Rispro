@@ -3,6 +3,7 @@ import { after, test } from "node:test";
 import fs from "node:fs/promises";
 import { pool } from "../db/pool.js";
 import { beginRequestScanAttachment, claimNextRequestScanJob, claimRequestScanJob, recoverExpiredRequestScanJobs, renewRequestScanLease, RequestScanCancellationRequestedError, updateRequestScanProgress } from "./request-scan-processing-service.js";
+import { REQUEST_SCAN_RESET_ADVISORY_LOCK } from "./request-scan-dev-reset-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
 const ids: number[] = [];
@@ -44,6 +45,23 @@ test("claim-next atomically gives concurrent slots different pending jobs in pri
   assert.equal([claimA.job.worker_id, claimB.job.worker_id].sort().join(","), "claim-worker,claim-worker");
   assert.equal(await claimNextRequestScanJob("worker-c"), null);
   await releaseRequestScanWorkerLeadership("claim-worker");
+});
+test("claim-next is blocked by the development reset advisory lock and resumes after release", async (t) => {
+  if (!(await ready(t))) return;
+  const id = await job();
+  assert.equal(await acquireRequestScanWorkerLeadership("claim-worker"), true);
+  const resetClient = await pool.connect(); let lockHeld = false;
+  try {
+    const lock = await resetClient.query<{ acquired: boolean }>("select pg_try_advisory_lock($1) acquired", [REQUEST_SCAN_RESET_ADVISORY_LOCK]);
+    assert.equal(lock.rows[0]?.acquired, true); lockHeld = true;
+    assert.equal(await claimNextRequestScanJob("claim-worker"), null);
+    assert.equal((await resetClient.query<{ unlocked: boolean }>("select pg_advisory_unlock($1) unlocked", [REQUEST_SCAN_RESET_ADVISORY_LOCK])).rows[0]?.unlocked, true); lockHeld = false;
+    const claimed = await claimNextRequestScanJob("claim-worker");
+    assert.ok(claimed); assert.equal(Number(claimed.job.id), id);
+  } finally {
+    if (lockHeld) await resetClient.query("select pg_advisory_unlock($1)", [REQUEST_SCAN_RESET_ADVISORY_LOCK]).catch(() => undefined);
+    resetClient.release(); await releaseRequestScanWorkerLeadership("claim-worker");
+  }
 });
 test("expired leases recover conservatively while active leases remain processing", async (t) => { if (!(await ready(t))) return; const id = await job(); const claimed = await claimRequestScanJob(id, "worker-a"); assert.ok(claimed); await pool.query("update request_scan_jobs set lease_expires_at=now()-interval '1 second' where id=$1", [id]); assert.equal((await recoverExpiredRequestScanJobs()).requeued, 1); const row = await pool.query<{ status: string; recovery_count: number }>("select status,recovery_count from request_scan_jobs where id=$1", [id]); assert.deepEqual(row.rows[0], { status: "pending", recovery_count: 1 }); });
 after(async () => { if (ids.length) await pool.query("delete from request_scan_jobs where id=any($1::bigint[])", [ids]); await pool.end(); });
