@@ -5881,7 +5881,7 @@ async function waitForProvenOrthancRecoveryModifiedChild(
   while (true) {
     await options.renewLease();
     const usingCachedCandidateIds = candidateIds !== null;
-    const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, usingCachedCandidateIds ? { ...options, candidateIds } : options);
+    const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, candidateIds === null ? options : { ...options, candidateIds });
     if (candidateIds === null && discovered.candidateIds.length > 0) candidateIds = discovered.candidateIds;
     provenanceAvailable ||= discovered.provenanceAvailable;
     if (!discovered.searchConclusive && discovered.candidateIds.length === 0) {
