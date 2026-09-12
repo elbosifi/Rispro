@@ -1083,6 +1083,8 @@ test("sent staging cleanup does not mark staging complete when storage cleanup f
 
 test("send monitor sanitizes failure classification and missing Orthanc jobs safely", async () => {
   const job = remapJob({ status: "sending", orthanc_send_job_id: "job-failed", send_attempt_count: 2, destination_pacs_key: "PACS_MAIN" });
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
   const failed = remapJob({ ...job, status: "failed", send_error_code: "PACS_DIMSE_REJECTED" });
   queueQueryResults([{ rows: [failed] }]);
   queueOrthancResults([orthancResult({ json: { State: "Failure", Type: "DicomModalityStore", DIMSEStatus: "0xA700", ErrorDescription: "association rejected" } })]);
@@ -1094,12 +1096,16 @@ test("send monitor sanitizes failure classification and missing Orthanc jobs saf
   queueQueryResults([{ rows: [missing] }]);
   queueOrthancResults([orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } })]);
   assert.equal((await monitorDicomRemapSendJob(job))?.send_error_code, "ORTHANC_SEND_JOB_NOT_FOUND");
+  assert.deepEqual(auditEntries.map((entry) => entry.actionType), ["pacs_send_failed", "pacs_send_failed"]);
 });
 
 test("stale sending rows without an Orthanc job ID become recoverable failed rows", async () => {
   const stale = remapJob({ status: "failed", orthanc_send_job_id: null, send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS" });
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
   queueQueryResults([{ rows: [stale] }]);
   assert.equal(await failStaleDicomRemapSendEnqueues(10), 1);
+  assert.deepEqual(auditEntries.map((entry) => entry.actionType), ["pacs_send_failed"]);
 });
 
 test("dicom helper: Orthanc invalid-DICOM upload rejection detection is narrow", () => {
