@@ -5819,28 +5819,32 @@ async function readOrthancModifiedFromStudyId(candidateStudyId: string): Promise
 async function findProvenOrthancRecoveryModifiedChildren(
   job: DicomRemapJobRow,
   sourceStudyId: string,
-  options: { renewLease?: () => Promise<void> } = {},
-): Promise<{ exact: string[]; provenanceAvailable: boolean; searchConclusive: boolean }> {
+  options: { renewLease?: () => Promise<void>; candidateIds?: string[] } = {},
+): Promise<{ exact: string[]; provenanceAvailable: boolean; searchConclusive: boolean; candidateIds: string[] }> {
   await options.renewLease?.();
   const sourceMetadata = await readOrthancStudyMatchMetadata(sourceStudyId);
-  const query: Record<string, string> = {};
   const replacementPatientId = String(job.replacement_patient_id || "").trim();
-  if (replacementPatientId) query.PatientID = replacementPatientId;
-  if (sourceMetadata?.studyDate) query.StudyDate = sourceMetadata.studyDate;
-  if (sourceMetadata?.accessionNumber) query.AccessionNumber = sourceMetadata.accessionNumber;
-  await options.renewLease?.();
-  const studies = await fetchOrthancForRemap("/tools/find", {
-    method: "POST",
-    body: { Level: "Study", Query: query },
-    timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
-  }).catch(() => null);
-  await options.renewLease?.();
-  if (!studies?.ok || !Array.isArray(studies.json)) return { exact: [], provenanceAvailable: false, searchConclusive: false };
-  const candidateIds: string[] = [];
-  for (const candidate of studies.json) {
-    const candidateId = typeof candidate === "string" ? candidate.trim() : parseOrthancResourceId(candidate);
-    if (!candidateId) return { exact: [], provenanceAvailable: false, searchConclusive: false };
-    if (!candidateIds.includes(candidateId)) candidateIds.push(candidateId);
+  let candidateIds = Array.from(new Set((options.candidateIds || []).map((candidateId) => String(candidateId || "").trim())))
+    .filter((candidateId) => candidateId && candidateId !== sourceStudyId);
+  if (options.candidateIds === undefined) {
+    const query: Record<string, string> = {};
+    if (replacementPatientId) query.PatientID = replacementPatientId;
+    if (sourceMetadata?.studyDate) query.StudyDate = sourceMetadata.studyDate;
+    if (sourceMetadata?.accessionNumber) query.AccessionNumber = sourceMetadata.accessionNumber;
+    await options.renewLease?.();
+    const studies = await fetchOrthancForRemap("/tools/find", {
+      method: "POST",
+      body: { Level: "Study", Query: query },
+      timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+    }).catch(() => null);
+    await options.renewLease?.();
+    if (!studies?.ok || !Array.isArray(studies.json)) return { exact: [], provenanceAvailable: false, searchConclusive: false, candidateIds: [] };
+    candidateIds = [];
+    for (const candidate of studies.json) {
+      const candidateId = typeof candidate === "string" ? candidate.trim() : parseOrthancResourceId(candidate);
+      if (!candidateId) return { exact: [], provenanceAvailable: false, searchConclusive: false, candidateIds: [] };
+      if (candidateId !== sourceStudyId && !candidateIds.includes(candidateId)) candidateIds.push(candidateId);
+    }
   }
   let provenanceAvailable = false;
   const exact: string[] = [];
@@ -5857,7 +5861,7 @@ async function findProvenOrthancRecoveryModifiedChildren(
     provenanceAvailable ||= provenance.available;
     if (provenance.available && provenance.sourceStudyId === sourceStudyId) exact.push(candidateId);
   }
-  return { exact, provenanceAvailable, searchConclusive: true };
+  return { exact, provenanceAvailable, searchConclusive: true, candidateIds };
 }
 
 async function waitForProvenOrthancRecoveryModifiedChild(
@@ -5867,10 +5871,18 @@ async function waitForProvenOrthancRecoveryModifiedChild(
 ): Promise<string> {
   let elapsedMs = 0;
   let provenanceAvailable = false;
+  let candidateIds: string[] | null = null;
   while (true) {
     await options.renewLease();
-    const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, options);
+    const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, candidateIds === null ? options : { ...options, candidateIds });
+    if (candidateIds === null && discovered.candidateIds.length > 0) candidateIds = discovered.candidateIds;
     provenanceAvailable ||= discovered.provenanceAvailable;
+    if (!discovered.searchConclusive && discovered.candidateIds.length === 0) {
+      throw new HttpError(409, "Orthanc recovery provenance could not prove the modified child.", {
+        code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+        provenanceAvailable,
+      });
+    }
     if (discovered.exact.length > 1) {
       throw new HttpError(409, "Multiple exact Orthanc recovery children were found.", {
         code: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN",
