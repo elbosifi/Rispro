@@ -992,9 +992,11 @@ describe("PacsRemapPage five-step wizard", () => {
 
   it("fails closed without staging or processing when a deferred Review confirmation's UID is absent from the completed scan", async () => {
     const fullScan = deferred<ReturnType<typeof result>>();
+    const replacementScan = deferred<ReturnType<typeof result>>();
     const confirmedStudy = study("study-a", "Study A");
-    previewMock.mockResolvedValue({ ...result([confirmedStudy]), previewOnly: true });
-    scanMock.mockReturnValue(fullScan.promise);
+    const replacementStudy = study("study-c", "Study C");
+    previewMock.mockResolvedValueOnce({ ...result([confirmedStudy]), previewOnly: true }).mockResolvedValueOnce({ ...result([replacementStudy]), previewOnly: true });
+    scanMock.mockReturnValueOnce(fullScan.promise).mockReturnValueOnce(replacementScan.promise);
     renderPage();
     fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [confirmedStudy.files[0]!.file] } });
     await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
@@ -1013,6 +1015,52 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByRole("alert").textContent).toContain("The confirmed preliminary study was not found after the complete source scan.");
     expect(FakeXHR.instances).toHaveLength(0);
     expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [replacementStudy.files[0]!.file] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    replacementScan.resolve(result([replacementStudy]));
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    expect(FakeXHR.instances[0]?.sentBody?.get("selectedStudyInstanceUID")).toBe("study-c");
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+    expect(FakeXHR.instances.some((xhr) => xhr.url.includes("/process-multipart"))).toBe(false);
+  });
+
+  it("clears a deferred Review confirmation when the complete scan fails before a replacement source is staged", async () => {
+    const failedScan = deferred<ReturnType<typeof result>>();
+    const replacementScan = deferred<ReturnType<typeof result>>();
+    const confirmedStudy = study("study-a", "Study A");
+    const replacementStudy = study("study-c", "Study C");
+    previewMock.mockResolvedValueOnce({ ...result([confirmedStudy]), previewOnly: true }).mockResolvedValueOnce({ ...result([replacementStudy]), previewOnly: true });
+    scanMock.mockReturnValueOnce(failedScan.promise).mockReturnValueOnce(replacementScan.promise);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [confirmedStudy.files[0]!.file] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }));
+
+    failedScan.reject(new Error("Complete scan failed to read this folder."));
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Complete scan failed to read this folder.");
+    expect(FakeXHR.instances).toHaveLength(0);
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [replacementStudy.files[0]!.file] } });
+    await screen.findByRole("button", { name: "Confirm study and continue to Patient" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm study and continue to Patient" }));
+    replacementScan.resolve(result([replacementStudy]));
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    expect(FakeXHR.instances[0]?.sentBody?.get("selectedStudyInstanceUID")).toBe("study-c");
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+    expect(FakeXHR.instances.some((xhr) => xhr.url.includes("/process-multipart"))).toBe(false);
   });
 
   it("records Review confirmation during an incomplete preliminary scan and automatically stages then confirms it after the scan", async () => {

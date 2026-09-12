@@ -818,6 +818,7 @@ export default function PacsRemapPage() {
       if (confirmedUid) {
         const confirmedStudy = result.studies.find((study) => study.studyInstanceUid === confirmedUid) || null;
         if (!confirmedStudy) {
+          clearPendingStagedConfirmation();
           clearPreliminaryConfirmedStudy();
           setSelectedStudyInstanceUid("");
           setErrorMessage("The confirmed preliminary study was not found after the complete source scan. Please review the source studies again.");
@@ -841,6 +842,7 @@ export default function PacsRemapPage() {
       fullScanControllerRef.current = null;
       setPreviewWarning("");
       setCompleteScanStatus("failed");
+      clearPendingStagedConfirmation();
       clearPreliminaryConfirmedStudy();
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
       setUiStep("source");
@@ -858,6 +860,7 @@ export default function PacsRemapPage() {
       previewUnavailableRunIdRef.current = null;
       latestPartialScanResultRef.current = null;
       stagingStartedScanRunIdRef.current = null;
+      clearPendingStagedConfirmation();
       clearPreliminaryConfirmedStudy();
       setUiStep("source");
       setErrorMessage("");
@@ -1810,6 +1813,7 @@ export default function PacsRemapPage() {
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
+                    clearPendingStagedConfirmation();
                     clearPreliminaryConfirmedStudy();
                     stagingStartedScanRunIdRef.current = null;
                     setFiles(selectedFiles);
@@ -1844,6 +1848,7 @@ export default function PacsRemapPage() {
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
+                    clearPendingStagedConfirmation();
                     clearPreliminaryConfirmedStudy();
                     stagingStartedScanRunIdRef.current = null;
                     setFiles(selectedFiles);
