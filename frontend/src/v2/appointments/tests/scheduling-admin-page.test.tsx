@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { SchedulingAdminPage } from "../scheduling-admin-page";
 import type { PolicyPreviewDto, PolicyStatusDto } from "../types";
 
@@ -15,7 +16,10 @@ vi.mock("@/providers/auth-provider", () => ({
 }));
 
 vi.mock("@/providers/language-provider", () => ({
-  useLanguage: () => ({ language: "en" }),
+  useLanguage: () => ({
+    language: "en",
+    t: (key: TranslationKey, params?: Record<string, string | number>) => translate("en", key, params),
+  }),
 }));
 
 vi.mock("@/lib/toast", () => ({
