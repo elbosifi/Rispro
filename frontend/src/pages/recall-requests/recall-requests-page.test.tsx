@@ -216,12 +216,12 @@ describe("Recall Requests metadata", () => {
     expect((screen.getByLabelText("QA classification") as HTMLSelectElement).value).toBe("acquisition_error");
     expect((screen.getByLabelText("Urgency") as HTMLSelectElement).value).toBe("within_24_hours");
     expect((screen.getByLabelText("Reporting disposition") as HTMLSelectElement).value).toBe("separate_report");
+    expect(screen.getByLabelText("Reporting disposition").hasAttribute("disabled")).toBe(true);
     expect((screen.getByLabelText("Due date/time") as HTMLInputElement).value).toBe("2026-09-01T10:00");
 
     await userEvent.selectOptions(screen.getByLabelText("Recall reason"), "incorrect_protocol");
     await userEvent.selectOptions(screen.getByLabelText("QA classification"), "protocol_error");
     await userEvent.selectOptions(screen.getByLabelText("Urgency"), "same_day");
-    await userEvent.selectOptions(screen.getByLabelText("Reporting disposition"), "no_separate_report");
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(mockUpdateRecall).toHaveBeenCalledWith(42, expect.objectContaining({
@@ -231,7 +231,7 @@ describe("Recall Requests metadata", () => {
       qaClassification: "protocol_error",
       urgency: "same_day",
       dueAt: "2026-09-01T08:00:00.000Z",
-      reportingDisposition: "no_separate_report",
+      reportingDisposition: "separate_report",
     })));
   });
 

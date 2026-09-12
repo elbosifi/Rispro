@@ -215,15 +215,24 @@ describe("Doctor protocoling request documents", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
     await userEvent.click(screen.getByRole("button", { name: "Request additional imaging" }));
-    expect((screen.getByLabelText("Urgency") as HTMLSelectElement).value).toBe("routine");
-    expect((screen.getByLabelText("Reporting disposition") as HTMLSelectElement).value).toBe("supplement_original_report");
-    expect(screen.getAllByRole("button", { name: "Request additional imaging" })[1]?.hasAttribute("disabled")).toBe(true);
+    const dialog = screen.getByRole("heading", { name: "Request additional imaging" }).closest('[role="dialog"]') as HTMLElement | null;
+    expect(dialog).toBeTruthy();
+    if (!dialog) return;
+    expect(within(dialog).getByRole("heading", { name: "Request additional imaging" })).toBeTruthy();
+    expect((within(dialog).getByLabelText("Urgency") as HTMLSelectElement).value).toBe("routine");
+    const submit = within(dialog).getByRole("button", { name: "Request additional imaging" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
 
-    await userEvent.selectOptions(screen.getByLabelText("Recall reason"), "missing_sequence_phase");
-    await userEvent.selectOptions(screen.getByLabelText("QA classification"), "acquisition_error");
-    fireEvent.change(screen.getByLabelText("Due date/time"), { target: { value: "2026-09-01T10:00" } });
-    await userEvent.type(screen.getByRole("textbox", { name: "Technologist instruction" }), "Repeat the delayed phase");
-    await userEvent.click(screen.getAllByRole("button", { name: "Request additional imaging" })[1]!);
+    await userEvent.selectOptions(within(dialog).getByLabelText("Recall reason"), "missing_sequence_phase");
+    await userEvent.selectOptions(within(dialog).getByLabelText("QA classification"), "acquisition_error");
+    fireEvent.change(within(dialog).getByLabelText("Due date/time"), { target: { value: "2026-09-01T10:00" } });
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "What additional imaging is needed?" }), "Repeat the delayed phase");
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    const addToReport = within(dialog).getByRole("button", { name: /^Add to this report/ });
+    await userEvent.click(addToReport);
+    expect(addToReport.getAttribute("aria-pressed")).toBe("true");
+    expect(submit.hasAttribute("disabled")).toBe(false);
+    await userEvent.click(submit);
 
     await waitFor(() => expect(mockCreateComplementaryRecall).toHaveBeenCalledWith(42, {
       receptionInstruction: null,
@@ -233,6 +242,11 @@ describe("Doctor protocoling request documents", () => {
       urgency: "routine",
       dueAt: "2026-09-01T08:00:00.000Z",
       reportingDisposition: "supplement_original_report",
+      requestedModalityId: null,
+      requestedExamTypeId: null,
+      originalReportDependency: "imaging_completed",
+      notifyOnArrival: false,
+      notifyOnImagingCompleted: false,
     }));
   });
 
