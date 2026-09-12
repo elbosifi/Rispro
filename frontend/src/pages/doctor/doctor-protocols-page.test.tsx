@@ -64,6 +64,7 @@ vi.mock("@/lib/api-hooks", () => ({
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
   deleteProtocolLibraryCtTechnique: vi.fn(), duplicateProtocolLibraryCtVersion: vi.fn(),
   confirmMriSequenceImport: vi.fn(), downloadMriSequenceImportTemplate: vi.fn(), exportMriSequencePresetsWorkbook: vi.fn(),
+  confirmProtocolImport: vi.fn(), downloadProtocolImportTemplate: vi.fn(), inspectProtocolImport: vi.fn(), previewProtocolImport: vi.fn(),
   fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
   fetchRequestDocumentProtocolPolicy: mockFetchProtocolPolicy,
@@ -1062,6 +1063,16 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByRole("textbox", { name: "Oral contrast policy" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Bowel preparation" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Initial change summary" })).toBeTruthy();
+  });
+});
+
+describe("Protocol workbook import controls", () => {
+  it("shows the full-protocol XLSX controls only in Protocol Library administration", async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    expect(await screen.findByRole("button", { name: "Download XLSX template" })).toBeTruthy();
+    expect(screen.getByText("Import protocols XLSX")).toBeTruthy();
+    expect(screen.getByText(/saved as drafts and must be reviewed/i)).toBeTruthy();
   });
 });
 

@@ -387,3 +387,12 @@ describe("Protocol library read repository", () => {
     assert.match(repo, /minMa cannot exceed maxMa/);
   });
 });
+
+describe("Protocol workbook import routes", () => {
+  it("keeps every workbook import endpoint behind protocol-library administration access", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-routes.ts`, "utf8");
+    for (const path of ["/protocols/import/template.xlsx", "/protocols/import/inspect", "/protocols/import/preview", "/protocols/import/confirm"]) {
+      assert.match(routes, new RegExp(`${path.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}[^]*requireProtocolLibraryAdminAccess\\(req\\)`));
+    }
+  });
+});

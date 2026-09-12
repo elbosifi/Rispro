@@ -42,6 +42,12 @@ import {
   mriSequenceImportTemplateXlsx,
   previewMriSequenceImport,
 } from "./protocol-library-mri-sequence-import-export-service.js";
+import {
+  confirmProtocolImport,
+  inspectProtocolImport,
+  previewProtocolImport,
+  protocolImportTemplateXlsx,
+} from "./protocol-library-protocol-import-service.js";
 
 const router = Router();
 
@@ -442,6 +448,41 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolLibraryAdminAccess(req);
     res.json({ summary: await confirmMriSequenceImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }) });
+  })
+);
+
+router.get(
+  "/protocols/import/template.xlsx",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const payload = await protocolImportTemplateXlsx();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.send(payload.buffer);
+  })
+);
+
+router.post(
+  "/protocols/import/inspect",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json(await inspectProtocolImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }));
+  })
+);
+
+router.post(
+  "/protocols/import/preview",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json(await previewProtocolImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }));
+  })
+);
+
+router.post(
+  "/protocols/import/confirm",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json({ summary: await confirmProtocolImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, actorUserId(req)) });
   })
 );
 

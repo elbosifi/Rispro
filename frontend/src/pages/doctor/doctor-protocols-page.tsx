@@ -21,6 +21,8 @@ import {
   deleteProtocolLibraryCtTechnique,
   deleteProtocolLibraryMriSequenceRow,
   confirmMriSequenceImport,
+  confirmProtocolImport,
+  downloadProtocolImportTemplate,
   downloadMriSequenceImportTemplate,
   exportMriSequencePresetsWorkbook,
   fetchDoctorProtocolingAppointmentDetail,
@@ -37,7 +39,9 @@ import {
   fetchProtocolLibraryProtocols,
   fetchProtocolLibraryScanners,
   inspectMriSequenceImport,
+  inspectProtocolImport,
   previewMriSequenceImport,
+  previewProtocolImport,
   reorderProtocolLibraryCtPhaseRows,
   reorderProtocolLibraryMriSequenceRows,
   updateProtocolLibraryCtPhaseRow,
@@ -55,6 +59,9 @@ import {
   type MriSequenceImportInspect,
   type MriSequenceImportPreview,
   type MriSequenceImportSummary,
+  type ProtocolImportInspect,
+  type ProtocolImportPreview,
+  type ProtocolImportSummary,
   type ProtocolLibraryCtPhaseRowPayload,
   type ProtocolLibraryCtTechniquePayload,
   type ProtocolLibraryMriSequenceRowPayload,
@@ -429,6 +436,11 @@ function ProtocolLibraryPanel() {
   const [mriImportInspect, setMriImportInspect] = useState<MriSequenceImportInspect | null>(null);
   const [mriImportPreview, setMriImportPreview] = useState<MriSequenceImportPreview | null>(null);
   const [mriImportSummary, setMriImportSummary] = useState<MriSequenceImportSummary | null>(null);
+  const [protocolImportFileBase64, setProtocolImportFileBase64] = useState("");
+  const [protocolImportFileName, setProtocolImportFileName] = useState("");
+  const [protocolImportInspect, setProtocolImportInspect] = useState<ProtocolImportInspect | null>(null);
+  const [protocolImportPreview, setProtocolImportPreview] = useState<ProtocolImportPreview | null>(null);
+  const [protocolImportSummary, setProtocolImportSummary] = useState<ProtocolImportSummary | null>(null);
 
   const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: section === "protocols" });
   const anatomyQuery = useQuery({ queryKey: ["doctor", "protocol-library", "anatomy-regions"], queryFn: fetchProtocolLibraryAnatomyRegions, enabled: section === "anatomy" || section === "protocols" });
@@ -483,6 +495,10 @@ function ProtocolLibraryPanel() {
       await onMutationSuccess("mri-sequence-presets", "MRI sequence import applied.");
     },
   });
+  const downloadProtocolTemplateMutation = useMutation({ mutationFn: downloadProtocolImportTemplate, onError: onMutationError });
+  const inspectProtocolImportMutation = useMutation({ mutationFn: inspectProtocolImport, onError: onMutationError, onSuccess: (inspect) => { setProtocolImportInspect(inspect); setProtocolImportPreview(null); setProtocolImportSummary(null); } });
+  const previewProtocolImportMutation = useMutation({ mutationFn: previewProtocolImport, onError: onMutationError, onSuccess: (preview) => { setProtocolImportPreview(preview); setProtocolImportSummary(null); } });
+  const confirmProtocolImportMutation = useMutation({ mutationFn: confirmProtocolImport, onError: onMutationError, onSuccess: async (summary) => { setProtocolImportSummary(summary); setMessage({ tone: "success", text: "Protocol workbook imported as drafts. Review and activate each protocol before clinical use." }); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] }); } });
 
   const readMriImportFile = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -498,6 +514,17 @@ function ProtocolLibraryPanel() {
     setMriImportPreview(null);
     setMriImportSummary(null);
     inspectMriImportMutation.mutate({ fileContentBase64: base64, fileName: file.name });
+  };
+  const readProtocolImportFile = async (file: File) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Failed to read protocol import file."));
+      reader.readAsDataURL(file);
+    });
+    const base64 = dataUrl.split(",")[1] ?? "";
+    setProtocolImportFileBase64(base64); setProtocolImportFileName(file.name); setProtocolImportInspect(null); setProtocolImportPreview(null); setProtocolImportSummary(null);
+    inspectProtocolImportMutation.mutate({ fileContentBase64: base64, fileName: file.name });
   };
   const refreshBuilder = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] });
@@ -641,7 +668,22 @@ function ProtocolLibraryPanel() {
         </DialogContent>
       </Dialog>
       {section === "protocols" && !selectedVersion && (
-        <ProtocolList
+        <div className="space-y-3">
+          <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => downloadProtocolTemplateMutation.mutate()} disabled={downloadProtocolTemplateMutation.isPending}>Download XLSX template</button>
+              <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Import protocols XLSX<input className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readProtocolImportFile(file); event.currentTarget.value = ""; }} /></label>
+              {protocolImportFileName && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{protocolImportFileName}</span>}
+            </div>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>Imported protocols are saved as drafts and must be reviewed and activated before clinical use.</p>
+            {(protocolImportInspect || protocolImportPreview || protocolImportSummary) && <div className="mt-3 space-y-3 text-sm">
+              {protocolImportInspect && <div><p className="font-semibold">Workbook inspect</p>{protocolImportInspect.sheets.map((sheet) => <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>{sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}</p>)}{protocolImportInspect.unknownSheets.length ? <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ignored extra sheets: {protocolImportInspect.unknownSheets.join(", ")}</p> : null}</div>}
+              {protocolImportFileBase64 && <div className="flex flex-wrap gap-2"><button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={previewProtocolImportMutation.isPending} onClick={() => previewProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Preview import</button><button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={!protocolImportPreview?.canConfirm || confirmProtocolImportMutation.isPending} onClick={() => confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Confirm import</button></div>}
+              {protocolImportPreview && <><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><SummaryCard label="Protocols" value={protocolImportPreview.summary.protocols} /><SummaryCard label="CT phases" value={protocolImportPreview.summary.ctPhases} /><SummaryCard label="CT techniques" value={protocolImportPreview.summary.ctTechniques} /><SummaryCard label="MRI sequences" value={protocolImportPreview.summary.mriSequences} /><SummaryCard label="Errors" value={protocolImportPreview.summary.errors} /></div><div className="grid gap-2 md:grid-cols-2"><ImportPreviewList title="Protocols" rows={protocolImportPreview.protocolRows.map((row) => ({ key: `protocol-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"} - ${row.action}`, errors: row.errors }))} /><ImportPreviewList title="CT Phases" rows={protocolImportPreview.ctPhaseRows.map((row) => ({ key: `ct-phase-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="CT Techniques" rows={protocolImportPreview.ctTechniqueRows.map((row) => ({ key: `ct-technique-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="MRI Sequences" rows={protocolImportPreview.mriSequenceRows.map((row) => ({ key: `mri-sequence-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /></div></>}
+              {protocolImportSummary && <p className="text-emerald-700">Import complete: {protocolImportSummary.createdProtocols} draft protocols, {protocolImportSummary.createdCtPhases} CT phases, {protocolImportSummary.createdCtTechniques} CT techniques, and {protocolImportSummary.createdMriSequenceRows} MRI sequence rows created.</p>}
+            </div>}
+          </div>
+          <ProtocolList
           rows={filteredProtocols}
           filter={protocolFilter}
           search={protocolSearch}
@@ -659,7 +701,8 @@ function ProtocolLibraryPanel() {
           }}
           onToggle={(protocol) => protocol.isActive ? setProtocolPendingToggle(protocol) : updateProtocolMutation.mutate({ id: protocol.id, payload: { isActive: !protocol.isActive } })}
           onDuplicate={(protocol) => { const versionId = protocol.activeVersionId ?? protocol.latestDraftVersionId; if (versionId) { setDuplicateVersion({ versionId, protocolName: protocol.name, versionNumber: protocol.activeVersionNumber ?? protocol.latestDraftVersionNumber, source: null }); setDuplicateName(`Copy of ${protocol.name}`); } }}
-        />
+          />
+        </div>
       )}
       {section === "anatomy" && (
         <SettingsTable emptyText="No anatomy regions yet" headers={["Name", "Scope", "Body system", "Coverage", "Status", "Actions"]}>
@@ -768,6 +811,10 @@ function ImportPreviewList({ title, rows }: { title: string; rows: Array<{ key: 
       </div>
     </div>
   );
+}
+
+function SummaryCard({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-lg border px-2 py-2 text-center" style={{ borderColor: "var(--border)" }}><p className="text-xs" style={{ color: "var(--text-muted)" }}>{label}</p><p className="text-lg font-semibold">{value}</p></div>;
 }
 
 function ProtocolList({
