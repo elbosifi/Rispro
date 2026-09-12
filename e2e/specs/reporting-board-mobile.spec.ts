@@ -46,7 +46,7 @@ test("authenticated personal reporting desk shows the doctor identity and person
   await page.setViewportSize({ width: 390, height: 844 });
   await openAuthenticatedPersonalDesk(page);
 
-  await expect(page.getByRole("button", { name: "e2e_doctor" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "E2E Doctor" })).toBeVisible();
   await expect(page.getByText("Sign in to enable notifications")).not.toBeVisible();
   for (const tab of ["My Cases", "Available", "Urgent", "Overdue"]) {
     await expect(personalWorkflowTab(page, tab)).toBeVisible();

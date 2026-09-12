@@ -705,6 +705,7 @@ describe("Doctor Portal shell", () => {
       },
       ctPhases: [],
       mriSequences: [],
+      ctTechniques: [],
     });
     updateProtocolLibraryProtocolMock.mockResolvedValue({});
     updateProtocolLibraryVersionMock.mockResolvedValue({});
@@ -1954,14 +1955,16 @@ describe("Doctor Portal shell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
 
     expect(await screen.findByRole("heading", { name: "Protocol Library" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Protocol List" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Anatomy / Regions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Scanners" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "CT Phase Presets" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "MRI Sequence Presets" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Library setup" })).toBeTruthy();
     expect(await screen.findByText("No protocols yet")).toBeTruthy();
     expect(screen.getByText("Create CT or MRI protocols from your saved phase and sequence presets.")).toBeTruthy();
     await waitFor(() => expect(fetchProtocolLibraryProtocolsMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    expect(screen.getByRole("button", { name: "Anatomy / Regions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Scanners" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Legacy CT Phase Presets" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "MRI Sequence Presets" })).toBeTruthy();
   });
 
   it("creates an anatomy region from the Protocol Library", async () => {
@@ -1969,6 +1972,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Anatomy / Regions" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add region" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Brain" } });
@@ -1992,6 +1996,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Scanners" }));
 
     expect(await screen.findByText("Scanner equipment is managed in Settings → Equipment.")).toBeTruthy();
@@ -2006,6 +2011,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add MRI sequence" }));
 
@@ -2043,6 +2049,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
 
     expect(screen.getByRole("button", { name: "Download template" })).toBeTruthy();
@@ -2089,6 +2096,7 @@ describe("Doctor Portal shell", () => {
 
     renderDoctorPortal("/doctor/protocols");
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
     fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
 
@@ -2122,6 +2130,7 @@ describe("Doctor Portal shell", () => {
 
     renderDoctorPortal("/doctor/protocols");
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
     fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
     await screen.findByText("Workbook inspect");
@@ -2133,28 +2142,24 @@ describe("Doctor Portal shell", () => {
     await waitFor(() => expect(fetchProtocolLibraryMriSequencePresetsMock).toHaveBeenCalledTimes(2));
   });
 
-  it("opens Add Protocol and creates a CT draft builder", async () => {
+  it("opens New CT Protocol and creates a CT draft builder", async () => {
     fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Add protocol" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
     fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "CT Brain" } });
-    fireEvent.change(screen.getByLabelText("Protocol modality"), { target: { value: "CT" } });
-    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Oncology" } });
-    fireEvent.change(screen.getByLabelText("IV contrast policy"), { target: { value: "With IV contrast" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create protocol" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(createProtocolLibraryProtocolMock.mock.calls[0]?.[0]).toMatchObject({
       name: "CT Brain",
       modality: "CT",
-      category: "Oncology",
-      contrastPolicy: "With IV contrast",
       changeSummary: "Initial protocol version",
     }));
     expect(await screen.findByText("CT phases")).toBeTruthy();
-    expect(screen.getByText("No CT phases added yet")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Activate version" })).toBeTruthy();
+    expect(screen.getByText("No phases yet")).toBeTruthy();
+    expect(screen.getByText("Build this CT protocol by adding acquisitions in scan order.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publish protocol" })).toHaveProperty("disabled", true);
   });
 
   it("renders MRI sequence terminology in the protocol builder", async () => {
@@ -2192,15 +2197,15 @@ describe("Doctor Portal shell", () => {
       },
       ctPhases: [],
       mriSequences: [],
+      ctTechniques: [],
     });
     fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Add protocol" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New MRI Protocol" }));
     fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "MRI Prostate" } });
-    fireEvent.change(screen.getByLabelText("Protocol modality"), { target: { value: "MRI" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create protocol" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByText("MRI sequences")).toBeTruthy();
     expect(screen.getByText("No MRI sequences added yet")).toBeTruthy();
