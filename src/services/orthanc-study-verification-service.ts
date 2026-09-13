@@ -343,13 +343,27 @@ function extractTags(payload: unknown): Record<string, unknown> {
   };
 }
 
+function dicomTagValue(tags: Record<string, unknown>, keyword: string, numericTag: string): unknown {
+  const compactTag = numericTag.replace(/,/g, "").toUpperCase();
+  const keywordLower = keyword.toLowerCase();
+  for (const [key, value] of Object.entries(tags)) {
+    if (key.toLowerCase() === keywordLower || key.replace(/,/g, "").toUpperCase() === compactTag) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function candidateFromPayload(payload: unknown, options: { remote: boolean; orthancStudyId?: string | null } = { remote: false }): StudyCandidate {
   const record = getRecord(payload);
   const tags = extractTags(payload);
-  const seriesCount = parseCount(record.SeriesCount ?? record.CountSeries ?? tags.NumberOfStudyRelatedSeries ?? tags["00201206"]);
-  const instanceCount = parseCount(record.InstanceCount ?? record.CountInstances ?? tags.NumberOfStudyRelatedInstances ?? tags["00201208"]);
-  const acquisitionDateTime = parseDicomDateTime(tags.AcquisitionDateTime ?? tags["0008002A"]);
-  const studyDateTime = parseDicomDateAndTime(tags.StudyDate ?? tags["00080020"], tags.StudyTime ?? tags["00080030"]);
+  const seriesCount = parseCount(record.SeriesCount ?? record.CountSeries ?? dicomTagValue(tags, "NumberOfStudyRelatedSeries", "0020,1206"));
+  const instanceCount = parseCount(record.InstanceCount ?? record.CountInstances ?? dicomTagValue(tags, "NumberOfStudyRelatedInstances", "0020,1208"));
+  const acquisitionDateTime = parseDicomDateTime(dicomTagValue(tags, "AcquisitionDateTime", "0008,002A"));
+  const studyDateTime = parseDicomDateAndTime(
+    dicomTagValue(tags, "StudyDate", "0008,0020"),
+    dicomTagValue(tags, "StudyTime", "0008,0030")
+  );
   const orthancLastUpdateAt = parseOrthancTimestamp(record.LastUpdate ?? record.LastUpdateTime);
   const lastUpdate = orthancLastUpdateAt ?? parseOrthancTimestamp(record.FirstSeen ?? record.CreatedAt);
   const studyStartedAt = acquisitionDateTime ?? studyDateTime ?? lastUpdate;
@@ -367,19 +381,19 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
       : lastUpdate
         ? "low"
         : null;
-  const modalities = normalizeDicomModalityValues(tags.ModalitiesInStudy ?? tags["00080061"]);
-  if (modalities.length === 0) modalities.push(...normalizeDicomModalityValues(tags.Modality ?? tags["00080060"]));
+  const modalities = normalizeDicomModalityValues(dicomTagValue(tags, "ModalitiesInStudy", "0008,0061"));
+  if (modalities.length === 0) modalities.push(...normalizeDicomModalityValues(dicomTagValue(tags, "Modality", "0008,0060")));
 
   return {
     orthancStudyId: firstString(options.orthancStudyId, record.ID, record.Id, record.id) || null,
-    studyInstanceUid: firstString(tags.StudyInstanceUID, tags.StudyInstanceUid, tags["0020000D"]) || null,
-    accessionNumber: firstString(tags.AccessionNumber, tags["00080050"]) || null,
+    studyInstanceUid: firstString(dicomTagValue(tags, "StudyInstanceUID", "0020,000D")) || null,
+    accessionNumber: firstString(dicomTagValue(tags, "AccessionNumber", "0008,0050")) || null,
     patientIds: Array.from(new Set([
-      firstString(tags.PatientID, tags["00100020"]),
+      firstString(dicomTagValue(tags, "PatientID", "0010,0020")),
       firstString(tags.OtherPatientIDs, tags["00101000"]),
     ].filter((value): value is string => Boolean(value)))),
     modality: modalities.join("\\") || null,
-    studyDate: normalizeDicomDate(tags.StudyDate ?? tags["00080020"]),
+    studyDate: normalizeDicomDate(dicomTagValue(tags, "StudyDate", "0008,0020")),
     seriesCount,
     instanceCount,
     orthancLastUpdateAt,
@@ -716,13 +730,13 @@ async function queryRemoteSeriesActivity(
 
     for (const answer of answers) {
       const tags = extractTags(answer);
-      const seriesInstanceUid = firstString(tags.SeriesInstanceUID, tags.SeriesInstanceUid, tags["0020000E"]);
+      const seriesInstanceUid = firstString(dicomTagValue(tags, "SeriesInstanceUID", "0020,000E"));
       if (!seriesInstanceUid) {
         reliableSeriesCount = false;
         reliableInstanceCount = false;
         continue;
       }
-      const instanceCount = parseIntegerCount(tags.NumberOfSeriesRelatedInstances ?? tags["00201209"]);
+      const instanceCount = parseIntegerCount(dicomTagValue(tags, "NumberOfSeriesRelatedInstances", "0020,1209"));
       if (instanceCount == null) {
         reliableInstanceCount = false;
       }

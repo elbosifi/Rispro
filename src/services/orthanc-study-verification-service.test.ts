@@ -442,6 +442,55 @@ test("remote C-FIND enriches a unique study with deduplicated SERIES activity", 
   assert.equal(result.resultJson.remoteInstanceCountReliable, true);
 });
 
+test("remote C-FIND accepts production comma-form Orthanc tags and reaches SERIES enrichment", async () => {
+  const queries: unknown[] = [];
+  service.__setOrthancFetchForTests(async (path, options) => {
+    if (path === "/modalities/PAX2/query") {
+      queries.push(options?.body);
+      return orthancResponse({ ID: queries.length === 1 ? "study-query" : "series-query" });
+    }
+    if (path === "/queries/study-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/study-query/answers/0/content") return orthancResponse({
+      "0008,0050": { Name: "AccessionNumber", Type: "String", Value: "V2-005132" },
+      "0010,0020": { Name: "PatientID", Type: "String", Value: "119660187913" },
+      "0020,000d": { Name: "StudyInstanceUID", Type: "String", Value: "1.2.3.4" },
+    });
+    if (path === "/queries/series-query/answers") return orthancResponse(["0", "1"]);
+    if (path === "/queries/series-query/answers/0/content") return orthancResponse({
+      "0020,000e": { Name: "SeriesInstanceUID", Type: "String", Value: "1.2.3.4.1" },
+      "0020,1209": { Name: "NumberOfSeriesRelatedInstances", Type: "String", Value: "120" },
+    });
+    if (path === "/queries/series-query/answers/1/content") return orthancResponse({
+      "0020,000E": { Name: "SeriesInstanceUID", Type: "String", Value: "1.2.3.4.2" },
+      "0020,1209": { Name: "NumberOfSeriesRelatedInstances", Type: "String", Value: "80" },
+    });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc({
+    ...baseBooking,
+    study_instance_uid: null,
+    accession_number: "V2-005132",
+    national_id: "119660187913",
+    mrn: null,
+    patient_primary_id: null,
+  }, {
+    ...baseSetting,
+    orthanc_target_type: "remote_modality",
+    orthanc_target_key: "PAX2",
+  });
+
+  assert.equal(result.status, "matched");
+  assert.deepEqual(queries, [
+    { Level: "Study", Query: { AccessionNumber: "V2-005132" } },
+    { Level: "Series", Query: { StudyInstanceUID: "1.2.3.4" } },
+  ]);
+  assert.equal(result.resultJson.remoteSeriesQueryAttempted, true);
+  assert.equal(result.resultJson.remoteSeriesQuerySucceeded, true);
+  assert.equal(result.seriesCount, 2);
+  assert.equal(result.instanceCount, 200);
+});
+
 test("remote SERIES C-FIND retains usable series activity when instance counts are unavailable", async () => {
   let queryCount = 0;
   service.__setOrthancFetchForTests(async (path) => {
