@@ -4,6 +4,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchComplementaryRecallBookingContext, fetchDoctorMe, fetchPatientById } from "@/lib/api-hooks";
+import { fetchIrReferralScheduleBookingContext } from "@/lib/api/ir-referrals";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
@@ -12,9 +13,13 @@ export function AppointmentCreatePage() {
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
   const recallRequestIdParam = searchParams.get("recallRequestId");
+  const irReferralScheduleRequestIdParam = searchParams.get("irReferralScheduleRequestId");
   const recallMode = recallRequestIdParam !== null;
+  const irReferralMode = irReferralScheduleRequestIdParam !== null;
   const recallRequestId = Number(recallRequestIdParam);
+  const irReferralScheduleRequestId = Number(irReferralScheduleRequestIdParam);
   const hasValidRecallRequestId = Number.isInteger(recallRequestId) && recallRequestId > 0;
+  const hasValidIrReferralScheduleRequestId = Number.isInteger(irReferralScheduleRequestId) && irReferralScheduleRequestId > 0;
   const { user } = useAuth();
   const { language } = useLanguage();
   const lookups = useV2Lookups();
@@ -27,7 +32,8 @@ export function AppointmentCreatePage() {
     staleTime: 60_000,
   });
   const recallContextQuery = useQuery({ queryKey: ["complementary-recall", "booking-context", recallRequestId], queryFn: () => fetchComplementaryRecallBookingContext(recallRequestId), enabled: recallMode && hasValidRecallRequestId, staleTime: 60_000 });
-  const parsedPatientId = recallMode ? (recallContextQuery.data?.patientId ?? null) : (urlPatientId ? Number(urlPatientId) : null);
+  const irReferralContextQuery = useQuery({ queryKey: ["ir-referral", "booking-context", irReferralScheduleRequestId], queryFn: () => fetchIrReferralScheduleBookingContext(irReferralScheduleRequestId), enabled: irReferralMode && hasValidIrReferralScheduleRequestId, staleTime: 60_000 });
+  const parsedPatientId = recallMode ? (recallContextQuery.data?.patientId ?? null) : irReferralMode ? (irReferralContextQuery.data?.patientId ?? null) : (urlPatientId ? Number(urlPatientId) : null);
   const hasValidPatientId = Number.isInteger(parsedPatientId) && (parsedPatientId as number) > 0;
 
   const preloadPatientQuery = useQuery({
@@ -61,17 +67,19 @@ export function AppointmentCreatePage() {
       }
     : null;
 
-  if (recallMode) {
-    if (!hasValidRecallRequestId) {
+  if (recallMode || irReferralMode) {
+    if (recallMode && irReferralMode) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Only one request context can be booked at a time.</div>;
+    if (recallMode && !hasValidRecallRequestId) {
       return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Invalid complementary recall request ID.</div>;
     }
+    if (irReferralMode && !hasValidIrReferralScheduleRequestId) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Invalid IR scheduling request ID.</div>;
 
-    if (recallContextQuery.isLoading || (recallContextQuery.isSuccess && preloadPatientQuery.isLoading)) {
+    if (recallContextQuery.isLoading || irReferralContextQuery.isLoading || ((recallContextQuery.isSuccess || irReferralContextQuery.isSuccess) && preloadPatientQuery.isLoading)) {
       return <div style={{ padding: "24px 16px" }}>Loading complementary recall context…</div>;
     }
 
-    if (recallContextQuery.isError || preloadPatientQuery.isError || !recallContextQuery.data || !initialSelectedPatient) {
-      const error = recallContextQuery.error ?? preloadPatientQuery.error;
+    if (recallContextQuery.isError || irReferralContextQuery.isError || preloadPatientQuery.isError || (recallMode && !recallContextQuery.data) || (irReferralMode && !irReferralContextQuery.data) || !initialSelectedPatient) {
+      const error = recallContextQuery.error ?? irReferralContextQuery.error ?? preloadPatientQuery.error;
       return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Unable to load the complementary recall booking context. {(error as Error | undefined)?.message ?? "Please return to Recall Requests and try again."}</div>;
     }
   }
@@ -110,6 +118,7 @@ export function AppointmentCreatePage() {
         doctorModuleCapabilities={doctorMeQuery.data?.moduleCapabilities ?? []}
         initialSelectedPatient={initialSelectedPatient}
         complementaryRecallContext={recallContextQuery.data ? { id: recallContextQuery.data.id, modalityId: recallContextQuery.data.modalityId, examTypeId: recallContextQuery.data.examTypeId, requiresReport: recallContextQuery.data.requiresReport, originalAccession: recallContextQuery.data.originalAccession, originalExam: recallContextQuery.data.originalExam, receptionInstruction: recallContextQuery.data.receptionInstruction } : null}
+        irReferralScheduleContext={irReferralContextQuery.data ? { id: irReferralContextQuery.data.id, modalityId: irReferralContextQuery.data.requestedModalityId, examTypeId: irReferralContextQuery.data.requestedExamTypeId, procedure: irReferralContextQuery.data.requestedProcedure, receptionInstruction: irReferralContextQuery.data.receptionInstruction } : null}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />

@@ -363,6 +363,15 @@ function normalizePositiveJobId(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
+interface IrReferralRemapContext {
+  id: number;
+  patientId: number;
+  patientMrn: string | null;
+  patientEnglishName: string | null;
+  patientArabicName: string | null;
+  requestedProcedure: string;
+  status: string;
+}
 
 function canRecoverSource(job: RemapJob | null | undefined): boolean {
   return Boolean(job && job.source_recovery_available === true && !job.staging_cleanup_completed_at);
@@ -479,14 +488,20 @@ export default function PacsRemapPage() {
   const [searchParams] = useSearchParams();
   const comparisonRequestIdValue = Number(searchParams.get("comparisonRequestId") || 0);
   const comparisonRequestId = Number.isSafeInteger(comparisonRequestIdValue) && comparisonRequestIdValue > 0 ? comparisonRequestIdValue : null;
+  const irReferralIdValue = Number(searchParams.get("irReferralId") || 0);
+  const irReferralId = Number.isSafeInteger(irReferralIdValue) && irReferralIdValue > 0 ? irReferralIdValue : null;
   const requestedReturnPath = String(searchParams.get("returnPath") || "");
   const comparisonReturnPath = comparisonRequestId && requestedReturnPath === `/comparisons/${comparisonRequestId}`
     ? requestedReturnPath
     : comparisonRequestId ? `/comparisons/${comparisonRequestId}` : "";
+  const irReferralReturnPath = irReferralId && requestedReturnPath === `/comparisons/ir/${irReferralId}`
+    ? requestedReturnPath
+    : irReferralId ? `/comparisons/ir/${irReferralId}` : "";
+  const scopedReturnPath = comparisonRequestId ? comparisonReturnPath : irReferralReturnPath;
   const remapApiPath = (path: string) => {
-    if (!comparisonRequestId) return path;
+    if (!comparisonRequestId && !irReferralId) return path;
     const separator = path.includes("?") ? "&" : "?";
-    return `${path}${separator}comparisonRequestId=${comparisonRequestId}`;
+    return `${path}${separator}${comparisonRequestId ? `comparisonRequestId=${comparisonRequestId}` : `irReferralId=${irReferralId}`}`;
   };
   const comparisonContextQuery = useQuery({
     queryKey: ["comparison-request", comparisonRequestId, "remap-context"],
@@ -495,6 +510,8 @@ export default function PacsRemapPage() {
     retry: 0,
   });
   const comparisonContext = comparisonContextQuery.data?.comparisonRequest ?? null;
+  const irReferralContextQuery = useQuery({ queryKey: ["ir-referral", irReferralId, "remap-context"], queryFn: () => api<{ referral: IrReferralRemapContext }>(`/ir-referrals/${irReferralId}`), enabled: irReferralId != null, retry: 0 });
+  const irReferralContext = irReferralContextQuery.data?.referral ?? null;
   const [files, setFiles] = useState<File[]>([]);
   const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
@@ -576,6 +593,7 @@ export default function PacsRemapPage() {
   const scopedStudyInstanceUid = resumedJobSelection?.studyInstanceUid ?? selectedStudyInstanceUid;
   const scopedPatientId = comparisonRequestId
     ? (comparisonContext ? String(comparisonContext.patientId) : "")
+    : irReferralId ? (irReferralContext ? String(irReferralContext.patientId) : "")
     : resumedJobSelection?.patientId ?? selectedPatientId;
   const scopedDestinationKey = resumedJobSelection?.destinationKey ?? selectedDestinationKey;
   const scopedConfirmChecked = resumedJobSelection?.confirmChecked ?? confirmChecked;
@@ -590,7 +608,7 @@ export default function PacsRemapPage() {
     }));
   };
   const selectPatient = (patientId: string): void => {
-    if (comparisonRequestId) return;
+    if (comparisonRequestId || irReferralId) return;
     if (activeResumedJobId == null) setSelectedPatientId(patientId);
     else updateResumedJobSelection({ patientId });
   };
@@ -1683,13 +1701,13 @@ export default function PacsRemapPage() {
               {t(language, "pacs.remap.safetyBanner")}
             </div>
           </div>
-          {comparisonRequestId ? (
+          {comparisonRequestId || irReferralId ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-950">
               <div>
-                <strong>{t(language, "comparisons.remapTitle")}</strong>
-                <span className="ms-2">{t(language, "comparisons.remapLocked", { id: comparisonRequestId })}</span>
+                <strong>{comparisonRequestId ? t(language, "comparisons.remapTitle") : "IR referral imaging preparation"}</strong>
+                <span className="ms-2">{comparisonRequestId ? t(language, "comparisons.remapLocked", { id: comparisonRequestId }) : `Referral #${irReferralId}`}</span>
               </div>
-              <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(comparisonReturnPath)}>
+              <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(scopedReturnPath)}>
                 {t(language, "comparisons.return")}
               </button>
             </div>

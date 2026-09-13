@@ -30,6 +30,7 @@ import NoShowReviewPage from "@/pages/queue/no-show-review-page";
 import ModalityPage from "@/pages/modality/modality-page";
 import DocumentIngestionPage from "@/pages/modality/document-ingestion-page";
 import ComparisonsPage from "@/pages/comparisons/comparisons-page";
+import IrReferralDetailPage from "@/pages/comparisons/ir-referral-detail-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
 import PrintPage from "@/pages/print/print-page";
@@ -322,6 +323,7 @@ function AppContent() {
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
             <Route path="/modality/document-ingestion" element={guardedPage("modality", <DocumentIngestionPage />)} />
             <Route path="/comparisons" element={guardedPage("comparisons", <ComparisonsPage />)} />
+            <Route path="/comparisons/ir/:id" element={guardedPage("comparisons", <IrReferralDetailPage />)} />
             <Route path="/comparisons/:id/remap" element={guardedPage("comparisons", <PacsRemapPage />)} />
             <Route path="/comparisons/:id" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/print" element={guardedPage("print", <PrintPage />)} />

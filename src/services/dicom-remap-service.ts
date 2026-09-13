@@ -71,6 +71,7 @@ export interface DicomRemapJobRow {
   created_by_user_name?: string | null;
   created_by_username?: string | null;
   comparison_request_id?: number | null;
+  ir_referral_case_id?: number | null;
   status: DicomRemapJobStatus;
   source_orthanc_study_id: string | null;
   modified_orthanc_study_id: string | null;
@@ -2775,9 +2776,12 @@ export async function assertDicomRemapJobComparisonAccess(
 
 async function createEmptyDicomRemapUploadJob(
   currentUserId: UserId,
-  comparisonRequestIdInput?: number | string | null
+  comparisonRequestIdInput?: number | string | null,
+  irReferralIdInput?: number | string | null
 ): Promise<DicomRemapJobRow> {
   const comparisonRequestId = normalizePositiveInteger(comparisonRequestIdInput, "comparisonRequestId", { required: false });
+  const irReferralId = normalizePositiveInteger(irReferralIdInput, "irReferralId", { required: false });
+  if (comparisonRequestId && irReferralId) throw new HttpError(400, "A remap job cannot belong to both a comparison and an IR referral.");
   if (comparisonRequestId) {
     const comparison = await queryDicomRemapDb<{ patient_id: number; status: string }>(
       "select patient_id, status from comparison_requests where id = $1 limit 1",
@@ -2789,27 +2793,33 @@ async function createEmptyDicomRemapUploadJob(
       throw new HttpError(409, "Only pending comparison requests can start a comparison remap.");
     }
   }
+  if (irReferralId) {
+    const referral = await queryDicomRemapDb<{ status: string }>("select status from ir_referral_cases where id = $1 limit 1", [irReferralId]);
+    if (!referral.rows[0]) throw new HttpError(404, "IR referral not found.");
+    if (referral.rows[0].status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can start a remap.");
+  }
   const createResult = await queryDicomRemapDb<DicomRemapJobRow>(
       `
         insert into dicom_remap_jobs (
           created_by_user_id,
           status,
-          comparison_request_id
+          comparison_request_id,
+          ir_referral_case_id
         )
-        select $1, 'uploaded', $2::bigint
-        where $2::bigint is null
+        select $1, 'uploaded', $2::bigint, $3::bigint
+        where ($2::bigint is null
            or exists (
              select 1 from comparison_requests
              where id = $2::bigint and status = 'pending_upload_confirmation'
-           )
+           )) and ($3::bigint is null or exists (select 1 from ir_referral_cases where id = $3::bigint and status = 'preparing'))
         returning *
       `,
-      [currentUserId, comparisonRequestId]
+      [currentUserId, comparisonRequestId, irReferralId]
     );
 
   const job = createResult.rows[0];
   if (!job) {
-    if (comparisonRequestId) {
+    if (comparisonRequestId || irReferralId) {
       throw new HttpError(409, "Comparison request is no longer pending preparation.");
     }
     throw new HttpError(500, "Failed to create DICOM remap job.");
@@ -2818,7 +2828,14 @@ async function createEmptyDicomRemapUploadJob(
 }
 
 async function assertDicomRemapComparisonPatient(job: DicomRemapJobRow, patientId: number): Promise<void> {
-  if (!job.comparison_request_id) return;
+  if (!job.comparison_request_id && !job.ir_referral_case_id) return;
+  if (job.ir_referral_case_id) {
+    const result = await queryDicomRemapDb<{ patient_id: number }>("select patient_id from ir_referral_cases where id = $1 limit 1", [job.ir_referral_case_id]);
+    const referralPatientId = Number(result.rows[0]?.patient_id || 0);
+    if (!referralPatientId) throw new HttpError(409, "Linked IR referral is unavailable.");
+    if (referralPatientId !== patientId) throw new HttpError(400, "IR referral remap patient must match the IR referral patient.", { code: "DICOM_REMAP_IR_REFERRAL_PATIENT_MISMATCH", irReferralId: job.ir_referral_case_id });
+    return;
+  }
   const result = await queryDicomRemapDb<{ patient_id: number }>(
     "select patient_id from comparison_requests where id = $1 limit 1",
     [job.comparison_request_id]
@@ -3010,9 +3027,10 @@ async function writePrivateJson(target: string, value: unknown): Promise<void> {
 
 export async function createDicomRemapStagingContext(
   currentUserId: UserId,
-  comparisonRequestId?: number | string | null
+  comparisonRequestId?: number | string | null,
+  irReferralId?: number | string | null
 ): Promise<DicomRemapStagingContext> {
-  const job = await createEmptyDicomRemapUploadJob(currentUserId, comparisonRequestId);
+  const job = await createEmptyDicomRemapUploadJob(currentUserId, comparisonRequestId, irReferralId);
   const storageKey = `jobs/${job.id}-${randomUUID()}`;
   const directory = resolveDicomRemapStagingPath(storageKey);
   try {
@@ -3243,6 +3261,17 @@ export async function finalizeDicomRemapAwaitingConfirmationStagingJob({
 export async function failDicomRemapStagingJob(jobId: number, code: string): Promise<void> {
   const safeCode = ["DICOM_REMAP_STAGING_INTERRUPTED", "DICOM_REMAP_STAGING_FILE_LIMIT", "DICOM_REMAP_STAGING_SIZE_LIMIT", "DICOM_REMAP_STAGING_WRITE_FAILED", "DICOM_REMAP_STAGING_MANIFEST_FAILED"].includes(code) ? code : "DICOM_REMAP_STAGING_WRITE_FAILED";
   await queryDicomRemapDb(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = $2::text, processing_error_details = jsonb_build_object('code', $2::text), error_message = 'DICOM staging did not complete. Start a new upload.', processing_lease_owner = null, processing_lease_expires_at = null, updated_at = now() where id = $1`, [jobId, safeCode]);
+}
+
+export async function assertDicomRemapJobIrReferralAccess(
+  jobId: number | string,
+  currentUserId: UserId,
+  irReferralIdInput: number | string
+): Promise<void> {
+  const irReferralId = normalizePositiveInteger(irReferralIdInput, "irReferralId");
+  if (!irReferralId) throw new HttpError(400, "irReferralId is required.");
+  const job = await loadAccessibleDicomRemapJob(jobId);
+  if (Number(job.ir_referral_case_id || 0) !== irReferralId) throw new HttpError(403, "DICOM remap job does not belong to this IR referral.");
 }
 
 export async function cleanupDicomRemapStagingStorage(storageKey: string): Promise<void> {

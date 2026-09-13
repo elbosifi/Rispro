@@ -6,6 +6,7 @@ import type { BookingOverride, BookingStatus, CaseCategory, CapacityResolutionMo
 
 export interface CreateAppointmentDto {
   complementaryRecallRequestId?: number | null;
+  irReferralScheduleRequestId?: number | null;
   patientId: number;
   modalityId: number;
   examTypeId?: number | null;

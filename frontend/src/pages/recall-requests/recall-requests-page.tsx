@@ -10,6 +10,7 @@ import { chooseLocalized } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy, isoToTripoliDateTimeLocal, tripoliDateTimeLocalToIso } from "@/lib/date-format";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { fetchIrReferralScheduleRequests } from "@/lib/api/ir-referrals";
 
 const statuses = ["pending_scheduling", "scheduled", "completed", "cancelled"] as const;
 type RecallStatus = (typeof statuses)[number];
@@ -51,6 +52,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   const withdrawalSubmitting = useRef(false);
   const key = mode === "doctor" ? ["doctor", "protocoling", "complementary-recalls"] : ["complementary-recalls"];
   const recalls = useQuery({ queryKey: key, queryFn: mode === "doctor" ? fetchDoctorComplementaryRecalls : fetchComplementaryRecalls, refetchInterval: 30_000 });
+  const irSchedules = useQuery({ queryKey: ["ir-referral-schedule-requests"], queryFn: fetchIrReferralScheduleRequests, enabled: mode === "reception", refetchInterval: 30_000 });
   const seen = useMutation({ mutationFn: ({ ids }: SeenRecallBatch) => markComplementaryRecallsSeen(ids), onMutate: ({ pendingIds }: SeenRecallBatch) => { if (pendingIds.length) setSessionNewIds((current) => new Set([...current, ...pendingIds])); }, onSuccess: () => { void Promise.all([queryClient.invalidateQueries({ queryKey: ["complementary-recalls"] }), queryClient.invalidateQueries({ queryKey: ["complementary-recalls", "reception-summary"] })]); } });
   const acknowledge = useMutation({ mutationFn: (id: number) => acknowledgeComplementaryRecall(id), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: key }); } });
   const resetContactForm = () => { setContactMethod("phone"); setContactValue(""); setContactOutcome("no_answer"); setContactFollowUpAt(""); setContactNote(""); };
@@ -112,6 +114,7 @@ export default function RecallRequestsPage({ mode = "reception" }: RecallRequest
   useEffect(() => { if (!editTarget) return; document.querySelector<HTMLSelectElement>('select[aria-label="Reporting disposition"]')?.setAttribute("disabled", ""); }, [editTarget]);
 
   return <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4" dir={isArabic ? "rtl" : "ltr"}>
+    {mode === "reception" ? <section className="rounded-2xl border border-border bg-card p-4 shadow-sm"><div className="flex flex-wrap items-baseline justify-between gap-2"><div><h2 className="text-lg font-semibold">IR Referral scheduling</h2><p className="mt-1 text-sm text-muted-foreground">Separate IR consultation requests, booked through the normal Appointment V2 flow.</p></div><Badge variant="info">IR Referral</Badge></div>{irSchedules.isLoading ? <p className="mt-3 text-sm text-muted-foreground">Loading IR referral requests...</p> : irSchedules.isError ? <p className="mt-3 text-sm text-red-700">Unable to load IR referral requests.</p> : (irSchedules.data ?? []).length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No IR referral requests awaiting booking.</p> : <div className="mt-3 grid gap-3">{irSchedules.data?.map((request) => <article key={request.id} className="rounded-lg border border-border p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap gap-2"><Badge variant="info">IR Referral</Badge><Badge variant="warning">{request.urgency.replaceAll("_", " ")}</Badge></div><h3 className="mt-2 font-semibold">{request.patientEnglishName || request.patientArabicName || request.patientMrn || `Patient ${request.patientId}`}</h3><p className="text-sm text-muted-foreground">{request.patientMrn || "MRN unavailable"} · {request.requestedProcedure}</p><p className="mt-2 text-sm">Assigned IR doctor: {request.assignedDoctorName || "Unassigned"}</p>{request.preferredDate ? <p className="text-sm">Preferred date: {request.preferredDate}</p> : null}<p className="mt-2 text-sm"><span className="font-medium">Reception instruction:</span> {request.receptionInstruction || "None"}</p><p className="text-sm"><span className="font-medium">Technologist instruction:</span> {request.technologistInstruction}</p></div><Button type="button" onClick={() => navigate(`/appointments?irReferralScheduleRequestId=${request.id}`)}>Book Appointment</Button></div></article>)}</div>}</section> : null}
     <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
       {([
         ["needs_booking", local("بحاجة إلى حجز", "Needs booking"), attentionCounts.needsBooking],

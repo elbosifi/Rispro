@@ -3108,6 +3108,33 @@ export async function createAdditionalImagingNotification(input: { recallRequest
   return created;
 }
 
+/** IR consultations use the existing Doctor Workspace in-app event feed, not reporting-case state. */
+export async function createIrReferralReadyNotification(input: { referralId: number; recipientDoctorId: number; recipientUserId: number }): Promise<number> {
+  const result = await pool.query(
+    `
+      insert into doctor_portal.reporting_board_notification_events (
+        recipient_user_id, recipient_doctor_id, ir_referral_case_id,
+        event_type, delivery_channel, status, title, body, action_url,
+        dedupe_key, metadata_json, delivered_at
+      )
+      values ($1, $2, $3, 'ir_referral_ready_for_review', 'in_app', 'delivered',
+        'IR consultation ready for review',
+        'The prepared IR consultation is ready for your clinical review.',
+        $4, $5, $6::jsonb, now())
+      on conflict (dedupe_key) do nothing
+    `,
+    [
+      input.recipientUserId,
+      input.recipientDoctorId,
+      input.referralId,
+      `/comparisons/ir/${input.referralId}`,
+      `ir_referral_ready_for_review:${input.referralId}:${input.recipientUserId}`,
+      JSON.stringify({ notificationType: "ir_referral_ready_for_review", irReferralCaseId: input.referralId }),
+    ]
+  );
+  return Number(result.rowCount ?? 0);
+}
+
 export async function listReportingBoardNotifications(userId: UserId): Promise<ReportingBoardNotificationEvent[]> {
   const result = await pool.query<ReportingBoardNotificationEvent>(
     `

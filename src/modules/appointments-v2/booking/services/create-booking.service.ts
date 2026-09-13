@@ -55,6 +55,7 @@ import { PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, revalidateSt
 import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
 import { generateComplementaryRecallRequestDocument, linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
+import { linkIrReferralScheduleBooking, lockIrReferralScheduleRequestForBooking } from "../../../../services/ir-referral-service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -131,8 +132,11 @@ export async function createBookingInternal(
   approvedOverrideContext?: AuthorizedOverrideContext,
   identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
-  if (payload.complementaryRecallRequestId != null && String(payload.studyInstanceUid ?? "").trim()) {
-    throw new HttpError(400, "Complementary recall bookings must not reuse a StudyInstanceUID.");
+  if (payload.complementaryRecallRequestId != null && payload.irReferralScheduleRequestId != null) {
+    throw new HttpError(400, "A booking cannot be linked to both an additional-imaging and IR request.");
+  }
+  if ((payload.complementaryRecallRequestId != null || payload.irReferralScheduleRequestId != null) && String(payload.studyInstanceUid ?? "").trim()) {
+    throw new HttpError(400, "Request-linked bookings must not reuse a StudyInstanceUID.");
   }
   const recall = payload.complementaryRecallRequestId == null
     ? null
@@ -141,6 +145,13 @@ export async function createBookingInternal(
       modalityId: payload.modalityId,
       examTypeId: payload.examTypeId ?? null,
       requiresReport: payload.requiresReport,
+    });
+  const irScheduleRequest = payload.irReferralScheduleRequestId == null
+    ? null
+    : await lockIrReferralScheduleRequestForBooking(client, Number(payload.irReferralScheduleRequestId), {
+      patientId: payload.patientId,
+      modalityId: payload.modalityId,
+      examTypeId: payload.examTypeId ?? null,
     });
   if (recall) {
     const separate = recall.reportingDisposition === "separate_report";
@@ -530,6 +541,7 @@ export async function createBookingInternal(
     userId,
   });
   if (recall) await linkComplementaryRecallBooking(client, recall, booking.id, userId);
+  if (irScheduleRequest) await linkIrReferralScheduleBooking(client, irScheduleRequest, booking.id, userId);
   if (consumedSpecialQuota) {
     const matchedQuota = decision.matchedSpecialQuota;
     if (!matchedQuota || payload.examTypeId == null) {

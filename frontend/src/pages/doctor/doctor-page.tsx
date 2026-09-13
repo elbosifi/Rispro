@@ -39,6 +39,7 @@ import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists
 import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { EnglishLanguageScope } from "@/providers/language-provider-component";
 import RecallRequestsPage from "@/pages/recall-requests/recall-requests-page";
+import { DoctorIrReferralsPage } from "./doctor-ir-referrals-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -57,6 +58,7 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
   { path: "/doctor/additional-imaging", label: "Additional Imaging", icon: ClipboardList },
+  { path: "/doctor/ir-consultations", label: "IR Consultations", icon: ClipboardList },
   { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList },
 ];
 
@@ -300,6 +302,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
         element={canAccessProtocolsPage(me) ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route path="additional-imaging" element={me.canAssignProtocols ? <RecallRequestsPage mode="doctor" /> : <Navigate to="/doctor/my-work" replace />} />
+      <Route path="ir-consultations" element={canAccessClinical ? <DoctorIrReferralsPage /> : <Navigate to="/doctor/my-work" replace />} />
       <Route
         path="team-workload"
         element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/my-work" replace />}

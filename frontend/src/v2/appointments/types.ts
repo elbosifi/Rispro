@@ -191,6 +191,7 @@ export interface EvaluateRequest {
 
 export interface CreateBookingRequest {
   complementaryRecallRequestId?: number | null;
+  irReferralScheduleRequestId?: number | null;
   patientId: number;
   modalityId: number;
   examTypeId: number | null;

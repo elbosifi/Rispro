@@ -18,6 +18,7 @@ import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
 import { printingRouter } from "./routes/printing-routes.js";
 import { comparisonsRouter } from "./routes/comparisons.js";
+import { irReferralsRouter } from "./routes/ir-referrals.js";
 import { settingsRouter } from "./routes/settings.js";
 import { userNotificationsRouter } from "./routes/user-notifications.js";
 import { nameDictionaryRouter } from "./routes/name-dictionary.js";
@@ -164,6 +165,7 @@ export function createApp(): Application {
   app.use("/api/audit", auditRouter);
   app.use("/api/printing", printingRouter);
   app.use("/api/comparisons", comparisonsRouter);
+  app.use("/api/ir-referrals", irReferralsRouter);
   app.use("/api/settings/email-notifications", emailSettingsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/user-notifications", userNotificationsRouter);

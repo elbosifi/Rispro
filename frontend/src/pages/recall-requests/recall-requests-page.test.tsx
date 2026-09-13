@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import RecallRequestsPage from "./recall-requests-page";
 
-const { mockFetchRecalls, mockFetchDoctorRecalls, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen, mockSendReception, mockSendDoctor } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn(), mockSendReception: vi.fn(), mockSendDoctor: vi.fn() }));
+const { mockFetchRecalls, mockFetchDoctorRecalls, mockFetchIrSchedules, mockUpdateRecall, mockAcknowledge, mockRecordContact, mockMarkSeen, mockSendReception, mockSendDoctor } = vi.hoisted(() => ({ mockFetchRecalls: vi.fn(), mockFetchDoctorRecalls: vi.fn(), mockFetchIrSchedules: vi.fn(), mockUpdateRecall: vi.fn(), mockAcknowledge: vi.fn(), mockRecordContact: vi.fn(), mockMarkSeen: vi.fn(), mockSendReception: vi.fn(), mockSendDoctor: vi.fn() }));
 const languageState = vi.hoisted(() => ({ value: "en" as "en" | "ar" }));
 
 vi.mock("@/lib/api/complementary-recalls", () => ({
@@ -23,6 +23,7 @@ vi.mock("@/lib/api/doctor-portal-reporting", () => ({
   withdrawComplementaryRecallRequest: vi.fn(),
 }));
 vi.mock("@/lib/api-hooks", () => ({ markComplementaryRecallsSeen: mockMarkSeen }));
+vi.mock("@/lib/api/ir-referrals", () => ({ fetchIrReferralScheduleRequests: mockFetchIrSchedules }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { role: "doctor" } }) }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.value, isArabic: languageState.value === "ar" }) }));
 vi.mock("@/components/appointments/appointment-manage-modal", () => ({ AppointmentManageModal: () => null }));
@@ -79,6 +80,7 @@ describe("Recall Requests metadata", () => {
     languageState.value = "en";
     mockFetchRecalls.mockReset();
     mockFetchDoctorRecalls.mockReset();
+    mockFetchIrSchedules.mockReset();
     mockUpdateRecall.mockReset();
     mockAcknowledge.mockReset();
     mockRecordContact.mockReset();
@@ -87,6 +89,7 @@ describe("Recall Requests metadata", () => {
     mockSendDoctor.mockReset();
     mockFetchRecalls.mockResolvedValue([recall]);
     mockFetchDoctorRecalls.mockResolvedValue([recall]);
+    mockFetchIrSchedules.mockResolvedValue([]);
     mockUpdateRecall.mockResolvedValue(recall);
     mockAcknowledge.mockResolvedValue(acknowledgedRecall);
     mockRecordContact.mockResolvedValue(contactedRecall.contactAttempts[0]);
@@ -103,6 +106,16 @@ describe("Recall Requests metadata", () => {
     expect(screen.getByText("0923456789")).toBeTruthy();
     expect(screen.getByText("Not contacted")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Record contact attempt" })).toBeTruthy();
+  });
+
+  it("shows IR referrals as a separate reception booking source and launches Appointment V2", async () => {
+    mockFetchIrSchedules.mockResolvedValue([{ id: 71, irReferralCaseId: 19, patientId: 41, patientMrn: "MRN-IR", patientEnglishName: "IR Patient", patientArabicName: null, requestedProcedure: "IR biopsy", assignedDoctorName: "Dr IR", requestedModalityId: 3, requestedExamTypeId: 5, preferredDate: "2039-06-16", urgency: "within_24_hours", receptionInstruction: "Coordinate fasting", technologistInstruction: "Prepare biopsy tray", status: "pending_scheduling", appointmentId: null, requestedAt: "2039-06-15T08:00:00.000Z", scheduledAt: null }]);
+    renderPage("reception");
+
+    expect(await screen.findByText("IR Referral scheduling")).toBeTruthy();
+    expect(await screen.findByText("IR Patient")).toBeTruthy();
+    expect(screen.getByText("Assigned IR doctor: Dr IR")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Book Appointment" })).toBeTruthy();
   });
 
   it("keeps each contact workflow inside its recall article", async () => {

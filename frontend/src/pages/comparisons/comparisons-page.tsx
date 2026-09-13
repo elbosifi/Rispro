@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { CheckCircle2, ExternalLink, ImageUp, Search, XCircle } from "lucide-react";
 import {
   Badge,
@@ -28,6 +28,11 @@ import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import type { ComparisonRequest } from "@/types/api";
+import type { Patient } from "@/types/api";
+import { searchPatients } from "@/lib/api/patients";
+import { RequestComparisonModal } from "@/components/patients/request-comparison-modal";
+import { RequestIrReferralModal } from "@/components/patients/request-ir-referral-modal";
+import { fetchIrReferrals } from "@/lib/api/ir-referrals";
 import { ComparisonDocumentsPanel } from "./comparison-documents-panel";
 
 const CONFIRM_ROLES = new Set(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
@@ -257,16 +262,25 @@ function ComparisonRow({ row, canConfirm, canCancel, canEdit, manager }: { row: 
 
 export default function ComparisonsPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { language } = useLanguage();
+  const [requestKind, setRequestKind] = useState<"all" | "comparisons" | "ir">("all");
   const { user } = useAuth();
   const [status, setStatus] = useState(() => user?.role === "receptionist" ? "pending" : "active");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const [patientQuery, setPatientQuery] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [createComparisonOpen, setCreateComparisonOpen] = useState(false);
+  const [createIrOpen, setCreateIrOpen] = useState(false);
+  const patientsQuery = useQuery({ queryKey: ["comparison-patient-search", patientQuery.trim()], queryFn: () => searchPatients(patientQuery.trim()), enabled: patientSearchOpen && patientQuery.trim().length >= 2 });
   const canConfirm = Boolean(user && CONFIRM_ROLES.has(user.role));
   const canCancel = Boolean(user && CANCEL_ROLES.has(user.role));
   const manager = Boolean(user && ["supervisor", "super_admin"].includes(user.role));
   const selectedId = id ? Number(id) : null;
   const listQuery = useQuery({ queryKey: ["comparison-requests", status, search], queryFn: () => fetchComparisonRequests({ status, q: search || null }), enabled: !selectedId });
+  const irReferralsQuery = useQuery({ queryKey: ["ir-referrals"], queryFn: fetchIrReferrals, enabled: !selectedId });
   const detailQuery = useQuery({ queryKey: ["comparison-request", selectedId], queryFn: () => fetchComparisonRequest(selectedId!), enabled: Boolean(selectedId), refetchInterval: (query) => {
     const remapStatus = (query.state.data as ComparisonRequest | undefined)?.remapJobStatus;
     return remapStatus && ["uploaded", "processing", "remapped", "sending", "awaiting_confirmation"].includes(remapStatus) ? 2_000 : false;
@@ -278,11 +292,12 @@ export default function ComparisonsPage() {
   return (
     <main className="space-y-4 p-4 lg:p-6" dir={language === "ar" ? "rtl" : "ltr"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-semibold">{t(language, "comparisons.title")}</h1><p className="text-sm text-muted-foreground">{t(language, "comparisons.subtitle")}</p></div>
-        {selectedId ? <Link to="/comparisons" className="text-sm font-semibold text-accent">{t(language, "comparisons.allRequests")}</Link> : null}
+        <div><h1 className="text-2xl font-semibold">{t(language, "comparisons.title")}</h1><p className="text-sm text-muted-foreground">Comparisons and IR consultations share this patient-based entry point.</p></div>
+        <div className="flex items-center gap-3"><Button type="button" onClick={() => { setPatientSearchOpen(true); setSelectedPatient(null); setPatientQuery(""); }}>Search Patient</Button>{selectedId ? <Link to="/comparisons" className="text-sm font-semibold text-accent">{t(language, "comparisons.allRequests")}</Link> : null}</div>
       </div>
       {!selectedId ? (
         <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-background p-3">
+          <div className="flex h-10 items-end gap-1"><Button type="button" size="sm" variant={requestKind === "all" ? "secondary" : "ghost"} onClick={() => setRequestKind("all")}>All</Button><Button type="button" size="sm" variant={requestKind === "comparisons" ? "secondary" : "ghost"} onClick={() => setRequestKind("comparisons")}>Comparisons</Button><Button type="button" size="sm" variant={requestKind === "ir" ? "secondary" : "ghost"} onClick={() => setRequestKind("ir")}>IR Consultations</Button></div>
           <label className="grid gap-1 text-xs font-semibold">{t(language, "comparisons.status")}<select aria-label={t(language, "comparisons.statusAria")} value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{t(language, `comparisons.filter.${value}` as TranslationKey)}</option>)}</select></label>
           <form className="flex flex-1 items-end gap-2" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
             <label className="grid min-w-60 flex-1 gap-1 text-xs font-semibold">{t(language, "comparisons.search")}<input aria-label={t(language, "comparisons.searchAria")} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal" placeholder={t(language, "comparisons.searchPlaceholder")} /></label>
@@ -290,7 +305,11 @@ export default function ComparisonsPage() {
           </form>
         </div>
       ) : null}
-      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} manager={manager} canEdit={Boolean(user && (manager || row.createdBy === user.id))} />)}</div></div>}
+      {requestKind !== "ir" ? (isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} manager={manager} canEdit={Boolean(user && (manager || row.createdBy === user.id))} />)}</div></div>) : null}
+      {!selectedId && requestKind !== "comparisons" ? <section className="rounded-xl border border-border/70 bg-muted/60 p-4"><h2 className="text-lg font-semibold">IR Consultations</h2><div className="mt-3 grid gap-3">{irReferralsQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading IR consultations...</p> : (irReferralsQuery.data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No IR consultations found.</p> : (irReferralsQuery.data ?? []).map((referral) => <article key={referral.id} className="rounded-lg border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex gap-2"><Badge variant="neutral" size="sm">IR Consultation</Badge><Badge variant={referral.status === "ready_for_review" ? "success" : referral.status === "preparing" ? "warning" : "info"} size="sm">{referral.status.replaceAll("_", " ")}</Badge></div><p className="mt-2 font-semibold">{referral.patientEnglishName || referral.patientArabicName || referral.patientMrn || `Patient ${referral.patientId}`}</p><p className="text-sm text-muted-foreground">{referral.patientMrn || "MRN unavailable"} · {referral.requestedProcedure}</p><p className="text-sm text-muted-foreground">Assigned: {getDoctorDisplayName({ displayName: referral.assignedDoctorName, fullName: referral.assignedDoctorNameAr, englishName: referral.assignedDoctorNameEn }, language) || "Unassigned"} · Documents: {referral.documentCount} · Imaging: {referral.imagesConfirmed ? "confirmed" : "pending"}</p></div><div className="flex gap-2"><Link to={`/comparisons/ir/${referral.id}`} className="rounded border px-3 py-2 text-sm font-semibold">Open details</Link>{referral.status === "appointment_requested" && referral.scheduleRequestId ? <Link to={`/appointments?irReferralScheduleRequestId=${referral.scheduleRequestId}`} className="rounded bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground">Book IR appointment</Link> : null}</div></div></article>)}</div></section> : null}
+      {patientSearchOpen ? <Dialog open onClose={() => setPatientSearchOpen(false)}><DialogContent><DialogHeader><DialogTitle>Search Patient</DialogTitle><DialogDescription>Use the canonical RISpro patient search to start a review request.</DialogDescription></DialogHeader><div className="grid gap-3"><input autoFocus aria-label="Search patient" value={patientQuery} onChange={e => setPatientQuery(e.target.value)} placeholder="Enter at least 2 characters" className="h-10 rounded border px-3"/>{patientQuery.trim().length >= 2 ? patientsQuery.isLoading ? <p className="text-sm text-muted-foreground">Searching...</p> : <div className="grid gap-2">{(patientsQuery.data ?? []).map(patient => <button key={patient.id} type="button" className="rounded border p-3 text-left text-sm hover:bg-muted" onClick={() => setSelectedPatient(patient)}><strong>{patient.englishFullName || patient.arabicFullName || patient.mrn}</strong>{patient.mrn ? <span className="ml-2 text-muted-foreground">{patient.mrn}</span> : null}</button>)}</div> : <p className="text-sm text-muted-foreground">Enter at least 2 characters.</p>}</div>{selectedPatient ? <div className="rounded border bg-muted/20 p-3"><p className="font-medium">{selectedPatient.englishFullName || selectedPatient.arabicFullName || selectedPatient.mrn}</p><div className="mt-3 flex gap-2"><Button type="button" onClick={() => setCreateComparisonOpen(true)}>Create Comparison</Button><Button type="button" onClick={() => setCreateIrOpen(true)}>Create IR Consultation</Button></div></div> : null}</DialogContent></Dialog> : null}
+      {createComparisonOpen && selectedPatient ? <RequestComparisonModal patientId={selectedPatient.id} onClose={() => setCreateComparisonOpen(false)} /> : null}
+      {createIrOpen && selectedPatient ? <RequestIrReferralModal patient={selectedPatient} onClose={() => setCreateIrOpen(false)} onCreated={(referralId) => { setCreateIrOpen(false); setPatientSearchOpen(false); navigate(`/comparisons/ir/${referralId}`); }} /> : null}
     </main>
   );
 }

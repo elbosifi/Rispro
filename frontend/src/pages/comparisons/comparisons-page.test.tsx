@@ -13,6 +13,8 @@ const apiMocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   fetchOne: vi.fn(),
   fetchMany: vi.fn(),
+  searchPatients: vi.fn(),
+  fetchIrReferrals: vi.fn(),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
@@ -26,6 +28,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchComparisonRequests: apiMocks.fetchMany,
 }));
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
+vi.mock("@/lib/api/patients", () => ({ searchPatients: apiMocks.searchPatients }));
+vi.mock("@/lib/api/ir-referrals", () => ({ fetchIrReferrals: apiMocks.fetchIrReferrals }));
+vi.mock("@/components/patients/request-comparison-modal", () => ({ RequestComparisonModal: () => <div>Comparison modal launched</div> }));
+vi.mock("@/components/patients/request-ir-referral-modal", () => ({ RequestIrReferralModal: () => <div>IR consultation modal launched</div> }));
 vi.mock("./comparison-documents-panel", () => ({
   ComparisonDocumentsPanel: ({ comparisonRequestId, canAttach, canDelete }: { comparisonRequestId: number; canAttach: boolean; canDelete: boolean }) => (
     <div aria-label={`Documents for ${comparisonRequestId}`} data-can-attach={String(canAttach)} data-can-delete={String(canDelete)}>Upload Scan View</div>
@@ -132,6 +138,22 @@ afterEach(() => {
 });
 
 describe("comparison preparation worklist behavior", () => {
+  it("uses canonical patient search and offers both review-request actions", async () => {
+    apiMocks.fetchMany.mockResolvedValue([]);
+    apiMocks.fetchIrReferrals.mockResolvedValue([]);
+    apiMocks.searchPatients.mockResolvedValue([{ id: 41, englishFullName: "Shared Entry Patient", arabicFullName: null, mrn: "MRN-41" }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Search Patient" }));
+    fireEvent.change(screen.getByLabelText("Search patient"), { target: { value: "sh" } });
+    expect(await screen.findByText("Shared Entry Patient")).toBeTruthy();
+    expect(apiMocks.searchPatients).toHaveBeenCalledWith("sh");
+    fireEvent.click(screen.getByText("Shared Entry Patient"));
+    fireEvent.click(screen.getByRole("button", { name: "Create Comparison" }));
+    expect(await screen.findByText("Comparison modal launched")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create IR Consultation" }));
+    expect(await screen.findByText("IR consultation modal launched")).toBeTruthy();
+  });
+
   it("renders the worklist in Arabic with RTL direction", async () => {
     languageState.language = "ar";
     apiMocks.fetchMany.mockResolvedValue([]);

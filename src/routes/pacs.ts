@@ -11,6 +11,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { HttpError } from "../utils/http-error.js";
+import { findIrReferralById } from "../services/ir-referral-service.js";
 import {
   listPacsNodes,
   createPacsNode,
@@ -36,6 +37,7 @@ import {
 } from "../services/appointments-v2-pacs-auto-completion-worker.js";
 import {
   assertDicomRemapJobComparisonAccess,
+  assertDicomRemapJobIrReferralAccess,
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
   clearFailedDicomRemapOrthancStudies,
@@ -85,6 +87,7 @@ const REMAP_PATIENT_SEARCH_MAX_LENGTH = 200;
 const REMAP_PATIENT_SEARCH_RESULT_LIMIT = 25;
 
 type ComparisonRemapScope = { comparisonRequestId: number; patientId: number };
+type IrReferralRemapScope = { irReferralId: number; patientId: number };
 
 async function requirePacsRemapAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -92,6 +95,17 @@ async function requirePacsRemapAccess(req: Request, res: Response, next: NextFun
     const matrix = await readPageVisibilityMatrix();
     const hasGeneralRemapAccess = canRoleAccessPage("pacs.remap", req.user.role, matrix);
     const comparisonRequestId = asOptionalString(asUnknownRecord(req.query).comparisonRequestId);
+    const irReferralId = asOptionalString(asUnknownRecord(req.query).irReferralId);
+    if (comparisonRequestId && irReferralId) throw new HttpError(400, "A remap request cannot be linked to both a comparison and an IR referral.");
+    if (irReferralId) {
+      if (!COMPARISON_REMAP_ROLES.has(req.user.role)) throw new HttpError(403, "This role cannot prepare IR referral images.");
+      const referral = await findIrReferralById(irReferralId);
+      if (!referral) throw new HttpError(404, "IR referral not found.");
+      if (referral.status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can use DICOM remap.");
+      res.locals.irReferralRemapScope = { irReferralId: referral.id, patientId: referral.patientId } satisfies IrReferralRemapScope;
+      next();
+      return;
+    }
     if (!comparisonRequestId) {
       if (hasGeneralRemapAccess) {
         next();
@@ -180,6 +194,24 @@ pacsRouter.use("/remap", async function requireComparisonRemapScope(req: Request
   } catch (error) {
     next(error);
   }
+});
+
+pacsRouter.use("/remap", async function requireIrReferralRemapScope(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const scope = res.locals.irReferralRemapScope as IrReferralRemapScope | undefined;
+    if (!scope) return next();
+    const pathname = new URL(req.originalUrl, "http://rispro.local").pathname;
+    const remapIndex = pathname.indexOf("/remap");
+    const scopedPath = remapIndex >= 0 ? pathname.slice(remapIndex + "/remap".length) : req.path;
+    if ((req.method === "POST" && ["/preview-multipart", "/jobs/stage-multipart", "/jobs/process-multipart"].includes(scopedPath)) || (req.method === "GET" && scopedPath === "/destinations")) return next();
+    if (req.method === "POST" && scopedPath === "/replacement-preview") {
+      if (Number(asOptionalString(asUnknownRecord(req.body ?? {}).risproPatientId)) !== scope.patientId) throw new HttpError(403, "Replacement patient must match the IR referral.");
+      return next();
+    }
+    const jobMatch = scopedPath.match(/^\/jobs\/(\d+)(?:\/|$)/);
+    if (jobMatch?.[1] && req.user) { await assertDicomRemapJobIrReferralAccess(jobMatch[1], req.user.sub as UserId, scope.irReferralId); return next(); }
+    throw new HttpError(403, "IR-referral-linked remap access is limited to this referral.");
+  } catch (error) { next(error); }
 });
 
 async function stageDicomRemapMultipartFiles(req: Request): Promise<{
@@ -883,7 +915,8 @@ pacsRouter.post(
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const context = await createDicomRemapStagingContext(
       currentUserId,
-      asOptionalString(asUnknownRecord(req.query).comparisonRequestId)
+      asOptionalString(asUnknownRecord(req.query).comparisonRequestId),
+      asOptionalString(asUnknownRecord(req.query).irReferralId)
     );
     try {
       const staged = await stageDicomRemapMultipartDurably(req, context);
@@ -911,7 +944,8 @@ pacsRouter.post(
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const context = await createDicomRemapStagingContext(
       currentUserId,
-      asOptionalString(asUnknownRecord(req.query).comparisonRequestId)
+      asOptionalString(asUnknownRecord(req.query).comparisonRequestId),
+      asOptionalString(asUnknownRecord(req.query).irReferralId)
     );
     try {
       const staged = await stageDicomRemapMultipartDurably(req, context);

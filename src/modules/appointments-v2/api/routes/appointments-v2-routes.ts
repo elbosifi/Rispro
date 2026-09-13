@@ -185,6 +185,9 @@ router.post(
         throw new HttpError(403, "This role cannot access recall requests.");
       }
     }
+    if (body.irReferralScheduleRequestId != null && !["receptionist", "administrative", "modality_staff", "doctor", "supervisor", "super_admin"].includes(String(userRole ?? ""))) {
+      throw new HttpError(403, "This role cannot schedule IR referrals.");
+    }
     const capacityResolutionMode: CapacityResolutionMode =
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
@@ -203,6 +206,7 @@ router.post(
     const result = await createBooking(
       {
         complementaryRecallRequestId: body.complementaryRecallRequestId ?? null,
+        irReferralScheduleRequestId: body.irReferralScheduleRequestId ?? null,
         patientId: body.patientId,
         modalityId: body.modalityId,
         examTypeId: body.examTypeId ?? null,
