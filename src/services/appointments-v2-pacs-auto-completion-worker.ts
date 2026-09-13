@@ -590,8 +590,14 @@ function isSafePacsStartObservation(result: OrthancVerificationResult): boolean 
 }
 
 function isTrackablePacsObservation(result: OrthancVerificationResult): boolean {
-  return result.status === "matched" || isBelowMinimumSeriesResult(result) ||
-    (result.status === "insufficient_evidence" && result.lastError === "instance_count_zero");
+  return !remoteSeriesQueryFailed(result) && (
+    result.status === "matched" || isBelowMinimumSeriesResult(result) ||
+    (result.status === "insufficient_evidence" && result.lastError === "instance_count_zero")
+  );
+}
+
+function remoteSeriesQueryFailed(result: OrthancVerificationResult): boolean {
+  return result.resultJson.remoteSeriesQueryAttempted === true && result.resultJson.remoteSeriesQuerySucceeded === false;
 }
 
 function hasMeasurablePacsActivity(result: OrthancVerificationResult): boolean {

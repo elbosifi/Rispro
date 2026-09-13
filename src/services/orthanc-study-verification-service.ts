@@ -90,7 +90,18 @@ interface StudyCandidate {
   pacsFirstSeenAt: string | null;
   timingSource: string | null;
   timingConfidence: "high" | "medium" | "low" | null;
+  remoteSeriesQuery: RemoteSeriesQueryResult | null;
   raw: unknown;
+}
+
+interface RemoteSeriesQueryResult {
+  attempted: boolean;
+  succeeded: boolean;
+  seriesCount: number | null;
+  seriesCountReliable: boolean;
+  instanceCount: number | null;
+  instanceCountReliable: boolean;
+  error: string | null;
 }
 
 let fetchOrthancForVerification: OrthancFetch = orthancFetch;
@@ -378,6 +389,7 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
     pacsFirstSeenAt: lastUpdate,
     timingSource,
     timingConfidence,
+    remoteSeriesQuery: null,
     raw: payload,
   };
 }
@@ -518,6 +530,17 @@ function evaluateCandidates({
   }
 
   const candidate = candidates[0]!;
+  const remoteSeriesDiagnostics = candidate.remoteSeriesQuery
+    ? {
+        remoteSeriesQueryAttempted: candidate.remoteSeriesQuery.attempted,
+        remoteSeriesQuerySucceeded: candidate.remoteSeriesQuery.succeeded,
+        remoteSeriesCount: candidate.remoteSeriesQuery.seriesCount,
+        remoteSeriesCountReliable: candidate.remoteSeriesQuery.seriesCountReliable,
+        remoteInstanceCount: candidate.remoteSeriesQuery.instanceCount,
+        remoteInstanceCountReliable: candidate.remoteSeriesQuery.instanceCountReliable,
+        ...(candidate.remoteSeriesQuery.error ? { remoteSeriesQueryError: candidate.remoteSeriesQuery.error } : {}),
+      }
+    : {};
   const conflict = hasConflict(booking, candidate);
   if (conflict) {
     return makeResult("insufficient_evidence", {
@@ -532,7 +555,7 @@ function evaluateCandidates({
       pacsFirstSeenAt: candidate.pacsFirstSeenAt,
       timingSource: candidate.timingSource,
       timingConfidence: candidate.timingConfidence,
-      resultJson: { conflict, candidate: candidate.raw },
+      resultJson: { ...remoteSeriesDiagnostics, conflict, candidate: candidate.raw },
       lastError: conflict,
     });
   }
@@ -552,6 +575,7 @@ function evaluateCandidates({
       timingSource: candidate.timingSource,
       timingConfidence: candidate.timingConfidence,
       resultJson: {
+        ...remoteSeriesDiagnostics,
         reason: thresholdResult.reason,
         minimumSeriesCount: thresholdResult.minimumSeriesCount ?? null,
         belowMinimumSeriesAction: setting.below_minimum_series_action ?? "leave_unchanged",
@@ -574,6 +598,7 @@ function evaluateCandidates({
     timingSource: candidate.timingSource,
     timingConfidence: candidate.timingConfidence,
     resultJson: {
+      ...remoteSeriesDiagnostics,
       candidate: candidate.raw,
       timing: {
         orthancLastUpdateAt: candidate.orthancLastUpdateAt,
@@ -594,6 +619,13 @@ function buildFindQuery(matchKey: OrthancMatchKey, matchValue: string): Record<s
     Query: matchKey === "study_instance_uid"
       ? { StudyInstanceUID: matchValue }
       : { AccessionNumber: matchValue },
+  };
+}
+
+function buildRemoteSeriesFindQuery(studyInstanceUid: string): Record<string, unknown> {
+  return {
+    Level: "Series",
+    Query: { StudyInstanceUID: studyInstanceUid },
   };
 }
 
@@ -630,26 +662,14 @@ async function queryLocal(matchKey: OrthancMatchKey, matchValue: string, setting
   return Promise.all(studyIds.map((studyId) => readLocalCandidate(studyId, settings)));
 }
 
-async function readRemoteAnswer(queryId: string, answerId: string, settings: ResolvedOrthancSettings): Promise<StudyCandidate> {
-  const response = await fetchOrthancForVerification(
-    `/queries/${encodeURIComponent(queryId)}/answers/${encodeURIComponent(answerId)}/content`,
-    { settings }
-  );
-  if (!response.ok) {
-    throw new Error(`Orthanc remote answer read failed (status=${response.status}).`);
-  }
-  return candidateFromPayload(response.json, { remote: true });
-}
-
-async function queryRemote(
+async function readRemoteQueryAnswers(
   targetKey: string,
-  matchKey: OrthancMatchKey,
-  matchValue: string,
+  body: Record<string, unknown>,
   settings: ResolvedOrthancSettings
-): Promise<StudyCandidate[]> {
+): Promise<unknown[]> {
   const query = await fetchOrthancForVerification(`/modalities/${encodeURIComponent(targetKey)}/query`, {
     method: "POST",
-    body: buildFindQuery(matchKey, matchValue),
+    body,
     settings,
   });
   if (!query.ok) {
@@ -666,7 +686,98 @@ async function queryRemote(
   }
 
   const answerIds = answers.json.map((value) => firstString(value)).filter((value): value is string => Boolean(value));
-  return Promise.all(answerIds.map((answerId) => readRemoteAnswer(queryId, answerId, settings)));
+  return Promise.all(answerIds.map(async (answerId) => {
+    const response = await fetchOrthancForVerification(
+      `/queries/${encodeURIComponent(queryId)}/answers/${encodeURIComponent(answerId)}/content`,
+      { settings }
+    );
+    if (!response.ok) {
+      throw new Error(`Orthanc remote answer read failed (status=${response.status}).`);
+    }
+    return response.json;
+  }));
+}
+
+function parseIntegerCount(value: unknown): number | null {
+  const count = parseCount(value);
+  return count != null && Number.isInteger(count) ? count : null;
+}
+
+async function queryRemoteSeriesActivity(
+  targetKey: string,
+  studyInstanceUid: string,
+  settings: ResolvedOrthancSettings
+): Promise<RemoteSeriesQueryResult> {
+  try {
+    const answers = await readRemoteQueryAnswers(targetKey, buildRemoteSeriesFindQuery(studyInstanceUid), settings);
+    const uniqueSeries = new Map<string, number | null>();
+    let reliableSeriesCount = true;
+    let reliableInstanceCount = answers.length > 0;
+
+    for (const answer of answers) {
+      const tags = extractTags(answer);
+      const seriesInstanceUid = firstString(tags.SeriesInstanceUID, tags.SeriesInstanceUid, tags["0020000E"]);
+      if (!seriesInstanceUid) {
+        reliableSeriesCount = false;
+        reliableInstanceCount = false;
+        continue;
+      }
+      const instanceCount = parseIntegerCount(tags.NumberOfSeriesRelatedInstances ?? tags["00201209"]);
+      if (instanceCount == null) {
+        reliableInstanceCount = false;
+      }
+      if (!uniqueSeries.has(seriesInstanceUid)) {
+        uniqueSeries.set(seriesInstanceUid, instanceCount);
+      } else if (uniqueSeries.get(seriesInstanceUid) !== instanceCount) {
+        reliableInstanceCount = false;
+      }
+    }
+
+    const instanceCount = reliableInstanceCount
+      ? Array.from(uniqueSeries.values()).reduce<number>((total, count) => total + (count || 0), 0)
+      : null;
+    return {
+      attempted: true,
+      succeeded: true,
+      seriesCount: reliableSeriesCount ? uniqueSeries.size : null,
+      seriesCountReliable: reliableSeriesCount,
+      instanceCount,
+      instanceCountReliable: reliableInstanceCount,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      succeeded: false,
+      seriesCount: null,
+      seriesCountReliable: false,
+      instanceCount: null,
+      instanceCountReliable: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function queryRemote(
+  targetKey: string,
+  matchKey: OrthancMatchKey,
+  matchValue: string,
+  settings: ResolvedOrthancSettings
+): Promise<StudyCandidate[]> {
+  const answers = await readRemoteQueryAnswers(targetKey, buildFindQuery(matchKey, matchValue), settings);
+  const candidates = answers.map((answer) => candidateFromPayload(answer, { remote: true }));
+  const candidate = candidates.length === 1 ? candidates[0]! : null;
+  if (!candidate?.studyInstanceUid) return candidates;
+
+  const activity = await queryRemoteSeriesActivity(targetKey, candidate.studyInstanceUid, settings);
+  return [{
+    ...candidate,
+    seriesCount: activity.succeeded ? activity.seriesCount : candidate.seriesCount,
+    instanceCount: activity.succeeded ? activity.instanceCount : candidate.instanceCount,
+    reliableSeriesCount: activity.seriesCountReliable,
+    reliableInstanceCount: activity.instanceCountReliable,
+    remoteSeriesQuery: activity,
+  }];
 }
 
 async function runQuery(

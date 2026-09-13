@@ -97,6 +97,13 @@ test("worker distinguishes strict start evidence from zero-instance tracking evi
   assert.match(source, /result\.status === "matched"\s*&&\s*result\.instanceCount !== 0\s*\?\s*"completed"\s*:\s*null/);
 });
 
+test("worker preserves PACS state when remote SERIES enrichment fails", () => {
+  assert.match(source, /function remoteSeriesQueryFailed/);
+  assert.match(source, /remoteSeriesQueryAttempted === true/);
+  assert.match(source, /remoteSeriesQuerySucceeded === false/);
+  assert.match(source, /!remoteSeriesQueryFailed\(result\)/);
+});
+
 test("worker does not auto-discontinue unavailable series counts", () => {
   assert.match(source, /result\.lastError === "series_count_below_minimum"/);
   assert.doesNotMatch(source, /series_count_unavailable[\s\S]*status = 'discontinued'/);

@@ -314,6 +314,141 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     assert.equal(staleClient.poll_interval_minutes, 15);
     assert.equal(staleClient.inactivity_completion_minutes, 16);
   });
+
+  it("uses remote SERIES C-FIND activity for PACS-owned inactivity completion without overriding MPPS", async () => {
+    const remoteObservation = { series: 5, instances: 300, includeInstanceCounts: true, failSeriesQuery: false };
+    __setOrthancFetchForTests(async (path, options) => {
+      if (path === "/modalities/REMOTE/query") {
+        const level = (options?.body as { Level?: string } | undefined)?.Level;
+        if (level === "Study") return response({ ID: "remote-study-query" });
+        if (level === "Series") {
+          return remoteObservation.failSeriesQuery
+            ? { status: 503, ok: false, text: "temporary remote failure", json: null }
+            : response({ ID: "remote-series-query" });
+        }
+      }
+      if (path === "/queries/remote-study-query/answers") return response(["0"]);
+      if (path === "/queries/remote-study-query/answers/0/content") return response({
+        StudyInstanceUID: "1.2.840.remote-study",
+        AccessionNumber: "V2-REMOTE",
+        StudyDate: new Date().toISOString().slice(0, 10).replace(/-/g, ""),
+        Modality: modalityCode,
+      });
+      if (path === "/queries/remote-series-query/answers") {
+        return response(Array.from({ length: remoteObservation.series }, (_, index) => String(index)));
+      }
+      const seriesAnswer = path.match(/^\/queries\/remote-series-query\/answers\/(\d+)\/content$/);
+      if (seriesAnswer) {
+        const index = Number(seriesAnswer[1]);
+        const base = Math.floor(remoteObservation.instances / remoteObservation.series);
+        const remainder = remoteObservation.instances % remoteObservation.series;
+        return response({
+          SeriesInstanceUID: `1.2.840.remote-study.${index + 1}`,
+          ...(remoteObservation.includeInstanceCounts
+            ? { NumberOfSeriesRelatedInstances: String(base + (index < remainder ? 1 : 0)) }
+            : {}),
+        });
+      }
+      throw new Error(`Unexpected Orthanc path ${path}`);
+    });
+    await pool.query(
+      `update appointments_v2.pacs_auto_completion_settings
+       set enabled = true, orthanc_target_type = 'remote_modality', orthanc_target_key = 'REMOTE',
+           completion_threshold = 'study_exists', minimum_series_count = 2,
+           below_minimum_series_action = 'leave_unchanged', poll_interval_minutes = 1,
+           inactivity_completion_minutes = 10
+       where modality_id = $1`,
+      [testData.modalityId]
+    );
+
+    const bookingId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const started = await pool.query<{ status: string; source: string | null; activity: Date | null; series: number | null; instances: number | null }>(
+      `select status, acquisition_status_source as source, pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    assert.deepEqual(started.rows[0] && {
+      status: started.rows[0].status,
+      source: started.rows[0].source,
+      series: started.rows[0].series,
+      instances: started.rows[0].instances,
+    }, { status: "in-progress", source: "pacs", series: 5, instances: 300 });
+
+    await clearThrottle(bookingId);
+    remoteObservation.series = 7;
+    remoteObservation.instances = 420;
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [bookingId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const changed = await pool.query<{ status: string; activity: Date | null; series: number | null; instances: number | null }>(
+      `select status, pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    assert.deepEqual(changed.rows[0] && {
+      status: changed.rows[0].status,
+      series: changed.rows[0].series,
+      instances: changed.rows[0].instances,
+    }, { status: "in-progress", series: 7, instances: 420 });
+    assert.ok((changed.rows[0]?.activity?.getTime() || 0) > (started.rows[0]?.activity?.getTime() || 0));
+
+    await clearThrottle(bookingId);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '9 minutes' where id = $1`, [bookingId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId])).rows[0]?.status, "in-progress");
+
+    await clearThrottle(bookingId);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [bookingId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [bookingId])).rows[0]?.status, "completed");
+
+    remoteObservation.series = 5;
+    remoteObservation.includeInstanceCounts = false;
+    const seriesOnlyId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const seriesOnlyStarted = await pool.query<{ activity: Date | null; series: number | null; instances: number | null }>(
+      `select pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [seriesOnlyId]
+    );
+    assert.deepEqual(seriesOnlyStarted.rows[0] && { series: seriesOnlyStarted.rows[0].series, instances: seriesOnlyStarted.rows[0].instances }, { series: 5, instances: null });
+    await clearThrottle(seriesOnlyId);
+    remoteObservation.series = 7;
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [seriesOnlyId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const seriesOnlyChanged = await pool.query<{ status: string; activity: Date | null; series: number | null; instances: number | null }>(
+      `select status, pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+      [seriesOnlyId]
+    );
+    assert.deepEqual(seriesOnlyChanged.rows[0] && {
+      status: seriesOnlyChanged.rows[0].status,
+      series: seriesOnlyChanged.rows[0].series,
+      instances: seriesOnlyChanged.rows[0].instances,
+    }, { status: "in-progress", series: 7, instances: null });
+    assert.ok((seriesOnlyChanged.rows[0]?.activity?.getTime() || 0) > (seriesOnlyStarted.rows[0]?.activity?.getTime() || 0));
+
+    const failedEnrichmentId = await createBooking("in-progress");
+    await pool.query(
+      `update appointments_v2.bookings
+       set acquisition_status_source = 'pacs', pacs_last_activity_at = current_timestamp - interval '11 minutes',
+           pacs_last_observed_series_count = 7, pacs_last_observed_instance_count = 420
+       where id = $1`,
+      [failedEnrichmentId]
+    );
+    remoteObservation.failSeriesQuery = true;
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [failedEnrichmentId])).rows[0]?.status, "in-progress");
+    const failureHistory = await pool.query<{ result_json: { remoteSeriesQuerySucceeded?: boolean } }>(
+      `select result_json from appointments_v2.pacs_auto_completion_verification_history where booking_id = $1 order by id desc limit 1`,
+      [failedEnrichmentId]
+    );
+    assert.equal(failureHistory.rows[0]?.result_json.remoteSeriesQuerySucceeded, false);
+
+    const mppsOwnedId = await createBooking("in-progress");
+    await pool.query(`update appointments_v2.bookings set acquisition_status_source = 'mpps' where id = $1`, [mppsOwnedId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const mppsOwned = await pool.query<{ status: string; source: string | null }>(
+      `select status, acquisition_status_source as source from appointments_v2.bookings where id = $1`, [mppsOwnedId]
+    );
+    assert.deepEqual(mppsOwned.rows[0], { status: "in-progress", source: "mpps" });
+  });
 });
 
 function response(json: unknown) {

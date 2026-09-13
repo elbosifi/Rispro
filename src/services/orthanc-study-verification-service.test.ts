@@ -405,11 +405,19 @@ test("missing instance count fails instance_exists", async () => {
   assert.equal(result.lastError, "instance_count_unavailable");
 });
 
-test("remote C-FIND answer without reliable counts only satisfies study_exists", async () => {
-  service.__setOrthancFetchForTests(async (path) => {
-    if (path === "/modalities/REMOTE/query") return orthancResponse({ ID: "query-1" });
-    if (path === "/queries/query-1/answers") return orthancResponse(["0"]);
-    if (path === "/queries/query-1/answers/0/content") return orthancResponse(studyPayload());
+test("remote C-FIND enriches a unique study with deduplicated SERIES activity", async () => {
+  const queries: unknown[] = [];
+  service.__setOrthancFetchForTests(async (path, options) => {
+    if (path === "/modalities/REMOTE/query") {
+      queries.push(options?.body);
+      return orthancResponse({ ID: queries.length === 1 ? "study-query" : "series-query" });
+    }
+    if (path === "/queries/study-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/study-query/answers/0/content") return orthancResponse(studyPayload({ CountSeries: undefined, CountInstances: undefined }));
+    if (path === "/queries/series-query/answers") return orthancResponse(["0", "1", "2"]);
+    if (path === "/queries/series-query/answers/0/content") return orthancResponse({ SeriesInstanceUID: "1.2.3.1", NumberOfSeriesRelatedInstances: "100" });
+    if (path === "/queries/series-query/answers/1/content") return orthancResponse({ SeriesInstanceUID: "1.2.3.2", NumberOfSeriesRelatedInstances: "200" });
+    if (path === "/queries/series-query/answers/2/content") return orthancResponse({ SeriesInstanceUID: "1.2.3.1", NumberOfSeriesRelatedInstances: "100" });
     throw new Error(`Unexpected path ${path}`);
   });
 
@@ -418,15 +426,70 @@ test("remote C-FIND answer without reliable counts only satisfies study_exists",
     orthanc_target_type: "remote_modality",
     orthanc_target_key: "REMOTE",
   };
-  const studyResult = await service.verifyBookingStudyWithOrthanc({ ...baseBooking, study_instance_uid: null }, remoteSetting);
-  assert.equal(studyResult.status, "matched");
+  const result = await service.verifyBookingStudyWithOrthanc({ ...baseBooking, study_instance_uid: null }, remoteSetting);
 
-  const seriesResult = await service.verifyBookingStudyWithOrthanc(
-    { ...baseBooking, study_instance_uid: null },
-    { ...remoteSetting, completion_threshold: "series_exists" }
-  );
-  assert.equal(seriesResult.status, "matched");
-  assert.equal(seriesResult.resultJson.seriesCountUnavailableAccepted, true);
+  assert.equal(result.status, "matched");
+  assert.equal(result.seriesCount, 2);
+  assert.equal(result.instanceCount, 300);
+  assert.deepEqual(queries, [
+    { Level: "Study", Query: { AccessionNumber: "V2-000042" } },
+    { Level: "Series", Query: { StudyInstanceUID: "1.2.3" } },
+  ]);
+  assert.equal(result.resultJson.remoteSeriesQueryAttempted, true);
+  assert.equal(result.resultJson.remoteSeriesQuerySucceeded, true);
+  assert.equal(result.resultJson.remoteSeriesCount, 2);
+  assert.equal(result.resultJson.remoteInstanceCount, 300);
+  assert.equal(result.resultJson.remoteInstanceCountReliable, true);
+});
+
+test("remote SERIES C-FIND retains usable series activity when instance counts are unavailable", async () => {
+  let queryCount = 0;
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/modalities/REMOTE/query") return orthancResponse({ ID: ++queryCount === 1 ? "study-query" : "series-query" });
+    if (path === "/queries/study-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/study-query/answers/0/content") return orthancResponse(studyPayload({ CountSeries: undefined, CountInstances: undefined }));
+    if (path === "/queries/series-query/answers") return orthancResponse(["0", "1"]);
+    if (path === "/queries/series-query/answers/0/content") return orthancResponse({ SeriesInstanceUID: "1.2.3.1" });
+    if (path === "/queries/series-query/answers/1/content") return orthancResponse({ SeriesInstanceUID: "1.2.3.2" });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc({ ...baseBooking, study_instance_uid: null }, {
+    ...baseSetting,
+    orthanc_target_type: "remote_modality",
+    orthanc_target_key: "REMOTE",
+  });
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.seriesCount, 2);
+  assert.equal(result.instanceCount, null);
+  assert.equal(result.resultJson.remoteInstanceCountReliable, false);
+});
+
+test("remote SERIES C-FIND failure keeps the STUDY match and records diagnostics", async () => {
+  service.__setOrthancFetchForTests(async (path, options) => {
+    if (path === "/modalities/REMOTE/query") {
+      return (options?.body as { Level?: string } | undefined)?.Level === "Series"
+        ? orthancResponse(null, 503)
+        : orthancResponse({ ID: "study-query" });
+    }
+    if (path === "/queries/study-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/study-query/answers/0/content") return orthancResponse(studyPayload({ CountSeries: undefined, CountInstances: undefined }));
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc({ ...baseBooking, study_instance_uid: null }, {
+    ...baseSetting,
+    orthanc_target_type: "remote_modality",
+    orthanc_target_key: "REMOTE",
+  });
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.seriesCount, null);
+  assert.equal(result.instanceCount, null);
+  assert.equal(result.resultJson.remoteSeriesQueryAttempted, true);
+  assert.equal(result.resultJson.remoteSeriesQuerySucceeded, false);
+  assert.equal(result.resultJson.remoteInstanceCountReliable, false);
 });
 
 test("Orthanc timeout/error returns error with lastError", async () => {
