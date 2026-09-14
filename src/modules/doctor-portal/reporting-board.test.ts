@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
+import type { ReportingBoardNotificationEvent } from "./reporting-board-types.js";
 
 const root = process.cwd();
 
@@ -389,6 +390,20 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /"\/notifications"/);
     assert.match(routes, /"\/notifications\/:id\/read"/);
     assert.match(routes, /"\/notifications\/:id\/dismiss"/);
+    const irReadyNotification: ReportingBoardNotificationEvent = {
+      id: 1,
+      eventType: "ir_referral_ready_for_review",
+      title: "IR consultation ready for review",
+      body: "The prepared IR consultation is ready for your clinical review.",
+      actionUrl: "/comparisons/ir/1",
+      status: "delivered",
+      createdAt: "2026-09-14T10:00:00Z",
+      deliveredAt: "2026-09-14T10:00:00Z",
+      readAt: null,
+      dismissedAt: null,
+    };
+    assert.equal(irReadyNotification.eventType, "ir_referral_ready_for_review");
+    assert.match(repo, /ir_referral_ready_for_review/);
   });
 
   it("adds classified, system-managed doctor worklists with idempotent provisioning", () => {

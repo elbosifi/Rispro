@@ -19,6 +19,7 @@ test("IR referral readiness and Appointment V2 booking link are authoritative", 
   const data = await seedTestData(setup.schemaName, prefix);
   const profile = await pool.query<{ id: number }>(`insert into doctor_portal.doctor_profiles(user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise) values($1,$2,'consultant',true,true,true,true) returning id`, [data.userId, `${prefix} Doctor`]);
   const doctorId = Number(profile.rows[0]!.id);
+  await pool.query("update users set full_name=$1, english_name=$2 where id=$3", [`${prefix} Reviewer Arabic`, `${prefix} Reviewer English`, data.userId]);
   const actor = { userId: data.userId, appRole: "supervisor" as const };
   const documentIds: number[] = [];
   try {
@@ -39,6 +40,11 @@ test("IR referral readiness and Appointment V2 booking link are authoritative", 
     assert.equal(needsInformation.status, "needs_information");
     assert.equal(needsInformation.assessmentText, "Prior assessment");
     assert.equal(needsInformation.decisionNote, "Please add the prior report");
+    assert.equal(needsInformation.reviewedByDoctorId, doctorId);
+    assert.equal(needsInformation.reviewedByDoctorName, `${prefix} Doctor`);
+    assert.equal(needsInformation.reviewedByDoctorNameAr, `${prefix} Reviewer Arabic`);
+    assert.equal(needsInformation.reviewedByDoctorNameEn, `${prefix} Reviewer English`);
+    assert.ok(needsInformation.reviewedAt);
     await assert.rejects(() => recordIrReferralDecision(actor, referral.id, { assessmentText: "Should not review", decision: "eligible_for_intervention" }), { statusCode: 409 });
     const additionalDocument = await uploadIrReferralDocument(actor, referral.id, {
       originalFilename: "additional-ir-report.pdf",
@@ -91,6 +97,48 @@ test("IR referral readiness and Appointment V2 booking link are authoritative", 
       fileContentBase64: Buffer.from("%PDF-1.4\nnot suitable IR report\n%%EOF").toString("base64"),
     }), { statusCode: 409 });
   } finally { for (const documentId of [...documentIds].reverse()) await deleteDocumentById(documentId, data.userId).catch(() => undefined); await pool.query("delete from ir_referral_schedule_requests where ir_referral_case_id in (select id from ir_referral_cases where assigned_doctor_id=$1)", [doctorId]); await pool.query("delete from ir_referral_cases where assigned_doctor_id=$1", [doctorId]); await pool.query("delete from doctor_portal.doctor_profiles where id=$1", [doctorId]); await setup.cleanup(); }
+});
+
+test("IR ready notifications and email outbox are durably committed and idempotent", { skip: skipEnv }, async () => {
+  const setup = await setupTestDatabase(prefix);
+  const data = await seedTestData(setup.schemaName, prefix);
+  const profile = await pool.query<{ id: number }>(`insert into doctor_portal.doctor_profiles(user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise) values($1,$2,'consultant',true,true,true,true) returning id`, [data.userId, `${prefix} Notification Doctor`]);
+  const doctorId = Number(profile.rows[0]!.id);
+  const actor = { userId: data.userId, appRole: "supervisor" as const };
+  try {
+    await pool.query("update users set email=$1 where id=$2", [`${prefix.toLowerCase()}@example.test`, data.userId]);
+    const referral = await createIrReferral(actor, { patientId: data.patientId, requestedProcedure: "IR biopsy", clinicalIndication: "Durable notification proof", assignedDoctorId: doctorId, notifyAssignedDoctor: true });
+
+    const ready = await confirmIrReferralMaterials(actor, referral.id, { documentsConfirmed: true, imagesConfirmed: true });
+    assert.equal(ready.status, "ready_for_review");
+    const firstNotification = await pool.query<{ count: string }>("select count(*)::text as count from doctor_portal.reporting_board_notification_events where ir_referral_case_id=$1 and event_type='ir_referral_ready_for_review'", [referral.id]);
+    const firstEmail = await pool.query<{ count: string }>("select count(*)::text as count from email_outbox where related_entity_type='ir_referral_case' and related_entity_id=$1 and event_type='ir_referral_ready_for_review'", [String(referral.id)]);
+    assert.equal(Number(firstNotification.rows[0]!.count), 1);
+    assert.equal(Number(firstEmail.rows[0]!.count), 1);
+
+    const repeated = await confirmIrReferralMaterials(actor, referral.id, { documentsConfirmed: true, imagesConfirmed: true });
+    assert.equal(repeated.status, "ready_for_review");
+    const repeatedNotification = await pool.query<{ count: string }>("select count(*)::text as count from doctor_portal.reporting_board_notification_events where ir_referral_case_id=$1 and event_type='ir_referral_ready_for_review'", [referral.id]);
+    const repeatedEmail = await pool.query<{ count: string }>("select count(*)::text as count from email_outbox where related_entity_type='ir_referral_case' and related_entity_id=$1 and event_type='ir_referral_ready_for_review'", [String(referral.id)]);
+    assert.equal(Number(repeatedNotification.rows[0]!.count), 1);
+    assert.equal(Number(repeatedEmail.rows[0]!.count), 1);
+
+    await pool.query("update users set email=null where id=$1", [data.userId]);
+    const missingEmailReferral = await createIrReferral(actor, { patientId: data.patientId, requestedProcedure: "IR drainage", clinicalIndication: "Missing email proof", assignedDoctorId: doctorId, notifyAssignedDoctor: true });
+    const missingEmailReady = await confirmIrReferralMaterials(actor, missingEmailReferral.id, { documentsConfirmed: true, imagesConfirmed: true });
+    assert.equal(missingEmailReady.status, "ready_for_review");
+    const missingEmailNotification = await pool.query<{ count: string }>("select count(*)::text as count from doctor_portal.reporting_board_notification_events where ir_referral_case_id=$1 and event_type='ir_referral_ready_for_review'", [missingEmailReferral.id]);
+    const missingEmailOutbox = await pool.query<{ count: string }>("select count(*)::text as count from email_outbox where related_entity_type='ir_referral_case' and related_entity_id=$1 and event_type='ir_referral_ready_for_review'", [String(missingEmailReferral.id)]);
+    assert.equal(Number(missingEmailNotification.rows[0]!.count), 1);
+    assert.equal(Number(missingEmailOutbox.rows[0]!.count), 0);
+  } finally {
+    await pool.query("delete from email_outbox where related_entity_type='ir_referral_case' and related_entity_id in (select id::text from ir_referral_cases where assigned_doctor_id=$1)", [doctorId]);
+    await pool.query("delete from doctor_portal.reporting_board_notification_events where ir_referral_case_id in (select id from ir_referral_cases where assigned_doctor_id=$1)", [doctorId]);
+    await pool.query("delete from ir_referral_schedule_requests where ir_referral_case_id in (select id from ir_referral_cases where assigned_doctor_id=$1)", [doctorId]);
+    await pool.query("delete from ir_referral_cases where assigned_doctor_id=$1", [doctorId]);
+    await pool.query("delete from doctor_portal.doctor_profiles where id=$1", [doctorId]);
+    await setup.cleanup();
+  }
 });
 
 test("IR referral document deletion uses one transaction and protects shared documents", { skip: skipEnv, timeout: 10000 }, async () => {

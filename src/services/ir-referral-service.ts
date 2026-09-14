@@ -19,7 +19,7 @@ export type IrReferralRow = {
   assignedDoctorId: number | null; assignedDoctorName: string | null; assignedDoctorNameAr: string | null; assignedDoctorNameEn: string | null;
   notifyAssignedDoctor: boolean; documentsConfirmed: boolean; imagesConfirmed: boolean; materialsConfirmed: boolean;
   materialsConfirmedBy: number | null; materialsConfirmedAt: string | null; materialsConfirmationNote: string | null;
-  assessmentText: string | null; decision: string | null; decisionNote: string | null; reviewedByDoctorId: number | null; reviewedAt: string | null;
+  assessmentText: string | null; decision: string | null; decisionNote: string | null; reviewedByDoctorId: number | null; reviewedByDoctorName: string | null; reviewedByDoctorNameAr: string | null; reviewedByDoctorNameEn: string | null; reviewedAt: string | null;
   createdByUserId: number; createdByName: string | null; createdAt: string; updatedAt: string; documentCount: number; remapJobId: number | null; remapJobStatus: string | null; scheduleRequestId: number | null;
 };
 
@@ -39,7 +39,7 @@ const SELECT = `
     ir.assigned_doctor_id as "assignedDoctorId", dp.display_name as "assignedDoctorName", du.full_name as "assignedDoctorNameAr", du.english_name as "assignedDoctorNameEn",
     ir.notify_assigned_doctor as "notifyAssignedDoctor", ir.documents_confirmed as "documentsConfirmed", ir.images_confirmed as "imagesConfirmed", ir.materials_confirmed as "materialsConfirmed",
     ir.materials_confirmed_by as "materialsConfirmedBy", ir.materials_confirmed_at as "materialsConfirmedAt", ir.materials_confirmation_note as "materialsConfirmationNote",
-    ir.assessment_text as "assessmentText", ir.decision, ir.decision_note as "decisionNote", ir.reviewed_by_doctor_id as "reviewedByDoctorId", ir.reviewed_at as "reviewedAt",
+    ir.assessment_text as "assessmentText", ir.decision, ir.decision_note as "decisionNote", ir.reviewed_by_doctor_id as "reviewedByDoctorId", reviewer_dp.display_name as "reviewedByDoctorName", reviewer_du.full_name as "reviewedByDoctorNameAr", reviewer_du.english_name as "reviewedByDoctorNameEn", ir.reviewed_at as "reviewedAt",
     ir.created_by_user_id as "createdByUserId", cu.full_name as "createdByName", ir.created_at as "createdAt", ir.updated_at as "updatedAt",
     (select count(*)::integer from ir_referral_documents ird where ird.ir_referral_case_id = ir.id) as "documentCount",
     remap.id as "remapJobId", remap.status as "remapJobStatus", schedule.id as "scheduleRequestId"
@@ -48,6 +48,8 @@ const SELECT = `
   left join lateral (select pi.value from patient_identifiers pi where pi.patient_id = p.id and pi.is_primary = true order by pi.id asc limit 1) primary_identifier on true
   left join doctor_portal.doctor_profiles dp on dp.id = ir.assigned_doctor_id
   left join users du on du.id = dp.user_id
+  left join doctor_portal.doctor_profiles reviewer_dp on reviewer_dp.id = ir.reviewed_by_doctor_id
+  left join users reviewer_du on reviewer_du.id = reviewer_dp.user_id
   join users cu on cu.id = ir.created_by_user_id
   left join lateral (select id, status from dicom_remap_jobs where ir_referral_case_id = ir.id order by created_at desc limit 1) remap on true
   left join lateral (select id from ir_referral_schedule_requests where ir_referral_case_id = ir.id and status = 'pending_scheduling' order by requested_at desc limit 1) schedule on true`;
@@ -87,14 +89,38 @@ export async function deleteIrReferralDocument(actor: IrReferralActor, caseIdInp
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 export async function uploadIrReferralDocument(actor: IrReferralActor, caseIdInput: unknown, payload: DocumentUploadPayload) { const referral = await findIrReferralById(caseIdInput); if (!referral) throw new HttpError(404, "IR referral not found."); const document = await uploadDocument({ ...payload, patientId: referral.patientId, appointmentId: undefined, appointmentRefType: undefined, documentType: "ir_referral" }, actor.userId); try { return await attachDocumentToIrReferral(actor, referral.id, document.id); } catch (error) { await deleteDocumentById(document.id, actor.userId).catch(() => undefined); throw error; } }
-async function queueIrReferralReadyEmail(referral: IrReferralRow, actor: IrReferralActor): Promise<void> { if (!referral.notifyAssignedDoctor || !referral.assignedDoctorId) return; const recipient = await pool.query<{ user_id:number; email:string|null; is_active:boolean }>(`select u.id as user_id,u.email,u.is_active from doctor_portal.doctor_profiles dp join users u on u.id=dp.user_id where dp.id=$1 and dp.active=true limit 1`,[referral.assignedDoctorId]); const user=recipient.rows[0]; if(!user?.is_active || !user.email?.trim()) { await audit(actor,"ir_referral_ready_email_recipient_unavailable",referral.id,{assignedDoctorId:referral.assignedDoctorId}); return; } const patient=referral.patientEnglishName||referral.patientArabicName||referral.patientMrn||`Patient ${referral.patientId}`; await enqueueEmail({eventType:"ir_referral_ready_for_review",recipientUserId:user.user_id,recipientEmail:user.email.trim(),subject:"IR consultation ready for review",textBody:`IR consultation ready for review.\n\nPatient: ${patient}${referral.patientMrn?`\nMRN: ${referral.patientMrn}`:""}\nRequested procedure: ${referral.requestedProcedure}\n\nOpen RISpro Doctor Workspace to review.`,idempotencyKey:`ir_referral_ready_for_review:${referral.id}:${user.user_id}`,relatedEntityType:"ir_referral_case",relatedEntityId:String(referral.id),createdByUserId:actor.userId}); await audit(actor,"ir_referral_ready_email_enqueued",referral.id,{assignedDoctorId:referral.assignedDoctorId}); }
-async function queueIrReferralReadyNotification(referral: IrReferralRow, actor: IrReferralActor): Promise<void> {
+async function queueIrReferralReadyEmail(referral: IrReferralRow, actor: IrReferralActor, client: PoolClient): Promise<void> {
+  if (!referral.notifyAssignedDoctor || !referral.assignedDoctorId) return;
+  const recipient = await client.query<{ user_id: number; email: string | null; is_active: boolean }>(
+    `select u.id as user_id,u.email,u.is_active from doctor_portal.doctor_profiles dp join users u on u.id=dp.user_id where dp.id=$1 and dp.active=true limit 1`,
+    [referral.assignedDoctorId]
+  );
+  const user = recipient.rows[0];
+  if (!user?.is_active || !user.email?.trim()) {
+    await audit(actor, "ir_referral_ready_email_recipient_unavailable", referral.id, { assignedDoctorId: referral.assignedDoctorId }, client);
+    return;
+  }
+  const patient = referral.patientEnglishName || referral.patientArabicName || referral.patientMrn || `Patient ${referral.patientId}`;
+  await enqueueEmail({
+    eventType: "ir_referral_ready_for_review",
+    recipientUserId: user.user_id,
+    recipientEmail: user.email.trim(),
+    subject: "IR consultation ready for review",
+    textBody: `IR consultation ready for review.\n\nPatient: ${patient}${referral.patientMrn ? `\nMRN: ${referral.patientMrn}` : ""}\nRequested procedure: ${referral.requestedProcedure}\n\nOpen RISpro Doctor Workspace to review.`,
+    idempotencyKey: `ir_referral_ready_for_review:${referral.id}:${user.user_id}`,
+    relatedEntityType: "ir_referral_case",
+    relatedEntityId: String(referral.id),
+    createdByUserId: actor.userId,
+  }, client);
+  await audit(actor, "ir_referral_ready_email_enqueued", referral.id, { assignedDoctorId: referral.assignedDoctorId }, client);
+}
+async function queueIrReferralReadyNotification(referral: IrReferralRow, actor: IrReferralActor, client: PoolClient): Promise<void> {
   if (!referral.assignedDoctorId) return;
-  const recipient = await pool.query<{ user_id: number }>(`select u.id as user_id from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id where dp.id = $1 and dp.active = true and u.is_active = true limit 1`, [referral.assignedDoctorId]);
+  const recipient = await client.query<{ user_id: number }>(`select u.id as user_id from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id where dp.id = $1 and dp.active = true and u.is_active = true limit 1`, [referral.assignedDoctorId]);
   const user = recipient.rows[0];
   if (!user) return;
-  const created = await createIrReferralReadyNotification({ referralId: referral.id, recipientDoctorId: referral.assignedDoctorId, recipientUserId: user.user_id });
-  await audit(actor, "ir_referral_ready_notification_created", referral.id, { assignedDoctorId: referral.assignedDoctorId, created });
+  const created = await createIrReferralReadyNotification({ referralId: referral.id, recipientDoctorId: referral.assignedDoctorId, recipientUserId: user.user_id }, client);
+  await audit(actor, "ir_referral_ready_notification_created", referral.id, { assignedDoctorId: referral.assignedDoctorId, created }, client);
 }
 
 export async function confirmIrReferralMaterials(actor: IrReferralActor, caseIdInput: unknown, input: { documentsConfirmed?: unknown; imagesConfirmed?: unknown; note?: unknown }) {
@@ -105,14 +131,20 @@ export async function confirmIrReferralMaterials(actor: IrReferralActor, caseIdI
   try {
     await client.query("begin");
     const referral = await lock(caseId, client);
-    if (referral.status === "ready_for_review" && referral.materialsConfirmed) { await client.query("commit"); return referral; }
+    if (referral.status === "ready_for_review" && referral.materialsConfirmed) {
+      await queueIrReferralReadyNotification(referral, actor, client);
+      await queueIrReferralReadyEmail(referral, actor, client);
+      await client.query("commit");
+      return referral;
+    }
     if (!isIrReferralMaterialPreparationStatus(referral.status)) throw new HttpError(409, "IR referral is not open for material preparation.");
     await client.query(`update ir_referral_cases set status='ready_for_review', documents_confirmed=true, images_confirmed=true, materials_confirmed=true, materials_confirmed_by=$2, materials_confirmed_at=now(), materials_confirmation_note=$3, updated_at=now() where id=$1`, [caseId, actor.userId, optionalText(input.note)]);
     const updated = await lock(caseId, client);
     await audit(actor, "ir_referral_materials_confirmed", caseId, {}, client);
     await audit(actor, "ir_referral_ready_for_review", caseId, {}, client);
+    await queueIrReferralReadyNotification(updated, actor, client);
+    await queueIrReferralReadyEmail(updated, actor, client);
     await client.query("commit");
-    await Promise.all([queueIrReferralReadyNotification(updated, actor), queueIrReferralReadyEmail(updated, actor)].map((task) => task.catch(() => undefined)));
     return updated;
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }

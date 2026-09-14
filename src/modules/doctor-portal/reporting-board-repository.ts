@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
 import { pool } from "../../db/pool.js";
 import type { Role } from "../../types/domain.js";
@@ -2747,7 +2747,7 @@ export async function bulkUnassignReportingCases(input: {
 
 function notificationEvent(row: {
   id: number;
-  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";
+  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized" | "ir_referral_ready_for_review";
   title: string;
   body: string;
   actionUrl: string | null;
@@ -3109,8 +3109,8 @@ export async function createAdditionalImagingNotification(input: { recallRequest
 }
 
 /** IR consultations use the existing Doctor Workspace in-app event feed, not reporting-case state. */
-export async function createIrReferralReadyNotification(input: { referralId: number; recipientDoctorId: number; recipientUserId: number }): Promise<number> {
-  const result = await pool.query(
+export async function createIrReferralReadyNotification(input: { referralId: number; recipientDoctorId: number; recipientUserId: number }, db: Pool | PoolClient = pool): Promise<number> {
+  const result = await db.query(
     `
       insert into doctor_portal.reporting_board_notification_events (
         recipient_user_id, recipient_doctor_id, ir_referral_case_id,

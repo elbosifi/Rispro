@@ -869,7 +869,7 @@ export interface ReportingBoardBulkResumeHoldResult {
 
 export interface ReportingBoardNotificationEvent {
   id: number;
-  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized";
+  eventType: "reporting_case_assigned_to_me" | "additional_imaging_patient_arrived" | "additional_imaging_completed" | "additional_imaging_report_finalized" | "ir_referral_ready_for_review";
   title: string;
   body: string;
   actionUrl: string | null;
