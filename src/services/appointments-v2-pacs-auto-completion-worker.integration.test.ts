@@ -166,6 +166,17 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     await runAppointmentsV2PacsAutoCompletionTick();
     assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [scheduledZeroId])).rows[0]?.status, "scheduled");
 
+    observation = { series: 0, instances: null, lastUpdate: "20260911T085001" };
+    const scheduledZeroOrUnknownId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [scheduledZeroOrUnknownId])).rows[0]?.status, "scheduled");
+
+    observation = { series: null, instances: null, lastUpdate: null };
+    const scheduledUnknownId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [scheduledUnknownId])).rows[0]?.status, "scheduled");
+
+    observation = { series: 1, instances: 0, lastUpdate: "20260911T085000" };
     const zeroTrackingId = await createBooking("in-progress");
     await pool.query(
       `update appointments_v2.bookings set acquisition_status_source = 'pacs', pacs_last_activity_at = current_timestamp - interval '11 minutes', pacs_last_observed_instance_count = 10, pacs_last_observed_series_count = 1, pacs_last_observed_orthanc_update_at = '2026-09-11T08:00:00Z' where id = $1`,
@@ -404,11 +415,16 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     remoteObservation.includeInstanceCounts = false;
     const seriesOnlyId = await createBooking();
     await runAppointmentsV2PacsAutoCompletionTick();
-    const seriesOnlyStarted = await pool.query<{ activity: Date | null; series: number | null; instances: number | null }>(
-      `select pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
+    const seriesOnlyStarted = await pool.query<{ status: string; source: string | null; activity: Date | null; series: number | null; instances: number | null }>(
+      `select status, acquisition_status_source as source, pacs_last_activity_at as activity, pacs_last_observed_series_count as series, pacs_last_observed_instance_count as instances from appointments_v2.bookings where id = $1`,
       [seriesOnlyId]
     );
-    assert.deepEqual(seriesOnlyStarted.rows[0] && { series: seriesOnlyStarted.rows[0].series, instances: seriesOnlyStarted.rows[0].instances }, { series: 5, instances: null });
+    assert.deepEqual(seriesOnlyStarted.rows[0] && {
+      status: seriesOnlyStarted.rows[0].status,
+      source: seriesOnlyStarted.rows[0].source,
+      series: seriesOnlyStarted.rows[0].series,
+      instances: seriesOnlyStarted.rows[0].instances,
+    }, { status: "in-progress", source: "pacs", series: 5, instances: null });
     await clearThrottle(seriesOnlyId);
     remoteObservation.series = 7;
     await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [seriesOnlyId]);
@@ -424,6 +440,16 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     }, { status: "in-progress", series: 7, instances: null });
     assert.ok((seriesOnlyChanged.rows[0]?.activity?.getTime() || 0) > (seriesOnlyStarted.rows[0]?.activity?.getTime() || 0));
 
+    await clearThrottle(seriesOnlyId);
+    await pool.query(`update appointments_v2.bookings set pacs_last_activity_at = current_timestamp - interval '11 minutes' where id = $1`, [seriesOnlyId]);
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [seriesOnlyId])).rows[0]?.status, "completed");
+
+    remoteObservation.failSeriesQuery = true;
+    const failedUnstartedId = await createBooking();
+    await runAppointmentsV2PacsAutoCompletionTick();
+    assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [failedUnstartedId])).rows[0]?.status, "scheduled");
+
     const failedEnrichmentId = await createBooking("in-progress");
     await pool.query(
       `update appointments_v2.bookings
@@ -432,7 +458,6 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
        where id = $1`,
       [failedEnrichmentId]
     );
-    remoteObservation.failSeriesQuery = true;
     await runAppointmentsV2PacsAutoCompletionTick();
     assert.equal((await pool.query<{ status: string }>(`select status from appointments_v2.bookings where id = $1`, [failedEnrichmentId])).rows[0]?.status, "in-progress");
     const failureHistory = await pool.query<{ result_json: { remoteSeriesQuerySucceeded?: boolean } }>(

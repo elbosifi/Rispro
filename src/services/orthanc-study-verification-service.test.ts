@@ -432,14 +432,72 @@ test("remote C-FIND enriches a unique study with deduplicated SERIES activity", 
   assert.equal(result.seriesCount, 2);
   assert.equal(result.instanceCount, 300);
   assert.deepEqual(queries, [
-    { Level: "Study", Query: { AccessionNumber: "V2-000042" } },
-    { Level: "Series", Query: { StudyInstanceUID: "1.2.3" } },
+    {
+      Level: "Study",
+      Query: {
+        AccessionNumber: "V2-000042",
+        StudyInstanceUID: "",
+        PatientID: "",
+        StudyDate: "",
+        StudyTime: "",
+        ModalitiesInStudy: "",
+        NumberOfStudyRelatedSeries: "",
+        NumberOfStudyRelatedInstances: "",
+      },
+    },
+    {
+      Level: "Series",
+      Query: {
+        StudyInstanceUID: "1.2.3",
+        SeriesInstanceUID: "",
+        NumberOfSeriesRelatedInstances: "",
+        Modality: "",
+      },
+    },
   ]);
   assert.equal(result.resultJson.remoteSeriesQueryAttempted, true);
   assert.equal(result.resultJson.remoteSeriesQuerySucceeded, true);
   assert.equal(result.resultJson.remoteSeriesCount, 2);
   assert.equal(result.resultJson.remoteInstanceCount, 300);
   assert.equal(result.resultJson.remoteInstanceCountReliable, true);
+});
+
+test("remote STUDY C-FIND preserves a StudyInstanceUID match while requesting return keys", async () => {
+  const queries: unknown[] = [];
+  service.__setOrthancFetchForTests(async (path, options) => {
+    if (path === "/modalities/REMOTE/query") {
+      queries.push(options?.body);
+      return orthancResponse({ ID: queries.length === 1 ? "study-query" : "series-query" });
+    }
+    if (path === "/queries/study-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/study-query/answers/0/content") return orthancResponse(studyPayload());
+    if (path === "/queries/series-query/answers") return orthancResponse(["0"]);
+    if (path === "/queries/series-query/answers/0/content") {
+      return orthancResponse({ SeriesInstanceUID: "1.2.3.1", NumberOfSeriesRelatedInstances: "2" });
+    }
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, {
+    ...baseSetting,
+    orthanc_target_type: "remote_modality",
+    orthanc_target_key: "REMOTE",
+  });
+
+  assert.equal(result.status, "matched");
+  assert.deepEqual(queries[0], {
+    Level: "Study",
+    Query: {
+      StudyInstanceUID: "1.2.3",
+      AccessionNumber: "",
+      PatientID: "",
+      StudyDate: "",
+      StudyTime: "",
+      ModalitiesInStudy: "",
+      NumberOfStudyRelatedSeries: "",
+      NumberOfStudyRelatedInstances: "",
+    },
+  });
 });
 
 test("remote C-FIND accepts production comma-form Orthanc tags and reaches SERIES enrichment", async () => {
@@ -482,8 +540,28 @@ test("remote C-FIND accepts production comma-form Orthanc tags and reaches SERIE
 
   assert.equal(result.status, "matched");
   assert.deepEqual(queries, [
-    { Level: "Study", Query: { AccessionNumber: "V2-005132" } },
-    { Level: "Series", Query: { StudyInstanceUID: "1.2.3.4" } },
+    {
+      Level: "Study",
+      Query: {
+        AccessionNumber: "V2-005132",
+        StudyInstanceUID: "",
+        PatientID: "",
+        StudyDate: "",
+        StudyTime: "",
+        ModalitiesInStudy: "",
+        NumberOfStudyRelatedSeries: "",
+        NumberOfStudyRelatedInstances: "",
+      },
+    },
+    {
+      Level: "Series",
+      Query: {
+        StudyInstanceUID: "1.2.3.4",
+        SeriesInstanceUID: "",
+        NumberOfSeriesRelatedInstances: "",
+        Modality: "",
+      },
+    },
   ]);
   assert.equal(result.resultJson.remoteSeriesQueryAttempted, true);
   assert.equal(result.resultJson.remoteSeriesQuerySucceeded, true);

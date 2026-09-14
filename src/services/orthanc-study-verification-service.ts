@@ -639,7 +639,39 @@ function buildFindQuery(matchKey: OrthancMatchKey, matchValue: string): Record<s
 function buildRemoteSeriesFindQuery(studyInstanceUid: string): Record<string, unknown> {
   return {
     Level: "Series",
-    Query: { StudyInstanceUID: studyInstanceUid },
+    Query: {
+      StudyInstanceUID: studyInstanceUid,
+      SeriesInstanceUID: "",
+      NumberOfSeriesRelatedInstances: "",
+      Modality: "",
+    },
+  };
+}
+
+function buildRemoteStudyFindQuery(matchKey: OrthancMatchKey, matchValue: string): Record<string, unknown> {
+  return {
+    Level: "Study",
+    Query: matchKey === "study_instance_uid"
+      ? {
+        StudyInstanceUID: matchValue,
+        AccessionNumber: "",
+        PatientID: "",
+        StudyDate: "",
+        StudyTime: "",
+        ModalitiesInStudy: "",
+        NumberOfStudyRelatedSeries: "",
+        NumberOfStudyRelatedInstances: "",
+      }
+      : {
+        AccessionNumber: matchValue,
+        StudyInstanceUID: "",
+        PatientID: "",
+        StudyDate: "",
+        StudyTime: "",
+        ModalitiesInStudy: "",
+        NumberOfStudyRelatedSeries: "",
+        NumberOfStudyRelatedInstances: "",
+      },
   };
 }
 
@@ -778,7 +810,7 @@ async function queryRemote(
   matchValue: string,
   settings: ResolvedOrthancSettings
 ): Promise<StudyCandidate[]> {
-  const answers = await readRemoteQueryAnswers(targetKey, buildFindQuery(matchKey, matchValue), settings);
+  const answers = await readRemoteQueryAnswers(targetKey, buildRemoteStudyFindQuery(matchKey, matchValue), settings);
   const candidates = answers.map((answer) => candidateFromPayload(answer, { remote: true }));
   const candidate = candidates.length === 1 ? candidates[0]! : null;
   if (!candidate?.studyInstanceUid) return candidates;

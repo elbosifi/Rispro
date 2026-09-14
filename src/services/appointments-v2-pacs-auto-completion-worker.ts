@@ -584,8 +584,14 @@ function isPacsStartEligible(status: string): status is typeof PACS_START_ELIGIB
   return PACS_START_ELIGIBLE_STATUSES.includes(status as typeof PACS_START_ELIGIBLE_STATUSES[number]);
 }
 
+function hasPositivePacsContent(result: OrthancVerificationResult): boolean {
+  return (result.instanceCount != null && result.instanceCount > 0) ||
+    (result.seriesCount != null && result.seriesCount > 0);
+}
+
 function isSafePacsStartObservation(result: OrthancVerificationResult): boolean {
-  return result.instanceCount !== 0 &&
+  return !remoteSeriesQueryFailed(result) &&
+    hasPositivePacsContent(result) &&
     (result.status === "matched" || isBelowMinimumSeriesResult(result));
 }
 
@@ -752,7 +758,7 @@ async function processPacsObservation({
       if (!activityChanged && hasMeasurablePacsActivity(result) && current.pacs_inactivity_elapsed) {
         targetStatus = isBelowMinimumSeriesResult(result)
           ? "discontinued"
-          : result.status === "matched" && result.instanceCount !== 0
+          : result.status === "matched" && hasPositivePacsContent(result)
             ? "completed"
             : null;
         if (targetStatus === "discontinued" && setting.below_minimum_series_action !== "discontinue") {
