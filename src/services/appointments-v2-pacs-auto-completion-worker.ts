@@ -41,6 +41,7 @@ export interface PacsAutoCompletionSettingRow {
   below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   inactivity_completion_minutes: number;
+  mpps_stale_fallback_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
   last_check_status: OrthancVerificationStatus | null;
@@ -68,6 +69,8 @@ interface EligibleBookingRow extends OrthancBookingVerificationContext {
   status: string;
   acquisition_status_source: "pacs" | "mpps" | null;
   pacs_auto_completion_disabled_at: string | null;
+  pacs_auto_completion_disabled_by_user_id: number | null;
+  pacs_first_seen_at: string | null;
   pacs_last_activity_at: string | null;
   pacs_last_observed_instance_count: number | null;
   pacs_last_observed_series_count: number | null;
@@ -86,6 +89,7 @@ interface EligibleBookingRow extends OrthancBookingVerificationContext {
   below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   inactivity_completion_minutes: number;
+  mpps_stale_fallback_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
 }
@@ -289,6 +293,7 @@ export async function listPacsAutoCompletionSettings(): Promise<PacsAutoCompleti
         coalesce(s.below_minimum_series_action, 'leave_unchanged') as below_minimum_series_action,
         coalesce(s.poll_interval_minutes, 2) as poll_interval_minutes,
         coalesce(s.inactivity_completion_minutes, 10) as inactivity_completion_minutes,
+        coalesce(s.mpps_stale_fallback_minutes, greatest(180, coalesce(s.inactivity_completion_minutes, 10) + 1)) as mpps_stale_fallback_minutes,
         coalesce(s.lookback_hours, 24) as lookback_hours,
         coalesce(s.stop_after_hours, 72) as stop_after_hours,
         s.last_check_status,
@@ -332,12 +337,23 @@ export async function upsertPacsAutoCompletionSetting(
   );
   const lookbackHours = normalizeNonNegative(payload.lookbackHours ?? payload.lookback_hours, "lookbackHours", 24);
   const stopAfterHours = normalizePositive(payload.stopAfterHours ?? payload.stop_after_hours, "stopAfterHours", 72);
+  const mppsStaleFallbackMinutes = normalizePositive(
+    payload.mppsStaleFallbackMinutes ?? payload.mpps_stale_fallback_minutes,
+    "mppsStaleFallbackMinutes",
+    Math.max(180, inactivityCompletionMinutes + 1)
+  );
 
   if (targetType === "remote_modality" && !targetKey) {
     throw new HttpError(400, "orthancTargetKey is required for remote modality targets.");
   }
   if (pollIntervalMinutes >= inactivityCompletionMinutes) {
     throw new HttpError(400, "pollIntervalMinutes must be less than inactivityCompletionMinutes.");
+  }
+  if (mppsStaleFallbackMinutes < 30) {
+    throw new HttpError(400, "mppsStaleFallbackMinutes must be at least 30.");
+  }
+  if (mppsStaleFallbackMinutes <= inactivityCompletionMinutes) {
+    throw new HttpError(400, "mppsStaleFallbackMinutes must be greater than inactivityCompletionMinutes.");
   }
 
   const { rows } = await pool.query(
@@ -353,11 +369,12 @@ export async function upsertPacsAutoCompletionSetting(
         below_minimum_series_action,
         poll_interval_minutes,
         inactivity_completion_minutes,
+        mpps_stale_fallback_minutes,
         lookback_hours,
         stop_after_hours,
         updated_at
       )
-      values ($1, $2, $3, nullif($4, ''), $5, $6, $7, $8, $9, $10, $11, $12, now())
+      values ($1, $2, $3, nullif($4, ''), $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
       on conflict (modality_id) do update
       set
         enabled = excluded.enabled,
@@ -369,6 +386,7 @@ export async function upsertPacsAutoCompletionSetting(
         below_minimum_series_action = excluded.below_minimum_series_action,
         poll_interval_minutes = excluded.poll_interval_minutes,
         inactivity_completion_minutes = excluded.inactivity_completion_minutes,
+        mpps_stale_fallback_minutes = excluded.mpps_stale_fallback_minutes,
         lookback_hours = excluded.lookback_hours,
         stop_after_hours = excluded.stop_after_hours,
         updated_at = now()
@@ -385,6 +403,7 @@ export async function upsertPacsAutoCompletionSetting(
       belowMinimumSeriesAction,
       pollIntervalMinutes,
       inactivityCompletionMinutes,
+      mppsStaleFallbackMinutes,
       lookbackHours,
       stopAfterHours,
     ]
@@ -406,6 +425,8 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
         b.status,
         b.acquisition_status_source,
         b.pacs_auto_completion_disabled_at,
+        b.pacs_auto_completion_disabled_by_user_id,
+        b.pacs_first_seen_at,
         b.pacs_last_activity_at,
         b.pacs_last_observed_instance_count,
         b.pacs_last_observed_series_count,
@@ -424,6 +445,7 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
         s.below_minimum_series_action,
         s.poll_interval_minutes,
         s.inactivity_completion_minutes,
+        s.mpps_stale_fallback_minutes,
         s.lookback_hours,
         s.stop_after_hours
       from appointments_v2.bookings b
@@ -452,6 +474,8 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
     status: "scheduled",
     acquisition_status_source: null,
     pacs_auto_completion_disabled_at: null,
+    pacs_auto_completion_disabled_by_user_id: null,
+    pacs_first_seen_at: null,
     pacs_last_activity_at: null,
     pacs_last_observed_instance_count: null,
     pacs_last_observed_series_count: null,
@@ -470,6 +494,7 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
     below_minimum_series_action: setting.below_minimum_series_action,
     poll_interval_minutes: setting.poll_interval_minutes,
     inactivity_completion_minutes: setting.inactivity_completion_minutes,
+    mpps_stale_fallback_minutes: setting.mpps_stale_fallback_minutes,
     lookback_hours: setting.lookback_hours,
     stop_after_hours: setting.stop_after_hours,
   };
@@ -627,6 +652,121 @@ function samePacsTimestamp(left: unknown, right: unknown): boolean {
   return String(left) === String(right);
 }
 
+const PACS_TRACKING_TIMEOUT_REASON = "PACS auto-completion tracking exceeded the configured stop-after period; manual review is required.";
+
+async function preparePacsTracking(booking: EligibleBookingRow): Promise<boolean> {
+  if (booking.status !== "in-progress" || booking.acquisition_status_source !== "pacs") return true;
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{
+      status: string;
+      acquisition_status_source: "pacs" | "mpps" | null;
+      pacs_auto_completion_disabled_at: string | null;
+      pacs_first_seen_at: string | null;
+      tracking_timed_out: boolean;
+    }>(
+      `
+        select
+          status,
+          acquisition_status_source,
+          pacs_auto_completion_disabled_at,
+          pacs_first_seen_at,
+          (
+            pacs_first_seen_at is not null
+            and current_timestamp >= pacs_first_seen_at + make_interval(hours => $2::int)
+          ) as tracking_timed_out
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [booking.id, booking.stop_after_hours]
+    );
+    const current = rows[0];
+    if (!current || current.status !== "in-progress" || current.acquisition_status_source !== "pacs" || current.pacs_auto_completion_disabled_at) {
+      await client.query("commit");
+      return false;
+    }
+    if (!current.pacs_first_seen_at) {
+      await client.query(
+        `update appointments_v2.bookings set pacs_first_seen_at = coalesce(pacs_first_seen_at, now()), updated_at = now() where id = $1`,
+        [booking.id]
+      );
+      await client.query("commit");
+      return true;
+    }
+    if (current.tracking_timed_out) {
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set
+            pacs_auto_completion_disabled_at = now(),
+            pacs_auto_completion_disabled_by_user_id = null,
+            pacs_auto_completion_disabled_reason = $2,
+            updated_at = now(),
+            updated_by_user_id = null
+          where id = $1
+        `,
+        [booking.id, PACS_TRACKING_TIMEOUT_REASON]
+      );
+      await logAuditEntry({
+        entityType: "appointment_v2_booking",
+        entityId: Number(booking.id),
+        actionType: "orthanc_auto_completion_tracking_timeout",
+        oldValues: { status: current.status, acquisitionStatusSource: current.acquisition_status_source },
+        newValues: {
+          status: current.status,
+          acquisitionStatusSource: current.acquisition_status_source,
+          pacsFirstSeenAt: current.pacs_first_seen_at,
+          pacsLastActivityAt: booking.pacs_last_activity_at,
+          stopAfterHours: booking.stop_after_hours,
+        },
+        changedByUserId: null,
+      }, client);
+      await client.query("commit");
+      return false;
+    }
+    await client.query("commit");
+    return true;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function latestStaleMatchedMppsEvent(client: PoolClient, bookingId: number, staleMinutes: number): Promise<{
+  id: number;
+  mpps_instance_uid: string | null;
+  received_at: string;
+} | null> {
+  const { rows } = await client.query<{
+    id: number;
+    mpps_instance_uid: string | null;
+    received_at: string;
+  }>(
+    `
+      select id, mpps_instance_uid, received_at
+      from mpps_event_log
+      where correlated_appointment_id = $1
+        and correlation_status = 'matched'
+        and processing_status = 'processed'
+      order by received_at desc, id desc
+      limit 1
+    `,
+    [bookingId]
+  );
+  const latest = rows[0];
+  if (!latest) return null;
+  const stale = await client.query<{ stale: boolean; performed_step_status: string }>(
+    `select current_timestamp >= $2::timestamptz + make_interval(mins => $3::int) as stale, performed_step_status from mpps_event_log where id = $1`,
+    [latest.id, latest.received_at, staleMinutes]
+  );
+  return stale.rows[0]?.performed_step_status === "IN PROGRESS" && stale.rows[0]?.stale ? latest : null;
+}
+
 async function processPacsObservation({
   booking,
   setting,
@@ -634,7 +774,7 @@ async function processPacsObservation({
   historyId,
 }: {
   booking: OrthancBookingVerificationContext;
-  setting: OrthancAutoCompletionSettingLike & Pick<PacsAutoCompletionSettingRow, "inactivity_completion_minutes">;
+  setting: OrthancAutoCompletionSettingLike & Pick<PacsAutoCompletionSettingRow, "inactivity_completion_minutes" | "mpps_stale_fallback_minutes">;
   result: OrthancVerificationResult;
   historyId: number;
 }): Promise<boolean> {
@@ -650,7 +790,7 @@ async function processPacsObservation({
   try {
     await client.query("begin");
     const { rows } = await client.query<Pick<EligibleBookingRow,
-      "id" | "status" | "acquisition_status_source" | "pacs_auto_completion_disabled_at" |
+      "id" | "status" | "acquisition_status_source" | "pacs_auto_completion_disabled_at" | "pacs_auto_completion_disabled_by_user_id" | "pacs_first_seen_at" |
       "pacs_last_activity_at" | "pacs_last_observed_instance_count" | "pacs_last_observed_series_count" |
       "pacs_last_observed_orthanc_update_at"
     > & { pacs_inactivity_elapsed: boolean }>(
@@ -660,6 +800,8 @@ async function processPacsObservation({
           status,
           acquisition_status_source,
           pacs_auto_completion_disabled_at,
+          pacs_auto_completion_disabled_by_user_id,
+          pacs_first_seen_at,
           pacs_last_activity_at,
           pacs_last_observed_instance_count,
           pacs_last_observed_series_count,
@@ -676,14 +818,17 @@ async function processPacsObservation({
     );
     const current = rows[0];
     if (
-      !current ||
-      current.pacs_auto_completion_disabled_at
+      !current
     ) {
       await client.query("commit");
       return false;
     }
 
     if (isPacsStartEligible(current.status)) {
+      if (current.pacs_auto_completion_disabled_at) {
+        await client.query("commit");
+        return false;
+      }
       if (!isSafePacsStartObservation(result)) {
         await client.query("commit");
         return false;
@@ -699,7 +844,7 @@ async function processPacsObservation({
             pacs_last_observed_series_count = $3,
             pacs_last_observed_orthanc_update_at = $4::timestamptz,
             pacs_study_started_at = coalesce(pacs_study_started_at, $5::timestamptz),
-            pacs_first_seen_at = coalesce(pacs_first_seen_at, $6::timestamptz),
+            pacs_first_seen_at = coalesce(pacs_first_seen_at, $6::timestamptz, now()),
             pacs_timing_source = $7,
             pacs_timing_confidence = $8,
             pacs_timing_checked_at = now(),
@@ -730,6 +875,10 @@ async function processPacsObservation({
       }, client);
       started = true;
     } else if (current.status === "in-progress" && current.acquisition_status_source === "pacs") {
+      if (current.pacs_auto_completion_disabled_at) {
+        await client.query("commit");
+        return false;
+      }
       if (!isTrackablePacsObservation(result)) {
         await client.query("commit");
         return false;
@@ -744,7 +893,7 @@ async function processPacsObservation({
             pacs_last_observed_series_count = $4,
             pacs_last_observed_orthanc_update_at = $5::timestamptz,
             pacs_study_started_at = coalesce(pacs_study_started_at, $6::timestamptz),
-            pacs_first_seen_at = coalesce(pacs_first_seen_at, $7::timestamptz),
+            pacs_first_seen_at = coalesce(pacs_first_seen_at, $7::timestamptz, now()),
             pacs_timing_source = $8,
             pacs_timing_confidence = $9,
             pacs_timing_checked_at = now(),
@@ -814,6 +963,78 @@ async function processPacsObservation({
           }
         }
       }
+    } else if (current.status === "in-progress" && current.acquisition_status_source === "mpps") {
+      const latestMpps = current.pacs_auto_completion_disabled_by_user_id == null
+        ? await latestStaleMatchedMppsEvent(client, bookingId, setting.mpps_stale_fallback_minutes)
+        : null;
+      if (!latestMpps || remoteSeriesQueryFailed(result) || result.status !== "matched" || !hasPositivePacsContent(result)) {
+        await client.query("commit");
+        return false;
+      }
+      const initializing = !current.pacs_last_activity_at ||
+        new Date(current.pacs_last_activity_at).getTime() <= new Date(latestMpps.received_at).getTime();
+      const activityChanged = initializing || pacsActivityChanged(current, result);
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set
+            pacs_last_activity_at = case when $2 then now() else pacs_last_activity_at end,
+            pacs_last_observed_instance_count = $3,
+            pacs_last_observed_series_count = $4,
+            pacs_last_observed_orthanc_update_at = $5::timestamptz,
+            pacs_study_started_at = coalesce(pacs_study_started_at, $6::timestamptz),
+            pacs_first_seen_at = coalesce(pacs_first_seen_at, $7::timestamptz, now()),
+            pacs_timing_source = $8,
+            pacs_timing_confidence = $9,
+            pacs_timing_checked_at = now(),
+            updated_at = now(),
+            updated_by_user_id = null
+          where id = $1
+        `,
+        [bookingId, activityChanged, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt, result.studyStartedAt, result.pacsFirstSeenAt, result.timingSource, result.timingConfidence]
+      );
+      if (!activityChanged && current.pacs_inactivity_elapsed) {
+        await client.query(
+          `
+            update appointments_v2.bookings
+            set
+              acquisition_status_source = 'pacs',
+              auto_completed_by = 'orthanc_pacs_auto_completion',
+              auto_completed_at = now(),
+              auto_completion_check_id = $2,
+              pacs_last_observed_instance_count = $3,
+              pacs_last_observed_series_count = $4,
+              pacs_last_observed_orthanc_update_at = $5::timestamptz,
+              pacs_timing_checked_at = now()
+            where id = $1
+          `,
+          [bookingId, historyId, result.instanceCount, result.seriesCount, result.orthancLastUpdateAt]
+        );
+        targetStatus = "completed";
+        terminalTransition = await applyBookingTerminalTransition({
+          client,
+          bookingId,
+          previousStatus: current.status,
+          targetStatus,
+          actorUserId: null,
+          source: "pacs",
+          auditNewValues: {
+            pacsFallbackReason: "stale_mpps",
+            latestMppsEventId: latestMpps.id,
+            mppsInstanceUid: latestMpps.mpps_instance_uid,
+            latestMppsReceivedAt: latestMpps.received_at,
+            mppsStaleFallbackMinutes: setting.mpps_stale_fallback_minutes,
+            verificationCheckId: historyId,
+            matchKey: result.matchKey,
+            matchValue: result.matchValue,
+            studyInstanceUid: result.studyInstanceUid,
+            accessionNumber: result.accessionNumber,
+            seriesCount: result.seriesCount,
+            instanceCount: result.instanceCount,
+          },
+        });
+        await markHistoryCompleted(historyId, client);
+      }
     } else {
       await client.query("commit");
       return false;
@@ -850,6 +1071,13 @@ async function processPacsObservation({
 }
 
 async function runVerificationForBooking(booking: EligibleBookingRow): Promise<{ result: OrthancVerificationResult; history: VerificationHistoryRow; completed: boolean }> {
+  if (!(await preparePacsTracking(booking))) {
+    return {
+      result: { status: "not_found", resultJson: {}, seriesCount: null, instanceCount: null, orthancLastUpdateAt: null, studyStartedAt: null, pacsFirstSeenAt: null, timingSource: null, timingConfidence: null, matchKey: null, matchValue: null, studyInstanceUid: null, accessionNumber: null, lastError: null },
+      history: { id: 0, booking_id: null, modality_id: null, setting_id: null, orthanc_target_type: "local", orthanc_target_key: null, match_key: null, match_value: null, result_status: "not_found", result_json: {}, series_count: null, instance_count: null, last_error: null, completed_booking: false, created_at: "" },
+      completed: false,
+    };
+  }
   const setting = mapSetting({ ...booking, id: booking.setting_id });
   const result = await verifyBookingStudyWithOrthanc(mapBooking(booking), setting);
   const history = await insertVerificationHistory({
@@ -973,6 +1201,8 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
         b.status,
         b.acquisition_status_source,
         b.pacs_auto_completion_disabled_at,
+        b.pacs_auto_completion_disabled_by_user_id,
+        b.pacs_first_seen_at,
         b.pacs_last_activity_at,
         b.pacs_last_observed_instance_count,
         b.pacs_last_observed_series_count,
@@ -991,24 +1221,43 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
         s.below_minimum_series_action,
         s.poll_interval_minutes,
         s.inactivity_completion_minutes,
+        s.mpps_stale_fallback_minutes,
         s.lookback_hours,
         s.stop_after_hours
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       join appointments_v2.pacs_auto_completion_settings s on s.modality_id = b.modality_id
+      left join lateral (
+        select performed_step_status, received_at
+        from mpps_event_log
+        where correlated_appointment_id = b.id
+          and correlation_status = 'matched'
+          and processing_status = 'processed'
+        order by received_at desc, id desc
+        limit 1
+      ) latest_mpps on true
       where s.enabled = true
-        and b.pacs_auto_completion_disabled_at is null
         and (
-          b.status = any($1::text[])
+          (
+            b.status = any($1::text[])
+            and b.pacs_auto_completion_disabled_at is null
+            and b.booking_date <= current_date
+            and b.booking_date >= (now() - make_interval(hours => s.lookback_hours))::date
+          )
           or (
             b.status = 'in-progress'
             and b.acquisition_status_source = 'pacs'
+            and b.pacs_auto_completion_disabled_at is null
+          )
+          or (
+            b.status = 'in-progress'
+            and b.acquisition_status_source = 'mpps'
+            and b.pacs_auto_completion_disabled_by_user_id is null
+            and latest_mpps.performed_step_status = 'IN PROGRESS'
+            and latest_mpps.received_at <= now() - make_interval(mins => s.mpps_stale_fallback_minutes)
           )
         )
-        and b.booking_date::timestamptz <= now()
-        and b.booking_date::timestamptz >= now() - make_interval(hours => s.lookback_hours)
-        and b.booking_date::timestamptz >= now() - make_interval(hours => s.stop_after_hours)
         and not exists (
           select 1
           from appointments_v2.pacs_auto_completion_verification_history h

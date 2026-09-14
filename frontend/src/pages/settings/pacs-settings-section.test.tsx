@@ -74,6 +74,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
               below_minimum_series_action: "leave_unchanged",
               poll_interval_minutes: 2,
               inactivity_completion_minutes: 10,
+              mpps_stale_fallback_minutes: 180,
               lookback_hours: 24,
               stop_after_hours: 72,
               last_check_status: "not_found",
@@ -188,6 +189,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(screen.getByText(/No matching study/)).toBeTruthy();
     expect((screen.getByLabelText("Poll interval minutes") as HTMLInputElement).value).toBe("2");
     expect((screen.getByLabelText("Inactivity timeout (minutes)") as HTMLInputElement).value).toBe("10");
+    expect((screen.getByLabelText("Stale MPPS fallback (minutes)") as HTMLInputElement).value).toBe("180");
 
     await user.click(screen.getByRole("checkbox", { name: "Enable" }));
     await user.selectOptions(screen.getByLabelText("Orthanc target"), "CT_REMOTE");
@@ -199,6 +201,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
     await user.type(screen.getByLabelText("Poll interval minutes"), "3");
     await user.clear(screen.getByLabelText("Inactivity timeout (minutes)"));
     await user.type(screen.getByLabelText("Inactivity timeout (minutes)"), "15");
+    await user.clear(screen.getByLabelText("Stale MPPS fallback (minutes)"));
+    await user.type(screen.getByLabelText("Stale MPPS fallback (minutes)"), "180");
     await user.clear(screen.getByLabelText("Lookback hours"));
     await user.type(screen.getByLabelText("Lookback hours"), "12");
     await user.clear(screen.getByLabelText("Stop after hours"));
@@ -223,6 +227,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(payload.belowMinimumSeriesAction).toBe("discontinue");
     expect(payload.pollIntervalMinutes).toBe(3);
     expect(payload.inactivityCompletionMinutes).toBe(15);
+    expect(payload.mppsStaleFallbackMinutes).toBe(180);
     expect(payload.lookbackHours).toBe(12);
     expect(payload.stopAfterHours).toBe(36);
   });

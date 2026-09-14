@@ -78,6 +78,18 @@ test("worker defers below-minimum discontinuation until PACS inactivity", () => 
   assert.match(source, /applyBookingTerminalTransition/);
 });
 
+test("worker separates date-safe discovery, PACS tracking timeout, and stale MPPS rescue", () => {
+  assert.match(source, /b\.booking_date <= current_date/);
+  assert.match(source, /b\.booking_date >= \(now\(\) - make_interval\(hours => s\.lookback_hours\)\)::date/);
+  assert.doesNotMatch(source, /b\.booking_date::timestamptz >= now\(\) - make_interval\(hours => s\.stop_after_hours\)/);
+  assert.match(source, /pacs_first_seen_at \+ make_interval\(hours => \$2::int\)/);
+  assert.match(source, /orthanc_auto_completion_tracking_timeout/);
+  assert.match(source, /correlated_appointment_id = b\.id[\s\S]*correlation_status = 'matched'[\s\S]*processing_status = 'processed'/);
+  assert.match(source, /latest_mpps\.performed_step_status = 'IN PROGRESS'/);
+  assert.match(source, /pacsFallbackReason: "stale_mpps"/);
+  assert.match(source, /acquisition_status_source = 'pacs'/);
+});
+
 test("worker marks only completed PACS verification history as completed", () => {
   assert.match(source, /if \(targetStatus === "completed"\) \{\s*await markHistoryCompleted\(historyId, client\);/);
 });
@@ -94,7 +106,7 @@ test("worker distinguishes strict start evidence from zero-instance tracking evi
   assert.match(source, /result\.lastError === "instance_count_zero"/);
   assert.match(source, /if \(!isSafePacsStartObservation\(result\)\)/);
   assert.match(source, /if \(!isTrackablePacsObservation\(result\)\)/);
-  assert.match(source, /result\.status === "matched"\s*&&\s*result\.instanceCount !== 0\s*\?\s*"completed"\s*:\s*null/);
+  assert.match(source, /result\.status === "matched"\s*&&\s*hasPositivePacsContent\(result\)\s*\?\s*"completed"\s*:\s*null/);
 });
 
 test("worker preserves PACS state when remote SERIES enrichment fails", () => {

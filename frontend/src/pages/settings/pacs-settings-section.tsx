@@ -39,6 +39,7 @@ interface PacsAutoCompletionSetting {
   below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   inactivity_completion_minutes: number;
+  mpps_stale_fallback_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
   last_check_status: string | null;
@@ -99,6 +100,7 @@ type AutoCompletionDraft = {
   belowMinimumSeriesAction: BelowMinimumSeriesAction;
   pollIntervalMinutes: number | "";
   inactivityCompletionMinutes: number | "";
+  mppsStaleFallbackMinutes: number | "";
   lookbackHours: number | "";
   stopAfterHours: number | "";
 };
@@ -114,6 +116,7 @@ function toAutoCompletionDraft(setting: PacsAutoCompletionSetting): AutoCompleti
     belowMinimumSeriesAction: setting.below_minimum_series_action || "leave_unchanged",
     pollIntervalMinutes: Number(setting.poll_interval_minutes || 2),
     inactivityCompletionMinutes: Number(setting.inactivity_completion_minutes || 10),
+    mppsStaleFallbackMinutes: Number(setting.mpps_stale_fallback_minutes || 180),
     lookbackHours: Number(setting.lookback_hours || 24),
     stopAfterHours: Number(setting.stop_after_hours || 72)
   };
@@ -283,6 +286,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           minimumSeriesCount: Math.max(1, Number(draft.minimumSeriesCount) || 2),
           pollIntervalMinutes: Math.max(1, Number(draft.pollIntervalMinutes) || 1),
           inactivityCompletionMinutes: Math.max(2, Number(draft.inactivityCompletionMinutes) || 2),
+          mppsStaleFallbackMinutes: Math.max(30, Number(draft.mppsStaleFallbackMinutes) || 30),
           lookbackHours: Math.max(0, Number(draft.lookbackHours) || 0),
           stopAfterHours: Math.max(1, Number(draft.stopAfterHours) || 1)
         })
@@ -517,6 +521,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
               belowMinimumSeriesAction: "leave_unchanged" as const,
               pollIntervalMinutes: 2,
               inactivityCompletionMinutes: 10,
+              mppsStaleFallbackMinutes: 180,
               lookbackHours: 24,
               stopAfterHours: 72
             };
@@ -639,6 +644,19 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     />
                   </label>
                   <label className="space-y-1">
+                    <span className="block text-xs text-stone-500">{t(language, "settings.pacs.mppsStaleFallbackMinutes")}</span>
+                    <input
+                      aria-label={t(language, "settings.pacs.mppsStaleFallbackMinutes")}
+                      type="number"
+                      min={30}
+                      step={1}
+                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      value={draft.mppsStaleFallbackMinutes}
+                      onChange={(event) => updateDraft({ mppsStaleFallbackMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
+                    />
+                    <span className="block text-xs text-stone-500 dark:text-stone-400">{t(language, "settings.pacs.mppsStaleFallbackHelp")}</span>
+                  </label>
+                  <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.lookbackHours")}</span>
                     <input
                       type="number"
@@ -668,13 +686,18 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     onClick={() => {
                       const pollIntervalMinutes = Math.max(1, Number(draft.pollIntervalMinutes) || 1);
                       const inactivityCompletionMinutes = Math.max(2, Number(draft.inactivityCompletionMinutes) || 2);
+                      const mppsStaleFallbackMinutes = Math.max(30, Number(draft.mppsStaleFallbackMinutes) || 30);
                       if (pollIntervalMinutes >= inactivityCompletionMinutes) {
                         setAutoMessage(t(language, "settings.pacs.pollMustBeShorterThanInactivity"));
                         return;
                       }
+                      if (mppsStaleFallbackMinutes <= inactivityCompletionMinutes) {
+                        setAutoMessage(t(language, "settings.pacs.mppsStaleFallbackMustExceedInactivity"));
+                        return;
+                      }
                       saveAutoMutation.mutate({
                         modalityId: setting.modality_id,
-                        draft: { ...draft, pollIntervalMinutes, inactivityCompletionMinutes },
+                        draft: { ...draft, pollIntervalMinutes, inactivityCompletionMinutes, mppsStaleFallbackMinutes },
                       });
                     }}
                   >
