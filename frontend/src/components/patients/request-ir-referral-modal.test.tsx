@@ -9,11 +9,24 @@ vi.mock("@/lib/api/ir-referrals", () => ({ fetchAssignableIrDoctors: api.doctors
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 
 const patient = { id: 41, englishFullName: "IR Patient", arabicFullName: null, mrn: "MRN-41" } as never;
-function renderModal(onCreated = vi.fn()) { const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); return render(<EnglishLanguageScope><QueryClientProvider client={client}><RequestIrReferralModal patient={patient} onClose={vi.fn()} onCreated={onCreated} /></QueryClientProvider></EnglishLanguageScope>); }
+function renderModal(onCreated = vi.fn(), onClose = vi.fn()) { const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); return render(<EnglishLanguageScope><QueryClientProvider client={client}><RequestIrReferralModal patient={patient} onClose={onClose} onCreated={onCreated} /></QueryClientProvider></EnglishLanguageScope>); }
 
 beforeEach(() => { vi.clearAllMocks(); api.doctors.mockResolvedValue([{ id: 8, displayName: "Dr IR", fullName: null, englishName: "Dr IR", username: "ir.doctor" }]); api.create.mockResolvedValue({ id: 91 }); });
 
 describe("RequestIrReferralModal", () => {
+  it("renders as a shared dialog and closes when Cancel is clicked", () => {
+    const onClose = vi.fn(); renderModal(vi.fn(), onClose);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes when Escape is pressed", () => {
+    const onClose = vi.fn(); renderModal(vi.fn(), onClose);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("locks the selected patient, requires a procedure and IR doctor, and creates with ready-notification preference", async () => {
     const onCreated = vi.fn(); renderModal(onCreated);
     expect(screen.getByText("IR Patient")).toBeTruthy();
