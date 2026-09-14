@@ -11,7 +11,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { HttpError } from "../utils/http-error.js";
-import { findIrReferralById } from "../services/ir-referral-service.js";
+import { findIrReferralById, isIrReferralMaterialPreparationStatus } from "../services/ir-referral-service.js";
 import {
   listPacsNodes,
   createPacsNode,
@@ -101,7 +101,7 @@ async function requirePacsRemapAccess(req: Request, res: Response, next: NextFun
       if (!COMPARISON_REMAP_ROLES.has(req.user.role)) throw new HttpError(403, "This role cannot prepare IR referral images.");
       const referral = await findIrReferralById(irReferralId);
       if (!referral) throw new HttpError(404, "IR referral not found.");
-      if (referral.status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can use DICOM remap.");
+      if (!isIrReferralMaterialPreparationStatus(referral.status)) throw new HttpError(409, "IR referral is not open for material preparation.");
       res.locals.irReferralRemapScope = { irReferralId: referral.id, patientId: referral.patientId } satisfies IrReferralRemapScope;
       next();
       return;

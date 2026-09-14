@@ -15,6 +15,7 @@ import { logAuditEntry } from "./audit-service.js";
 import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 import { getPatientById } from "./patient-service.js";
+import { isIrReferralMaterialPreparationStatus } from "./ir-referral-service.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 import type { DicomRemapJobStatus, DicomRemapOrthancRecoveryStage, DicomRemapOrthancRecoveryStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
 export type { DicomRemapJobStatus, DicomRemapOrthancRecoveryStage, DicomRemapOrthancRecoveryStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
@@ -2796,7 +2797,7 @@ async function createEmptyDicomRemapUploadJob(
   if (irReferralId) {
     const referral = await queryDicomRemapDb<{ status: string }>("select status from ir_referral_cases where id = $1 limit 1", [irReferralId]);
     if (!referral.rows[0]) throw new HttpError(404, "IR referral not found.");
-    if (referral.rows[0].status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can start a remap.");
+    if (!isIrReferralMaterialPreparationStatus(referral.rows[0].status)) throw new HttpError(409, "IR referral is not open for material preparation.");
   }
   const createResult = await queryDicomRemapDb<DicomRemapJobRow>(
       `
@@ -2811,7 +2812,7 @@ async function createEmptyDicomRemapUploadJob(
            or exists (
              select 1 from comparison_requests
              where id = $2::bigint and status = 'pending_upload_confirmation'
-           )) and ($3::bigint is null or exists (select 1 from ir_referral_cases where id = $3::bigint and status = 'preparing'))
+           )) and ($3::bigint is null or exists (select 1 from ir_referral_cases where id = $3::bigint and status in ('preparing', 'needs_information')))
         returning *
       `,
       [currentUserId, comparisonRequestId, irReferralId]

@@ -325,9 +325,9 @@ export async function listDocuments(
   return rows as DocumentRow[];
 }
 
-export async function getDocumentById(documentId: UserId): Promise<DocumentRow> {
+export async function getDocumentById(documentId: UserId, executor: DocumentDatabaseExecutor = pool): Promise<DocumentRow> {
   const cleanDocumentId = normalizePositiveInteger(documentId, "documentId");
-  const { rows } = await pool.query(
+  const { rows } = await executor.query(
     `
       select
         id,
@@ -916,16 +916,17 @@ export async function upsertDocumentAppointmentLinks(documentId: number, appoint
 
 export async function deleteDocumentById(
   documentId: UserId,
-  currentUserId: OptionalUserId
+  currentUserId: OptionalUserId,
+  executor: DocumentDatabaseExecutor = pool
 ): Promise<{ deleted: boolean; documentId: number }> {
-  const document = await getDocumentById(documentId);
+  const document = await getDocumentById(documentId, executor);
   const absolutePath = getDocumentAbsolutePath(document);
   const unlinkResult = await safeUnlink(absolutePath);
   if (!unlinkResult.ok) {
     throw new HttpError(500, `Failed to delete file from storage: ${unlinkResult.reason}`);
   }
 
-  await pool.query(`delete from documents where id = $1`, [document.id]);
+  await executor.query(`delete from documents where id = $1`, [document.id]);
   await logAuditEntry({
     entityType: "document",
     entityId: document.id,
@@ -933,7 +934,7 @@ export async function deleteDocumentById(
     oldValues: document,
     newValues: null,
     changedByUserId: currentUserId,
-  });
+  }, executor);
 
   return { deleted: true, documentId: document.id };
 }

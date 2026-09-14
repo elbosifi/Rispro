@@ -14,7 +14,7 @@ export type IrReferralStatus = "preparing" | "ready_for_review" | "needs_informa
 export type IrReferralActor = { userId: UserId; appRole: Role };
 
 export type IrReferralRow = {
-  id: number; patientId: number; patientMrn: string | null; patientEnglishName: string | null; patientArabicName: string | null;
+  id: number; patientId: number; patientMrn: string | null; patientDicomId: string | null; patientEnglishName: string | null; patientArabicName: string | null;
   requestedProcedure: string; clinicalIndication: string | null; status: IrReferralStatus;
   assignedDoctorId: number | null; assignedDoctorName: string | null; assignedDoctorNameAr: string | null; assignedDoctorNameEn: string | null;
   notifyAssignedDoctor: boolean; documentsConfirmed: boolean; imagesConfirmed: boolean; materialsConfirmed: boolean;
@@ -26,8 +26,15 @@ export type IrReferralRow = {
 const CREATE_ROLES = new Set<Role>(["receptionist", "administrative", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const PREPARE_ROLES = new Set<Role>(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const MANAGER_ROLES = new Set<Role>(["supervisor", "super_admin"]);
+const MATERIAL_PREPARATION_STATUSES = new Set<IrReferralStatus>(["preparing", "needs_information"]);
+
+export function isIrReferralMaterialPreparationStatus(status: string): boolean {
+  return MATERIAL_PREPARATION_STATUSES.has(status as IrReferralStatus);
+}
+
 const SELECT = `
   select ir.id, ir.patient_id as "patientId", p.mrn as "patientMrn", p.english_full_name as "patientEnglishName", p.arabic_full_name as "patientArabicName",
+    coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as "patientDicomId",
     ir.requested_procedure as "requestedProcedure", ir.clinical_indication as "clinicalIndication", ir.status,
     ir.assigned_doctor_id as "assignedDoctorId", dp.display_name as "assignedDoctorName", du.full_name as "assignedDoctorNameAr", du.english_name as "assignedDoctorNameEn",
     ir.notify_assigned_doctor as "notifyAssignedDoctor", ir.documents_confirmed as "documentsConfirmed", ir.images_confirmed as "imagesConfirmed", ir.materials_confirmed as "materialsConfirmed",
@@ -38,6 +45,7 @@ const SELECT = `
     remap.id as "remapJobId", remap.status as "remapJobStatus", schedule.id as "scheduleRequestId"
   from ir_referral_cases ir
   join patients p on p.id = ir.patient_id
+  left join lateral (select pi.value from patient_identifiers pi where pi.patient_id = p.id and pi.is_primary = true order by pi.id asc limit 1) primary_identifier on true
   left join doctor_portal.doctor_profiles dp on dp.id = ir.assigned_doctor_id
   left join users du on du.id = dp.user_id
   join users cu on cu.id = ir.created_by_user_id
@@ -66,16 +74,16 @@ export async function createIrReferral(actor: IrReferralActor, input: { patientI
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 export async function listIrReferralDocuments(caseIdInput: unknown) { const caseId = id(caseIdInput, "irReferralId"); const result = await pool.query<DocumentRow>(`select d.* from ir_referral_documents ird join documents d on d.id = ird.document_id where ird.ir_referral_case_id = $1 order by ird.created_at desc, d.id desc`, [caseId]); return result.rows; }
-export async function attachDocumentToIrReferral(actor: IrReferralActor, caseIdInput: unknown, documentIdInput: unknown) { if (!PREPARE_ROLES.has(actor.appRole)) throw new HttpError(403, "This role cannot prepare IR referrals."); const caseId = id(caseIdInput, "irReferralId"); const documentId = id(documentIdInput, "documentId"); const client = await pool.connect(); try { await client.query("begin"); const referral = await lock(caseId, client); if (referral.status !== "preparing") throw new HttpError(409, "Only preparing IR referrals accept documents."); const document = (await client.query<DocumentRow>("select * from documents where id = $1 for update", [documentId])).rows[0]; if (!document) throw new HttpError(404, "Document not found."); if (Number(document.patient_id) !== referral.patientId) throw new HttpError(400, "Document patient does not match the IR referral patient."); await client.query(`insert into ir_referral_documents(ir_referral_case_id, document_id, created_by) values($1,$2,$3) on conflict do nothing`, [caseId, documentId, actor.userId]); await audit(actor, "ir_referral_document_attached", caseId, { documentId }, client); await client.query("commit"); return document; } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); } }
+export async function attachDocumentToIrReferral(actor: IrReferralActor, caseIdInput: unknown, documentIdInput: unknown) { if (!PREPARE_ROLES.has(actor.appRole)) throw new HttpError(403, "This role cannot prepare IR referrals."); const caseId = id(caseIdInput, "irReferralId"); const documentId = id(documentIdInput, "documentId"); const client = await pool.connect(); try { await client.query("begin"); const referral = await lock(caseId, client); if (!isIrReferralMaterialPreparationStatus(referral.status)) throw new HttpError(409, "IR referral is not open for material preparation."); const document = (await client.query<DocumentRow>("select * from documents where id = $1 for update", [documentId])).rows[0]; if (!document) throw new HttpError(404, "Document not found."); if (Number(document.patient_id) !== referral.patientId) throw new HttpError(400, "Document patient does not match the IR referral patient."); await client.query(`insert into ir_referral_documents(ir_referral_case_id, document_id, created_by) values($1,$2,$3) on conflict do nothing`, [caseId, documentId, actor.userId]); await audit(actor, "ir_referral_document_attached", caseId, { documentId }, client); await client.query("commit"); return document; } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); } }
 export async function deleteIrReferralDocument(actor: IrReferralActor, caseIdInput: unknown, documentIdInput: unknown) {
   if (!MANAGER_ROLES.has(actor.appRole)) throw new HttpError(403, "This role cannot remove IR referral documents.");
   const caseId = id(caseIdInput, "irReferralId"); const documentId = id(documentIdInput, "documentId"); const client = await pool.connect();
   try {
-    await client.query("begin"); const referral = await lock(caseId, client); if (referral.status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can remove documents.");
+    await client.query("begin"); const referral = await lock(caseId, client); if (!isIrReferralMaterialPreparationStatus(referral.status)) throw new HttpError(409, "IR referral is not open for material preparation.");
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`ir-referral-document:${documentId}`]);
     const linked = await client.query<{ appointment_id:number|null; v2_booking_id:number|null; other_ir_count:number; comparison_count:number }>(`select d.appointment_id, d.v2_booking_id, (select count(*)::integer from ir_referral_documents x where x.document_id=d.id and x.ir_referral_case_id<>$1) as other_ir_count, (select count(*)::integer from comparison_request_documents x where x.document_id=d.id) as comparison_count from ir_referral_documents link join documents d on d.id=link.document_id where link.ir_referral_case_id=$1 and link.document_id=$2 for update`, [caseId, documentId]);
     const row = linked.rows[0]; if (!row) throw new HttpError(404, "IR referral document link not found."); if (row.appointment_id != null || row.v2_booking_id != null || Number(row.other_ir_count) > 0 || Number(row.comparison_count) > 0) throw new HttpError(409, "This canonical document is used elsewhere and cannot be removed from storage.");
-    await deleteDocumentById(documentId, actor.userId); await audit(actor, "ir_referral_document_removed", caseId, { documentId }, client); await client.query("commit"); return { deleted: true, documentId };
+    await deleteDocumentById(documentId, actor.userId, client); await audit(actor, "ir_referral_document_removed", caseId, { documentId }, client); await client.query("commit"); return { deleted: true, documentId };
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 export async function uploadIrReferralDocument(actor: IrReferralActor, caseIdInput: unknown, payload: DocumentUploadPayload) { const referral = await findIrReferralById(caseIdInput); if (!referral) throw new HttpError(404, "IR referral not found."); const document = await uploadDocument({ ...payload, patientId: referral.patientId, appointmentId: undefined, appointmentRefType: undefined, documentType: "ir_referral" }, actor.userId); try { return await attachDocumentToIrReferral(actor, referral.id, document.id); } catch (error) { await deleteDocumentById(document.id, actor.userId).catch(() => undefined); throw error; } }
@@ -98,7 +106,7 @@ export async function confirmIrReferralMaterials(actor: IrReferralActor, caseIdI
     await client.query("begin");
     const referral = await lock(caseId, client);
     if (referral.status === "ready_for_review" && referral.materialsConfirmed) { await client.query("commit"); return referral; }
-    if (referral.status !== "preparing") throw new HttpError(409, "Only preparing IR referrals can be confirmed.");
+    if (!isIrReferralMaterialPreparationStatus(referral.status)) throw new HttpError(409, "IR referral is not open for material preparation.");
     await client.query(`update ir_referral_cases set status='ready_for_review', documents_confirmed=true, images_confirmed=true, materials_confirmed=true, materials_confirmed_by=$2, materials_confirmed_at=now(), materials_confirmation_note=$3, updated_at=now() where id=$1`, [caseId, actor.userId, optionalText(input.note)]);
     const updated = await lock(caseId, client);
     await audit(actor, "ir_referral_materials_confirmed", caseId, {}, client);
