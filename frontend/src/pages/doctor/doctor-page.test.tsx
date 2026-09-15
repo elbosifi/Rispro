@@ -66,6 +66,13 @@ const createProtocolLibraryCtPhasePresetMock = vi.fn();
 const updateProtocolLibraryCtPhasePresetMock = vi.fn();
 const createProtocolLibraryMriSequencePresetMock = vi.fn();
 const updateProtocolLibraryMriSequencePresetMock = vi.fn();
+const downloadProtocolImportTemplateMock = vi.fn();
+const inspectProtocolImportMock = vi.fn();
+const previewProtocolImportMock = vi.fn();
+const confirmProtocolImportMock = vi.fn();
+const exportAllProtocolLibraryWorkbooksMock = vi.fn();
+const exportProtocolLibraryProtocolWorkbookMock = vi.fn();
+const exportProtocolLibraryVersionWorkbookMock = vi.fn();
 const downloadMriSequenceImportTemplateMock = vi.fn();
 const exportMriSequencePresetsWorkbookMock = vi.fn();
 const inspectMriSequenceImportMock = vi.fn();
@@ -203,6 +210,13 @@ vi.mock("@/lib/api-hooks", () => ({
   updateProtocolLibraryCtPhasePreset: (...args: unknown[]) => updateProtocolLibraryCtPhasePresetMock(...args),
   createProtocolLibraryMriSequencePreset: (...args: unknown[]) => createProtocolLibraryMriSequencePresetMock(...args),
   updateProtocolLibraryMriSequencePreset: (...args: unknown[]) => updateProtocolLibraryMriSequencePresetMock(...args),
+  downloadProtocolImportTemplate: (...args: unknown[]) => downloadProtocolImportTemplateMock(...args),
+  inspectProtocolImport: (...args: unknown[]) => inspectProtocolImportMock(...args),
+  previewProtocolImport: (...args: unknown[]) => previewProtocolImportMock(...args),
+  confirmProtocolImport: (...args: unknown[]) => confirmProtocolImportMock(...args),
+  exportAllProtocolLibraryWorkbooks: (...args: unknown[]) => exportAllProtocolLibraryWorkbooksMock(...args),
+  exportProtocolLibraryProtocolWorkbook: (...args: unknown[]) => exportProtocolLibraryProtocolWorkbookMock(...args),
+  exportProtocolLibraryVersionWorkbook: (...args: unknown[]) => exportProtocolLibraryVersionWorkbookMock(...args),
   downloadMriSequenceImportTemplate: (...args: unknown[]) => downloadMriSequenceImportTemplateMock(...args),
   exportMriSequencePresetsWorkbook: (...args: unknown[]) => exportMriSequencePresetsWorkbookMock(...args),
   inspectMriSequenceImport: (...args: unknown[]) => inspectMriSequenceImportMock(...args),
@@ -1954,17 +1968,18 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
 
-    expect(await screen.findByRole("heading", { name: "Protocol Library" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Protocols" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Library setup" })).toBeTruthy();
     expect(await screen.findByText("No protocols yet")).toBeTruthy();
-    expect(screen.getByText("Create CT or MRI protocols from your saved phase and sequence presets.")).toBeTruthy();
+    expect(screen.getByText("Use New protocol to add your first clinical protocol.")).toBeTruthy();
     await waitFor(() => expect(fetchProtocolLibraryProtocolsMock).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "Library setup" }));
-    expect(screen.getByRole("button", { name: "Anatomy / Regions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import / Export" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Anatomy" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Scanners" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Legacy CT Phase Presets" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "MRI Sequence Presets" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CT phase presets" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "MRI sequence presets" })).toBeTruthy();
   });
 
   it("creates an anatomy region from the Protocol Library", async () => {
@@ -1973,7 +1988,7 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Anatomy / Regions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Anatomy" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add region" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Brain" } });
     fireEvent.change(screen.getByLabelText("Body system"), { target: { value: "Neuro" } });
@@ -1988,7 +2003,7 @@ describe("Doctor Portal shell", () => {
       defaultCoverageNote: "Vertex to skull base",
       isActive: true,
     }));
-    await waitFor(() => expect(fetchProtocolLibraryAnatomyRegionsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchProtocolLibraryAnatomyRegionsMock).toHaveBeenCalledTimes(3));
   });
 
   it("directs protocol library admins to Equipment for scanner management", async () => {
@@ -2012,7 +2027,7 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI sequence presets" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add MRI sequence" }));
 
     expect(screen.queryByLabelText("Scanner")).toBeNull();
@@ -2050,7 +2065,7 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI sequence presets" }));
 
     expect(screen.getByRole("button", { name: "Download template" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Export current XLSX" })).toBeTruthy();
@@ -2097,7 +2112,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI sequence presets" }));
     fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
 
     expect(await screen.findByText("Workbook inspect")).toBeTruthy();
@@ -2131,7 +2146,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Library setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI sequence presets" }));
     fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
     await screen.findByText("Workbook inspect");
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
@@ -2147,7 +2162,8 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New protocol" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "New protocol" })).getByRole("button", { name: /CT protocol/ }));
     fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "CT Brain" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
@@ -2203,7 +2219,8 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New MRI Protocol" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New protocol" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "New protocol" })).getByRole("button", { name: /MRI protocol/ }));
     fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "MRI Prostate" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 

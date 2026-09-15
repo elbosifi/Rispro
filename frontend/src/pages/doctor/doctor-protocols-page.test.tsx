@@ -1049,15 +1049,22 @@ describe("Doctor protocoling request documents", () => {
     expect(within(section).getByText("Possible patient match")).toBeTruthy(); expect(within(section).getByText(/Patient denied ownership/)).toBeTruthy(); expect(within(section).getByText(/Denied study/)).toBeTruthy(); expect(within(section).getByRole("button", { name: /Reconcile/ })).toBeTruthy();
   });
 
-  it("offers separate minimal CT and full MRI protocol creation paths", async () => {
+  it("offers one modality-aware new protocol flow while preserving CT and MRI creation forms", async () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
+    expect(screen.getAllByRole("button", { name: "New protocol" })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "New protocol" }));
+    const chooser = screen.getByRole("dialog", { name: "New protocol" });
+    expect(within(chooser).getByText("Select the imaging modality.")).toBeTruthy();
+    expect(within(chooser).getByRole("button", { name: /CT protocol/ })).toBeTruthy();
+    expect(within(chooser).getByRole("button", { name: /MRI protocol/ })).toBeTruthy();
+    await userEvent.click(within(chooser).getByRole("button", { name: /CT protocol/ }));
     expect(screen.getByRole("textbox", { name: "Protocol name" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Indication" })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Anatomy region" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await userEvent.click(screen.getByRole("button", { name: "New MRI Protocol" }));
+    await userEvent.click(screen.getByRole("button", { name: "New protocol" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "New protocol" })).getByRole("button", { name: /MRI protocol/ }));
     expect(screen.getByRole("combobox", { name: "Anatomy region" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Category" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "IV contrast policy" })).toBeTruthy();
@@ -1071,9 +1078,13 @@ describe("Protocol workbook import controls", () => {
   it("shows the full-protocol XLSX controls only in Protocol Library administration", async () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    expect(screen.queryByRole("button", { name: "Download XLSX template" })).toBeNull();
+    expect(screen.queryByText("Import protocols XLSX")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Import / Export" }));
     expect(await screen.findByRole("button", { name: "Download XLSX template" })).toBeTruthy();
     expect(screen.getByText("Import protocols XLSX")).toBeTruthy();
-    expect(screen.getByText(/saved as drafts and must be reviewed/i)).toBeTruthy();
+    expect(screen.getByText(/saved as drafts and require review before activation/i)).toBeTruthy();
   });
 });
 
@@ -1153,14 +1164,98 @@ describe("CT protocol library workbench", () => {
     vi.mocked(apiHooks.deleteProtocolLibraryCtPhaseRow).mockResolvedValue(libraryDetail());
   });
 
+  it("renders the clinical protocol list with contrast and combined version status", async () => {
+    const activeOnly = { ...libraryProtocol, id: 101, name: "Brain acute", anatomyRegionName: "Brain", category: "General", indication: "Trauma and stroke imaging", contrastPolicy: "Non-contrast" };
+    const draftOnly = { ...libraryProtocol, id: 102, name: "Brain tumor", anatomyRegionName: "Brain", category: "Oncology", indication: "Tumor and infection assessment", contrastPolicy: "With IV contrast", activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: 302, latestDraftVersionNumber: "1.0" };
+    const activeAndDraft = { ...libraryProtocol, id: 103, name: "CAP oncology", anatomyRegionName: "Chest / abdomen / pelvis", category: "Oncology", indication: "Staging and treatment response", contrastPolicy: "With IV contrast", activeVersionNumber: "2.0", latestDraftVersionId: 303, latestDraftVersionNumber: "2.1" };
+    const inactive = { ...libraryProtocol, id: 104, name: "Inactive protocol", isActive: false };
+    const noVersion = { ...libraryProtocol, id: 105, name: "No version protocol", activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: null, latestDraftVersionNumber: null };
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([activeOnly, draftOnly, activeAndDraft, inactive, noVersion]);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+
+    expect(await screen.findByRole("heading", { name: "Protocols" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Protocol" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Contrast" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Indication" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Active version" })).toBeNull();
+    expect(within(screen.getByRole("row", { name: /Brain acute/ })).getByText("Non-contrast")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Brain acute/ })).getByText(/ACTIVE.*v1\.7/)).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Brain tumor/ })).getByText("DRAFT")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Brain tumor/ })).getByText("Needs activation")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /CAP oncology/ })).getByText("DRAFT CHANGES PENDING")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Inactive protocol/ })).getByText("INACTIVE")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /No version protocol/ })).getByText("NO VERSION")).toBeTruthy();
+  });
+
+  it("searches protocol name and clinical metadata while retaining compact filters", async () => {
+    const rows = [
+      { ...libraryProtocol, id: 201, name: "Name match", indication: "Routine follow-up", anatomyRegionName: "Liver", category: "General", contrastPolicy: "Non-contrast" },
+      { ...libraryProtocol, id: 202, name: "Indication match", indication: "Stroke triage", anatomyRegionName: "Brain", category: "General", contrastPolicy: "With IV contrast" },
+      { ...libraryProtocol, id: 203, name: "Anatomy match", indication: "Routine follow-up", anatomyRegionName: "Knee", category: "General", contrastPolicy: "Non-contrast" },
+      { ...libraryProtocol, id: 204, name: "Category match", indication: "Routine follow-up", anatomyRegionName: "Chest", category: "Oncology", contrastPolicy: "Non-contrast" },
+      { ...libraryProtocol, id: 205, name: "Contrast match", indication: "Routine follow-up", anatomyRegionName: "Pelvis", category: "General", contrastPolicy: "Dynamic contrast" },
+      { ...libraryProtocol, id: 206, name: "MRI filter", modality: "MRI" as const, indication: "Routine follow-up", anatomyRegionName: "Brain", category: "General", contrastPolicy: "Non-contrast" },
+      { ...libraryProtocol, id: 207, name: "Draft filter", activeVersionId: null, activeVersionNumber: null, activeVersionStatus: null, latestDraftVersionId: 307, latestDraftVersionNumber: "1.0" },
+    ];
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue(rows);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    const search = await screen.findByRole("textbox", { name: "Search protocols" });
+
+    for (const [term, name] of [["name match", "Name match"], ["stroke triage", "Indication match"], ["knee", "Anatomy match"], ["oncology", "Category match"], ["dynamic contrast", "Contrast match"]]) {
+      await userEvent.clear(search);
+      await userEvent.type(search, term);
+      expect(screen.getByRole("row", { name: new RegExp(name) })).toBeTruthy();
+    }
+    await userEvent.clear(search);
+    expect(screen.getByRole("row", { name: /MRI filter/ })).toBeTruthy();
+    expect(screen.getByRole("row", { name: /Draft filter/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /^CT$/ }));
+    expect(screen.queryByRole("row", { name: /MRI filter/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^MRI$/ }));
+    expect(screen.getByRole("row", { name: /MRI filter/ })).toBeTruthy();
+    expect(screen.queryByRole("row", { name: /Name match/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^Active$/ }));
+    expect(screen.getByRole("row", { name: /MRI filter/ })).toBeTruthy();
+    expect(screen.queryByRole("row", { name: /Draft filter/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^Draft$/ }));
+    expect(screen.getByRole("row", { name: /Draft filter/ })).toBeTruthy();
+    expect(screen.queryByRole("row", { name: /MRI filter/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^All$/ }));
+    expect(screen.getByRole("row", { name: /MRI filter/ })).toBeTruthy();
+  });
+
+  it("keeps row actions in an accessible overflow menu and confirms deactivation", async () => {
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([libraryProtocol]);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+
+    const more = await screen.findByRole("button", { name: "More actions for Liver Multiphasic CT" });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    await userEvent.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: "Duplicate" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Deactivate protocol" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Deactivate protocol" }));
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("heading", { name: "Deactivate protocol?" })).toBeTruthy();
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(apiHooks.updateProtocolLibraryProtocol).not.toHaveBeenCalled();
+  });
+
   it("offers all, protocol, and exact-version XLSX exports through the typed download helpers", async () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Import / Export" }));
     await userEvent.click(await screen.findByRole("button", { name: "Export all protocols XLSX" }));
     expect(apiHooks.exportAllProtocolLibraryWorkbooks).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole("button", { name: "Export XLSX" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export Liver Multiphasic CT XLSX" }));
     expect(vi.mocked(apiHooks.exportProtocolLibraryProtocolWorkbook).mock.calls[0]?.[0]).toBe(101);
-    await userEvent.click(screen.getByRole("button", { name: "View/Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Protocols" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Export this version XLSX" }));
     expect(vi.mocked(apiHooks.exportProtocolLibraryVersionWorkbook).mock.calls[0]?.[0]).toBe(201);
   });
@@ -1170,6 +1265,8 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Import / Export" }));
     await userEvent.click(await screen.findByRole("button", { name: "Export all protocols XLSX" }));
 
     expect(await screen.findByText("Workbook download failed")).toBeTruthy();
@@ -1182,7 +1279,8 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "New CT Protocol" }));
+    await userEvent.click(screen.getByRole("button", { name: "New protocol" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "New protocol" })).getByRole("button", { name: /CT protocol/ }));
     await userEvent.type(screen.getByRole("textbox", { name: "Protocol name" }), "Liver Multiphasic CT");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
 
@@ -1200,7 +1298,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     expect(await screen.findByText("Liver Multiphasic CT")).toBeTruthy();
     expect(screen.getByText("Portal venous")).toBeTruthy();
     expect(screen.getAllByText("Bolus tracking · Abdominal aorta · 150 HU · +18 sec").length).toBeGreaterThan(0);
@@ -1209,6 +1307,8 @@ describe("CT protocol library workbench", () => {
     expect(screen.queryByRole("textbox", { name: "Internal protocol notes" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
     expect(screen.getByText("120 kVp · SmartmA · NI 25 · 100–500 mA · ASiR-V 40% · 1.25 / 0.625 mm · STANDARD")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "← Back to protocols" }));
+    expect(await screen.findByRole("columnheader", { name: "Protocol" })).toBeTruthy();
   });
 
   it("shows resulting revision versions and exact duplicate source context", async () => {
@@ -1217,7 +1317,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Create revision" }));
     expect(screen.getByRole("heading", { name: "Create revision" })).toBeTruthy();
     expect(screen.getByText("Creates v1.8")).toBeTruthy();
@@ -1235,7 +1335,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Remove Arterial phase" }));
     expect(screen.getByRole("heading", { name: "Remove Arterial phase?" })).toBeTruthy();
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove phase" }));
@@ -1249,7 +1349,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Publish protocol" }));
     expect(screen.getByRole("heading", { name: "Publish protocol?" })).toBeTruthy();
     expect(screen.getByText("Liver Multiphasic CT · v1.0")).toBeTruthy();
@@ -1264,7 +1364,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
     await userEvent.click(screen.getAllByRole("button", { name: "Remove" }).at(-1)!);
     expect(screen.getByRole("heading", { name: "Remove GE Revolution CT technique?" })).toBeTruthy();
@@ -1279,7 +1379,7 @@ describe("CT protocol library workbench", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
 
     await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
-    await userEvent.click(await screen.findByRole("button", { name: "View/Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Liver Multiphasic CT$/ }));
     await userEvent.click(screen.getByRole("button", { name: /Advanced technique/ }));
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.clear(screen.getByLabelText("Noise Index"));

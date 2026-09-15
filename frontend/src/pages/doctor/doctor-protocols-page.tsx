@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreVertical, Pencil, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreVertical, Pencil, Plus, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -75,7 +75,7 @@ import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProto
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
-import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea } from "@/components/shared";
+import { AnchoredMenu, Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, SearchInput, Textarea } from "@/components/shared";
 import { DateInput } from "@/components/common/date-input";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
@@ -207,7 +207,7 @@ function HistoricalPacsCandidates({ candidates, canReconcilePatientIdentity, cur
   })}</div>;
 }
 
-type LibrarySection = "protocols" | "anatomy" | "scanners" | "ctPhases" | "mriSequences";
+type LibrarySection = "protocols" | "importExport" | "anatomy" | "scanners" | "ctPhases" | "mriSequences";
 
 function SectionButton({
   label,
@@ -424,6 +424,7 @@ function ProtocolLibraryPanel() {
   const [mriSequenceDraft, setMriSequenceDraft] = useState<MriSequencePresetPayload | null>(null);
   const [editingMriSequenceId, setEditingMriSequenceId] = useState<number | null>(null);
   const [protocolDraft, setProtocolDraft] = useState<ProtocolLibraryProtocolPayload | null>(null);
+  const [newProtocolDialogOpen, setNewProtocolDialogOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [protocolFilter, setProtocolFilter] = useState<"all" | "CT" | "MRI" | "active" | "draft">("all");
   const [protocolSearch, setProtocolSearch] = useState("");
@@ -445,7 +446,7 @@ function ProtocolLibraryPanel() {
   const [protocolImportPreview, setProtocolImportPreview] = useState<ProtocolImportPreview | null>(null);
   const [protocolImportSummary, setProtocolImportSummary] = useState<ProtocolImportSummary | null>(null);
 
-  const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: section === "protocols" });
+  const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: section === "protocols" || section === "importExport" });
   const anatomyQuery = useQuery({ queryKey: ["doctor", "protocol-library", "anatomy-regions"], queryFn: fetchProtocolLibraryAnatomyRegions, enabled: section === "anatomy" || section === "protocols" });
   const scannersQuery = useQuery({ queryKey: ["doctor", "protocol-library", "scanners"], queryFn: fetchProtocolLibraryScanners, enabled: section === "scanners" || section === "mriSequences" || selectedVersionId !== null });
   const ctPhasesQuery = useQuery({ queryKey: ["doctor", "protocol-library", "ct-phase-presets"], queryFn: fetchProtocolLibraryCtPhasePresets, enabled: section === "ctPhases" || selectedVersionId !== null });
@@ -470,7 +471,11 @@ function ProtocolLibraryPanel() {
       (protocolFilter === "active" && protocol.activeVersionId !== null) ||
       (protocolFilter === "draft" && protocol.latestDraftVersionId !== null);
     const term = protocolSearch.trim().toLowerCase();
-    return matchesFilter && (!term || protocol.name.toLowerCase().includes(term));
+    const searchableText = [protocol.name, protocol.indication, protocol.anatomyRegionName, protocol.category, protocol.contrastPolicy]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join(" ")
+      .toLowerCase();
+    return matchesFilter && (!term || searchableText.includes(term));
   });
 
   const invalidate = async (key: string) => queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", key] });
@@ -570,13 +575,12 @@ function ProtocolLibraryPanel() {
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Protocols</p>
-          <h2 className="mt-1 text-2xl font-semibold text-foreground">Protocol Library</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>
-            Reusable CT/MRI protocol settings for anatomy regions, scanners, CT phases, and MRI sequences.
+          <h2 className="text-2xl font-semibold text-foreground">Protocols</h2>
+          <p className="mt-1.5 max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+            CT and MRI clinical imaging protocols.
           </p>
         </div>
-        {section === "protocols" && !selectedVersion ? <div className="flex flex-wrap gap-2"><AddButton label="New CT Protocol" onClick={() => setProtocolDraft(EMPTY_CT_PROTOCOL)} /><button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setProtocolDraft(EMPTY_MRI_PROTOCOL)}>New MRI Protocol</button></div> : null}
+        {section === "protocols" && !selectedVersion ? <Button type="button" size="sm" className="inline-flex items-center gap-1.5" onClick={() => setNewProtocolDialogOpen(true)}><Plus size={16} aria-hidden="true" />New protocol</Button> : null}
         {section === "anatomy" && <AddButton label="Add region" onClick={() => { setEditingRegionId(null); setRegionDraft(EMPTY_REGION); }} />}
         {section === "ctPhases" && <AddButton label="Add CT phase" onClick={() => { setEditingCtPhaseId(null); setCtPhaseDraft(EMPTY_CT_PHASE); }} />}
         {section === "mriSequences" && <AddButton label="Add MRI sequence" onClick={() => { setEditingMriSequenceId(null); setMriSequenceDraft(EMPTY_MRI_SEQUENCE); }} />}
@@ -589,17 +593,16 @@ function ProtocolLibraryPanel() {
       )}
 
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2" aria-label="Protocol library areas">
-          <span className="me-1 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Library areas</span>
+        <div className="flex flex-wrap items-center gap-2" aria-label="Protocol library navigation">
           <SectionButton label="Protocols" active={section === "protocols"} onClick={() => setSection("protocols")} />
-          <SectionButton label="Library setup" active={section !== "protocols"} onClick={() => setSection("anatomy")} />
+          <SectionButton label="Library setup" active={section !== "protocols"} onClick={() => setSection("importExport")} />
         </div>
         {section !== "protocols" ? <div className="flex flex-wrap items-center gap-2 border-s ps-3" style={{ borderColor: "var(--border)" }} aria-label="Library setup navigation">
-          <span className="me-1 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Configuration</span>
-          <SectionButton label="Anatomy / Regions" active={section === "anatomy"} onClick={() => setSection("anatomy")} />
+          <SectionButton label="Import / Export" active={section === "importExport"} onClick={() => setSection("importExport")} />
+          <SectionButton label="Anatomy" active={section === "anatomy"} onClick={() => setSection("anatomy")} />
           <SectionButton label="Scanners" active={section === "scanners"} onClick={() => setSection("scanners")} />
-          <SectionButton label="Legacy CT Phase Presets" active={section === "ctPhases"} onClick={() => setSection("ctPhases")} />
-          <SectionButton label="MRI Sequence Presets" active={section === "mriSequences"} onClick={() => setSection("mriSequences")} />
+          <SectionButton label="CT phase presets" active={section === "ctPhases"} onClick={() => setSection("ctPhases")} />
+          <SectionButton label="MRI sequence presets" active={section === "mriSequences"} onClick={() => setSection("mriSequences")} />
         </div> : null}
       </div>
 
@@ -635,9 +638,37 @@ function ProtocolLibraryPanel() {
           onCancelMriRow={() => { setMriRowDraft(null); setEditingMriRowId(null); }}
           onSaveMriRow={(payload) => editingMriRowId ? updateMriRowMutation.mutate({ versionId: selectedVersion.version.id, rowId: editingMriRowId, payload }) : createMriRowMutation.mutate({ versionId: selectedVersion.version.id, payload })}
           onRemoveMriRow={(rowId) => deleteMriRowMutation.mutate({ versionId: selectedVersion.version.id, rowId })}
-          onReorderMriRows={(rowIds) => reorderMriRowsMutation.mutate({ versionId: selectedVersion.version.id, rowIds })}
-        />
-      )}
+           onReorderMriRows={(rowIds) => reorderMriRowsMutation.mutate({ versionId: selectedVersion.version.id, rowIds })}
+         />
+       )}
+      <Dialog open={newProtocolDialogOpen} onClose={() => setNewProtocolDialogOpen(false)}>
+        <DialogContent maxWidth="420px" aria-label="New protocol">
+          <DialogHeader>
+            <DialogTitle>New protocol</DialogTitle>
+            <DialogDescription>Select the imaging modality.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <button
+              type="button"
+              className="rounded-xl border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              style={{ borderColor: "var(--border)" }}
+              onClick={() => { setNewProtocolDialogOpen(false); setProtocolDraft(EMPTY_CT_PROTOCOL); }}
+            >
+              <span className="block text-sm font-semibold">CT protocol</span>
+              <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Phases, contrast timing and scanner technique</span>
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              style={{ borderColor: "var(--border)" }}
+              onClick={() => { setNewProtocolDialogOpen(false); setProtocolDraft(EMPTY_MRI_PROTOCOL); }}
+            >
+              <span className="block text-sm font-semibold">MRI protocol</span>
+              <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Anatomy and ordered MRI sequences</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={duplicateVersion !== null} onClose={() => { if (!duplicateCtVersionMutation.isPending) setDuplicateVersion(null); }}>
         <DialogContent maxWidth="520px">
           <DialogHeader>
@@ -674,25 +705,40 @@ function ProtocolLibraryPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {section === "protocols" && !selectedVersion && (
-        <div className="space-y-3">
-          <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => downloadProtocolTemplateMutation.mutate()} disabled={downloadProtocolTemplateMutation.isPending}>Download XLSX template</button>
-              <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => exportAllProtocolsMutation.mutate()} disabled={exportAllProtocolsMutation.isPending}>Export all protocols XLSX</button>
-              <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Import protocols XLSX<input className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readProtocolImportFile(file); event.currentTarget.value = ""; }} /></label>
-              {protocolImportFileName && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{protocolImportFileName}</span>}
-            </div>
-            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>Imported protocols are saved as drafts and must be reviewed and activated before clinical use.</p>
-            {(protocolImportInspect || protocolImportPreview || protocolImportSummary) && <div className="mt-3 space-y-3 text-sm">
-              {protocolImportInspect && <div><p className="font-semibold">Workbook inspect</p>{protocolImportInspect.sheets.map((sheet) => <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>{sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}</p>)}{protocolImportInspect.unknownSheets.length ? <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ignored extra sheets: {protocolImportInspect.unknownSheets.join(", ")}</p> : null}</div>}
-              {protocolImportFileBase64 && <div className="flex flex-wrap gap-2"><button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={previewProtocolImportMutation.isPending} onClick={() => previewProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Preview import</button><button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={!protocolImportPreview?.canConfirm || confirmProtocolImportMutation.isPending} onClick={() => confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Confirm import</button></div>}
-              {protocolImportPreview && <><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><SummaryCard label="Protocols" value={protocolImportPreview.summary.protocols} /><SummaryCard label="CT phases" value={protocolImportPreview.summary.ctPhases} /><SummaryCard label="CT techniques" value={protocolImportPreview.summary.ctTechniques} /><SummaryCard label="MRI sequences" value={protocolImportPreview.summary.mriSequences} /><SummaryCard label="Errors" value={protocolImportPreview.summary.errors} /></div><div className="grid gap-2 md:grid-cols-2"><ImportPreviewList title="Protocols" rows={protocolImportPreview.protocolRows.map((row) => ({ key: `protocol-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"} - ${row.action}`, errors: row.errors }))} /><ImportPreviewList title="CT Phases" rows={protocolImportPreview.ctPhaseRows.map((row) => ({ key: `ct-phase-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="CT Techniques" rows={protocolImportPreview.ctTechniqueRows.map((row) => ({ key: `ct-technique-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="MRI Sequences" rows={protocolImportPreview.mriSequenceRows.map((row) => ({ key: `mri-sequence-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /></div></>}
-              {protocolImportSummary && <p className="text-emerald-700">Import complete: {protocolImportSummary.createdProtocols} draft protocols, {protocolImportSummary.createdCtPhases} CT phases, {protocolImportSummary.createdCtTechniques} CT techniques, and {protocolImportSummary.createdMriSequenceRows} MRI sequence rows created.</p>}
-            </div>}
+      {section === "importExport" && (
+        <section className="space-y-4 rounded-xl border p-4" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+          <div>
+            <h3 className="text-lg font-semibold">Protocol import / export</h3>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Bulk administration tools for the Protocol Library.</p>
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Imported protocols are saved as drafts and require review before activation.</p>
           </div>
-          <ProtocolList
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => downloadProtocolTemplateMutation.mutate()} disabled={downloadProtocolTemplateMutation.isPending}>Download XLSX template</Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => exportAllProtocolsMutation.mutate()} disabled={exportAllProtocolsMutation.isPending}>Export all protocols XLSX</Button>
+            <label className="inline-flex h-[var(--control-height-sm)] cursor-pointer items-center rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+              Import protocols XLSX
+              <input aria-label="Import protocols XLSX" className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readProtocolImportFile(file); event.currentTarget.value = ""; }} />
+            </label>
+            {protocolImportFileName && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{protocolImportFileName}</span>}
+          </div>
+          {protocols.length ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+            <h4 className="text-sm font-semibold">Export an individual protocol</h4>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {protocols.map((protocol) => <Button key={protocol.id} type="button" variant="ghost" size="sm" onClick={() => exportProtocolMutation.mutate(protocol.id)}>Export {protocol.name} XLSX</Button>)}
+            </div>
+          </div> : null}
+          {(protocolImportInspect || protocolImportPreview || protocolImportSummary) && <div className="space-y-3 text-sm">
+            {protocolImportInspect && <div><p className="font-semibold">Workbook inspect</p>{protocolImportInspect.sheets.map((sheet) => <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>{sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}</p>)}{protocolImportInspect.unknownSheets.length ? <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ignored extra sheets: {protocolImportInspect.unknownSheets.join(", ")}</p> : null}</div>}
+            {protocolImportFileBase64 && <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" size="sm" disabled={previewProtocolImportMutation.isPending} onClick={() => previewProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Preview import</Button><Button type="button" variant="secondary" size="sm" disabled={!protocolImportPreview?.canConfirm || confirmProtocolImportMutation.isPending} onClick={() => confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Confirm import</Button></div>}
+            {protocolImportPreview && <><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><SummaryCard label="Protocols" value={protocolImportPreview.summary.protocols} /><SummaryCard label="CT phases" value={protocolImportPreview.summary.ctPhases} /><SummaryCard label="CT techniques" value={protocolImportPreview.summary.ctTechniques} /><SummaryCard label="MRI sequences" value={protocolImportPreview.summary.mriSequences} /><SummaryCard label="Errors" value={protocolImportPreview.summary.errors} /></div><div className="grid gap-2 md:grid-cols-2"><ImportPreviewList title="Protocols" rows={protocolImportPreview.protocolRows.map((row) => ({ key: `protocol-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"} - ${row.action}`, errors: row.errors }))} /><ImportPreviewList title="CT Phases" rows={protocolImportPreview.ctPhaseRows.map((row) => ({ key: `ct-phase-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="CT Techniques" rows={protocolImportPreview.ctTechniqueRows.map((row) => ({ key: `ct-technique-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="MRI Sequences" rows={protocolImportPreview.mriSequenceRows.map((row) => ({ key: `mri-sequence-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /></div></>}
+            {protocolImportSummary && <p className="text-emerald-700">Import complete: {protocolImportSummary.createdProtocols} draft protocols, {protocolImportSummary.createdCtPhases} CT phases, {protocolImportSummary.createdCtTechniques} CT techniques, and {protocolImportSummary.createdMriSequenceRows} MRI sequence rows created.</p>}
+          </div>}
+        </section>
+      )}
+      {section === "protocols" && !selectedVersion && (
+        <ProtocolList
           rows={filteredProtocols}
+          totalRows={protocols.length}
           filter={protocolFilter}
           search={protocolSearch}
           draft={protocolDraft}
@@ -709,9 +755,7 @@ function ProtocolLibraryPanel() {
           }}
           onToggle={(protocol) => protocol.isActive ? setProtocolPendingToggle(protocol) : updateProtocolMutation.mutate({ id: protocol.id, payload: { isActive: !protocol.isActive } })}
           onDuplicate={(protocol) => { const versionId = protocol.activeVersionId ?? protocol.latestDraftVersionId; if (versionId) { setDuplicateVersion({ versionId, protocolName: protocol.name, versionNumber: protocol.activeVersionNumber ?? protocol.latestDraftVersionNumber, source: null }); setDuplicateName(`Copy of ${protocol.name}`); } }}
-          onExport={(protocol) => exportProtocolMutation.mutate(protocol.id)}
-          />
-        </div>
+        />
       )}
       {section === "anatomy" && (
         <SettingsTable emptyText="No anatomy regions yet" headers={["Name", "Scope", "Body system", "Coverage", "Status", "Actions"]}>
@@ -793,12 +837,12 @@ function RowActions({ active, onEdit, onToggle }: { active: boolean; onEdit: () 
   );
 }
 
-function SettingsTable({ headers, emptyText, children }: { headers: string[]; emptyText: string; children: ReactNode }) {
+function SettingsTable({ headers, emptyText, tableClassName = "", children }: { headers: string[]; emptyText: string; tableClassName?: string; children: ReactNode }) {
   const childArray = Children.toArray(children);
   const hasRows = childArray.length > 0;
   return (
     <div className="overflow-x-auto rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <table className="min-w-full text-sm">
+      <table className={`min-w-full text-sm ${tableClassName}`.trim()}>
         <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
         <tbody>{hasRows ? childArray : <tr><td className="p-6 text-sm" colSpan={headers.length} style={{ color: "var(--text-muted)" }}>{emptyText}</td></tr>}</tbody>
       </table>
@@ -826,8 +870,19 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg border px-2 py-2 text-center" style={{ borderColor: "var(--border)" }}><p className="text-xs" style={{ color: "var(--text-muted)" }}>{label}</p><p className="text-lg font-semibold">{value}</p></div>;
 }
 
+function ProtocolStatus({ protocol }: { protocol: ProtocolLibraryProtocol }) {
+  if (!protocol.isActive) return <Badge variant="neutral" size="sm">INACTIVE</Badge>;
+  if (protocol.activeVersionId !== null && protocol.latestDraftVersionId !== null) {
+    return <div className="flex min-w-40 flex-col items-start gap-1"><Badge variant="success" size="sm">ACTIVE · v{protocol.activeVersionNumber ?? "—"}</Badge><Badge variant="warning" size="sm">DRAFT CHANGES PENDING</Badge></div>;
+  }
+  if (protocol.activeVersionId !== null) return <Badge variant="success" size="sm">ACTIVE · v{protocol.activeVersionNumber ?? "—"}</Badge>;
+  if (protocol.latestDraftVersionId !== null) return <div className="flex flex-col items-start gap-1"><Badge variant="draft" size="sm">DRAFT</Badge><span className="text-xs font-medium text-amber-700">Needs activation</span></div>;
+  return <Badge variant="neutral" size="sm">NO VERSION</Badge>;
+}
+
 function ProtocolList({
   rows,
+  totalRows,
   filter,
   search,
   draft,
@@ -841,9 +896,9 @@ function ProtocolList({
   onOpen,
   onToggle,
   onDuplicate,
-  onExport,
 }: {
   rows: ProtocolLibraryProtocol[];
+  totalRows: number;
   filter: "all" | "CT" | "MRI" | "active" | "draft";
   search: string;
   draft: ProtocolLibraryProtocolPayload | null;
@@ -857,8 +912,8 @@ function ProtocolList({
   onOpen: (protocol: ProtocolLibraryProtocol) => void;
   onToggle: (protocol: ProtocolLibraryProtocol) => void;
   onDuplicate: (protocol: ProtocolLibraryProtocol) => void;
-  onExport: (protocol: ProtocolLibraryProtocol) => void;
 }) {
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const filterLabels: Array<{ value: typeof filter; label: string }> = [
     { value: "all", label: "All" },
     { value: "CT", label: "CT" },
@@ -866,23 +921,27 @@ function ProtocolList({
     { value: "active", label: "Active" },
     { value: "draft", label: "Draft" },
   ];
+  const hasFilters = filter !== "all" || Boolean(search.trim());
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        {filterLabels.map((item) => <SectionButton key={item.value} label={item.label} active={filter === item.value} onClick={() => setFilter(item.value)} />)}
-        <input aria-label="Search protocols" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name" className="h-9 min-w-52 rounded-lg border px-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {filterLabels.map((item) => <SectionButton key={item.value} label={item.label} active={filter === item.value} onClick={() => setFilter(item.value)} />)}
+        </div>
+        <div className="w-full sm:ms-auto sm:max-w-sm">
+          <SearchInput aria-label="Search protocols" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search protocol, indication, anatomy…" showClearButton onClear={() => setSearch("")} className="w-full" />
+        </div>
       </div>
-      <SettingsTable emptyText="No protocols yet" headers={["Name", "Modality", "Indication", "Active version", "Status", "Actions"]}>
+      <SettingsTable emptyText="No protocols yet" tableClassName="min-w-[720px]" headers={["Protocol", "Contrast", "Indication", "Status", "Actions"]}>
         {draft && (draft.modality === "CT" ? <CtProtocolCreateForm draft={draft} saving={saving} setDraft={setDraft} onCancel={() => setDraft(null)} onSave={onCreate} /> : <MriProtocolCreateForm draft={draft} anatomy={anatomy} saving={saving} setDraft={setDraft} onManageAnatomy={onManageAnatomy} onCancel={() => setDraft(null)} onSave={onCreate} />)}
-        {rows.length === 0 && !draft ? <tr><td className="p-6 text-sm" colSpan={6} style={{ color: "var(--text-muted)" }}><p>No protocols yet</p><p>Create CT or MRI protocols from your saved phase and sequence presets.</p></td></tr> : null}
+        {rows.length === 0 && !draft ? <tr><td className="p-6 text-sm" colSpan={5} style={{ color: "var(--text-muted)" }}>{hasFilters || totalRows > 0 ? <p>No protocols match these filters.</p> : <><p className="font-semibold text-foreground">No protocols yet</p><p className="mt-1">Use New protocol to add your first clinical protocol.</p></>}</td></tr> : null}
         {rows.map((item) => (
           <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}>
-            <Cell>{item.name}</Cell>
-            <Cell>{item.modality}</Cell>
-            <Cell>{item.indication ?? "-"}</Cell>
-            <Cell>{item.activeVersionNumber ?? "-"}</Cell>
-            <Cell>{item.activeVersionId ? "Active" : item.latestDraftVersionId ? "Draft only" : "No active version"}</Cell>
-            <Cell><div className="flex flex-wrap gap-2"><button type="button" onClick={() => onOpen(item)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>View/Edit</button><button type="button" onClick={() => onExport(item)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Export XLSX</button>{item.modality === "CT" && (item.activeVersionId ?? item.latestDraftVersionId) ? <button type="button" onClick={() => onDuplicate(item)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate</button> : null}<button type="button" onClick={() => onToggle(item)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{item.isActive ? "Deactivate" : "Reactivate"}</button></div></Cell>
+            <Cell><p className="font-semibold">{item.name}</p><p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{[item.modality, item.anatomyRegionName, item.category].filter((value): value is string => Boolean(value?.trim())).join(" · ")}</p></Cell>
+            <Cell>{item.contrastPolicy?.trim() || "Not specified"}</Cell>
+            <Cell><span className="block max-w-[28rem] whitespace-normal break-words" title={item.indication ?? undefined} style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}>{item.indication ?? "Not specified"}</span></Cell>
+            <Cell><ProtocolStatus protocol={item} /></Cell>
+            <Cell><div className="flex items-center gap-1.5 whitespace-nowrap"><Button type="button" size="sm" className="!h-8 !min-h-8 !px-3 text-xs" aria-label={`Open ${item.name}`} onClick={() => onOpen(item)}>Open</Button><AnchoredMenu open={openMenuId === item.id} onOpenChange={(open) => setOpenMenuId(open ? item.id : null)} width={220} trigger={<Button type="button" variant="ghost" size="icon" className="!h-8 !w-8 !min-h-8 !p-0 !text-foreground hover:bg-muted" aria-label={`More actions for ${item.name}`}><MoreVertical size={18} aria-hidden="true" /></Button>}>{item.modality === "CT" && (item.activeVersionId ?? item.latestDraftVersionId) ? <button type="button" role="menuitem" className="flex min-h-9 w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-medium hover:bg-muted" onClick={() => onDuplicate(item)}>Duplicate</button> : null}<button type="button" role="menuitem" className="flex min-h-9 w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-medium hover:bg-muted" onClick={() => onToggle(item)}>{item.isActive ? "Deactivate protocol" : "Reactivate protocol"}</button></AnchoredMenu></div></Cell>
           </tr>
         ))}
       </SettingsTable>
@@ -892,7 +951,7 @@ function ProtocolList({
 
 function CtProtocolCreateForm({ draft, saving, setDraft, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onSave: () => void; onCancel: () => void }) {
   return (
-    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3">
+    <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3">
       <Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
       <Field label="Indication"><input aria-label="Indication" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field>
       <Field label="Internal protocol notes"><Textarea aria-label="Internal protocol notes" value={textValue(draft.protocolNotes ?? null)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Reusable guidance for doctors during protocoling. Not patient-facing.</span></Field>
@@ -993,7 +1052,7 @@ function ProtocolBuilder({
             <h3 className="mt-1 truncate text-xl font-semibold">{detail.protocol.name}</h3>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onBack}>Back</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onBack}>← Back to protocols</Button>
             <Button type="button" variant="secondary" size="sm" onClick={onExportVersion}>Export this version XLSX</Button>
             {editable ? <Button type="button" variant="secondary" size="sm" onClick={() => onSaveDraft(nullableText(changeSummary), nullableText(protocolNotes))} disabled={saving}>Save draft</Button> : null}
             {isCt ? <Button type="button" variant="secondary" size="sm" onClick={() => onDuplicate(detail)}>Duplicate</Button> : null}
@@ -1471,7 +1530,7 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
 }
 
 function MriProtocolCreateForm({ draft, anatomy, saving, setDraft, onManageAnatomy, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; anatomy: ProtocolAnatomyRegion[]; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onManageAnatomy: () => void; onSave: () => void; onCancel: () => void }) {
-  return <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3"><Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Anatomy region"><select aria-label="Anatomy region" className={inputClass()} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">No region</option>{anatomy.filter((region) => region.isActive && (region.modalityScope === "MRI" || region.modalityScope === "BOTH")).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></Field><Field label="Category"><select aria-label="Category" className={inputClass()} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: editableText(event.target.value) })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Indication"><input aria-label="Indication" className={inputClass()} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field><Field label="IV contrast policy"><select aria-label="IV contrast policy" className={inputClass()} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: editableText(event.target.value) })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Oral contrast policy"><input aria-label="Oral contrast policy" className={inputClass()} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field><Field label="Bowel preparation"><input aria-label="Bowel preparation" className={inputClass()} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field><Field label="Preparation notes"><textarea aria-label="Preparation notes" className={`${inputClass()} min-h-20`} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field><Field label="Initial change summary"><input aria-label="Initial change summary" className={inputClass()} value={textValue(draft.changeSummary)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field><Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} value={textValue(draft.protocolNotes)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field><div className="md:col-span-3"><button type="button" className="text-xs underline" onClick={onManageAnatomy}>Manage anatomy regions</button></div><FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} /></div></td></tr>;
+  return <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3"><Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Anatomy region"><select aria-label="Anatomy region" className={inputClass()} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">No region</option>{anatomy.filter((region) => region.isActive && (region.modalityScope === "MRI" || region.modalityScope === "BOTH")).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></Field><Field label="Category"><select aria-label="Category" className={inputClass()} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: editableText(event.target.value) })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Indication"><input aria-label="Indication" className={inputClass()} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field><Field label="IV contrast policy"><select aria-label="IV contrast policy" className={inputClass()} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: editableText(event.target.value) })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Oral contrast policy"><input aria-label="Oral contrast policy" className={inputClass()} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field><Field label="Bowel preparation"><input aria-label="Bowel preparation" className={inputClass()} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field><Field label="Preparation notes"><textarea aria-label="Preparation notes" className={`${inputClass()} min-h-20`} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field><Field label="Initial change summary"><input aria-label="Initial change summary" className={inputClass()} value={textValue(draft.changeSummary)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field><Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} value={textValue(draft.protocolNotes)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field><div className="md:col-span-3"><button type="button" className="text-xs underline" onClick={onManageAnatomy}>Manage anatomy regions</button></div><FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} /></div></td></tr>;
 }
 
 function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose, onEmbeddedUpdated }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void; onEmbeddedUpdated?: () => void | Promise<void> }) {

@@ -36,6 +36,63 @@ try {
      values ('التصوير المقطعي E2E', 'E2E CT', 'E2E_CT', 5, true) returning id`,
   );
   const modalityId = Number(modality.rows[0].id);
+  const brainRegion = await pool.query<{ id: number }>(
+    `insert into protocol_anatomy_regions (name, body_system, modality_scope, default_coverage_note, is_active)
+     values ('Brain', 'Neuro', 'BOTH', 'Vertex to skull base', true) returning id`,
+  );
+  const capRegion = await pool.query<{ id: number }>(
+    `insert into protocol_anatomy_regions (name, body_system, modality_scope, default_coverage_note, is_active)
+     values ('Chest / abdomen / pelvis', 'Body', 'CT', 'Lung apices through symphysis pubis', true) returning id`,
+  );
+  const seedProtocol = async ({
+    name,
+    modality: protocolModality,
+    anatomyRegionId,
+    category,
+    indication,
+    contrastPolicy,
+    isActive = true,
+    activeVersion,
+    draftVersion,
+  }: {
+    name: string;
+    modality: "CT" | "MRI";
+    anatomyRegionId: number;
+    category: "General" | "Oncology";
+    indication: string;
+    contrastPolicy: string;
+    isActive?: boolean;
+    activeVersion?: string;
+    draftVersion?: string;
+  }) => {
+    const protocol = await pool.query<{ id: number }>(
+      `insert into protocols (name, modality, anatomy_region_id, category, indication, contrast_policy, is_active)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [name, protocolModality, anatomyRegionId, category, indication, contrastPolicy, isActive],
+    );
+    const protocolId = Number(protocol.rows[0].id);
+    let activeVersionId: number | null = null;
+    if (activeVersion) {
+      const version = await pool.query<{ id: number }>(
+        `insert into protocol_versions (protocol_id, version_number, status, change_summary, created_by)
+         values ($1, $2, 'ACTIVE', 'E2E active protocol', $3) returning id`,
+        [protocolId, activeVersion, supervisorId],
+      );
+      activeVersionId = Number(version.rows[0].id);
+    }
+    if (draftVersion) {
+      await pool.query(
+        `insert into protocol_versions (protocol_id, version_number, status, change_summary, created_by)
+         values ($1, $2, 'DRAFT', 'E2E draft changes', $3)`,
+        [protocolId, draftVersion, supervisorId],
+      );
+    }
+    if (activeVersionId) await pool.query("update protocols set active_version_id = $2 where id = $1", [protocolId, activeVersionId]);
+  };
+  await seedProtocol({ name: "CT Brain - Acute", modality: "CT", anatomyRegionId: Number(brainRegion.rows[0].id), category: "General", indication: "Trauma and stroke imaging", contrastPolicy: "Non-contrast", activeVersion: "1.0" });
+  await seedProtocol({ name: "CT Brain - Tumor", modality: "CT", anatomyRegionId: Number(brainRegion.rows[0].id), category: "Oncology", indication: "Tumor and infection assessment", contrastPolicy: "With IV contrast", draftVersion: "1.0" });
+  await seedProtocol({ name: "CT CAP - Oncology", modality: "CT", anatomyRegionId: Number(capRegion.rows[0].id), category: "Oncology", indication: "Staging and treatment response", contrastPolicy: "With IV contrast", activeVersion: "2.0", draftVersion: "2.1" });
+  await seedProtocol({ name: "MRI Brain", modality: "MRI", anatomyRegionId: Number(brainRegion.rows[0].id), category: "General", indication: "Neuroimaging for headache and seizure", contrastPolicy: "Conditional / radiologist decision", activeVersion: "1.0" });
   await pool.query(
     "update modalities set safety_warning_ar = $2, safety_warning_en = $3, safety_warning_enabled = true where id = $1",
     [modalityId, "E2E synthetic CT safety warning", "E2E synthetic CT safety warning"],
