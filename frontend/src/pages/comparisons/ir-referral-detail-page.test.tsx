@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { User } from "@/types/api";
 import type { IrReferral } from "@/lib/api/ir-referrals";
+import { formatDateTimeLy } from "@/lib/date-format";
 
 const apiMocks = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -114,7 +115,8 @@ describe("IR referral detail page", () => {
 
     expect(await screen.findByText("Additional information requested")).toBeTruthy();
     expect(screen.getByText("Please add the prior report")).toBeTruthy();
-    expect(screen.getByText(/Assessment: Prior assessment/)).toBeTruthy();
+    expect(screen.getByText(/Assessment:/)).toBeTruthy();
+    expect(screen.getByText("Prior assessment")).toBeTruthy();
     expect(screen.getByLabelText("Choose document")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm & Send for IR Review" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "PACS Remap" })).toBeTruthy();
@@ -142,7 +144,7 @@ describe("IR referral detail page", () => {
     expect(screen.getByText("Suitable for CT-guided biopsy.")).toBeTruthy();
     expect(screen.getByText("Eligible for intervention")).toBeTruthy();
     expect(screen.getByText("Dr IR")).toBeTruthy();
-    expect(screen.getByText(new Date(reviewedAt).toLocaleString())).toBeTruthy();
+    expect(screen.getByText(formatDateTimeLy(reviewedAt))).toBeTruthy();
     expect(screen.queryByText("Clinical IR decision")).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Edit assessment" }));
@@ -222,7 +224,7 @@ describe("IR referral detail page", () => {
 
     expect(await screen.findByRole("button", { name: "Edit assessment" })).toBeTruthy();
     expect(screen.queryByText("Clinical IR decision")).toBeNull();
-    expect(screen.getByText("Request Appointment")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request Appointment" })).toBeTruthy();
   });
 
   it("shows a different doctor's saved assessment read-only without clinical mutation controls", async () => {

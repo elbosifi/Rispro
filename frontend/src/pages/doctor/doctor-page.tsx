@@ -28,6 +28,7 @@ import {
 } from "@/lib/api-hooks";
 import type { DoctorMe, User } from "@/types/api";
 import { canRoleAccessRoute, DEFAULT_PAGE_VISIBILITY_MATRIX, normalizePageVisibilityMatrix } from "@/lib/page-visibility";
+import { t } from "@/lib/i18n";
 import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
@@ -58,7 +59,7 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
   { path: "/doctor/additional-imaging", label: "Additional Imaging", icon: ClipboardList },
-  { path: "/doctor/ir-consultations", label: "IR Consultations", icon: ClipboardList },
+  { path: "/doctor/ir-consultations", label: t("en", "irReferral.navLabel"), icon: ClipboardList },
   { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList },
 ];
 

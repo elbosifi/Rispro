@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ComparisonRequest } from "@/types/api";
@@ -137,6 +137,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+beforeEach(() => {
+  apiMocks.fetchIrReferrals.mockResolvedValue([]);
+});
+
 describe("comparison preparation worklist behavior", () => {
   it("uses canonical patient search and offers both review-request actions", async () => {
     apiMocks.fetchMany.mockResolvedValue([]);
@@ -144,12 +148,17 @@ describe("comparison preparation worklist behavior", () => {
     apiMocks.searchPatients.mockResolvedValue([{ id: 41, englishFullName: "Shared Entry Patient", arabicFullName: null, mrn: "MRN-41" }]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Search Patient" }));
-    fireEvent.change(screen.getByLabelText("Search patient"), { target: { value: "sh" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Patient" }), { target: { value: "sh" } });
     expect(await screen.findByText("Shared Entry Patient")).toBeTruthy();
     expect(apiMocks.searchPatients).toHaveBeenCalledWith("sh");
     fireEvent.click(screen.getByText("Shared Entry Patient"));
     fireEvent.click(screen.getByRole("button", { name: "Create Comparison" }));
     expect(await screen.findByText("Comparison modal launched")).toBeTruthy();
+    cleanup();
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Search Patient" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Patient" }), { target: { value: "sh" } });
+    fireEvent.click(await screen.findByText("Shared Entry Patient"));
     fireEvent.click(screen.getByRole("button", { name: "Create IR Consultation" }));
     expect(await screen.findByText("IR consultation modal launched")).toBeTruthy();
   });
@@ -159,10 +168,10 @@ describe("comparison preparation worklist behavior", () => {
     apiMocks.fetchMany.mockResolvedValue([]);
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "تجهيز المقارنات" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "طلبات المراجعة" })).toBeTruthy();
     expect(screen.getByRole("main").getAttribute("dir")).toBe("rtl");
-    expect(screen.getByLabelText("حالة المقارنة")).toBeTruthy();
-    expect(screen.getByPlaceholderText("المريض أو الرقم الطبي أو رقم الفحص أو اسم الفحص أو السبب")).toBeTruthy();
+    expect(screen.queryByLabelText("حالة المقارنة")).toBeNull();
+    expect(screen.getByPlaceholderText("المريض أو رقم الملف أو رقم الفحص أو اسم الفحص أو الإجراء")).toBeTruthy();
   });
 
   it("shows an auditable cancellation dialog only to eligible roles and requires a reason", async () => {
@@ -203,13 +212,40 @@ describe("comparison preparation worklist behavior", () => {
     expect(screen.queryByRole("link", { name: /Upload \/ remap comparison study/ })).toBeNull();
   });
 
-  it("uses Active by default and applies simple status and search filters", async () => {
+  it("filters both request domains on All and keeps domain-specific status selectors separate", async () => {
+    apiMocks.fetchMany.mockResolvedValue([comparison({ patientEnglishName: "Comparison result" })]);
+    apiMocks.fetchIrReferrals.mockResolvedValue([{ id: 91, patientId: 10, patientMrn: "MRN-91", patientEnglishName: "IR result", patientArabicName: null, requestedProcedure: "Biopsy", clinicalIndication: null, status: "ready_for_review", assignedDoctorId: null, assignedDoctorName: null, assignedDoctorNameAr: null, assignedDoctorNameEn: null, notifyAssignedDoctor: false, documentsConfirmed: false, imagesConfirmed: true, materialsConfirmed: false, assessmentText: null, decision: null, decisionNote: null, reviewedByDoctorId: null, reviewedByDoctorName: null, reviewedByDoctorNameAr: null, reviewedByDoctorNameEn: null, reviewedAt: null, createdAt: "2026-08-11T08:00:00Z", documentCount: 2, scheduleRequestId: null }]);
+    renderPage();
+    await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "all", q: null }));
+    await waitFor(() => expect(apiMocks.fetchIrReferrals).toHaveBeenCalledWith({ status: "all", q: null }));
+    expect(screen.queryByLabelText("Comparison status")).toBeNull();
+    expect(await screen.findByText("Comparison result")).toBeTruthy();
+    expect(await screen.findByText("IR result")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "MRN-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "all", q: "MRN-123" }));
+    await waitFor(() => expect(apiMocks.fetchIrReferrals).toHaveBeenCalledWith({ status: "all", q: "MRN-123" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Comparisons" }));
+    expect(screen.getByLabelText("Comparison status")).toBeTruthy();
+    expect(screen.queryByLabelText("IR consultation status")).toBeNull();
+    await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "active", q: "MRN-123" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "IR Consultations" }));
+    expect(screen.getByLabelText("IR consultation status")).toBeTruthy();
+    expect(screen.queryByLabelText("Comparison status")).toBeNull();
+    fireEvent.change(screen.getByLabelText("IR consultation status"), { target: { value: "needs_information" } });
+    await waitFor(() => expect(apiMocks.fetchIrReferrals).toHaveBeenCalledWith({ status: "needs_information", q: "MRN-123" }));
+  });
+
+  it("uses the Comparison default status when opening the Comparisons tab", async () => {
     apiMocks.fetchMany.mockResolvedValue([]);
     renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Comparisons" }));
     await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "active", q: null }));
     fireEvent.change(screen.getByLabelText("Comparison status"), { target: { value: "cancelled" } });
     await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "cancelled", q: null }));
-    fireEvent.change(screen.getByLabelText("Search comparison requests"), { target: { value: "  MRN-10  " } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "  MRN-10  " } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(apiMocks.fetchMany).toHaveBeenCalledWith({ status: "cancelled", q: "MRN-10" }));
   });

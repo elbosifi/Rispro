@@ -5,7 +5,14 @@ export type IrDoctor = { id:number; displayName:string|null; fullName:string|nul
 export const fetchAssignableIrDoctors = async () => (await api<{doctors:IrDoctor[]}>("/ir-referrals/doctors")).doctors;
 export const createIrReferral = async (payload:{patientId:number;requestedProcedure:string;clinicalIndication?:string|null;assignedDoctorId:number;notifyAssignedDoctor:boolean}) => (await api<{referral:IrReferral}>("/ir-referrals",{method:"POST",body:JSON.stringify(payload)})).referral;
 export const fetchIrReferral = async (id:number) => (await api<{referral:IrReferral}>(`/ir-referrals/${id}`)).referral;
-export const fetchIrReferrals = async () => (await api<{referrals:IrReferral[]}>("/ir-referrals")).referrals;
+export type IrReferralListFilters = { status?: string | null; q?: string | null };
+export const fetchIrReferrals = async (filters: IrReferralListFilters = {}) => {
+ const params = new URLSearchParams();
+ if (filters.status) params.set("status", filters.status);
+ if (filters.q) params.set("q", filters.q);
+ const query = params.toString();
+ return (await api<{referrals:IrReferral[]}>(`/ir-referrals${query ? `?${query}` : ""}`)).referrals;
+};
 export type IrDocument = { id:number; original_filename?:string; originalFilename?:string; file_size?:number; fileSize?:number; mime_type?:string; mimeType?:string };
 export const listIrReferralDocuments = async (id:number) => (await api<{documents:IrDocument[]}>(`/ir-referrals/${id}/documents`)).documents;
 export const uploadIrReferralDocument = async (id:number,payload:{originalFilename:string;mimeType:string;fileContentBase64:string}) => (await api<{document:IrDocument}>(`/ir-referrals/${id}/documents`,{method:"POST",body:JSON.stringify(payload)})).document;

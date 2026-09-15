@@ -23,6 +23,7 @@ import {
 } from "@/lib/api-hooks";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
+import { IR_REFERRAL_STATUSES, irReferralStatusLabel, irReferralStatusVariant } from "@/lib/ir-referral-display";
 import { getDoctorDisplayName, getUserDisplayName } from "@/lib/user-display-name";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
@@ -33,12 +34,14 @@ import { searchPatients } from "@/lib/api/patients";
 import { RequestComparisonModal } from "@/components/patients/request-comparison-modal";
 import { RequestIrReferralModal } from "@/components/patients/request-ir-referral-modal";
 import { fetchIrReferrals } from "@/lib/api/ir-referrals";
+import type { IrReferral } from "@/lib/api/ir-referrals";
 import { ComparisonDocumentsPanel } from "./comparison-documents-panel";
 
 const CONFIRM_ROLES = new Set(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const CANCEL_ROLES = new Set(["supervisor", "super_admin"]);
 
 const STATUS_OPTIONS = ["active", "pending", "ready", "assigned", "finalized", "cancelled", "all"] as const;
+const IR_STATUS_OPTIONS = ["all", ...IR_REFERRAL_STATUSES] as const;
 
 function patientName(row: ComparisonRequest) {
   return row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
@@ -61,6 +64,40 @@ function imageReadiness(row: ComparisonRequest, language: Language): { label: st
   if (row.remapJobStatus === "awaiting_confirmation") return { label: t(language, "comparisons.image.awaiting"), tone: "text-amber-700" };
   if (row.imageAvailabilityConfirmed) return { label: t(language, "comparisons.image.manual"), tone: "text-emerald-700" };
   return { label: t(language, "comparisons.image.unverified"), tone: "text-amber-700" };
+}
+
+function irPatientName(row: IrReferral, language: Language) {
+  return row.patientEnglishName || row.patientArabicName || row.patientMrn || t(language, "reviewRequests.patientFallback", { id: row.patientId });
+}
+
+function IrReferralRow({ referral }: { referral: IrReferral }) {
+  const { language } = useLanguage();
+  const doctorName = getDoctorDisplayName({ displayName: referral.assignedDoctorName, fullName: referral.assignedDoctorNameAr, englishName: referral.assignedDoctorNameEn }, language) || t(language, "reviewRequests.unassigned");
+  return (
+    <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="neutral" size="sm">{t(language, "reviewRequests.irConsultation")}</Badge>
+            <Badge variant={irReferralStatusVariant(referral.status)} size="sm">{irReferralStatusLabel(language, referral.status)}</Badge>
+          </div>
+          <h3 className="mt-3 text-base font-semibold">{irPatientName(referral, language)}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">{referral.patientMrn || t(language, "reviewRequests.mrnUnavailable")}</p>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div><dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(language, "irReferral.requestedProcedureField")}</dt><dd className="mt-1 font-medium">{referral.requestedProcedure}</dd></div>
+            <div><dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(language, "reviewRequests.assignedLabel")}</dt><dd className="mt-1 font-medium">{doctorName}</dd></div>
+            <div><dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(language, "reviewRequests.documentsLabel")}</dt><dd className="mt-1 font-medium">{t(language, "reviewRequests.documents", { count: referral.documentCount })}</dd></div>
+            <div><dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(language, "reviewRequests.imagingLabel")}</dt><dd className="mt-1 font-medium">{t(language, "reviewRequests.imaging", { status: referral.imagesConfirmed ? t(language, "reviewRequests.confirmed") : t(language, "reviewRequests.pending") })}</dd></div>
+          </dl>
+          <p className="mt-4 text-xs text-muted-foreground">{t(language, "reviewRequests.created", { date: formatDateTimeLy(referral.createdAt) })}</p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <Link to={`/comparisons/ir/${referral.id}`} className="inline-flex h-10 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-muted">{t(language, "reviewRequests.openDetails")}<ExternalLink size={14} /></Link>
+          {referral.status === "appointment_requested" && referral.scheduleRequestId ? <Link to={`/appointments?irReferralScheduleRequestId=${referral.scheduleRequestId}`} className="inline-flex h-10 items-center rounded-md bg-accent px-3 text-sm font-semibold text-accent-foreground">{t(language, "reviewRequests.bookIrAppointment")}</Link> : null}
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function ConfirmationPanel({ row }: { row: ComparisonRequest }) {
@@ -266,7 +303,8 @@ export default function ComparisonsPage() {
   const { language } = useLanguage();
   const [requestKind, setRequestKind] = useState<"all" | "comparisons" | "ir">("all");
   const { user } = useAuth();
-  const [status, setStatus] = useState(() => user?.role === "receptionist" ? "pending" : "active");
+  const [comparisonStatus, setComparisonStatus] = useState(() => user?.role === "receptionist" ? "pending" : "active");
+  const [irStatus, setIrStatus] = useState<(typeof IR_STATUS_OPTIONS)[number]>("all");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
@@ -279,37 +317,54 @@ export default function ComparisonsPage() {
   const canCancel = Boolean(user && CANCEL_ROLES.has(user.role));
   const manager = Boolean(user && ["supervisor", "super_admin"].includes(user.role));
   const selectedId = id ? Number(id) : null;
-  const listQuery = useQuery({ queryKey: ["comparison-requests", status, search], queryFn: () => fetchComparisonRequests({ status, q: search || null }), enabled: !selectedId });
-  const irReferralsQuery = useQuery({ queryKey: ["ir-referrals"], queryFn: fetchIrReferrals, enabled: !selectedId });
+  const listQuery = useQuery({ queryKey: ["comparison-requests", requestKind, comparisonStatus, search], queryFn: () => fetchComparisonRequests({ status: requestKind === "all" ? "all" : comparisonStatus, q: search || null }), enabled: !selectedId && requestKind !== "ir" });
+  const irReferralsQuery = useQuery({ queryKey: ["ir-referrals", requestKind, irStatus, search], queryFn: () => fetchIrReferrals({ status: requestKind === "all" ? "all" : irStatus, q: search || null }), enabled: !selectedId && requestKind !== "comparisons" });
   const detailQuery = useQuery({ queryKey: ["comparison-request", selectedId], queryFn: () => fetchComparisonRequest(selectedId!), enabled: Boolean(selectedId), refetchInterval: (query) => {
     const remapStatus = (query.state.data as ComparisonRequest | undefined)?.remapJobStatus;
     return remapStatus && ["uploaded", "processing", "remapped", "sending", "awaiting_confirmation"].includes(remapStatus) ? 2_000 : false;
   } });
   const rows = selectedId ? (detailQuery.data ? [detailQuery.data] : []) : listQuery.data ?? [];
-  const isLoading = selectedId ? detailQuery.isLoading : listQuery.isLoading;
-  const error = selectedId ? detailQuery.error : listQuery.error;
+  const comparisonLoading = selectedId ? detailQuery.isLoading : listQuery.isLoading;
+  const comparisonError = selectedId ? detailQuery.error : listQuery.error;
+  const showComparisons = Boolean(selectedId) || requestKind !== "ir";
+  const showIr = !selectedId && requestKind !== "comparisons";
+  const comparisonResult = showComparisons ? (
+    <section className="space-y-3" aria-labelledby="comparison-results-heading">
+      {!selectedId ? <h2 id="comparison-results-heading" className="text-lg font-semibold">{t(language, "reviewRequests.comparisons")}</h2> : null}
+      {comparisonLoading ? <p className="text-sm text-muted-foreground">{t(language, "reviewRequests.loadingComparisons")}</p> : comparisonError ? <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{comparisonError instanceof Error ? comparisonError.message : t(language, "reviewRequests.comparisonLoadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "reviewRequests.noComparisonResults")}</p> : <div className="rounded-xl border border-border/70 bg-muted/40 p-4"><div className="grid gap-4">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} manager={manager} canEdit={Boolean(user && (manager || row.createdBy === user.id))} />)}</div></div>}
+    </section>
+  ) : null;
+  const irResult = showIr ? (
+    <section className="space-y-3" aria-labelledby="ir-results-heading">
+      <h2 id="ir-results-heading" className="text-lg font-semibold">{t(language, "reviewRequests.irConsultations")}</h2>
+      {irReferralsQuery.isLoading ? <p className="text-sm text-muted-foreground">{t(language, "reviewRequests.loadingIrConsultations")}</p> : irReferralsQuery.error ? <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{irReferralsQuery.error instanceof Error ? irReferralsQuery.error.message : t(language, "reviewRequests.irLoadError")}</p> : (irReferralsQuery.data ?? []).length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "reviewRequests.noIrResults")}</p> : <div className="grid gap-3">{(irReferralsQuery.data ?? []).map((referral) => <IrReferralRow key={referral.id} referral={referral} />)}</div>}
+    </section>
+  ) : null;
+  const allResultsEmpty = requestKind === "all" && !comparisonLoading && !comparisonError && !irReferralsQuery.isLoading && !irReferralsQuery.error && rows.length === 0 && (irReferralsQuery.data ?? []).length === 0;
 
   return (
-    <main className="space-y-4 p-4 lg:p-6" dir={language === "ar" ? "rtl" : "ltr"}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-semibold">{t(language, "comparisons.title")}</h1><p className="text-sm text-muted-foreground">Comparisons and IR consultations share this patient-based entry point.</p></div>
-        <div className="flex items-center gap-3"><Button type="button" onClick={() => { setPatientSearchOpen(true); setSelectedPatient(null); setPatientQuery(""); }}>Search Patient</Button>{selectedId ? <Link to="/comparisons" className="text-sm font-semibold text-accent">{t(language, "comparisons.allRequests")}</Link> : null}</div>
+    <main className="mx-auto max-w-[1400px] space-y-5 p-4 lg:p-6" dir={language === "ar" ? "rtl" : "ltr"}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">RISpro</p><h1 className="mt-1 text-2xl font-semibold">{t(language, "comparisons.title")}</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t(language, "comparisons.subtitle")}</p></div>
+        <div className="flex flex-wrap items-center gap-3"><Button type="button" onClick={() => { setPatientSearchOpen(true); setSelectedPatient(null); setPatientQuery(""); }}>{t(language, "reviewRequests.searchPatient")}</Button>{selectedId ? <Link to="/comparisons" className="text-sm font-semibold text-accent">{t(language, "reviewRequests.all")}</Link> : null}</div>
       </div>
       {!selectedId ? (
-        <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-background p-3">
-          <div className="flex h-10 items-end gap-1"><Button type="button" size="sm" variant={requestKind === "all" ? "secondary" : "ghost"} onClick={() => setRequestKind("all")}>All</Button><Button type="button" size="sm" variant={requestKind === "comparisons" ? "secondary" : "ghost"} onClick={() => setRequestKind("comparisons")}>Comparisons</Button><Button type="button" size="sm" variant={requestKind === "ir" ? "secondary" : "ghost"} onClick={() => setRequestKind("ir")}>IR Consultations</Button></div>
-          <label className="grid gap-1 text-xs font-semibold">{t(language, "comparisons.status")}<select aria-label={t(language, "comparisons.statusAria")} value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{t(language, `comparisons.filter.${value}` as TranslationKey)}</option>)}</select></label>
-          <form className="flex flex-1 items-end gap-2" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
-            <label className="grid min-w-60 flex-1 gap-1 text-xs font-semibold">{t(language, "comparisons.search")}<input aria-label={t(language, "comparisons.searchAria")} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal" placeholder={t(language, "comparisons.searchPlaceholder")} /></label>
-            <Button type="submit" variant="secondary"><Search size={15} />{t(language, "comparisons.search")}</Button>
-          </form>
+        <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex h-10 items-end gap-1" role="tablist" aria-label={t(language, "reviewRequests.title")}><Button type="button" size="sm" variant={requestKind === "all" ? "secondary" : "ghost"} onClick={() => setRequestKind("all")}>{t(language, "reviewRequests.all")}</Button><Button type="button" size="sm" variant={requestKind === "comparisons" ? "secondary" : "ghost"} onClick={() => setRequestKind("comparisons")}>{t(language, "reviewRequests.comparisons")}</Button><Button type="button" size="sm" variant={requestKind === "ir" ? "secondary" : "ghost"} onClick={() => setRequestKind("ir")}>{t(language, "reviewRequests.irConsultations")}</Button></div>
+            {requestKind === "comparisons" ? <label className="grid min-w-44 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.comparisonStatusAria")} value={comparisonStatus} onChange={(event) => setComparisonStatus(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{t(language, `comparisons.filter.${value}` as TranslationKey)}</option>)}</select></label> : null}
+            {requestKind === "ir" ? <label className="grid min-w-52 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.irStatusAria")} value={irStatus} onChange={(event) => setIrStatus(event.target.value as (typeof IR_STATUS_OPTIONS)[number])} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{IR_STATUS_OPTIONS.map((value) => <option key={value} value={value}>{value === "all" ? t(language, "reviewRequests.allStatuses") : irReferralStatusLabel(language, value)}</option>)}</select></label> : null}
+            <form className="flex min-w-[min(100%,18rem)] flex-1 items-end gap-2" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+              <label className="grid min-w-0 flex-1 gap-1 text-xs font-semibold">{t(language, "reviewRequests.search")}<input aria-label={t(language, "reviewRequests.search")} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal" placeholder={t(language, "reviewRequests.searchPlaceholder")} /></label>
+              <Button type="submit" variant="secondary"><Search size={15} />{t(language, "reviewRequests.search")}</Button>
+            </form>
+          </div>
         </div>
       ) : null}
-      {requestKind !== "ir" ? (isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} manager={manager} canEdit={Boolean(user && (manager || row.createdBy === user.id))} />)}</div></div>) : null}
-      {!selectedId && requestKind !== "comparisons" ? <section className="rounded-xl border border-border/70 bg-muted/60 p-4"><h2 className="text-lg font-semibold">IR Consultations</h2><div className="mt-3 grid gap-3">{irReferralsQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading IR consultations...</p> : (irReferralsQuery.data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No IR consultations found.</p> : (irReferralsQuery.data ?? []).map((referral) => <article key={referral.id} className="rounded-lg border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex gap-2"><Badge variant="neutral" size="sm">IR Consultation</Badge><Badge variant={referral.status === "ready_for_review" ? "success" : referral.status === "preparing" ? "warning" : "info"} size="sm">{referral.status.replaceAll("_", " ")}</Badge></div><p className="mt-2 font-semibold">{referral.patientEnglishName || referral.patientArabicName || referral.patientMrn || `Patient ${referral.patientId}`}</p><p className="text-sm text-muted-foreground">{referral.patientMrn || "MRN unavailable"} · {referral.requestedProcedure}</p><p className="text-sm text-muted-foreground">Assigned: {getDoctorDisplayName({ displayName: referral.assignedDoctorName, fullName: referral.assignedDoctorNameAr, englishName: referral.assignedDoctorNameEn }, language) || "Unassigned"} · Documents: {referral.documentCount} · Imaging: {referral.imagesConfirmed ? "confirmed" : "pending"}</p></div><div className="flex gap-2"><Link to={`/comparisons/ir/${referral.id}`} className="rounded border px-3 py-2 text-sm font-semibold">Open details</Link>{referral.status === "appointment_requested" && referral.scheduleRequestId ? <Link to={`/appointments?irReferralScheduleRequestId=${referral.scheduleRequestId}`} className="rounded bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground">Book IR appointment</Link> : null}</div></div></article>)}</div></section> : null}
-      {patientSearchOpen ? <Dialog open onClose={() => setPatientSearchOpen(false)}><DialogContent><DialogHeader><DialogTitle>Search Patient</DialogTitle><DialogDescription>Use the canonical RISpro patient search to start a review request.</DialogDescription></DialogHeader><div className="grid gap-3"><input autoFocus aria-label="Search patient" value={patientQuery} onChange={e => setPatientQuery(e.target.value)} placeholder="Enter at least 2 characters" className="h-10 rounded border px-3"/>{patientQuery.trim().length >= 2 ? patientsQuery.isLoading ? <p className="text-sm text-muted-foreground">Searching...</p> : <div className="grid gap-2">{(patientsQuery.data ?? []).map(patient => <button key={patient.id} type="button" className="rounded border p-3 text-left text-sm hover:bg-muted" onClick={() => setSelectedPatient(patient)}><strong>{patient.englishFullName || patient.arabicFullName || patient.mrn}</strong>{patient.mrn ? <span className="ml-2 text-muted-foreground">{patient.mrn}</span> : null}</button>)}</div> : <p className="text-sm text-muted-foreground">Enter at least 2 characters.</p>}</div>{selectedPatient ? <div className="rounded border bg-muted/20 p-3"><p className="font-medium">{selectedPatient.englishFullName || selectedPatient.arabicFullName || selectedPatient.mrn}</p><div className="mt-3 flex gap-2"><Button type="button" onClick={() => setCreateComparisonOpen(true)}>Create Comparison</Button><Button type="button" onClick={() => setCreateIrOpen(true)}>Create IR Consultation</Button></div></div> : null}</DialogContent></Dialog> : null}
+      {allResultsEmpty ? <p className="rounded-xl border border-border p-5 text-sm text-muted-foreground">{t(language, "reviewRequests.noResults")}</p> : <div className="space-y-6">{comparisonResult}{irResult}</div>}
+      {patientSearchOpen ? <Dialog open onClose={() => setPatientSearchOpen(false)}><DialogContent><DialogHeader><DialogTitle>{t(language, "reviewRequests.searchPatient")}</DialogTitle><DialogDescription>{t(language, "reviewRequests.searchPatientDescription")}</DialogDescription></DialogHeader><div className="grid gap-3"><input autoFocus aria-label={t(language, "reviewRequests.searchPatient")} value={patientQuery} onChange={(event) => setPatientQuery(event.target.value)} placeholder={t(language, "reviewRequests.searchPatientPlaceholder")} className="h-10 rounded-md border border-border px-3" />{patientQuery.trim().length >= 2 ? patientsQuery.isLoading ? <p className="text-sm text-muted-foreground">{t(language, "reviewRequests.searchingPatients")}</p> : <div className="grid gap-2">{(patientsQuery.data ?? []).map((patient) => <button key={patient.id} type="button" className="rounded-md border border-border p-3 text-start text-sm hover:bg-muted" onClick={() => setSelectedPatient(patient)}><strong>{patient.englishFullName || patient.arabicFullName || patient.mrn}</strong>{patient.mrn ? <span className="ms-2 text-muted-foreground">{patient.mrn}</span> : null}</button>)}</div> : <p className="text-sm text-muted-foreground">{t(language, "reviewRequests.searchPatientMinimum")}</p>}</div>{selectedPatient ? <div className="rounded-md border border-accent/50 bg-accent/5 p-3"><p className="font-medium">{selectedPatient.englishFullName || selectedPatient.arabicFullName || selectedPatient.mrn}</p>{selectedPatient.mrn ? <p className="mt-1 text-sm text-muted-foreground">{selectedPatient.mrn}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><Button type="button" onClick={() => { setPatientSearchOpen(false); setCreateIrOpen(false); setCreateComparisonOpen(true); }}>{t(language, "reviewRequests.createComparison")}</Button><Button type="button" variant="secondary" onClick={() => { setPatientSearchOpen(false); setCreateComparisonOpen(false); setCreateIrOpen(true); }}>{t(language, "reviewRequests.createIrConsultation")}</Button></div></div> : null}</DialogContent></Dialog> : null}
       {createComparisonOpen && selectedPatient ? <RequestComparisonModal patientId={selectedPatient.id} onClose={() => setCreateComparisonOpen(false)} /> : null}
-      {createIrOpen && selectedPatient ? <RequestIrReferralModal patient={selectedPatient} onClose={() => setCreateIrOpen(false)} onCreated={(referralId) => { setCreateIrOpen(false); setPatientSearchOpen(false); navigate(`/comparisons/ir/${referralId}`); }} /> : null}
+      {createIrOpen && selectedPatient ? <RequestIrReferralModal patient={selectedPatient} onClose={() => setCreateIrOpen(false)} onCreated={(referralId) => { setCreateIrOpen(false); setCreateComparisonOpen(false); setPatientSearchOpen(false); navigate(`/comparisons/ir/${referralId}`); }} /> : null}
     </main>
   );
 }

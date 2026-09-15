@@ -68,19 +68,19 @@ export function AppointmentCreatePage() {
     : null;
 
   if (recallMode || irReferralMode) {
-    if (recallMode && irReferralMode) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Only one request context can be booked at a time.</div>;
+    if (recallMode && irReferralMode) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>{t(language, "appointments.create.irContextConflict")}</div>;
     if (recallMode && !hasValidRecallRequestId) {
       return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Invalid complementary recall request ID.</div>;
     }
-    if (irReferralMode && !hasValidIrReferralScheduleRequestId) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Invalid IR scheduling request ID.</div>;
+    if (irReferralMode && !hasValidIrReferralScheduleRequestId) return <div style={{ padding: "24px 16px", color: "#dc2626" }}>{t(language, "appointments.create.invalidIrSchedulingRequest")}</div>;
 
     if (recallContextQuery.isLoading || irReferralContextQuery.isLoading || ((recallContextQuery.isSuccess || irReferralContextQuery.isSuccess) && preloadPatientQuery.isLoading)) {
-      return <div style={{ padding: "24px 16px" }}>Loading complementary recall context…</div>;
+      return <div style={{ padding: "24px 16px" }}>{irReferralMode ? t(language, "appointments.create.loadingIrContext") : "Loading complementary recall context…"}</div>;
     }
 
     if (recallContextQuery.isError || irReferralContextQuery.isError || preloadPatientQuery.isError || (recallMode && !recallContextQuery.data) || (irReferralMode && !irReferralContextQuery.data) || !initialSelectedPatient) {
       const error = recallContextQuery.error ?? irReferralContextQuery.error ?? preloadPatientQuery.error;
-      return <div style={{ padding: "24px 16px", color: "#dc2626" }}>Unable to load the complementary recall booking context. {(error as Error | undefined)?.message ?? "Please return to Recall Requests and try again."}</div>;
+      return <div style={{ padding: "24px 16px", color: "#dc2626" }}>{irReferralMode ? t(language, "appointments.create.irContextLoadError") : "Unable to load the complementary recall booking context."} {(error as Error | undefined)?.message ?? (irReferralMode ? t(language, "appointments.create.irReturnToRequests") : "Please return to Recall Requests and try again.")}</div>;
     }
   }
 
