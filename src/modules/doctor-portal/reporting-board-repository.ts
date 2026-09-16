@@ -3127,7 +3127,7 @@ export async function createIrReferralReadyNotification(input: { referralId: num
       input.recipientUserId,
       input.recipientDoctorId,
       input.referralId,
-      `/comparisons/ir/${input.referralId}`,
+      `/doctor/ir-consultations/${input.referralId}`,
       `ir_referral_ready_for_review:${input.referralId}:${input.recipientUserId}`,
       JSON.stringify({ notificationType: "ir_referral_ready_for_review", irReferralCaseId: input.referralId }),
     ]

@@ -2561,6 +2561,7 @@ export const en = {
   "irReferral.createFailedTitle": "IR consultation failed",
   "irReferral.createFailedMessage": "Unable to create IR consultation.",
   "irReferral.backToReviewRequests": "Back to Review Requests",
+  "irReferral.backToDoctorConsultations": "Back to IR Consultations",
   "irReferral.openPatientStudies": "Open patient studies",
   "irReferral.pacsIdentifierUnavailable": "Patient PACS identifier unavailable",
   "irReferral.pacsRemap": "PACS Remap",

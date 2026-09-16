@@ -395,7 +395,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
       eventType: "ir_referral_ready_for_review",
       title: "IR consultation ready for review",
       body: "The prepared IR consultation is ready for your clinical review.",
-      actionUrl: "/comparisons/ir/1",
+      actionUrl: "/doctor/ir-consultations/1",
       status: "delivered",
       createdAt: "2026-09-14T10:00:00Z",
       deliveredAt: "2026-09-14T10:00:00Z",
@@ -403,6 +403,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
       dismissedAt: null,
     };
     assert.equal(irReadyNotification.eventType, "ir_referral_ready_for_review");
+    assert.equal(irReadyNotification.actionUrl, "/doctor/ir-consultations/1");
     assert.match(repo, /ir_referral_ready_for_review/);
   });
 

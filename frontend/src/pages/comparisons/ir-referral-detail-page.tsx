@@ -17,12 +17,16 @@ import { useV2ExamTypes, useV2Lookups } from "@/v2/appointments/api";
 
 const PREPARE_ROLES = new Set<string>(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const MANAGER_ROLES = new Set<string>(["supervisor", "super_admin"]);
+type IrReferralDetailPageProps = {
+  surface?: "core" | "doctor";
+};
+
 async function toBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
 }
 
-export default function IrReferralDetailPage() {
+export default function IrReferralDetailPage({ surface = "core" }: IrReferralDetailPageProps) {
   const { id } = useParams();
   const referralId = Number(id);
   const { language } = useLanguage();
@@ -67,6 +71,7 @@ export default function IrReferralDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["ir-referral", referralId] });
     void queryClient.invalidateQueries({ queryKey: ["ir-referral-documents", referralId] });
     void queryClient.invalidateQueries({ queryKey: ["my-ir-referrals"] });
+    void queryClient.invalidateQueries({ queryKey: ["doctor", "ir-referrals", "worklist"] });
   };
 
   const upload = useMutation({
@@ -133,8 +138,8 @@ export default function IrReferralDetailPage() {
   const manager = MANAGER_ROLES.has(user?.role ?? "");
   const canPrepareByRole = PREPARE_ROLES.has(user?.role ?? "");
   const materialStatusOpen = row.status === "preparing" || row.status === "needs_information";
-  const canPrepareMaterials = canPrepareByRole && materialStatusOpen;
-  const canDeleteDocuments = manager && materialStatusOpen;
+  const canPrepareMaterials = surface === "core" && canPrepareByRole && materialStatusOpen;
+  const canDeleteDocuments = surface === "core" && manager && materialStatusOpen;
   const activeDoctorProfileId = doctorMe.data?.hasActiveDoctorProfile ? doctorMe.data.profile?.id ?? null : null;
   const canReviewClinically = activeDoctorProfileId != null && (activeDoctorProfileId === row.assignedDoctorId || manager);
   const ready = row.status === "ready_for_review";
@@ -156,7 +161,7 @@ export default function IrReferralDetailPage() {
 
   return <main className="mx-auto max-w-[1200px] space-y-5 p-4 lg:p-6" dir={language === "ar" ? "rtl" : "ltr"}>
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><Link to="/comparisons" className="text-sm font-semibold text-accent">{t(language, "irReferral.backToReviewRequests")}</Link><div className="mt-2 flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">{t(language, "irReferral.detailTitle")}</h1><Badge variant={irReferralStatusVariant(row.status)}>{irReferralStatusLabel(language, row.status)}</Badge></div></div>
+      <div><Link to={surface === "doctor" ? "/doctor/ir-consultations" : "/comparisons"} className="text-sm font-semibold text-accent">{t(language, surface === "doctor" ? "irReferral.backToDoctorConsultations" : "irReferral.backToReviewRequests")}</Link><div className="mt-2 flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">{t(language, "irReferral.detailTitle")}</h1><Badge variant={irReferralStatusVariant(row.status)}>{irReferralStatusLabel(language, row.status)}</Badge></div></div>
       <div className="flex flex-wrap gap-2">
         {row.patientDicomId ? <a href={buildRadiantPacsTagUrl("00100020", row.patientDicomId)} className="inline-flex h-10 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted">{t(language, "irReferral.openPatientStudies")} <ExternalLink size={15} /></a> : <span className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm text-muted-foreground">{t(language, "irReferral.pacsIdentifierUnavailable")}</span>}
         {canPrepareMaterials ? <Link to={`/pacs/remap?irReferralId=${row.id}&returnPath=${encodeURIComponent(`/comparisons/ir/${row.id}`)}`} className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted">{t(language, "irReferral.pacsRemap")}</Link> : null}

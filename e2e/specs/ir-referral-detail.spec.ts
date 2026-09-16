@@ -46,15 +46,18 @@ const preparingReferral = {
   reviewedAt: null,
 };
 
-async function mockIrShell(page: Page, role: BrowserRole, referral: typeof reviewedReferral | typeof preparingReferral, language: "en" | "ar" = "en") {
+async function mockIrShell(page: Page, role: BrowserRole, referral: typeof reviewedReferral | typeof preparingReferral, language: "en" | "ar" = "en", options: { coreComparisonsAccess?: boolean } = {}) {
+  const coreComparisonsAccess = options.coreComparisonsAccess ?? true;
   await page.addInitScript((selectedLanguage) => localStorage.setItem("rispro-language", selectedLanguage), language);
   await page.route("http://127.0.0.1:5173/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/auth/me") return route.fulfill({ json: { user: { id: 1, username: role, fullName: role === "doctor" ? "IR Doctor" : "Reception", role } } });
-    if (path === "/api/settings/users-and-roles/page-visibility") return route.fulfill({ json: { matrix: { comparisons: ["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"] } } });
-    if (path === "/api/doctor/me") return route.fulfill({ json: role === "doctor" ? { hasActiveDoctorProfile: true, canAccessClinicalDoctorPortal: true, canAccessDoctorPortal: true, canAccessCoreWorkspace: true, profile: { id: 11 } } : { hasActiveDoctorProfile: false, canAccessDoctorPortal: false, canAccessCoreWorkspace: true, profile: null } });
+    if (path === "/api/settings/users-and-roles/page-visibility") return route.fulfill({ json: { matrix: { comparisons: coreComparisonsAccess ? ["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"] : [] } } });
+    if (path === "/api/doctor/me") return route.fulfill({ json: role === "doctor" ? { hasActiveDoctorProfile: true, canAccessClinicalDoctorPortal: true, canAccessDoctorPortal: true, canAccessCoreWorkspace: coreComparisonsAccess, doctorRole: "specialist", canFinalizeReports: false, canAssignProtocols: true, canSupervise: false, allowedModalities: [], moduleCapabilities: ["doctor"], profile: { id: 11 } } : { hasActiveDoctorProfile: false, canAccessDoctorPortal: false, canAccessCoreWorkspace: true, doctorRole: null, canFinalizeReports: false, canAssignProtocols: false, canSupervise: false, allowedModalities: [], moduleCapabilities: [], profile: null } });
     if (path === "/api/v2/scheduling-override-requests") return route.fulfill({ json: { requests: [], total: 0 } });
+    if (path === "/api/doctor/reporting-board/notifications") return route.fulfill({ json: { notifications: [] } });
+    if (path === "/api/ir-referrals/my-worklist") return route.fulfill({ json: { referrals: role === "doctor" ? [referral] : [] } });
     if (path === "/api/ir-referrals/42") return route.fulfill({ json: { referral } });
     if (path === "/api/ir-referrals/42/documents") return route.fulfill({ json: { documents: role === "receptionist" ? [{ id: 9, originalFilename: "supporting-report.pdf" }] : [] } });
     if (path === "/api/v2/lookups/modalities") return route.fulfill({ json: { items: [] } });
@@ -142,6 +145,27 @@ test("assigned doctor sees and records a persisted IR assessment", async ({ page
   await expect(page.getByRole("combobox", { name: "Decision" })).toHaveValue("eligible_for_intervention");
   await page.getByRole("button", { name: "Record decision" }).click();
   await expect(page.getByRole("button", { name: "Edit assessment" })).toBeVisible();
+});
+
+test("assigned doctor opens IR consultation in Doctor Workspace without Core comparisons access", async ({ page }, testInfo) => {
+  await mockIrShell(page, "doctor", reviewedReferral, "en", { coreComparisonsAccess: false });
+  await page.goto("/doctor/ir-consultations");
+
+  await page.getByRole("link", { name: "Open consultation" }).click();
+  await expect(page).toHaveURL(/\/doctor\/ir-consultations\/42$/);
+  await expect(page.getByRole("heading", { name: "IR Consultation" })).toBeVisible();
+  await expect(page.getByText("IR Patient")).toBeVisible();
+  await expect(page.getByText("Ready for review")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open patient studies/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "IR Assessment" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit assessment" }).click();
+  await expect(page.getByRole("heading", { name: "Clinical IR decision" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Assessment" })).toHaveValue("Suitable for CT-guided biopsy.");
+  await expect(page.getByRole("link", { name: "PACS Remap" })).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: "Final preparation confirmation" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm & Send for IR Review" })).not.toBeVisible();
+  await expect(page).not.toHaveURL(/\/comparisons\/ir\/42$/);
+  await page.screenshot({ path: testInfo.outputPath("doctor-ir-consultation-detail.png"), fullPage: true });
 });
 
 test("receptionist sees material preparation but no clinical or delete controls", async ({ page }, testInfo) => {

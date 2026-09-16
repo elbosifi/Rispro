@@ -143,6 +143,7 @@ const fetchAppointmentsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
 const appointmentDetailsReadOnlyMock = vi.fn();
+const fetchMyIrReferralWorklistMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchCurrentSession: async () => ({ id: 1, username: "e2e_doctor", fullName: "E2E Doctor", role: "doctor" }),
@@ -291,6 +292,14 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({
   pushToast: (...args: unknown[]) => pushToastMock(...args),
+}));
+
+vi.mock("@/lib/api/ir-referrals", () => ({
+  fetchMyIrReferralWorklist: () => fetchMyIrReferralWorklistMock(),
+}));
+
+vi.mock("@/pages/comparisons/ir-referral-detail-page", () => ({
+  default: ({ surface }: { surface?: "core" | "doctor" }) => <div data-testid="ir-referral-detail-route" data-surface={surface}>IR Consultation detail</div>,
 }));
 
 vi.mock("@/lib/protocol-printing", () => ({
@@ -583,6 +592,7 @@ describe("Doctor Portal shell", () => {
     getAppointmentByIdMock.mockReset();
     fetchPatientDirectorySummaryMock.mockReset();
     appointmentDetailsReadOnlyMock.mockReset();
+    fetchMyIrReferralWorklistMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -848,6 +858,7 @@ describe("Doctor Portal shell", () => {
     fetchAppointmentsMock.mockResolvedValue([]);
     getAppointmentByIdMock.mockResolvedValue(null);
     fetchPatientDirectorySummaryMock.mockResolvedValue({});
+    fetchMyIrReferralWorklistMock.mockResolvedValue([]);
     fetchNoShowSummaryMock.mockResolvedValue({ mode: "manual", pendingCount: 0, lastAutomaticProcessedCount: 0 });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
     fetchMyDoctorReportingWorklistMock.mockResolvedValue({
@@ -889,6 +900,38 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: "Open account menu" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Switch workspace: Doctor Workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
+  });
+
+  it("opens IR consultations from the Doctor Workspace worklist", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchMyIrReferralWorklistMock.mockResolvedValue([{
+      id: 42,
+      patientId: 7,
+      patientMrn: "MRN-123",
+      patientEnglishName: "IR Patient",
+      patientArabicName: null,
+      requestedProcedure: "Biopsy",
+      clinicalIndication: "Clinical indication",
+      status: "ready_for_review",
+      documentsConfirmed: true,
+      imagesConfirmed: true,
+    }]);
+    renderDoctorPortal("/doctor/ir-consultations");
+
+    const openConsultation = await screen.findByRole("link", { name: "Open consultation" });
+    expect(openConsultation.getAttribute("href")).toBe("/doctor/ir-consultations/42");
+    expect(openConsultation.getAttribute("href")).not.toBe("/comparisons/ir/42");
+  });
+
+  it("renders the IR detail route with Doctor Workspace access only", async () => {
+    fetchDoctorMeMock.mockResolvedValue({ ...normalDoctor, canAccessCoreWorkspace: false });
+    fetchPageVisibilityMatrixMock.mockResolvedValue({ ...DEFAULT_PAGE_VISIBILITY_MATRIX, comparisons: [] });
+    renderDoctorPortal("/doctor/ir-consultations/42");
+
+    const detail = await screen.findByTestId("ir-referral-detail-route");
+    expect(detail.textContent).toContain("IR Consultation detail");
+    expect(detail.getAttribute("data-surface")).toBe("doctor");
+    expect(screen.queryByTestId("core-page")).toBeNull();
   });
 
   it("opens read-only patient details in Doctor Workspace from a patient search result", async () => {

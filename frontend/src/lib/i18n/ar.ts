@@ -2560,6 +2560,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "irReferral.createFailedTitle": "فشل إنشاء استشارة الأشعة التداخلية",
   "irReferral.createFailedMessage": "تعذّر إنشاء استشارة الأشعة التداخلية.",
   "irReferral.backToReviewRequests": "العودة إلى طلبات المراجعة",
+  "irReferral.backToDoctorConsultations": "العودة إلى استشارات الأشعة التداخلية",
   "irReferral.openPatientStudies": "فتح دراسات المريض",
   "irReferral.pacsIdentifierUnavailable": "معرّف المريض في PACS غير متاح",
   "irReferral.pacsRemap": "إعادة ربط PACS",

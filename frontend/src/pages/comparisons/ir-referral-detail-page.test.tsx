@@ -83,15 +83,17 @@ function configureViewer(role: User["role"], profileId: number | null = null) {
   apiMocks.fetchDoctorMe.mockResolvedValue(profileId == null ? { hasActiveDoctorProfile: false, profile: null } : activeDoctorMe(profileId));
 }
 
-function renderPage(referral: IrReferral, documents: Array<{ id: number; originalFilename: string }> = []) {
+function renderPage(referral: IrReferral, documents: Array<{ id: number; originalFilename: string }> = [], surface: "core" | "doctor" = "core") {
   apiMocks.fetchIrReferral.mockResolvedValue(referral);
   apiMocks.listDocuments.mockResolvedValue(documents);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const route = surface === "doctor" ? "/doctor/ir-consultations/:id" : "/comparisons/ir/:id";
+  const entry = surface === "doctor" ? "/doctor/ir-consultations/42" : "/comparisons/ir/42";
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/comparisons/ir/42"]}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route path="/comparisons/ir/:id" element={<IrReferralDetailPage />} />
+          <Route path={route} element={<IrReferralDetailPage surface={surface} />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -225,6 +227,39 @@ describe("IR referral detail page", () => {
     expect(await screen.findByRole("button", { name: "Edit assessment" })).toBeTruthy();
     expect(screen.queryByText("Clinical IR decision")).toBeNull();
     expect(screen.getByRole("button", { name: "Request Appointment" })).toBeTruthy();
+  });
+
+  it("renders the doctor review surface without Core preparation controls", async () => {
+    configureViewer("doctor", 11);
+    const reviewedReferral = {
+      ...baseReferral,
+      status: "ready_for_review",
+      decision: "eligible_for_intervention",
+      decisionNote: null,
+      reviewedByDoctorId: 11,
+      reviewedByDoctorName: "Dr IR",
+      reviewedByDoctorNameAr: "Dr IR Arabic",
+      reviewedByDoctorNameEn: "Dr IR",
+      reviewedAt: "2026-09-14T09:30:00Z",
+    };
+    renderPage(reviewedReferral, [preparationDocument], "doctor");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "IR Consultation" })).toBeTruthy();
+    expect(screen.getByText("IR Patient")).toBeTruthy();
+    expect(screen.getByText("Ready for review")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to IR Consultations" }).getAttribute("href")).toBe("/doctor/ir-consultations");
+    expect(screen.getByRole("link", { name: /Open patient studies/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Documents" })).toBeTruthy();
+    expect(await screen.findByText("supporting-report.pdf")).toBeTruthy();
+    expect(screen.getByText("IR Assessment")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit assessment" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Request Appointment" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "PACS Remap" })).toBeNull();
+    expect(screen.queryByLabelText("Choose document")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove document 9" })).toBeNull();
+    expect(screen.queryByText("Final preparation confirmation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm & Send for IR Review" })).toBeNull();
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
   });
 
   it("shows a different doctor's saved assessment read-only without clinical mutation controls", async () => {

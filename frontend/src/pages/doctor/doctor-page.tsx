@@ -41,6 +41,7 @@ import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-app
 import { EnglishLanguageScope } from "@/providers/language-provider-component";
 import RecallRequestsPage from "@/pages/recall-requests/recall-requests-page";
 import { DoctorIrReferralsPage } from "./doctor-ir-referrals-page";
+import IrReferralDetailPage from "@/pages/comparisons/ir-referral-detail-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -304,6 +305,10 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route path="additional-imaging" element={me.canAssignProtocols ? <RecallRequestsPage mode="doctor" /> : <Navigate to="/doctor/my-work" replace />} />
       <Route path="ir-consultations" element={canAccessClinical ? <DoctorIrReferralsPage /> : <Navigate to="/doctor/my-work" replace />} />
+      <Route
+        path="ir-consultations/:id"
+        element={canAccessClinical ? <IrReferralDetailPage surface="doctor" /> : <Navigate to="/doctor/my-work" replace />}
+      />
       <Route
         path="team-workload"
         element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
