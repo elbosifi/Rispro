@@ -6,6 +6,7 @@ import { pool } from "../db/pool.js";
 import { createApp } from "../app.js";
 import { env } from "../config/env.js";
 import { ingestMppsEvent } from "./mpps-service.js";
+import { loadAppointmentAcquisitionSummaries } from "./appointment-acquisition-summary.js";
 import { updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
 import { createPendingReportingAssignmentIntent } from "../modules/doctor-portal/reporting-assignment-intents-service.js";
 import { createComplementaryRecall, linkComplementaryRecallBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
@@ -431,6 +432,79 @@ describe("mpps-service integration", () => {
     assert.equal(result.updatedStatus, "in-progress");
     assert.deepEqual(stored.rows[0], { performed_start_date: "20260911", performed_start_time: "091317", scheduled_start_date: null });
     assert.equal(await getBookingStatus(bookingId), "in-progress");
+  });
+
+  it("resolves only the primary processed MPPS lifecycle through the canonical DICOM and equipment registries", async () => {
+    const bookingId = await createBooking();
+    const suffix = randomUUID();
+    const device = await pool.query<{ id: number }>(
+      `insert into dicom_devices (modality_id, device_name, modality_ae_title, scheduled_station_ae_title, is_active)
+       values ($1, $2, $3, $4, false) returning id`,
+      [testData.modalityId, `MPPS device ${suffix}`, `MPPS_MODALITY_${suffix}`, `MPPS_STATION_${suffix}`]
+    );
+    const deviceId = Number(device.rows[0]!.id);
+    const equipment = await pool.query<{ id: number }>(
+      `insert into equipment (name, equipment_type, modality, modality_id, vendor, model, dicom_device_id, is_active)
+       values ($1, 'CT', 'CT', $2, 'Philips', 'Ingenia Elition 3T', $3, false) returning id`,
+      [`Philips Ingenia Elition 3T ${suffix}`, testData.modalityId, deviceId]
+    );
+    const equipmentId = Number(equipment.rows[0]!.id);
+    const uid = `1.2.826.${bookingId}.${suffix}`;
+    try {
+      await pool.query(
+        `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_start_date, performed_start_time, correlated_appointment_id, correlation_status, processing_status)
+         values ($1, 'n-create', $2, $3, 'IN PROGRESS', '20260911', '235000', $4, 'matched', 'processed')`,
+        [`mpps-acquisition-start-${suffix}`, `  mpps_station_${suffix.toUpperCase()}  `, uid, bookingId]
+      );
+      await pool.query(
+        `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_end_date, performed_end_time, correlated_appointment_id, correlation_status, processing_status)
+         values ($1, 'n-set', $2, $3, 'COMPLETED', '20260912', '001500', $4, 'matched', 'processed')`,
+        [`mpps-acquisition-end-${suffix}`, `MPPS_STATION_${suffix}`, uid, bookingId]
+      );
+      await pool.query(
+        `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_start_date, performed_start_time, correlated_appointment_id, correlation_status, processing_status)
+         values ($1, 'n-create', $2, $3, 'IN PROGRESS', '20260912', '010000', $4, 'matched', 'ignored')`,
+        [`mpps-acquisition-reopen-${suffix}`, `MPPS_STATION_${suffix}`, `${uid}.ignored`, bookingId]
+      );
+
+      const summary = (await loadAppointmentAcquisitionSummaries([bookingId])).get(bookingId);
+      assert.ok(summary);
+      assert.equal(summary.sourceAeTitle.trim(), `mpps_station_${suffix.toUpperCase()}`);
+      assert.equal(summary.dicomDeviceId, deviceId);
+      assert.equal(summary.equipmentId, equipmentId);
+      assert.equal(summary.equipmentVendor, "Philips");
+      assert.equal(summary.equipmentModel, "Ingenia Elition 3T");
+      assert.equal(summary.performedStatus, "COMPLETED");
+      assert.equal(summary.durationSeconds, 1500);
+      assert.ok(summary.startedAt);
+      assert.ok(summary.endedAt);
+    } finally {
+      await pool.query(`delete from equipment where id = $1`, [equipmentId]);
+      await pool.query(`delete from dicom_devices where id = $1`, [deviceId]);
+    }
+  });
+
+  it("keeps valid in-progress MPPS timing without fabricating a terminal time and ignores non-processed rows", async () => {
+    const bookingId = await createBooking();
+    const uid = `1.2.826.${bookingId}.${randomUUID()}`;
+    await pool.query(
+      `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_start_date, performed_start_time, correlated_appointment_id, correlation_status, processing_status)
+       values ($1, 'n-create', 'NO_EQUIPMENT_AE', $2, 'IN PROGRESS', '20260911', '091317', $3, 'matched', 'processed')`,
+      [`mpps-acquisition-live-${uid}`, uid, bookingId]
+    );
+    await pool.query(
+      `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_end_date, performed_end_time, correlated_appointment_id, correlation_status, processing_status)
+       values ($1, 'n-set', 'NO_EQUIPMENT_AE', $2, 'COMPLETED', '20260911', '094501', $3, 'matched', 'failed')`,
+      [`mpps-acquisition-failed-${uid}`, uid, bookingId]
+    );
+
+    const summary = (await loadAppointmentAcquisitionSummaries([bookingId])).get(bookingId);
+    assert.ok(summary);
+    assert.equal(summary.performedStatus, "IN PROGRESS");
+    assert.ok(summary.startedAt);
+    assert.equal(summary.endedAt, null);
+    assert.equal(summary.durationSeconds, null);
+    assert.equal(summary.equipmentId, null);
   });
 
   it("uses the accepted N-CREATE lifecycle record to process identifier-free N-SET completion", async () => {

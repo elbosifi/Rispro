@@ -11,6 +11,7 @@ import type {
   DicomDevice,
   AuditEntry,
   IdentifierType,
+  AppointmentAcquisitionSummary,
   ReportingBoardCaseHoldSummary
 } from "@/types/api";
 import type { PersistedDictionaryEntry } from "@/lib/name-generation";
@@ -69,6 +70,7 @@ function fallback<T>(value: unknown, fallback: T): T {
 }
 
 export interface AppointmentWithDetails extends Appointment {
+  acquisitionSummary?: AppointmentAcquisitionSummary | null;
   patientId: number;
   caseCategory?: "oncology" | "non_oncology" | null;
   arabicFullName: string;
@@ -344,8 +346,29 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
   const mriScreening = rawMriScreening && typeof rawMriScreening === "object" && !Array.isArray(rawMriScreening)
     ? rawMriScreening as RawRecord
     : null;
+  const rawAcquisition = raw.acquisitionSummary ?? raw.acquisition_summary;
+  const acquisition = rawAcquisition && typeof rawAcquisition === "object" && !Array.isArray(rawAcquisition)
+    ? rawAcquisition as RawRecord
+    : null;
   return {
     ...mapAppointment(raw),
+    acquisitionSummary: acquisition &&
+      (acquisition.performedStatus === "IN PROGRESS" || acquisition.performedStatus === "COMPLETED" || acquisition.performedStatus === "DISCONTINUED")
+      ? {
+          source: "mpps",
+          sourceAeTitle: str(acquisition, "sourceAeTitle") || str(acquisition, "source_ae_title"),
+          dicomDeviceId: numOrNull(acquisition, "dicomDeviceId") ?? numOrNull(acquisition, "dicom_device_id"),
+          equipmentId: numOrNull(acquisition, "equipmentId") ?? numOrNull(acquisition, "equipment_id"),
+          equipmentName: strOrNull(acquisition, "equipmentName") ?? strOrNull(acquisition, "equipment_name"),
+          equipmentVendor: strOrNull(acquisition, "equipmentVendor") ?? strOrNull(acquisition, "equipment_vendor"),
+          equipmentModel: strOrNull(acquisition, "equipmentModel") ?? strOrNull(acquisition, "equipment_model"),
+          startedAt: strOrNull(acquisition, "startedAt") ?? strOrNull(acquisition, "started_at"),
+          endedAt: strOrNull(acquisition, "endedAt") ?? strOrNull(acquisition, "ended_at"),
+          durationSeconds: numOrNull(acquisition, "durationSeconds") ?? numOrNull(acquisition, "duration_seconds"),
+          performedStatus: acquisition.performedStatus,
+          discontinuationReason: strOrNull(acquisition, "discontinuationReason") ?? strOrNull(acquisition, "discontinuation_reason"),
+        }
+      : null,
     // Patient fields
     patientId: num(raw, 'patient_id') || num(raw, 'patientId') || num(raw, 'id'),
     caseCategory: (() => {

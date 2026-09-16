@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
 import { pool } from "../../db/pool.js";
+import { loadAppointmentAcquisitionSummaries } from "../../services/appointment-acquisition-summary.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -1247,7 +1248,9 @@ export async function listReportingBoardCaseCandidates(
     `,
     values
   );
-  return result.rows.map(reportingBoardCaseRow);
+  const cases = result.rows.map(reportingBoardCaseRow);
+  const summaries = await loadAppointmentAcquisitionSummaries(cases.map((caseRow) => caseRow.appointmentId));
+  return cases.map((caseRow) => ({ ...caseRow, acquisitionSummary: summaries.get(caseRow.appointmentId) ?? null }));
 }
 
 function reportingBoardCaseRow(row: ReportingBoardCaseRow & ReportingBoardCaseHoldSqlFields): ReportingBoardCaseRow {
@@ -1558,7 +1561,9 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
     `,
     [appointmentIds]
   );
-  return result.rows.map(reportingBoardCaseRow);
+  const cases = result.rows.map(reportingBoardCaseRow);
+  const summaries = await loadAppointmentAcquisitionSummaries(cases.map((caseRow) => caseRow.appointmentId));
+  return cases.map((caseRow) => ({ ...caseRow, acquisitionSummary: summaries.get(caseRow.appointmentId) ?? null }));
 }
 
 export async function findActiveManualFinalOverride(appointmentId: number): Promise<ReportingBoardManualFinalOverride | null> {

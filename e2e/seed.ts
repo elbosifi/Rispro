@@ -97,8 +97,10 @@ try {
       );
     }
     if (activeVersionId) await pool.query("update protocols set active_version_id = $2 where id = $1", [protocolId, activeVersionId]);
+    return { protocolId, activeVersionId };
   };
-  await seedProtocol({ name: "CT Brain - Acute", modality: "CT", anatomyRegionId: Number(brainRegion.rows[0].id), category: "General", indication: "Trauma and stroke imaging", contrastPolicy: "Non-contrast", activeVersion: "1.0" });
+  const acuteProtocol = await seedProtocol({ name: "CT Brain - Acute", modality: "CT", anatomyRegionId: Number(brainRegion.rows[0].id), category: "General", indication: "Trauma and stroke imaging", contrastPolicy: "Non-contrast", activeVersion: "1.0" });
+  if (!acuteProtocol.activeVersionId) throw new Error("E2E acute protocol requires an active version.");
   await seedProtocol({ name: "CT Brain - Tumor", modality: "CT", anatomyRegionId: Number(brainRegion.rows[0].id), category: "Oncology", indication: "Tumor and infection assessment", contrastPolicy: "With IV contrast", draftVersion: "1.0" });
   await seedProtocol({ name: "CT CAP - Oncology", modality: "CT", anatomyRegionId: Number(capRegion.rows[0].id), category: "Oncology", indication: "Staging and treatment response", contrastPolicy: "With IV contrast", activeVersion: "2.0", draftVersion: "2.1" });
   await seedProtocol({ name: "MRI Brain", modality: "MRI", anatomyRegionId: Number(brainRegion.rows[0].id), category: "General", indication: "Neuroimaging for headache and seizure", contrastPolicy: "Conditional / radiologist decision", activeVersion: "1.0" });
@@ -154,6 +156,57 @@ try {
      values ($1, 'Dr E2E', 'consultant', true, true, true, false) returning id`, [doctorUserId],
   )).rows[0].id);
   await pool.query(`insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_report, active) values ($1, $2, true, true)`, [doctorProfileId, modalityId]);
+  const supervisorProfileId = Number((await pool.query<{ id: number }>(
+    `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)
+     values ($1, 'Dr E2E Supervisor', 'consultant', true, true, true, true) returning id`, [supervisorId],
+  )).rows[0].id);
+  await pool.query(`insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_report, active) values ($1, $2, true, true)`, [supervisorProfileId, modalityId]);
+  const performedDevice = await pool.query<{ id: number }>(
+    `insert into dicom_devices (modality_id, device_name, modality_ae_title, scheduled_station_ae_title, is_active)
+     values ($1, 'E2E Performed CT device', 'E2E_MPPS_CT', 'E2E_MPPS_STATION', true) returning id`,
+    [modalityId],
+  );
+  await pool.query(
+    `insert into equipment (name, equipment_type, modality, modality_id, vendor, model, dicom_device_id, is_active)
+     values ('E2E Performed CT', 'CT', 'CT', $1, 'Philips', 'Incisive', $2, true) returning id`,
+    [modalityId, Number(performedDevice.rows[0].id)],
+  );
+  const plannedEquipment = await pool.query<{ id: number }>(
+    `insert into equipment (name, equipment_type, modality, modality_id, vendor, model, is_active)
+     values ('E2E Planned CT', 'CT', 'CT', $1, 'GE', 'Revolution', true) returning id`,
+    [modalityId],
+  );
+  const acquisitionPatient = await pool.query<{ id: number }>(
+    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+     values ('E2E Acquisition Patient', 'E2E Acquisition Patient', '100000000097', 'E2E Acquisition Patient', 'F', 39, '0910000097', 'national_id', '100000000097') returning id`,
+  );
+  const acquisitionBooking = await pool.query<{ id: number }>(
+    `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, case_category, requires_report, status, completed_at, policy_version_id, created_by_user_id, updated_by_user_id)
+     values ($1, $2, $3, $4::date, 'non_oncology', true, 'completed', now(), $5, $6, $6) returning id`,
+    [Number(acquisitionPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), e2eTodayInTripoli(), Number(policyVersion.rows[0].id), supervisorId],
+  );
+  const acquisitionBookingId = Number(acquisitionBooking.rows[0].id);
+  const acquisitionDicomDate = e2eTodayInTripoli().replaceAll("-", "");
+  await pool.query(
+    `insert into appointment_protocol_assignments (appointment_id, protocol_id, protocol_version_id, scanner_id, assigned_by, assigned_at, status)
+     values ($1, $2, $3, $4, $5, now(), 'ASSIGNED')`,
+    [acquisitionBookingId, acuteProtocol.protocolId, acuteProtocol.activeVersionId, Number(plannedEquipment.rows[0].id), supervisorId],
+  );
+  await pool.query(
+    `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_start_date, performed_start_time, correlated_appointment_id, correlation_status, processing_status)
+     values ($1, 'n-create', 'E2E_MPPS_CT', $2, 'IN PROGRESS', $3, '090000', $4, 'matched', 'processed')`,
+    ['e2e-acquisition-mpps-start', '1.2.826.0.1.3680043.10.543.e2e.acquisition', acquisitionDicomDate, acquisitionBookingId],
+  );
+  await pool.query(
+    `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, performed_end_date, performed_end_time, correlated_appointment_id, correlation_status, processing_status)
+     values ($1, 'n-set', 'E2E_MPPS_CT', $2, 'COMPLETED', $3, '092700', $4, 'matched', 'processed')`,
+    ['e2e-acquisition-mpps-end', '1.2.826.0.1.3680043.10.543.e2e.acquisition', acquisitionDicomDate, acquisitionBookingId],
+  );
+  await pool.query(
+    `insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, accession_number_snapshot)
+     values ($1, 'draft', 'sonicdicom', now(), now(), now() + interval '1 hour', now(), 0, 'V2-' || lpad(($1::bigint)::text, 6, '0'))`,
+    [acquisitionBookingId],
+  );
   const reportingPatient = await pool.query<{ id: number }>(
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
      values ('اختبار لوحة التقارير', 'E2E Reporting Patient', '100000000098', 'اختبار لوحة التقارير', 'F', 44, '0910000098', 'national_id', '100000000098') returning id`,

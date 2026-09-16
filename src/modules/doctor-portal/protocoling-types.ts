@@ -20,6 +20,7 @@ export interface ProtocolAssignmentSummary {
 }
 
 export interface DoctorProtocolingAppointmentRow {
+  acquisitionSummary: import("../../services/appointment-acquisition-summary.js").AppointmentAcquisitionSummary | null;
   appointmentId: number;
   accessionNumber: string;
   patientId: number;

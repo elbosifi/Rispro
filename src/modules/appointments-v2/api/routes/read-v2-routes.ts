@@ -37,6 +37,7 @@ import {
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../../services/protocoling-modality.js";
 import { asString } from "../../../../utils/request-coercion.js";
 import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, getModalitySonicDicomRedirect, recordModalityHistoricalPacsPatientAttestation, searchModalityHistoricalPacsPatientId } from "../../../doctor-portal/protocoling-repository.js";
+import { loadAppointmentAcquisitionSummaries } from "../../../../services/appointment-acquisition-summary.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -508,7 +509,10 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const rowsWithNotes = await attachSonicDicomStudyNotesToAppointments(result.rows);
+    const [rowsWithNotes, acquisitionSummaries] = await Promise.all([
+      attachSonicDicomStudyNotesToAppointments(result.rows),
+      loadAppointmentAcquisitionSummaries(result.rows.map((row) => Number(row.id))),
+    ]);
     const appointments = await Promise.all(rowsWithNotes.map(async (row) => {
       const publicCancelToken =
         patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
@@ -516,6 +520,7 @@ router.get(
           : null;
       return {
         ...row,
+        acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
           ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_list")
@@ -697,7 +702,10 @@ router.get(
     `, [bookingId]);
     const safety = safetyResult.rows[0];
 
-    const [appointmentWithNote] = await attachSonicDicomStudyNotesToAppointments([appointment]);
+    const [[appointmentWithNote], acquisitionSummaries] = await Promise.all([
+      attachSonicDicomStudyNotesToAppointments([appointment]),
+      loadAppointmentAcquisitionSummaries([bookingId]),
+    ]);
     const publicCancelToken =
       patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
         ? await issuePublicCancelToken(bookingId)
@@ -706,6 +714,7 @@ router.get(
     res.json({
       appointment: {
         ...appointmentWithNote,
+        acquisitionSummary: acquisitionSummaries.get(bookingId) ?? null,
         modality_safety_workflow_type: safety?.modality_safety_workflow_type ?? "standard_acknowledgement",
         mriPrimaryScreening: safety?.result ? {
           result: safety.result,
@@ -1533,7 +1542,11 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    res.json({ appointments: result.rows });
+    const acquisitionSummaries = await loadAppointmentAcquisitionSummaries(result.rows.map((row) => Number(row.id)));
+    res.json({ appointments: result.rows.map((row) => ({
+      ...row,
+      acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
+    })) });
   })
 );
 

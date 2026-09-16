@@ -39,6 +39,33 @@ function renderReadOnly(appointmentOverride: AppointmentWithDetails = appointmen
 }
 
 describe("AppointmentInformationView", () => {
+  it("renders MPPS performed equipment, timing, duration, and discontinuation reason without using workflow completion timing", () => {
+    renderReadOnly({
+      ...appointment,
+      acquisitionSummary: {
+        source: "mpps",
+        sourceAeTitle: "PHILIPS_MR",
+        dicomDeviceId: 6,
+        equipmentId: 9,
+        equipmentName: "Philips Ingenia Elition 3T",
+        equipmentVendor: "Philips",
+        equipmentModel: "Ingenia Elition 3T",
+        startedAt: "2026-07-26T07:37:00.000Z",
+        endedAt: "2026-07-26T08:04:00.000Z",
+        durationSeconds: 1620,
+        performedStatus: "DISCONTINUED",
+        discontinuationReason: "Patient unable to continue",
+      },
+    } as AppointmentWithDetails);
+
+    const acquisitionCard = screen.getByTestId("appointment-acquisition-card");
+    expect(acquisitionCard.textContent).toContain("Philips Ingenia Elition 3T");
+    expect(acquisitionCard.textContent).toContain("Scan started");
+    expect(acquisitionCard.textContent).toContain("Scan finished");
+    expect(screen.getByText("27 min")).toBeTruthy();
+    expect(screen.getByText("Patient unable to continue")).toBeTruthy();
+  });
+
   it("keeps patient identity visible while the appointment section enters controlled edit mode", async () => {
     renderInformation();
     expect(await screen.findByText("Test Patient")).toBeTruthy();

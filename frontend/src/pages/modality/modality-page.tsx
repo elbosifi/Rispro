@@ -1055,6 +1055,15 @@ export default function ModalityPage() {
                       const missingWaitingInfo = waitingInfo ? null : missingWaitingDurationInfo(language, appointment);
                       const missingPrimaryIdentifier = !hasPrimaryIdentifier(appointment);
                       const documentCount = appointment.documentCount ?? 0;
+                      const acquisition = appointment.acquisitionSummary;
+                      const acquisitionMinutes = acquisition?.durationSeconds != null
+                        ? Math.floor(acquisition.durationSeconds / 60)
+                        : acquisition?.performedStatus === "IN PROGRESS" && timestampValue(acquisition.startedAt) != null
+                          ? Math.max(0, Math.floor((elapsedNow.getTime() - timestampValue(acquisition.startedAt)!) / 60_000))
+                          : null;
+                      const acquisitionText = acquisition?.equipmentName
+                        ? `${acquisition.equipmentName}${acquisitionMinutes != null ? ` · ${formatDurationMinutes(language, acquisitionMinutes)}${acquisition.performedStatus === "IN PROGRESS" ? ` ${chooseLocalized(language, "قيد التشغيل", "running")}` : ""}` : ""}`
+                        : null;
                       const documentStatusLabel = documentCount === 0 ? t(language, "modality.documents.none") : documentCount === 1 ? t(language, "modality.documents.one") : t(language, "modality.documents.many", { count: documentCount });
                       const englishName = appointment.englishFullName?.trim();
                       const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
@@ -1146,6 +1155,7 @@ export default function ModalityPage() {
                               <td className="px-2 py-1.5 text-xs font-medium text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), chooseLocalized(language, "غير مسجل", "Not recorded"))}</td>
                               <td className="px-2 py-1.5 text-xs font-semibold text-slate-800">
                                 <span lang={isArabic ? "ar" : "en"} dir={isArabic ? "rtl" : "ltr"} className="block truncate leading-5">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || chooseLocalized(language, "غير مسجل", "Not recorded")}</span>
+                                {acquisitionText ? <span data-testid="modality-board-acquisition" className="block max-w-[14rem] truncate text-[11px] font-medium leading-4 text-muted-foreground" title={acquisitionText}>{acquisitionText}</span> : null}
                               </td>
                               <td className="px-2 py-1.5 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
@@ -1589,6 +1599,12 @@ export default function ModalityPage() {
                       <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
                       <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
                       <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                      {selectedAppointment.acquisitionSummary?.equipmentName ? <ClinicalBannerField label={chooseLocalized(language, "أُجري على", "Performed on")} value={selectedAppointment.acquisitionSummary.equipmentName} /> : null}
+                      {selectedAppointment.acquisitionSummary?.startedAt ? <ClinicalBannerField label={chooseLocalized(language, "بدأ التصوير", "Started")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.startedAt)} /> : null}
+                      {selectedAppointment.acquisitionSummary?.endedAt ? <ClinicalBannerField label={chooseLocalized(language, "انتهى التصوير", "Finished")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.endedAt)} /> : null}
+                      {selectedAppointment.acquisitionSummary?.durationSeconds != null ? <ClinicalBannerField label={chooseLocalized(language, "مدة الفحص", "Duration")} value={formatDurationMinutes(language, Math.floor(selectedAppointment.acquisitionSummary.durationSeconds / 60))} /> : null}
+                      {selectedAppointment.acquisitionSummary ? <ClinicalBannerField label={chooseLocalized(language, "المصدر", "Source")} value="MPPS" /> : null}
+                      {selectedAppointment.acquisitionSummary?.performedStatus === "DISCONTINUED" && selectedAppointment.acquisitionSummary.discontinuationReason ? <ClinicalBannerField label={chooseLocalized(language, "السبب", "Reason")} value={selectedAppointment.acquisitionSummary.discontinuationReason} /> : null}
                     </div>
                   </div>
                   <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>{t(language, "modality.specimenLabel.print")}</Button> : null}</div>

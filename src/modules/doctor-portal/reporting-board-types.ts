@@ -133,6 +133,7 @@ export interface ReportingBoardCaseHoldSummary {
 }
 
 export interface ReportingBoardCaseRow {
+  acquisitionSummary?: import("../../services/appointment-acquisition-summary.js").AppointmentAcquisitionSummary | null;
   caseType: "appointment" | "comparison";
   caseKey: string;
   appointmentId: number;

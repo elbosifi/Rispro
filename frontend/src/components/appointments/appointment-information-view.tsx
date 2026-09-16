@@ -91,6 +91,15 @@ function elapsedSince(value: string | null | undefined) {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+function formatAcquisitionDuration(language: "ar" | "en", seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return dash;
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours > 0) return language === "ar" ? `${hours} س ${remainingMinutes} د` : `${hours} h ${remainingMinutes} min`;
+  return language === "ar" ? `${minutes} د` : `${minutes} min`;
+}
+
 function recallStatusLabel(language: "ar" | "en", status: ComplementaryRecall["status"] | null) {
   const labels: Record<NonNullable<ComplementaryRecall["status"]>, [string, string]> = {
     pending_scheduling: ["بانتظار الحجز", "Awaiting booking"],
@@ -162,6 +171,8 @@ function WorkflowTimeline({ appointment }: { appointment: AppointmentWithDetails
     { label: text(language, "وصل", "Arrived"), value: appointment.arrivedAt },
     { label: text(language, "انتظار", "Waiting"), value: appointment.waitingStartedAt },
     { label: text(language, "اكتمل", "Completed"), value: appointment.completedAt ?? appointment.autoCompletedAt },
+    ...(appointment.acquisitionSummary?.startedAt ? [{ label: text(language, "بدأ التصوير", "Scan started"), value: appointment.acquisitionSummary.startedAt }] : []),
+    ...(appointment.acquisitionSummary?.endedAt ? [{ label: text(language, "انتهى التصوير", "Scan finished"), value: appointment.acquisitionSummary.endedAt }] : []),
   ].filter((point) => present(point.value));
   if (!points.length) return null;
   return <CompactCard title={text(language, "سير العمل", "Workflow")} testId="appointment-workflow-timeline"><ol className="flex flex-wrap gap-x-5 gap-y-3">{points.map((point) => <li key={point.label} className="min-w-28 border-s-2 border-accent/40 ps-3"><p className="text-xs font-semibold text-foreground">{point.label}</p><p dir="ltr" className="mt-0.5 text-xs text-muted-foreground">{formatDateTimeLy(String(point.value))}</p></li>)}</ol></CompactCard>;
@@ -245,6 +256,23 @@ function ClinicalCard({ appointment }: { appointment: AppointmentWithDetails }) 
   return <CompactCard title={text(language, "معلومات وتعليمات سريرية", "Clinical information and instructions")}><div className="space-y-3 text-sm">{present(appointment.notes) ? <div><p className="text-xs font-medium text-muted-foreground">{text(language, "ملاحظات الموعد", "Appointment notes")}</p><p className="mt-1 whitespace-pre-wrap">{appointment.notes}</p></div> : null}{present(modalityInstructions) ? <div><p className="text-xs font-medium text-muted-foreground">{text(language, "تعليمات الوسيلة", "Modality instructions")}</p><p className="mt-1 whitespace-pre-wrap">{modalityInstructions}</p></div> : null}{present(examinationInstructions) ? <div><p className="text-xs font-medium text-muted-foreground">{text(language, "تعليمات الفحص", "Examination instructions")}</p><p className="mt-1 whitespace-pre-wrap">{examinationInstructions}</p></div> : null}</div></CompactCard>;
 }
 
+function AcquisitionCard({ appointment }: { appointment: AppointmentWithDetails }) {
+  const { language } = useLanguage();
+  const acquisition = appointment.acquisitionSummary;
+  if (!acquisition) return null;
+  const performedOn = acquisition.equipmentName
+    ? <span className="inline-flex flex-wrap items-center gap-1.5"><Badge size="sm" variant="neutral">{acquisition.equipmentVendor || text(language, "غير معروف", "Unknown")}</Badge><span>{acquisition.equipmentName}</span></span>
+    : text(language, "غير متاح", "Unavailable");
+  return <CompactCard title={text(language, "بيانات الاقتناء", "Acquisition")} testId="appointment-acquisition-card"><DefinitionGrid rows={[
+    { label: text(language, "أُجري على", "Performed on"), value: performedOn, emphasis: Boolean(acquisition.equipmentName) },
+    ...(acquisition.startedAt ? [{ label: text(language, "بدأ التصوير", "Scan started"), value: formatDateTimeLy(acquisition.startedAt), dir: "ltr" as const }] : []),
+    ...(acquisition.endedAt ? [{ label: text(language, "انتهى التصوير", "Scan finished"), value: formatDateTimeLy(acquisition.endedAt), dir: "ltr" as const }] : []),
+    ...(acquisition.durationSeconds != null ? [{ label: text(language, "مدة الفحص", "Exam duration"), value: formatAcquisitionDuration(language, acquisition.durationSeconds), dir: "ltr" as const }] : []),
+    { label: text(language, "المصدر", "Acquisition source"), value: "MPPS", dir: "ltr" },
+    ...(acquisition.performedStatus === "DISCONTINUED" && acquisition.discontinuationReason ? [{ label: text(language, "سبب الإيقاف", "Discontinuation reason"), value: acquisition.discontinuationReason }] : []),
+  ]} /></CompactCard>;
+}
+
 type DetailsContentProps = {
   appointment: AppointmentWithDetails;
   reportStatus?: ReportStatus | null;
@@ -260,6 +288,7 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
   const waitingSince = ["arrived", "waiting"].includes(appointment.status) ? appointment.waitingStartedAt ?? appointment.arrivedAt : null;
   const capacity = capacityRows(language, appointment);
   const protocol = protocolRows(language, appointment);
+  const acquisition = appointment.acquisitionSummary;
 
   return <div className="space-y-4">
     <div data-testid="appointment-details-primary-grid" className={`grid gap-3 md:grid-cols-2 ${appointment.requiresReport ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
@@ -292,6 +321,7 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
     </div>
     <RecallCard appointment={appointment} recallContext={recallContext} onOpenAppointment={onOpenAppointment} />
     <ClinicalCard appointment={appointment} />
+    <AcquisitionCard appointment={appointment} />
     {protocol.length ? <CompactCard title={text(language, "البروتوكول", "Protocol")}><DefinitionGrid rows={protocol} /></CompactCard> : null}
     <WorkflowTimeline appointment={appointment} />
     {capacity.length ? <DisclosureSection title={text(language, "السعة واستثناءات الحجز", "Capacity and booking exceptions")}><DefinitionGrid rows={capacity} /></DisclosureSection> : null}

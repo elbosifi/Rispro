@@ -20,6 +20,21 @@ export type AppointmentStatus =
 
 export type QueueStatus = "waiting" | "called" | "in-progress" | "removed";
 
+export interface AppointmentAcquisitionSummary {
+  source: "mpps";
+  sourceAeTitle: string;
+  dicomDeviceId: number | null;
+  equipmentId: number | null;
+  equipmentName: string | null;
+  equipmentVendor: string | null;
+  equipmentModel: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  performedStatus: "IN PROGRESS" | "COMPLETED" | "DISCONTINUED";
+  discontinuationReason: string | null;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -509,6 +524,7 @@ export interface ReportingBoardCaseHoldSummary {
 }
 
 export interface ReportingBoardCaseRow {
+  acquisitionSummary?: AppointmentAcquisitionSummary | null;
   caseType: "appointment" | "comparison";
   caseKey: string;
   appointmentId: number;
@@ -1093,6 +1109,7 @@ export interface ProtocolAssignment {
 }
 
 export interface DoctorProtocolingAppointment {
+  acquisitionSummary?: AppointmentAcquisitionSummary | null;
   appointmentId: number;
   accessionNumber: string;
   patientId: number;

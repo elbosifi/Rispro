@@ -1821,6 +1821,29 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("oblique axial")).toBeTruthy();
   });
 
+  it("shows compact MPPS equipment and duration on the board and richer acquisition detail in the selected drawer", async () => {
+    const user = await openBoard([appointment({
+      id: 78,
+      acquisitionSummary: {
+        source: "mpps", sourceAeTitle: "PHILIPS_MR", dicomDeviceId: 7,
+        equipmentId: 8, equipmentName: "Philips Ingenia Elition 3T", equipmentVendor: "Philips", equipmentModel: "Ingenia Elition 3T",
+        startedAt: "2026-06-18T07:37:00.000Z", endedAt: "2026-06-18T08:04:00.000Z", durationSeconds: 1620,
+        performedStatus: "COMPLETED", discontinuationReason: null,
+      },
+    })]);
+    const row = screen.getByTestId("modality-board-row-78");
+    expect(within(row).getByTestId("modality-board-acquisition").textContent).toContain("Philips Ingenia Elition 3T · 27 min");
+
+    await user.click(row);
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    expect(within(drawer).getByText("Performed on")).toBeTruthy();
+    expect(within(drawer).getByText("Philips Ingenia Elition 3T")).toBeTruthy();
+    expect(within(drawer).getByText("Started")).toBeTruthy();
+    expect(within(drawer).getByText("Finished")).toBeTruthy();
+    expect(within(drawer).getByText("27 min")).toBeTruthy();
+    expect(within(drawer).getByText("MPPS")).toBeTruthy();
+  });
+
   it("treats MR as MRI, showing the assigned protocol and fetching its detail", async () => {
     const assigned = mriAssignment({ appointmentId: 20, protocolId: null, protocolVersionId: null, freeTextProtocol: "MRI brain with contrast", protocolName: null, versionNumber: null, mriSequences: [] });
     const user = await openBoard([appointment({

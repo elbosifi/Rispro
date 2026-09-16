@@ -4,6 +4,7 @@ import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
+import { loadAppointmentAcquisitionSummaries } from "../../services/appointment-acquisition-summary.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
 import { discoverHistoricalPacsCandidatesForPatient, getHistoricalPacsReconciliationForPatient, lookupHistoricalPacsByPatientId, type HistoricalPacsCandidate } from "../../services/historical-pacs-index-service.js";
 import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
@@ -107,6 +108,7 @@ function mapAssignment(row: RawRecord): ProtocolAssignmentSummary | null {
 function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
   const assignment = mapAssignment(row);
   return {
+    acquisitionSummary: null,
     appointmentId: Number(row.appointment_id),
     accessionNumber: String(row.accession_number),
     patientId: Number(row.patient_id),
@@ -333,7 +335,9 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
      limit 500`,
     values
   );
-  return result.rows.map(mapAppointment);
+  const appointments = result.rows.map(mapAppointment);
+  const summaries = await loadAppointmentAcquisitionSummaries(appointments.map((appointment) => appointment.appointmentId));
+  return appointments.map((appointment) => ({ ...appointment, acquisitionSummary: summaries.get(appointment.appointmentId) ?? null }));
 }
 
 async function getProtocolingAppointment(appointmentId: number): Promise<DoctorProtocolingAppointmentRow | null> {
@@ -344,7 +348,10 @@ async function getProtocolingAppointment(appointmentId: number): Promise<DoctorP
      limit 1`,
     [appointmentId]
   );
-  return result.rows[0] ? mapAppointment(result.rows[0]) : null;
+  if (!result.rows[0]) return null;
+  const appointment = mapAppointment(result.rows[0]);
+  const summaries = await loadAppointmentAcquisitionSummaries([appointmentId]);
+  return { ...appointment, acquisitionSummary: summaries.get(appointmentId) ?? null };
 }
 
 type PreviousStudiesAppointmentContext = Pick<DoctorProtocolingAppointmentRow, "appointmentId" | "patientId" | "accessionNumber" | "studyInstanceUid" | "patientDicomId" | "patientEnglishName" | "patientArabicName">;

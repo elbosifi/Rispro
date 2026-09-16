@@ -314,6 +314,50 @@ describe("Doctor protocoling request documents", () => {
     await waitFor(() => expect(mockFetchAppointments).toHaveBeenLastCalledWith(expect.objectContaining({ appointmentStatus: null, waitingFirst: true })));
   });
 
+  it("keeps the planned protocol scanner distinct from the MPPS performed device", async () => {
+    const acquiredAppointment = {
+      ...appointment,
+      assignment: {
+        assignmentId: 77,
+        protocolId: 9,
+        protocolVersionId: 10,
+        protocolName: "Chest routine",
+        versionNumber: 2,
+        scannerId: 5,
+        scannerName: "Planned CT",
+        protocolNotes: null,
+        contrastNotes: null,
+        freeTextProtocol: null,
+        status: "ASSIGNED" as const,
+        assignedBy: 3,
+        assignedAt: "2026-07-22T08:00:00Z",
+      },
+      acquisitionSummary: {
+        source: "mpps" as const,
+        sourceAeTitle: "CT-PERFORMED",
+        dicomDeviceId: 7,
+        equipmentId: 12,
+        equipmentName: "Performed CT",
+        equipmentVendor: "Philips",
+        equipmentModel: "Incisive",
+        startedAt: "2026-07-22T09:00:00.000Z",
+        endedAt: "2026-07-22T09:27:00.000Z",
+        durationSeconds: 1620,
+        performedStatus: "COMPLETED" as const,
+        discontinuationReason: null,
+      },
+    };
+    mockFetchAppointments.mockResolvedValue([acquiredAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: acquiredAppointment, assignmentDetail: null });
+
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    const performed = await screen.findByTestId("protocoling-performed-acquisition");
+    expect(performed.textContent).toContain("Performed on: Performed CT");
+    expect(performed.textContent).toContain("27 min");
+    expect(screen.getByText(/Protocol scanner: Planned CT/)).toBeTruthy();
+  });
+
   it("uses the standard DD/MM/YYYY date input while sending ISO date filters", async () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 

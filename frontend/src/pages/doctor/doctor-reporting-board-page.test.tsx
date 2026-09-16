@@ -445,6 +445,33 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
   });
 
+  it("shows MPPS performed equipment and duration as a compact study subline", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, acquisitionSummary: {
+        source: "mpps",
+        sourceAeTitle: "CT-1",
+        dicomDeviceId: 4,
+        equipmentId: 8,
+        equipmentName: "Philips Incisive CT",
+        equipmentVendor: "Philips",
+        equipmentModel: "Incisive",
+        startedAt: "2026-05-29T08:00:00.000Z",
+        endedAt: "2026-05-29T08:27:00.000Z",
+        durationSeconds: 1620,
+        performedStatus: "COMPLETED",
+        discontinuationReason: null,
+      }}],
+      totalCount: 1,
+      pagination: { limit: 100, offset: 0, hasMore: false, nextOffset: null },
+      filters: { reportStatus: "required_not_final", limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const acquisition = await screen.findByTestId("reporting-study-acquisition");
+    expect(acquisition.textContent).toContain("Philips Incisive CT");
+    expect(acquisition.textContent).toContain("27 min");
+  });
+
   it("opens the full Protocoling workspace from the patient name and closes back to the board", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select case V2-000042" }));
