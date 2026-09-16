@@ -80,6 +80,7 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
       mimeType: file!.type || "application/octet-stream",
       fileContentBase64: await toBase64(file!),
     }),
+    meta: { suppressGlobalToast: true },
     onSuccess: () => {
       setFile(null);
       if (fileInput.current) fileInput.current.value = "";
@@ -90,11 +91,13 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
   });
   const remove = useMutation({
     mutationFn: (documentId: number) => deleteIrReferralDocument(referralId, documentId),
+    meta: { suppressGlobalToast: true },
     onSuccess: refresh,
     onError: (error) => pushToast({ type: "error", title: t(language, "irReferral.documentRemoveFailedTitle"), message: error instanceof Error ? error.message : t(language, "irReferral.documentRemoveFailedMessage") }),
   });
   const confirm = useMutation({
     mutationFn: () => confirmIrReferralMaterials(referralId, { documentsConfirmed, imagesConfirmed, note: note.trim() || null }),
+    meta: { suppressGlobalToast: true },
     onSuccess: () => {
       refresh();
       pushToast({ type: "success", title: t(language, "irReferral.reviewSentTitle"), message: t(language, "irReferral.reviewSentMessage") });
@@ -107,6 +110,7 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
       decision,
       decisionNote: decisionNote.trim() || null,
     }),
+    meta: { suppressGlobalToast: true },
     onSuccess: () => {
       setReviewEditing(false);
       refresh();
@@ -123,6 +127,7 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
       receptionInstruction: receptionInstruction.trim() || null,
       technologistInstruction: technologistInstruction.trim(),
     }),
+    meta: { suppressGlobalToast: true },
     onSuccess: () => {
       refresh();
       pushToast({ type: "success", title: t(language, "irReferral.appointmentRequestedTitle"), message: t(language, "irReferral.appointmentRequestedMessage") });
@@ -140,7 +145,7 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
   const materialStatusOpen = row.status === "preparing" || row.status === "needs_information";
   const canPrepareMaterials = surface === "core" && canPrepareByRole && materialStatusOpen;
   const canDeleteDocuments = surface === "core" && manager && materialStatusOpen;
-  const activeDoctorProfileId = doctorMe.data?.hasActiveDoctorProfile ? doctorMe.data.profile?.id ?? null : null;
+  const activeDoctorProfileId = doctorMe.data?.hasActiveDoctorProfile && doctorMe.data.profile?.id != null ? Number(doctorMe.data.profile.id) : null;
   const canReviewClinically = activeDoctorProfileId != null && (activeDoctorProfileId === row.assignedDoctorId || manager);
   const ready = row.status === "ready_for_review";
   const recordedReview = Boolean(row.reviewedAt && row.decision);

@@ -118,7 +118,7 @@ export function AppointmentCreatePage() {
         doctorModuleCapabilities={doctorMeQuery.data?.moduleCapabilities ?? []}
         initialSelectedPatient={initialSelectedPatient}
         complementaryRecallContext={recallContextQuery.data ? { id: recallContextQuery.data.id, modalityId: recallContextQuery.data.modalityId, examTypeId: recallContextQuery.data.examTypeId, requiresReport: recallContextQuery.data.requiresReport, originalAccession: recallContextQuery.data.originalAccession, originalExam: recallContextQuery.data.originalExam, receptionInstruction: recallContextQuery.data.receptionInstruction } : null}
-        irReferralScheduleContext={irReferralContextQuery.data ? { id: irReferralContextQuery.data.id, modalityId: irReferralContextQuery.data.requestedModalityId, examTypeId: irReferralContextQuery.data.requestedExamTypeId, procedure: irReferralContextQuery.data.requestedProcedure, receptionInstruction: irReferralContextQuery.data.receptionInstruction } : null}
+        irReferralScheduleContext={irReferralContextQuery.data ? { id: irReferralContextQuery.data.id, modalityId: irReferralContextQuery.data.requestedModalityId, examTypeId: irReferralContextQuery.data.requestedExamTypeId, procedure: irReferralContextQuery.data.requestedProcedure, receptionInstruction: irReferralContextQuery.data.receptionInstruction, technologistInstruction: irReferralContextQuery.data.technologistInstruction } : null}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />

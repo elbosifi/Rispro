@@ -18,6 +18,7 @@ export function RequestIrReferralModal({ patient, onClose, onCreated }: { patien
   const doctors = useQuery({ queryKey: ["ir-referral-doctors"], queryFn: fetchAssignableIrDoctors });
   const create = useMutation({
     mutationFn: () => createIrReferral({ patientId: patient.id, requestedProcedure: procedure.trim(), clinicalIndication: indication.trim() || null, assignedDoctorId: doctorId!, notifyAssignedDoctor: notify }),
+    meta: { suppressGlobalToast: true },
     onSuccess: (referral) => {
       void queryClient.invalidateQueries({ queryKey: ["ir-referrals"] });
       pushToast({ type: "success", title: t(language, "irReferral.createdTitle"), message: t(language, "irReferral.createdMessage") });

@@ -52,7 +52,7 @@ interface CreateAppointmentTabProps {
   doctorModuleCapabilities?: DoctorModuleCapability[];
   initialSelectedPatient?: SelectedPatient | null;
   complementaryRecallContext?: { id: number; modalityId: number; examTypeId: number; requiresReport: boolean; originalAccession: string; originalExam: string | null; receptionInstruction: string | null } | null;
-  irReferralScheduleContext?: { id: number; modalityId: number; examTypeId: number; procedure: string; receptionInstruction: string | null } | null;
+  irReferralScheduleContext?: { id: number; modalityId: number; examTypeId: number; procedure: string; receptionInstruction: string | null; technologistInstruction: string | null } | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
     patientId: number;
@@ -922,7 +922,7 @@ export function CreateAppointmentTab({
               }}
               locked={Boolean(lockedBookingContext)}
             />
-            {lockedBookingContext ? <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">{lockedBookingContext.kind === "ir" ? t(language, "appointments.create.irReferralContext") : "Complementary recall"}</span><p className="mt-1 text-muted-foreground">{lockedBookingContext.kind === "ir" ? lockedBookingContext.procedure : `${lockedBookingContext.originalAccession} · ${lockedBookingContext.originalExam ?? "Original exam"}`}</p><p className="mt-1 text-muted-foreground">{lockedBookingContext.kind === "ir" ? t(language, "appointments.create.irLockedContext") : "Doctor-authorized patient, modality, and examination are locked for this booking."}</p>{lockedBookingContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{lockedBookingContext.receptionInstruction}</p> : null}</div> : null}
+            {lockedBookingContext ? <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-sm"><span className="font-semibold">{lockedBookingContext.kind === "ir" ? t(language, "appointments.create.irReferralContext") : "Complementary recall"}</span><p className="mt-1 text-muted-foreground">{lockedBookingContext.kind === "ir" ? lockedBookingContext.procedure : `${lockedBookingContext.originalAccession} · ${lockedBookingContext.originalExam ?? "Original exam"}`}</p><p className="mt-1 text-muted-foreground">{lockedBookingContext.kind === "ir" ? t(language, "appointments.create.irLockedContext") : "Doctor-authorized patient, modality, and examination are locked for this booking."}</p>{lockedBookingContext.receptionInstruction ? <p className="mt-1 text-muted-foreground">{lockedBookingContext.receptionInstruction}</p> : null}{lockedBookingContext.kind === "ir" && lockedBookingContext.technologistInstruction ? <p className="mt-1 text-muted-foreground">{t(language, "irReferral.technologistInstruction")}: {lockedBookingContext.technologistInstruction}</p> : null}</div> : null}
 
             {form.patientId != null && (patientNoShows.length > 0 || patientNoShowSummary?.bookingRestricted) && (
               <div className="mt-4 sm:mt-5 space-y-3">
