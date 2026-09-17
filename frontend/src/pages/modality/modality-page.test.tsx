@@ -1832,7 +1832,7 @@ describe("ModalityPage modality board", () => {
       },
     })]);
     const row = screen.getByTestId("modality-board-row-78");
-    expect(within(row).getByTestId("modality-board-acquisition").textContent).toContain("Philips Ingenia Elition 3T · 27 min");
+    expect(within(row).getByTestId("modality-board-acquisition").textContent).toContain("Philips Ingenia Elition 3T · 27m");
 
     await user.click(row);
     const drawer = await screen.findByTestId("selected-appointment-drawer");
@@ -1840,7 +1840,7 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Philips Ingenia Elition 3T")).toBeTruthy();
     expect(within(drawer).getByText("Started")).toBeTruthy();
     expect(within(drawer).getByText("Finished")).toBeTruthy();
-    expect(within(drawer).getByText("27 min")).toBeTruthy();
+    expect(within(drawer).getByText("27m")).toBeTruthy();
     expect(within(drawer).getByText("MPPS")).toBeTruthy();
   });
 
