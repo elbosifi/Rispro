@@ -8,7 +8,6 @@ export type SettingsSection =
   | "scheduling_engine_config"
   | "pacs_connection"
   | "dicom_gateway_config"
-  | "dicom_gateway_devices"
   | "dicom_gateway_monitoring"
   | "mwl_policy"
   | "orthanc_mwl_sync"
@@ -47,7 +46,6 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "scheduling_engine_config",
   "pacs_connection",
   "dicom_gateway_config",
-  "dicom_gateway_devices",
   "dicom_gateway_monitoring",
   "mwl_policy",
   "orthanc_mwl_sync",
@@ -92,7 +90,6 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   scheduling_engine_config: "scheduling",
   pacs_connection: "integrations",
   dicom_gateway_config: "integrations",
-  dicom_gateway_devices: "integrations",
   dicom_gateway_monitoring: "integrations",
   mwl_policy: "integrations",
   orthanc_mwl_sync: "integrations",
@@ -115,6 +112,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling"
 
 export function initialSettingsSection(search: string): SettingsSection {
   const requested = new URLSearchParams(search).get("section");
+  if (requested === "dicom_gateway_devices") return "equipment";
   return requested && SETTINGS_MENU_SECTIONS.includes(requested as SettingsMenuSection) ? requested as SettingsMenuSection : "menu";
 }
 

@@ -47,6 +47,10 @@ export async function updateEquipment(id: number, payload: RawRecord) {
   return api<{ equipment: RawRecord }>(`/settings/equipment/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 }
 
+export async function saveEquipmentDicomIdentity(id: number, payload: RawRecord) {
+  return api<{ equipment: RawRecord }>(`/settings/equipment/${id}/dicom-identity`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
 export async function deactivateEquipment(id: number) {
   return api<{ equipment: RawRecord }>(`/settings/equipment/${id}/deactivate`, { method: "POST" });
 }

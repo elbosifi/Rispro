@@ -223,7 +223,7 @@ export default function ModalitiesSection({ onReAuthRequired }: { onReAuthRequir
           >
             {showInactive ? "Hide inactive" : "Show inactive"}
           </Button>
-          <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة جهاز"}</Button>
+          <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة وسيلة تصوير"}</Button>
         </div>
       </div>
       <span className="text-sm description-center">{modalities.length} modalities</span>

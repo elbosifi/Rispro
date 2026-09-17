@@ -4,7 +4,7 @@ import { after, before, describe, it } from "node:test";
 import { pool } from "../db/pool.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { settingsRouter } from "../routes/settings.js";
-import { createEquipment, deactivateEquipment, getEquipment, listEquipment, updateEquipment } from "./equipment-service.js";
+import { createEquipment, deactivateEquipment, getEquipment, listEquipment, manageEquipmentDicomIdentity, updateEquipment } from "./equipment-service.js";
 import { HttpError } from "../utils/http-error.js";
 import { canReachDatabase, createTestAuthCookie, createTestSupervisorReauthCookie, fetchJson } from "../modules/appointments-v2/tests/integration/helpers.js";
 
@@ -65,7 +65,7 @@ describe("equipment service and Settings API", { skip: !process.env.DATABASE_URL
     if (!userId) return;
     await pool.query("delete from audit_log where changed_by_user_id=$1", [userId]);
     await pool.query("delete from equipment where name like $1", [`${prefix}%`]);
-    await pool.query("delete from dicom_devices where id=any($1::bigint[])", [Object.values(dicomIds)]);
+    await pool.query("delete from dicom_devices where created_by_user_id=$1", [userId]);
     await pool.query("delete from modalities where id=$1", [modalityIds.us]);
     await pool.query("delete from users where id=$1", [userId]);
   });
@@ -120,6 +120,28 @@ describe("equipment service and Settings API", { skip: !process.env.DATABASE_URL
     await expectHttpError(() => createEquipment({ name: `${prefix} DICOM mismatch`, equipmentType: "MRI", modalityId: modalityIds.mr, dicomDeviceId: dicomIds.ct }, userId), 400);
   });
 
+  it("creates, updates, and returns one nested DICOM identity for Equipment", async () => {
+    const equipment = await createEquipment({ name: `${prefix} Identity`, equipmentType: "CT", modalityId: modalityIds.ct }, userId);
+    const created = await manageEquipmentDicomIdentity(equipment.id, { deviceName: "CT Identity", modalityAeTitle: "ct_identity", stationName: "CT room", mwlEnabled: true, isActive: false }, userId);
+    assert.ok(created.dicomIdentity); assert.equal(created.dicomIdentity.modalityAeTitle, "CT_IDENTITY"); assert.equal(created.dicomIdentity.scheduledStationAeTitle, "CT_IDENTITY"); assert.equal(created.dicomIdentity.mwlEnabled, true); assert.equal(created.dicomIdentity.isActive, false);
+    const deviceId = created.dicomIdentity.id;
+    const updated = await manageEquipmentDicomIdentity(equipment.id, { deviceName: "CT Identity Updated", modalityAeTitle: "ct_identity", scheduledStationAeTitle: "station_ct", stationName: "CT room 2", sourceIp: "10.0.0.9", mwlEnabled: false, isActive: true }, userId);
+    assert.equal(updated.dicomIdentity?.id, deviceId); assert.equal(updated.dicomIdentity?.deviceName, "CT Identity Updated"); assert.equal(updated.dicomIdentity?.scheduledStationAeTitle, "STATION_CT"); assert.equal(updated.dicomIdentity?.mwlEnabled, false); assert.equal(updated.dicomIdentity?.sourceIp, "10.0.0.9");
+    const count = await pool.query("select count(*)::int as count from dicom_devices where id=$1", [deviceId]); assert.equal(count.rows[0]?.count, 1);
+  });
+
+  it("explicitly links only a compatible unlinked DICOM identity", async () => {
+    const equipment = await createEquipment({ name: `${prefix} Link`, equipmentType: "CT", modalityId: modalityIds.ct }, userId);
+    const unlinked = await createDicomDevice(modalityIds.ct, "Unlinked");
+    const linked = await manageEquipmentDicomIdentity(equipment.id, { existingDicomDeviceId: unlinked }, userId);
+    assert.equal(linked.dicomIdentity?.id, unlinked);
+    const other = await createEquipment({ name: `${prefix} Link other`, equipmentType: "CT", modalityId: modalityIds.ct }, userId);
+    await expectHttpError(() => manageEquipmentDicomIdentity(other.id, { existingDicomDeviceId: unlinked }, userId), 409);
+    await expectHttpError(() => manageEquipmentDicomIdentity(other.id, { existingDicomDeviceId: dicomIds.mr }, userId), 400);
+    const noModality = await createEquipment({ name: `${prefix} No modality`, equipmentType: "OTHER" }, userId);
+    await expectHttpError(() => manageEquipmentDicomIdentity(noModality.id, { deviceName: "No modality", modalityAeTitle: "NO_MODALITY" }, userId), 400);
+  });
+
   it("writes equipment audit entries for create, update, and deactivate operations", async () => {
     const equipment = await createEquipment({ name: `${prefix} Audit`, equipmentType: "OTHER" }, userId);
     await updateEquipment(equipment.id, { location: "Archive" }, userId); await deactivateEquipment(equipment.id, userId);
@@ -143,5 +165,14 @@ describe("equipment service and Settings API", { skip: !process.env.DATABASE_URL
     assert.equal(updated.status, 200); assert.equal(updated.data.equipment.location, "Updated desk");
     const deactivated = await fetchJson<{ equipment: { isActive: boolean } }>(app.baseUrl, `/api/settings/equipment/${created.data.equipment.id}/deactivate`, { method: "POST", cookie });
     assert.equal(deactivated.status, 200); assert.equal(deactivated.data.equipment.isActive, false);
+  });
+
+  it("protects and serves the Equipment DICOM identity API", async () => {
+    assert.ok(app); const cookie = `${createTestAuthCookie(userId, "supervisor")}; ${createTestSupervisorReauthCookie(userId, "supervisor")}`;
+    const created = await fetchJson<{ equipment: { id: number } }>(app.baseUrl, "/api/settings/equipment", { method: "POST", cookie, body: { name: `${prefix} API identity`, equipmentType: "CT", modalityId: modalityIds.ct } });
+    assert.equal((await fetchJson(app.baseUrl, `/api/settings/equipment/${created.data.equipment.id}/dicom-identity`, { method: "PUT", cookie: createTestAuthCookie(userId, "supervisor"), body: { deviceName: "API", modalityAeTitle: "API_IDENTITY" } })).status, 403);
+    const configured = await fetchJson<{ equipment: { dicomIdentity: { modalityAeTitle: string } } }>(app.baseUrl, `/api/settings/equipment/${created.data.equipment.id}/dicom-identity`, { method: "PUT", cookie, body: { deviceName: "API", modalityAeTitle: "api_identity", mwlEnabled: true, isActive: true } });
+    assert.equal(configured.status, 200); assert.equal(configured.data.equipment.dicomIdentity.modalityAeTitle, "API_IDENTITY");
+    assert.equal((await fetchJson(app.baseUrl, "/api/settings/dicom-devices", { cookie })).status, 200);
   });
 });

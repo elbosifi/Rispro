@@ -77,6 +77,18 @@ export interface DicomDeviceListRow {
   modality_name_en: string;
 }
 
+export interface DicomDeviceWriteInput {
+  modalityId: number;
+  deviceName: string;
+  modalityAeTitle: string;
+  scheduledStationAeTitle: string;
+  stationName: string;
+  stationLocation: string;
+  sourceIp: string | null;
+  mwlEnabled: boolean;
+  isActive: boolean;
+}
+
 export interface WorklistAppointmentRow {
   id: number;
   patient_id: number;
@@ -224,6 +236,58 @@ function normalizeIpAddress(value: unknown, fieldName: string): string | null {
   }
 
   throw new HttpError(400, `${fieldName} must be a valid IP address format.`);
+}
+
+export function normalizeDicomDeviceWriteInput(payload: UnknownRecord, modalityId?: number): DicomDeviceWriteInput {
+  const resolvedModalityId = modalityId ?? normalizePositiveInteger(payload.modalityId, "modalityId");
+  if (!resolvedModalityId) throw new HttpError(400, "modalityId is required.");
+  const deviceName = normalizeOptionalText(payload.deviceName);
+  const modalityAeTitle = normalizeOptionalText(payload.modalityAeTitle).toUpperCase();
+  const scheduledStationAeTitle = normalizeOptionalText(payload.scheduledStationAeTitle || modalityAeTitle).toUpperCase();
+  if (!deviceName) throw new HttpError(400, "deviceName is required.");
+  if (!modalityAeTitle) throw new HttpError(400, "modalityAeTitle is required.");
+  if (!scheduledStationAeTitle) throw new HttpError(400, "scheduledStationAeTitle is required.");
+  return {
+    modalityId: resolvedModalityId,
+    deviceName,
+    modalityAeTitle,
+    scheduledStationAeTitle,
+    stationName: normalizeOptionalText(payload.stationName),
+    stationLocation: normalizeOptionalText(payload.stationLocation),
+    sourceIp: normalizeIpAddress(payload.sourceIp, "sourceIp"),
+    mwlEnabled: normalizeBooleanFlag(payload.mwlEnabled ?? "enabled", "mwlEnabled"),
+    isActive: normalizeBooleanFlag(payload.isActive ?? "enabled", "isActive"),
+  };
+}
+
+async function assertDicomAeTitleAvailable(client: PoolClient, aeTitle: string, exceptDeviceId?: number): Promise<void> {
+  const result = await client.query("select id from dicom_devices where modality_ae_title=$1 and id <> coalesce($2, 0) limit 1", [aeTitle, exceptDeviceId ?? null]);
+  if (result.rows[0]) throw new HttpError(409, "AE Title already exists.");
+}
+
+export async function createDicomDeviceInTransaction(client: PoolClient, input: DicomDeviceWriteInput, currentUserId: UserId): Promise<DicomDeviceRow> {
+  await assertDicomAeTitleAvailable(client, input.modalityAeTitle);
+  const { rows } = await client.query(
+    `insert into dicom_devices (modality_id, device_name, modality_ae_title, scheduled_station_ae_title, station_name, station_location, source_ip, mwl_enabled, is_active, created_by_user_id, updated_by_user_id)
+     values ($1,$2,$3,$4,nullif($5,''),nullif($6,''),$7,$8,$9,$10,$10) returning *`,
+    [input.modalityId, input.deviceName, input.modalityAeTitle, input.scheduledStationAeTitle, input.stationName, input.stationLocation, input.sourceIp, input.mwlEnabled, input.isActive, currentUserId]
+  );
+  const device = requireRow(rows[0] as DicomDeviceRow | undefined, "Failed to create DICOM device.");
+  await logAuditEntry({ entityType: "integration", entityId: device.id, actionType: "create_dicom_device", oldValues: null, newValues: device, changedByUserId: currentUserId }, client);
+  return device;
+}
+
+export async function updateDicomDeviceInTransaction(client: PoolClient, deviceId: number, input: DicomDeviceWriteInput, currentUserId: UserId): Promise<DicomDeviceRow> {
+  const existing = (await client.query("select * from dicom_devices where id=$1 limit 1", [deviceId])).rows[0] as DicomDeviceRow | undefined;
+  if (!existing) throw new HttpError(404, "DICOM device not found.");
+  await assertDicomAeTitleAvailable(client, input.modalityAeTitle, deviceId);
+  const { rows } = await client.query(
+    `update dicom_devices set modality_id=$2, device_name=$3, modality_ae_title=$4, scheduled_station_ae_title=$5, station_name=nullif($6,''), station_location=nullif($7,''), source_ip=$8, mwl_enabled=$9, is_active=$10, updated_by_user_id=$11, updated_at=now() where id=$1 returning *`,
+    [deviceId, input.modalityId, input.deviceName, input.modalityAeTitle, input.scheduledStationAeTitle, input.stationName, input.stationLocation, input.sourceIp, input.mwlEnabled, input.isActive, currentUserId]
+  );
+  const device = requireRow(rows[0] as DicomDeviceRow | undefined, "Failed to update DICOM device.");
+  await logAuditEntry({ entityType: "integration", entityId: deviceId, actionType: "update_dicom_device", oldValues: existing, newValues: device, changedByUserId: currentUserId }, client);
+  return device;
 }
 
 function normalizeQrOrAccession(scanValue: unknown): string {
@@ -563,77 +627,11 @@ export async function createDicomDevice(
   payload: UnknownRecord,
   currentUserId: UserId
 ): Promise<DicomDeviceRow> {
-  const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
-  const deviceName = normalizeOptionalText(payload.deviceName);
-  const modalityAeTitle = normalizeOptionalText(payload.modalityAeTitle).toUpperCase();
-  const scheduledStationAeTitle = normalizeOptionalText(payload.scheduledStationAeTitle).toUpperCase();
-  const stationName = normalizeOptionalText(payload.stationName);
-  const stationLocation = normalizeOptionalText(payload.stationLocation);
-  const sourceIp = normalizeIpAddress(payload.sourceIp, "sourceIp");
-  const mwlEnabled = normalizeBooleanFlag(payload.mwlEnabled ?? "enabled", "mwlEnabled");
-  const isActive = normalizeBooleanFlag(payload.isActive ?? "enabled", "isActive");
-
-  if (!deviceName) {
-    throw new HttpError(400, "deviceName is required.");
-  }
-
-  if (!modalityAeTitle) {
-    throw new HttpError(400, "modalityAeTitle is required.");
-  }
-
-  if (!scheduledStationAeTitle) {
-    throw new HttpError(400, "scheduledStationAeTitle is required.");
-  }
-
+  const input = normalizeDicomDeviceWriteInput(payload);
   const client = await pool.connect();
-
   try {
     await client.query("begin");
-    const { rows } = await client.query(
-      `
-        insert into dicom_devices (
-          modality_id,
-          device_name,
-          modality_ae_title,
-          scheduled_station_ae_title,
-          station_name,
-          station_location,
-          source_ip,
-          mwl_enabled,
-          is_active,
-          created_by_user_id,
-          updated_by_user_id
-        )
-        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, $8, $9, $10, $10)
-        returning *
-      `,
-      [
-        modalityId,
-        deviceName,
-        modalityAeTitle,
-        scheduledStationAeTitle,
-        stationName,
-        stationLocation,
-        sourceIp,
-        mwlEnabled,
-        isActive,
-        currentUserId
-      ]
-    );
-    const createdDevice = requireRow(rows[0] as DicomDeviceRow | undefined, "Failed to create DICOM device.");
-
-    await logAuditEntry(
-      {
-        entityType: "integration",
-        entityId: createdDevice.id,
-        actionType: "create_dicom_device",
-        oldValues: null,
-        newValues: createdDevice,
-        changedByUserId: currentUserId
-      },
-      client
-    );
-
+    const createdDevice = await createDicomDeviceInTransaction(client, input, currentUserId);
     await client.query("commit");
     scheduleV2WorklistRebuild();
     return createdDevice;
@@ -651,81 +649,12 @@ export async function updateDicomDevice(
   currentUserId: UserId
 ): Promise<DicomDeviceRow> {
   const cleanDeviceId = normalizePositiveInteger(deviceId, "deviceId");
-  const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
-  const deviceName = normalizeOptionalText(payload.deviceName);
-  const modalityAeTitle = normalizeOptionalText(payload.modalityAeTitle).toUpperCase();
-  const scheduledStationAeTitle = normalizeOptionalText(payload.scheduledStationAeTitle).toUpperCase();
-  const stationName = normalizeOptionalText(payload.stationName);
-  const stationLocation = normalizeOptionalText(payload.stationLocation);
-  const sourceIp = normalizeIpAddress(payload.sourceIp, "sourceIp");
-  const mwlEnabled = normalizeBooleanFlag(payload.mwlEnabled ?? "enabled", "mwlEnabled");
-  const isActive = normalizeBooleanFlag(payload.isActive ?? "enabled", "isActive");
+  if (!cleanDeviceId) throw new HttpError(400, "deviceId is required.");
+  const input = normalizeDicomDeviceWriteInput(payload);
   const client = await pool.connect();
-
   try {
     await client.query("begin");
-    const existingResult = await client.query(
-      `
-        select *
-        from dicom_devices
-        where id = $1
-        limit 1
-      `,
-      [cleanDeviceId]
-    );
-
-    const existing = existingResult.rows[0] as DicomDeviceRow | undefined;
-
-    if (!existing) {
-      throw new HttpError(404, "DICOM device not found.");
-    }
-
-    const { rows } = await client.query(
-      `
-        update dicom_devices
-        set
-          modality_id = $2,
-          device_name = $3,
-          modality_ae_title = $4,
-          scheduled_station_ae_title = $5,
-          station_name = nullif($6, ''),
-          station_location = nullif($7, ''),
-          source_ip = $8,
-          mwl_enabled = $9,
-          is_active = $10,
-          updated_by_user_id = $11,
-          updated_at = now()
-        where id = $1
-        returning *
-      `,
-      [
-        cleanDeviceId,
-        modalityId,
-        deviceName,
-        modalityAeTitle,
-        scheduledStationAeTitle,
-        stationName,
-        stationLocation,
-        sourceIp,
-        mwlEnabled,
-        isActive,
-        currentUserId
-      ]
-    );
-    const updatedDevice = requireRow(rows[0] as DicomDeviceRow | undefined, "Failed to update DICOM device.");
-
-    await logAuditEntry(
-      {
-        entityType: "integration",
-        entityId: cleanDeviceId,
-        actionType: "update_dicom_device",
-        oldValues: existing,
-        newValues: updatedDevice,
-        changedByUserId: currentUserId
-      },
-      client
-    );
-
+    const updatedDevice = await updateDicomDeviceInTransaction(client, cleanDeviceId, input, currentUserId);
     await client.query("commit");
     scheduleV2WorklistRebuild();
     return updatedDevice;

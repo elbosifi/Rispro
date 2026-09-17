@@ -7,7 +7,6 @@ import type { TranslationKey } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { Card } from "@/components/shared/Card";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
-import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
 import MwlPolicySection from "./mwl-policy-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
@@ -267,7 +266,6 @@ export default function SettingsPage() {
             {section === "queue_and_arrival" && <SimpleSettingsSection category="queue_and_arrival" onReAuthRequired={requestReAuth} />}
             {section === "scheduling_engine_config" && <SchedulingEngineConfigSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_config" && <DicomGatewaySettingsSection onReAuthRequired={requestReAuth} />}
-            {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
             {section === "mwl_policy" && <MwlPolicySection onReAuthRequired={requestReAuth} />}
             {section === "orthanc_mwl_sync" && <OrthancMwlSection onReAuthRequired={requestReAuth} />}

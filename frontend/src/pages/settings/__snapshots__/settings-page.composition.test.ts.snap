@@ -35,10 +35,6 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
-    "dicom_gateway_devices",
-    "integrations",
-  ],
-  [
     "dicom_gateway_monitoring",
     "integrations",
   ],

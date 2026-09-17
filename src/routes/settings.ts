@@ -35,7 +35,7 @@ import {
   reconcileMwlProtocolPolicyChange,
   updateDicomDevice
 } from "../services/dicom-service.js";
-import { createEquipment, deactivateEquipment, listEquipment, updateEquipment } from "../services/equipment-service.js";
+import { createEquipment, deactivateEquipment, listEquipment, manageEquipmentDicomIdentity, updateEquipment } from "../services/equipment-service.js";
 import {
   deleteNameDictionaryEntry,
   listNameDictionary,
@@ -629,6 +629,14 @@ settingsRouter.patch(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     res.json({ equipment: await updateEquipment(asString(request.params?.equipmentId), asUnknownRecord(request.body ?? {}), request.user.sub as UserId) });
+  })
+);
+
+settingsRouter.put(
+  "/equipment/:equipmentId/dicom-identity",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    res.json({ equipment: await manageEquipmentDicomIdentity(asString(request.params?.equipmentId), asUnknownRecord(request.body ?? {}), request.user.sub as UserId) });
   })
 );
 
