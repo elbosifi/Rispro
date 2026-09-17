@@ -110,8 +110,13 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
 
 export const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
 
+function requestedSettingsSection(search: string | URLSearchParams): string | null {
+  const params = typeof search === "string" ? new URLSearchParams(search) : search;
+  return params.get("section");
+}
+
 export function initialSettingsSection(search: string): SettingsSection {
-  const requested = new URLSearchParams(search).get("section");
+  const requested = requestedSettingsSection(search);
   if (requested === "dicom_gateway_devices") return "equipment";
   return requested && SETTINGS_MENU_SECTIONS.includes(requested as SettingsMenuSection) ? requested as SettingsMenuSection : "menu";
 }
@@ -121,4 +126,18 @@ export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?
     return false;
   }
   return true;
+}
+
+/** Resolves a Settings deep link without allowing the URL to bypass section access rules. */
+export function settingsSectionFromSearch(search: string | URLSearchParams, role?: string): SettingsSection {
+  const section = initialSettingsSection(typeof search === "string" ? search : search.toString());
+  return section === "menu" || isSettingsMenuSectionVisible(section, role) ? section : "menu";
+}
+
+/** Updates only the navigational Settings section and retains unrelated safe query parameters. */
+export function buildSettingsSectionSearch(current: URLSearchParams, section: SettingsSection): URLSearchParams {
+  const next = new URLSearchParams(current);
+  if (section === "menu") next.delete("section");
+  else next.set("section", section);
+  return next;
 }

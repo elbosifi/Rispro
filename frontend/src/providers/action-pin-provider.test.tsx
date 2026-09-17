@@ -8,9 +8,12 @@ import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-b
 import { createPatient, addWalkIn } from "@/lib/api-hooks";
 import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
+import { useAuth } from "@/providers/auth-provider";
 import { AuthProvider } from "@/providers/auth-provider-component";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { createV2Booking } from "@/v2/appointments/api";
+import { PATIENTS_SEARCH_STORAGE_KEY } from "@/lib/navigation/patient-navigation";
+import { REGISTRATIONS_SEARCH_STORAGE_KEY } from "@/pages/registrations/registration-query";
 import type { Patient } from "@/types/api";
 import type { CreateBookingRequest } from "@/v2/appointments/types";
 
@@ -130,6 +133,28 @@ function renderIdleLock() {
         </QueryClientProvider>
       </BrowserRouter>
     </LanguageProvider>
+  );
+}
+
+function AuthLogoutButton() {
+  const { logout } = useAuth();
+  return <button type="button" onClick={() => void logout()}>Log out</button>;
+}
+
+function renderAuthLogout() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <LanguageProvider>
+      <BrowserRouter>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <AuthLogoutButton />
+          </AuthProvider>
+        </QueryClientProvider>
+      </BrowserRouter>
+    </LanguageProvider>,
   );
 }
 
@@ -739,6 +764,8 @@ describe("ActionPinIdleLock", () => {
     const fetchMock = mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
     const originalLocation = window.location;
     Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, href: "" } });
+    window.sessionStorage.setItem(PATIENTS_SEARCH_STORAGE_KEY, "PRIVATE SEARCH");
+    window.sessionStorage.setItem(REGISTRATIONS_SEARCH_STORAGE_KEY, "PRIVATE REGISTRATION SEARCH");
     renderIdleLock();
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
@@ -753,8 +780,25 @@ describe("ActionPinIdleLock", () => {
 
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/auth/logout")).toBe(true);
     expect(window.location.href).toBe("/login");
+    expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY)).toBeNull();
     expect(JSON.stringify(localStorage)).not.toContain("1234");
     expect(JSON.stringify(sessionStorage)).not.toContain("1234");
+    Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+  });
+
+  it("normal logout clears the Patients search session state", async () => {
+    const fetchMock = mockIdleFetch({ policyEnabled: false, idleLockEnabled: false });
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, href: "" } });
+    window.sessionStorage.setItem(PATIENTS_SEARCH_STORAGE_KEY, "PRIVATE SEARCH");
+    window.sessionStorage.setItem(REGISTRATIONS_SEARCH_STORAGE_KEY, "PRIVATE REGISTRATION SEARCH");
+    renderAuthLogout();
+
+    await userEvent.click(screen.getByRole("button", { name: "Log out" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/auth/logout")).toBe(true));
+    expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY)).toBeNull();
     Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
   });
 });

@@ -3,8 +3,10 @@ import {
   SETTINGS_GROUPS,
   SETTINGS_MENU_SECTIONS,
   SECTION_GROUPS,
+  buildSettingsSectionSearch,
   initialSettingsSection,
   isSettingsMenuSectionVisible,
+  settingsSectionFromSearch,
 } from "./settings-page.composition";
 
 describe("settings page composition", () => {
@@ -40,5 +42,16 @@ describe("settings page composition", () => {
       expect(isSettingsMenuSectionVisible(section, "supervisor")).toBe(expected);
       expect(isSettingsMenuSectionVisible(section, "super_admin")).toBe(true);
     }
+  });
+
+  it("resolves only authorized sections and preserves unrelated query state when changing section", () => {
+    expect(settingsSectionFromSearch("?section=sonicdicom_reports", "supervisor")).toBe("sonicdicom_reports");
+    expect(settingsSectionFromSearch("?section=system_diagnostics", "supervisor")).toBe("menu");
+    expect(settingsSectionFromSearch("?section=not_real", "super_admin")).toBe("menu");
+
+    expect(buildSettingsSectionSearch(new URLSearchParams("source=nav&section=users"), "sonicdicom_reports").toString())
+      .toBe("source=nav&section=sonicdicom_reports");
+    expect(buildSettingsSectionSearch(new URLSearchParams("source=nav&section=users"), "menu").toString())
+      .toBe("source=nav");
   });
 });

@@ -7,11 +7,14 @@ import { App } from "./App";
 import { APP_NAV_ITEMS } from "@/lib/route-registry";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 import { t as translate } from "@/lib/i18n";
+import { PATIENTS_SEARCH_STORAGE_KEY } from "@/lib/navigation/patient-navigation";
 import type { User } from "@/types/api";
 
 const testState = vi.hoisted(() => ({
   fetchDoctorMe: vi.fn(),
   fetchPageVisibilityMatrix: vi.fn(),
+  fetchAppointments: vi.fn(),
+  searchPatients: vi.fn(),
   logout: vi.fn(),
   language: "en" as "en" | "ar",
   user: {
@@ -69,8 +72,8 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchNoShowSummary: vi.fn().mockResolvedValue({ pendingCount: 0, mode: "manual", lastAutomaticProcessedCount: 0 }),
   fetchComplementaryRecallReceptionSummary: vi.fn().mockResolvedValue({ pendingCount: 0, unseenPendingCount: 0 }),
   fetchRequestScanReceptionSummary: vi.fn().mockResolvedValue({ needsAttentionCount: 0, latestProcessedAt: null, latestFailedAt: null }),
-  searchPatients: vi.fn(),
-  fetchAppointments: vi.fn(),
+  searchPatients: testState.searchPatients,
+  fetchAppointments: testState.fetchAppointments,
 }));
 
 vi.mock("@/components/auth/action-pin-settings-button", () => ({
@@ -190,12 +193,17 @@ describe("App route behavior", () => {
     testState.logout.mockReset();
     testState.fetchDoctorMe.mockReset();
     testState.fetchPageVisibilityMatrix.mockReset();
+    testState.fetchAppointments.mockReset();
+    testState.fetchAppointments.mockResolvedValue([]);
+    testState.searchPatients.mockReset();
+    window.sessionStorage.clear();
     localStorage.setItem("rispro-language", "en");
     testState.language = "en";
   });
 
   afterEach(() => {
     cleanup();
+    window.sessionStorage.clear();
     window.history.pushState({}, "", "/");
   });
 
@@ -218,6 +226,31 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/appointments"));
     expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
+  });
+
+  it("turns a global patient selection into a Patients deep link while retaining active Patients filters", async () => {
+    testState.searchPatients.mockResolvedValue([
+      {
+        id: 55,
+        arabicFullName: "Ali Patient",
+        englishFullName: "Ali Patient",
+        mrn: "MRN-55",
+        phone1: null,
+        nationalId: null,
+        identifierValue: null,
+        category: null,
+      },
+    ]);
+    renderAppAt("/patients?q=ali&page=2");
+
+    const user = userEvent.setup();
+    const globalSearch = await screen.findByRole("combobox", { name: "Search patients or registrations" });
+    await user.click(globalSearch);
+    await user.type(globalSearch, "Ali");
+    await user.click((await screen.findAllByRole("option", { name: /Ali Patient/i }))[0]);
+
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/patients?page=2&patientId=55"));
+    expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
   });
 
   it.each(["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const)("allows %s to open workstation printing without exposing admin settings", async (role) => {

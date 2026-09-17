@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { CalendarPlus, ChevronRight, ClipboardList, Pencil, Printer, X } from "lucide-react";
 import { authorizePatientNoShowBooking } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -12,11 +12,13 @@ import { Badge, Button } from "@/components/shared";
 import { RequestComparisonModal } from "@/components/patients/request-comparison-modal";
 import { PatientSummaryContent } from "@/components/patients/patient-summary-content";
 import { patientDirectorySummaryQueryKey, usePatientDirectorySummary } from "@/components/patients/patient-summary-formatters";
+import { patientDirectoryLocation, patientEditPath } from "@/lib/navigation/patient-navigation";
 
 export function PatientDrawer({ patientId, onClose }: { patientId: number; onClose: () => void }) {
   const { language } = useLanguage();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const isRtl = language === "ar";
   const [showComparisonModal, setShowComparisonModal] = useState(false);
@@ -74,7 +76,7 @@ export function PatientDrawer({ patientId, onClose }: { patientId: number; onClo
       <div className="border-t border-border p-4">
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground">{t(language, "patients.directory.drawer.quickActions")}</h3>
         <div className="grid grid-cols-2 gap-2">
-          <Button size="sm" variant="outline" onClick={() => navigate(`/patients/${patientId}/edit`)}><Pencil size={14} />{t(language, "patients.directory.action.edit")}</Button>
+          <Button size="sm" variant="outline" onClick={() => navigate(patientEditPath(patientId, patientDirectoryLocation(location.pathname, new URLSearchParams(location.search))))}><Pencil size={14} />{t(language, "patients.directory.action.edit")}</Button>
           <Button size="sm" variant="outline" onClick={() => navigate(`/appointments?patientId=${patientId}`)}><CalendarPlus size={14} />{t(language, "patients.directory.action.createAppointment")}</Button>
           {canRequestComparison ? <Button size="sm" variant="outline" onClick={() => setShowComparisonModal(true)}><ClipboardList size={14} />Request comparison</Button> : null}
           {lastAppointmentId != null ? <><Button size="sm" variant="outline" onClick={() => navigate(`/registrations?appointmentId=${lastAppointmentId}&patientId=${patientId}`)}><ChevronRight size={14} />{t(language, "patients.directory.action.manageRegistration")}</Button><Button size="sm" variant="outline" onClick={() => void printAppointmentSlipById(lastAppointmentId, language)}><Printer size={14} />{t(language, "patients.directory.action.print")}</Button></> : null}

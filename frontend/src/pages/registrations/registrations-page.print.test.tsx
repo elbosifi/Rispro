@@ -1,4 +1,4 @@
-import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import RegistrationsPage from "./registrations-page";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { todayIsoDateLy } from "@/lib/date-format";
-import { REGISTRATION_DEFAULT_STATUSES } from "./registration-query";
+import { REGISTRATION_DEFAULT_STATUSES, REGISTRATIONS_SEARCH_STORAGE_KEY } from "./registration-query";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -29,7 +29,14 @@ let mockAuthRole: "receptionist" | "supervisor" | "super_admin" = "super_admin";
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location-probe" data-search={location.search} />;
+  const navigate = useNavigate();
+  return (
+    <>
+      <div data-testid="location-probe" data-search={location.search} />
+      <button type="button" data-testid="history-back" onClick={() => navigate(-1)}>Back</button>
+      <button type="button" data-testid="history-forward" onClick={() => navigate(1)}>Forward</button>
+    </>
+  );
 }
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -150,6 +157,7 @@ describe("RegistrationsPage print actions", () => {
   beforeEach(() => {
     vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
     localStorage.setItem("rispro-language", "en");
+    sessionStorage.removeItem(REGISTRATIONS_SEARCH_STORAGE_KEY);
     fetchAppointmentsMock.mockReset();
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
@@ -387,9 +395,43 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("keeps search private while filter and appointment navigation state remain URL-addressable", async () => {
+    const user = userEvent.setup();
+    renderRegistrationsPage();
+
+    await screen.findAllByText("ACC-7");
+    await user.type(screen.getByPlaceholderText("Name, MRN, Accession..."), "MRN-123");
+    await user.selectOptions(screen.getByLabelText("Sort:"), "booking-asc");
+
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+      expect(params.get("sort")).toBe("booking-asc");
+      expect(params.has("q")).toBe(false);
+      expect(sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY)).toBe("MRN-123");
+    });
+
+    await user.click(getAppointmentRow("ACC-7"));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+      expect(params.get("appointmentId")).toBe("7");
+      expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+    });
+
+    await user.click(screen.getByTestId("history-back"));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+      expect(params.get("sort")).toBe("booking-asc");
+      expect(params.has("appointmentId")).toBe(false);
+      expect(screen.queryByRole("dialog", { name: "Manage" })).toBeNull();
+    });
+
+    await user.click(screen.getByTestId("history-forward"));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy());
+  });
+
   it("initializes appointment filters from URL params", async () => {
     renderRegistrationsPage([
-      "/registrations?dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show&q=ACC",
+      "/registrations?dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show",
     ]);
 
     await waitFor(() => {
@@ -398,7 +440,7 @@ describe("RegistrationsPage print actions", () => {
           dateFrom: "2026-06-01",
           dateTo: "2026-06-30",
           modalityId: "1",
-          q: "ACC",
+          q: "",
           status: ["completed", "no-show"],
         })
       );
@@ -407,7 +449,7 @@ describe("RegistrationsPage print actions", () => {
 
   it("shows and clears statistics drill-down filter context", async () => {
     renderRegistrationsPage([
-      "/registrations?source=statistics&dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show&q=ACC",
+      "/registrations?source=statistics&dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show",
     ]);
 
     expect(await screen.findByText("Filtered from Statistics")).toBeTruthy();
@@ -415,7 +457,7 @@ describe("RegistrationsPage print actions", () => {
     expect(await screen.findByText("Modality: CT")).toBeTruthy();
     expect(screen.getByText("Status: Completed")).toBeTruthy();
     expect(screen.getByText("Status: No-show")).toBeTruthy();
-    expect(screen.getByText("Search: ACC")).toBeTruthy();
+    expect(screen.queryByText(/^Search:/)).toBeNull();
 
     const backLink = screen.getByRole("link", { name: "Back to Statistics" });
     const backUrl = new URL(backLink.getAttribute("href") ?? "", "http://rispro.test");

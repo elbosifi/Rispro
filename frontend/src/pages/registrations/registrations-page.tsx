@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Bell, ExternalLink, Eye, FileText, MoreHorizontal, Printer } from "lucide-react";
@@ -30,10 +30,15 @@ import {
 } from "@/lib/print-utils";
 import { directPrintRegistrationRows } from "@/lib/registration-list-printing";
 import {
+  buildRegistrationSearch,
   buildRegistrationAppointmentQuery,
+  clearRegistrationSearch,
   parseRegistrationFiltersFromSearchParams,
+  readRegistrationSearch,
   REGISTRATION_DEFAULT_STATUSES,
   REGISTRATION_FILTER_STATUSES,
+  sanitizeRegistrationSearch,
+  writeRegistrationSearch,
 } from "./registration-query";
 import type { RegistrationSort, RegistrationsFilters } from "./registration-query";
 import type { WhatsappTemplate } from "@/lib/whatsapp";
@@ -111,6 +116,7 @@ export default function RegistrationsPage() {
   const queryClient = useQueryClient();
   const appointmentIdParam = searchParams.get("appointmentId");
   const patientIdParam = searchParams.get("patientId");
+  const patientDrawerId = normalizeAppointmentId(searchParams.get("patientDrawerId"));
   const tabParam = searchParams.get("tab");
   const isStatisticsDrilldown = searchParams.get("source") === "statistics";
   const hasUrlAppointmentFilters = DRILLDOWN_FILTER_PARAM_KEYS.some((key) => key !== "source" && searchParams.has(key));
@@ -120,8 +126,9 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [reportCheckOnOpen, setReportCheckOnOpen] = useState(false);
   const deepLinkedAppointmentId = normalizeAppointmentId(appointmentIdParam);
-  const manageAppointmentId = selectedAppointment?.id ?? deepLinkedAppointmentId;
-  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  // The panel is navigational: a browser Back action must close it even when a
+  // previously selected row remains cached for an optimistic initial render.
+  const manageAppointmentId = deepLinkedAppointmentId;
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
@@ -137,25 +144,49 @@ export default function RegistrationsPage() {
   const [whatsappMode, setWhatsappMode] = useState<"template" | "custom">("template");
   const [whatsappTemplate, setWhatsappTemplate] = useState<WhatsappTemplate>("qr_link");
   const [whatsappMessage, setWhatsappMessage] = useState("");
-  const patientScopedDefaultFilters: RegistrationsFilters = patientIdParam
-    ? {
-        ...DEFAULT_FILTERS,
-        dateMode: "all",
-        date: "",
-        dateFrom: "",
-        dateTo: "",
-      }
-    : DEFAULT_FILTERS;
-  const [storedFilters, setFilters] = useState<RegistrationsFilters>(() => {
-    const parsedFilters = parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters);
+  const patientScopedDefaultFilters = useMemo<RegistrationsFilters>(
+    () => patientIdParam
+      ? {
+          ...DEFAULT_FILTERS,
+          dateMode: "all",
+          date: "",
+          dateFrom: "",
+          dateTo: "",
+        }
+      : DEFAULT_FILTERS,
+    [patientIdParam],
+  );
+  const [privateQuery, setPrivateQuery] = useState(readRegistrationSearch);
+  const parsedFilters = useMemo(
+    () => parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters),
+    [patientScopedDefaultFilters, searchParams],
+  );
+  const urlFilters = useMemo(() => {
     if (canReviewVoided) return parsedFilters;
-
     const statuses = parsedFilters.statuses.filter((status) => status !== "voided");
     return { ...parsedFilters, statuses: statuses.length > 0 ? statuses : DEFAULT_FILTERS.statuses };
-  });
-  const filters = patientIdParam
-    ? { ...storedFilters, dateMode: "all" as const, date: "", dateFrom: "", dateTo: "" }
-    : storedFilters;
+  }, [canReviewVoided, parsedFilters]);
+  const filters = useMemo(
+    () => ({ ...urlFilters, query: privateQuery }),
+    [privateQuery, urlFilters],
+  );
+  const latestSearchParamsRef = useRef(new URLSearchParams(searchParams));
+  const pendingSearchRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const renderedSearch = searchParams.toString();
+    if (pendingSearchRef.current && pendingSearchRef.current !== renderedSearch) return;
+    latestSearchParamsRef.current = new URLSearchParams(searchParams);
+    pendingSearchRef.current = null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!searchParams.has("q")) return;
+    const next = sanitizeRegistrationSearch(searchParams);
+    latestSearchParamsRef.current = next;
+    pendingSearchRef.current = next.toString();
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -263,130 +294,99 @@ export default function RegistrationsPage() {
     { value: "appointment_cancelled", label: t("registrations.whatsappTemplateCancelled") },
   ];
 
+  const commitSearchParams = (next: URLSearchParams, replace = true) => {
+    latestSearchParamsRef.current = next;
+    pendingSearchRef.current = next.toString();
+    setSearchParams(next, { replace });
+  };
+
+  const commitFilters = (
+    nextFilters: RegistrationsFilters,
+    options: { replace?: boolean; clearPatientScope?: boolean; params?: URLSearchParams } = {},
+  ) => {
+    const nextParams = new URLSearchParams(options.params ?? latestSearchParamsRef.current);
+    if (options.clearPatientScope) nextParams.delete("patientId");
+    const defaults = nextParams.has("patientId") ? patientScopedDefaultFilters : DEFAULT_FILTERS;
+    commitSearchParams(buildRegistrationSearch(nextParams, nextFilters, defaults), options.replace ?? true);
+  };
+
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
     key: K,
     value: RegistrationsFilters[K],
   ) => {
-    setFilters((current) => ({ ...current, [key]: value }));
-  };
-
-  const clearPatientScope = () => {
-    if (!patientIdParam) return;
-
-    setFilters(filters);
-    const nextSearchParams = new URLSearchParams(searchParams);
-    nextSearchParams.delete("patientId");
-    setSearchParams(nextSearchParams, { replace: true });
-  };
-
-  const clearDeepLinkState = () => {
-    const nextSearchParams = new URLSearchParams(searchParams);
-    let changed = false;
-
-    if (nextSearchParams.has("patientId")) {
-      nextSearchParams.delete("patientId");
-      changed = true;
+    if (key === "query") {
+      const query = String(value);
+      setPrivateQuery(query);
+      writeRegistrationSearch(query);
+      return;
     }
-
-    if (nextSearchParams.has("appointmentId")) {
-      nextSearchParams.delete("appointmentId");
-      changed = true;
-    }
-
-    if (nextSearchParams.has("tab")) {
-      nextSearchParams.delete("tab");
-      changed = true;
-    }
-
-    if (changed) {
-      setSearchParams(nextSearchParams, { replace: true });
-    }
+    commitFilters({ ...filters, [key]: value });
   };
 
   const handleDateModeChange = (dateMode: RegistrationsFilters["dateMode"]) => {
-    clearPatientScope();
-    setFilters((current) => {
-      if (dateMode === "all") {
-        return {
-          ...current,
-          dateMode,
-          date: "",
-          dateFrom: "",
-          dateTo: "",
-        };
-      }
-
-      if (dateMode === "single") {
-        return {
-          ...current,
-          dateMode,
-          date: current.date || current.dateFrom || current.dateTo || todayValue,
-          dateFrom: "",
-          dateTo: "",
-        };
-      }
-
-      const baseDate = current.date || current.dateFrom || current.dateTo || todayValue;
-      return {
-        ...current,
-        dateMode,
-        date: "",
-        dateFrom: current.dateFrom || baseDate,
-        dateTo: current.dateTo || baseDate,
-      };
-    });
+    if (dateMode === "all") {
+      commitFilters({ ...filters, dateMode, date: "", dateFrom: "", dateTo: "" }, { clearPatientScope: true });
+      return;
+    }
+    if (dateMode === "single") {
+      commitFilters(
+        { ...filters, dateMode, date: filters.date || filters.dateFrom || filters.dateTo || todayValue, dateFrom: "", dateTo: "" },
+        { clearPatientScope: true },
+      );
+      return;
+    }
+    const baseDate = filters.date || filters.dateFrom || filters.dateTo || todayValue;
+    commitFilters(
+      { ...filters, dateMode, date: "", dateFrom: filters.dateFrom || baseDate, dateTo: filters.dateTo || baseDate },
+      { clearPatientScope: true },
+    );
   };
 
   const handleSingleDateChange = (value: string) => {
-    setFilters((current) => ({
-      ...current,
+    commitFilters({
+      ...filters,
       dateMode: "single",
       date: value,
       dateFrom: "",
       dateTo: "",
-    }));
-  };
-
-  const handleRangeDateChange = (key: "dateFrom" | "dateTo", value: string) => {
-    setFilters((current) => ({
-      ...current,
-      dateMode: "range",
-      [key]: value,
-      date: "",
-    }));
-  };
-
-  const handleStatusToggle = (status: string) => {
-    setFilters((current) => {
-      const nextStatuses = current.statuses.includes(status)
-        ? current.statuses.filter((entry) => entry !== status)
-        : [...current.statuses, status];
-
-      return {
-        ...current,
-        statuses: nextStatuses.length > 0 ? nextStatuses : current.statuses,
-      };
     });
   };
 
+  const handleRangeDateChange = (key: "dateFrom" | "dateTo", value: string) => {
+    commitFilters({
+      ...filters,
+      dateMode: "range",
+      [key]: value,
+      date: "",
+    });
+  };
+
+  const handleStatusToggle = (status: string) => {
+    const nextStatuses = filters.statuses.includes(status)
+      ? filters.statuses.filter((entry) => entry !== status)
+      : [...filters.statuses, status];
+    commitFilters({ ...filters, statuses: nextStatuses.length > 0 ? nextStatuses : filters.statuses });
+  };
+
   const handleResetFilters = () => {
-    setFilters(DEFAULT_FILTERS);
     setSelectedAppointment(null);
-    clearDeepLinkState();
+    clearRegistrationSearch();
+    setPrivateQuery("");
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
+    for (const key of ["patientId", "appointmentId", "tab"]) nextSearchParams.delete(key);
+    commitFilters(DEFAULT_FILTERS, { params: nextSearchParams });
   };
 
   const handleClearDrilldownFilters = () => {
-    setFilters(patientIdParam ? patientScopedDefaultFilters : DEFAULT_FILTERS);
-    const nextSearchParams = new URLSearchParams(searchParams);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
     for (const key of DRILLDOWN_FILTER_PARAM_KEYS) {
       nextSearchParams.delete(key);
     }
-    setSearchParams(nextSearchParams, { replace: true });
+    commitFilters(patientIdParam ? patientScopedDefaultFilters : DEFAULT_FILTERS, { params: nextSearchParams });
   };
 
   const handleTodayShortcut = () => {
-    clearPatientScope();
-    setFilters({
+    commitFilters({
       ...DEFAULT_FILTERS,
       dateMode: "single",
       date: todayValue,
@@ -396,14 +396,13 @@ export default function RegistrationsPage() {
       query: filters.query,
       statuses: filters.statuses,
       sort: filters.sort,
-    });
+    }, { clearPatientScope: true });
     void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
 
   const handleTomorrowShortcut = () => {
     const value = isoDateDaysFromNow(1);
-    clearPatientScope();
-    setFilters({
+    commitFilters({
       ...DEFAULT_FILTERS,
       dateMode: "single",
       date: value,
@@ -413,7 +412,7 @@ export default function RegistrationsPage() {
       query: filters.query,
       statuses: filters.statuses,
       sort: filters.sort,
-    });
+    }, { clearPatientScope: true });
     void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
 
@@ -472,7 +471,9 @@ export default function RegistrationsPage() {
   };
 
   const openPatientDrawer = (appointment: AppointmentWithDetails) => {
-    setSelectedPatientId(appointment.patientId);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
+    nextSearchParams.set("patientDrawerId", String(appointment.patientId));
+    commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
   };
 
   const openSlipPreview = (appointment: AppointmentWithDetails) => {
@@ -483,42 +484,42 @@ export default function RegistrationsPage() {
 
   const setManageTabAndUrl = (tab: AppointmentManageTab) => {
     if (!selectedAppointment && !appointmentIdParam) return;
-    const nextSearchParams = new URLSearchParams(searchParams);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
     if (selectedAppointment) nextSearchParams.set("appointmentId", String(selectedAppointment.id));
     if (tab === "documents") {
       nextSearchParams.delete("tab");
     } else {
       nextSearchParams.set("tab", tab);
     }
-    setSearchParams(nextSearchParams, { replace: true });
+    commitSearchParams(sanitizeRegistrationSearch(nextSearchParams));
   };
 
   const manageAppointment = (appointment: AppointmentWithDetails) => {
     setSelectedAppointment(appointment);
     setReportCheckOnOpen(false);
-    const nextSearchParams = new URLSearchParams(searchParams);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
     nextSearchParams.set("appointmentId", String(appointment.id));
     nextSearchParams.delete("tab");
-    setSearchParams(nextSearchParams, { replace: true });
+    commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
   };
 
   const openAppointmentById = (appointmentId: number) => {
     if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) return;
     setSelectedAppointment(null);
     setReportCheckOnOpen(false);
-    const nextSearchParams = new URLSearchParams(searchParams);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
     nextSearchParams.set("appointmentId", String(appointmentId));
     nextSearchParams.set("tab", "details");
-    setSearchParams(nextSearchParams, { replace: true });
+    commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
   };
 
   const openReportPanel = (appointment: AppointmentWithDetails, checkNow = false) => {
     setSelectedAppointment(appointment);
     setReportCheckOnOpen(checkNow);
-    const nextSearchParams = new URLSearchParams(searchParams);
+    const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
     nextSearchParams.set("appointmentId", String(appointment.id));
     nextSearchParams.set("tab", "report");
-    setSearchParams(nextSearchParams, { replace: true });
+    commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
   };
 
   const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
@@ -581,10 +582,10 @@ export default function RegistrationsPage() {
     setSelectedAppointment(null);
     setReportCheckOnOpen(false);
     if (appointmentIdParam) {
-      const nextSearchParams = new URLSearchParams(searchParams);
+      const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
       nextSearchParams.delete("appointmentId");
       nextSearchParams.delete("tab");
-      setSearchParams(nextSearchParams, { replace: true });
+      commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
     }
   };
 
@@ -1020,7 +1021,7 @@ export default function RegistrationsPage() {
                     key={apt.id}
                     role="button"
                     tabIndex={0}
-                    className={`rounded-xl border border-border p-3 ${patientCategoryRowClass(apt.caseCategory, index, selectedAppointment?.id === apt.id)}`}
+                    className={`rounded-xl border border-border p-3 ${patientCategoryRowClass(apt.caseCategory, index, manageAppointmentId === apt.id)}`}
                     onClick={() => manageAppointment(apt)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -1109,7 +1110,7 @@ export default function RegistrationsPage() {
             ) : (
               <div className="divide-y divide-border">
                 {appointments.map((apt: AppointmentWithDetails, index: number) => {
-                  const isSelected = selectedAppointment?.id === apt.id;
+                  const isSelected = manageAppointmentId === apt.id;
                   const patientName = chooseLocalized(language, apt.arabicFullName, apt.englishFullName);
                   const modalityName = chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn);
                   const examName = chooseLocalized(language, apt.examNameAr, apt.examNameEn);
@@ -1347,7 +1348,7 @@ export default function RegistrationsPage() {
       <AppointmentManageModal
         appointmentId={manageAppointmentId}
         open={manageAppointmentId !== null}
-        initialAppointment={selectedAppointment}
+        initialAppointment={selectedAppointment?.id === manageAppointmentId ? selectedAppointment : null}
         initialTab={initialManageTab}
         checkReportOnOpen={reportCheckOnOpen}
         onClose={closeManageModal}
@@ -1357,8 +1358,15 @@ export default function RegistrationsPage() {
         onAppointmentDeleted={closeManageModal}
       />
 
-      {selectedPatientId ? (
-        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
+      {patientDrawerId ? (
+        <PatientDrawer
+          patientId={patientDrawerId}
+          onClose={() => {
+            const nextSearchParams = new URLSearchParams(latestSearchParamsRef.current);
+            nextSearchParams.delete("patientDrawerId");
+            commitSearchParams(sanitizeRegistrationSearch(nextSearchParams), false);
+          }}
+        />
       ) : null}
 
       {whatsappAppointment ? (

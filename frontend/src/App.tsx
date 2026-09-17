@@ -52,7 +52,7 @@ import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { hasDoctorWorkspaceAccess, shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
-import { PatientDrawer } from "@/components/patients/patient-drawer";
+import { globalPatientSearchLocation, safeInternalReturnTo } from "@/lib/navigation/patient-navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { useLanguage } from "@/providers/language-provider";
@@ -145,7 +145,6 @@ function AppContent() {
   const { language, toggleLanguage, t } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [globalPatientId, setGlobalPatientId] = useState<number | null>(null);
   const { data: pageVisibilityMatrix, isLoading: isPageVisibilityLoading } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
     queryFn: fetchPageVisibilityMatrix,
@@ -176,6 +175,10 @@ function AppContent() {
     },
     [navigate]
   );
+
+  const handlePatientSearchSelect = useCallback((patientId: number) => {
+    navigate(globalPatientSearchLocation(location.pathname, location.search, patientId));
+  }, [location.pathname, location.search, navigate]);
 
   const currentRoute = (() => {
     const pathname = location.pathname;
@@ -255,7 +258,7 @@ function AppContent() {
         pageAction={isPatientCreate || isPatientEdit ? (
           <button
             type="button"
-            onClick={() => navigate("/patients")}
+            onClick={() => navigate(isPatientEdit ? safeInternalReturnTo(new URLSearchParams(location.search).get("returnTo")) : "/patients")}
             aria-label={language === "ar" ? "رجوع" : "Back"}
             className="inline-flex h-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium whitespace-nowrap shadow-sm transition-all hover:shadow-md active:scale-95 lg:h-10 lg:gap-2 lg:px-3 lg:text-xs"
             style={{
@@ -284,7 +287,7 @@ function AppContent() {
         onMobileNavToggle={() => setMobileNavOpen(true)}
         canSearchPatients={canRoleAccessRoute(normalizedMatrix, "patients", user.role)}
         canSearchRegistrations={canRoleAccessRoute(normalizedMatrix, "registrations", user.role)}
-        onPatientSearchSelect={setGlobalPatientId}
+        onPatientSearchSelect={handlePatientSearchSelect}
         onRegistrationSearchSelect={(appointment) => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`)}
         canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctorMe)}
         canAccessCoreWorkspace
@@ -365,7 +368,6 @@ function AppContent() {
       />
 
       <ToastViewport />
-      {globalPatientId != null ? <PatientDrawer patientId={globalPatientId} onClose={() => setGlobalPatientId(null)} /> : null}
     </div>
   );
 }

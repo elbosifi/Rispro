@@ -1,5 +1,18 @@
 export type RegistrationSort = "booking-desc" | "booking-asc" | "patient-asc" | "time-asc";
 
+export const REGISTRATIONS_SEARCH_STORAGE_KEY = "rispro:registrations:search";
+
+export const REGISTRATION_FILTER_QUERY_KEYS = [
+  "dateMode",
+  "date",
+  "dateFrom",
+  "dateTo",
+  "modalityId",
+  "status",
+  "status[]",
+  "sort",
+] as const;
+
 export interface RegistrationsFilters {
   dateMode: "all" | "single" | "range";
   date: string;
@@ -49,7 +62,9 @@ function readStatuses(params: URLSearchParams): string[] {
   for (const rawValue of values) {
     for (const rawStatus of rawValue.split(",")) {
       const status = rawStatus.trim();
-      if (status) seen.add(status);
+      if (REGISTRATION_FILTER_STATUSES.includes(status as (typeof REGISTRATION_FILTER_STATUSES)[number]) || status === "voided") {
+        seen.add(status);
+      }
     }
   }
 
@@ -62,7 +77,6 @@ export function parseRegistrationFiltersFromSearchParams(
 ): RegistrationsFilters {
   const next: RegistrationsFilters = { ...defaults, statuses: [...defaults.statuses] };
   const modalityId = firstTrimmed(params, "modalityId");
-  const query = firstTrimmed(params, "q");
   const statuses = readStatuses(params);
   const dateMode = firstTrimmed(params, "dateMode");
   const date = firstTrimmed(params, "date");
@@ -70,11 +84,8 @@ export function parseRegistrationFiltersFromSearchParams(
   const dateTo = firstTrimmed(params, "dateTo");
   const sort = firstTrimmed(params, "sort");
 
-  if (modalityId && /^\d+$/.test(modalityId)) {
+  if (/^[1-9]\d*$/.test(modalityId)) {
     next.modalityId = modalityId;
-  }
-  if (query) {
-    next.query = query;
   }
   if (statuses.length > 0) {
     next.statuses = statuses;
@@ -99,6 +110,66 @@ export function parseRegistrationFiltersFromSearchParams(
     return { ...next, dateMode: "range", date: "", dateFrom, dateTo };
   }
 
+  return next;
+}
+
+export function sanitizeRegistrationSearch(current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(current);
+  next.delete("q");
+  return next;
+}
+
+export function readRegistrationSearch(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeRegistrationSearch(value: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (value) window.sessionStorage.setItem(REGISTRATIONS_SEARCH_STORAGE_KEY, value);
+    else window.sessionStorage.removeItem(REGISTRATIONS_SEARCH_STORAGE_KEY);
+  } catch {
+    // Session storage can be unavailable in restricted browser contexts.
+  }
+}
+
+export function clearRegistrationSearch(): void {
+  writeRegistrationSearch("");
+}
+
+function sameStatuses(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((status, index) => status === right[index]);
+}
+
+/** Builds a shareable Registration query while retaining unrelated deep-link state. */
+export function buildRegistrationSearch(
+  current: URLSearchParams,
+  filters: RegistrationsFilters,
+  defaults: RegistrationsFilters,
+): URLSearchParams {
+  const next = sanitizeRegistrationSearch(current);
+  for (const key of REGISTRATION_FILTER_QUERY_KEYS) next.delete(key);
+
+  if (filters.dateMode === "all") {
+    next.set("dateMode", "all");
+  } else if (filters.dateMode === "range" && isIsoDate(filters.dateFrom) && isIsoDate(filters.dateTo) && filters.dateFrom <= filters.dateTo) {
+    next.set("dateMode", "range");
+    next.set("dateFrom", filters.dateFrom);
+    next.set("dateTo", filters.dateTo);
+  } else if (filters.dateMode === "single" && isIsoDate(filters.date) && filters.date !== defaults.date) {
+    next.set("date", filters.date);
+  }
+
+  if (/^[1-9]\d*$/.test(filters.modalityId)) next.set("modalityId", filters.modalityId);
+  if (!sameStatuses(filters.statuses, defaults.statuses)) {
+    for (const status of filters.statuses) next.append("status", status);
+  }
+  if (filters.sort !== defaults.sort) next.set("sort", filters.sort);
   return next;
 }
 

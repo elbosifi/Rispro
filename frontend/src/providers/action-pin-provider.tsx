@@ -13,6 +13,8 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { getUserDisplayName } from "@/lib/user-display-name";
+import { clearPatientDirectorySearch } from "@/lib/navigation/patient-navigation";
+import { clearRegistrationSearch } from "@/pages/registrations/registration-query";
 
 interface ActionPinChallenge {
   actionKey: string;
@@ -208,6 +210,8 @@ function ActionPinIdleLockOverlay({
     try {
       await logoutApi();
     } finally {
+      clearPatientDirectorySearch();
+      clearRegistrationSearch();
       window.location.href = "/login";
     }
   };

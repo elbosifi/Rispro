@@ -1,9 +1,22 @@
-import { useState, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPatientDirectory, type PatientDirectoryParams } from "@/lib/api-hooks";
 import PatientForm from "@/components/patients/patient-form";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
+import {
+  buildPatientDirectorySearch,
+  parsePatientDirectoryNavigation,
+  patientDirectoryLocation,
+  patientEditPath,
+  readPatientDirectorySearch,
+  sanitizePatientDirectorySearch,
+  writePatientDirectorySearch,
+  type PatientAppointmentFilter,
+  type PatientCategoryFilter,
+  type PatientSexFilter,
+  type PatientSort,
+} from "@/lib/navigation/patient-navigation";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -12,8 +25,7 @@ import { UserPlus, Search, Pencil, CalendarPlus, Printer, ChevronLeft, ChevronRi
 import { Button, Card, Badge } from "@/components/shared";
 import type { PatientDirectoryRow } from "@/types/api";
 
-type CategoryFilter = "oncology" | "non_oncology" | "";
-type AppointmentFilter = "has_future" | "today" | "no_future" | "";
+const PATIENT_DIRECTORY_SCROLL_ANCHOR_KEY = "rispro-patient-directory-scroll-anchor";
 
 function DirectoryStat({
   label,
@@ -45,17 +57,46 @@ export default function PatientsPage() {
   const { language } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isNewRoute = location.pathname === "/patients/new" || location.pathname.startsWith("/patients/new");
+  const [searchQuery, setSearchQuery] = useState(() => readPatientDirectorySearch());
+  const navigation = useMemo(() => parsePatientDirectoryNavigation(searchParams), [searchParams]);
+  const { category: categoryFilter, appointment: appointmentFilter, sex: sexFilter, ageMin, ageMax, sort: sortBy, page, patientId: selectedPatientId } = navigation;
+  const sanitizedSearchParams = useMemo(() => sanitizePatientDirectorySearch(searchParams), [searchParams]);
+  const latestSearchParamsRef = useRef(new URLSearchParams(sanitizedSearchParams));
+  const pendingSearchRef = useRef<string | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
-  const [appointmentFilter, setAppointmentFilter] = useState<AppointmentFilter>("");
-  const [sexFilter, setSexFilter] = useState<"male" | "female" | "">("");
-  const [ageMin, setAgeMin] = useState<number | "">("");
-  const [ageMax, setAgeMax] = useState<number | "">("");
-  const [sortBy, setSortBy] = useState<"name" | "recent" | "mrn">("recent");
-  const [page, setPage] = useState(1);
-  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const renderedSearch = searchParams.toString();
+    const sanitizedSearch = sanitizedSearchParams.toString();
+    if (renderedSearch !== sanitizedSearch) {
+      latestSearchParamsRef.current = sanitizedSearchParams;
+      pendingSearchRef.current = sanitizedSearch;
+      return;
+    }
+    if (pendingSearchRef.current && pendingSearchRef.current !== renderedSearch) return;
+    latestSearchParamsRef.current = new URLSearchParams(sanitizedSearchParams);
+    pendingSearchRef.current = null;
+  }, [sanitizedSearchParams, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (searchParams.toString() !== sanitizedSearchParams.toString()) {
+      setSearchParams(sanitizedSearchParams, { replace: true });
+    }
+  }, [sanitizedSearchParams, searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Parameters<typeof buildPatientDirectorySearch>[1], replace = true) => {
+    const next = buildPatientDirectorySearch(latestSearchParamsRef.current, patch);
+    if (next.toString() === location.search.slice(1)) {
+      latestSearchParamsRef.current = next;
+      pendingSearchRef.current = null;
+      return;
+    }
+    latestSearchParamsRef.current = next;
+    pendingSearchRef.current = next.toString();
+    setSearchParams(next, { replace });
+  };
+  const currentDirectoryLocation = patientDirectoryLocation(location.pathname, sanitizedSearchParams);
 
   const params = useMemo((): PatientDirectoryParams => ({
     q: searchQuery || undefined,
@@ -74,14 +115,6 @@ export default function PatientsPage() {
     queryFn: () => fetchPatientDirectory(params),
     staleTime: 1000 * 30
   });
-
-  if (isNewRoute) {
-    return (
-      <div className="w-full max-w-none space-y-5">
-        <PatientForm mode="create" />
-      </div>
-    );
-  }
 
   const patients = data?.patients || [];
   const pagination = data?.pagination;
@@ -107,14 +140,34 @@ export default function PatientsPage() {
   );
   const clearFilters = () => {
     setSearchQuery("");
-    setCategoryFilter("");
-    setAppointmentFilter("");
-    setSexFilter("");
-    setAgeMin("");
-    setAgeMax("");
-    setSortBy("recent");
-    setPage(1);
+    writePatientDirectorySearch("");
+    updateNavigation({ category: "", appointment: "", sex: "", ageMin: "", ageMax: "", sort: "recent", page: 1 });
   };
+  const openPatientDrawer = (patientId: number) => {
+    window.sessionStorage.setItem(PATIENT_DIRECTORY_SCROLL_ANCHOR_KEY, String(patientId));
+    updateNavigation({ patientId }, false);
+  };
+
+  useEffect(() => {
+    if (isNewRoute || isLoading || selectedPatientId != null) return;
+    const anchorId = Number(window.sessionStorage.getItem(PATIENT_DIRECTORY_SCROLL_ANCHOR_KEY));
+    if (!Number.isSafeInteger(anchorId) || anchorId <= 0 || !patients.some((patient) => patient.id === anchorId)) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const anchor = document.querySelector<HTMLElement>(`[data-patient-id="${anchorId}"]`);
+      if (typeof anchor?.scrollIntoView === "function") anchor.scrollIntoView({ block: "nearest" });
+      window.sessionStorage.removeItem(PATIENT_DIRECTORY_SCROLL_ANCHOR_KEY);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isLoading, isNewRoute, patients, selectedPatientId]);
+
+  if (isNewRoute) {
+    return (
+      <div className="w-full max-w-none space-y-5">
+        <PatientForm mode="create" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -136,7 +189,8 @@ export default function PatientsPage() {
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
-                setPage(1);
+                writePatientDirectorySearch(e.target.value);
+                updateNavigation({ page: 1 });
               }}
               placeholder={t(language, "patients.searchPlaceholder")}
               className="input-premium pl-12 h-11 sm:h-12"
@@ -150,8 +204,7 @@ export default function PatientsPage() {
             <select
               value={categoryFilter}
               onChange={(e) => {
-                setCategoryFilter(e.target.value as CategoryFilter);
-                setPage(1);
+                updateNavigation({ category: e.target.value as PatientCategoryFilter, page: 1 });
               }}
               className="input-premium h-10 w-full text-sm"
             >
@@ -165,8 +218,7 @@ export default function PatientsPage() {
             <select
               value={appointmentFilter}
               onChange={(e) => {
-                setAppointmentFilter(e.target.value as AppointmentFilter);
-                setPage(1);
+                updateNavigation({ appointment: e.target.value as PatientAppointmentFilter, page: 1 });
               }}
               className="input-premium h-10 w-full text-sm"
             >
@@ -181,8 +233,7 @@ export default function PatientsPage() {
             <select
               value={sexFilter}
               onChange={(e) => {
-                setSexFilter(e.target.value as "male" | "female" | "");
-                setPage(1);
+                updateNavigation({ sex: e.target.value as PatientSexFilter, page: 1 });
               }}
               className="input-premium h-10 w-full text-sm"
             >
@@ -198,8 +249,7 @@ export default function PatientsPage() {
                 type="number"
                 value={ageMin}
                 onChange={(e) => {
-                  setAgeMin(e.target.value === "" ? "" : Number(e.target.value));
-                  setPage(1);
+                  updateNavigation({ ageMin: e.target.value === "" ? "" : Number(e.target.value), page: 1 });
                 }}
                 placeholder={t(language, "patients.directory.filter.minAge")}
                 className="input-premium h-10 min-w-0 flex-1 text-sm"
@@ -210,8 +260,7 @@ export default function PatientsPage() {
                 type="number"
                 value={ageMax}
                 onChange={(e) => {
-                  setAgeMax(e.target.value === "" ? "" : Number(e.target.value));
-                  setPage(1);
+                  updateNavigation({ ageMax: e.target.value === "" ? "" : Number(e.target.value), page: 1 });
                 }}
                 placeholder={t(language, "patients.directory.filter.maxAge")}
                 className="input-premium h-10 min-w-0 flex-1 text-sm"
@@ -224,8 +273,7 @@ export default function PatientsPage() {
             <select
               value={sortBy}
               onChange={(e) => {
-                setSortBy(e.target.value as "name" | "recent" | "mrn");
-                setPage(1);
+                updateNavigation({ sort: e.target.value as PatientSort, page: 1 });
               }}
               className="input-premium h-10 w-full text-sm"
             >
@@ -313,11 +361,12 @@ export default function PatientsPage() {
                         data-category={patient.category || "unknown"}
                         role="button"
                         tabIndex={0}
-                        onClick={() => setSelectedPatientId(patient.id)}
+                        data-patient-id={patient.id}
+                        onClick={() => openPatientDrawer(patient.id)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            setSelectedPatientId(patient.id);
+                            openPatientDrawer(patient.id);
                           }
                         }}
                       >
@@ -385,7 +434,10 @@ export default function PatientsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => navigate(`/patients/${patient.id}/edit`)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              navigate(patientEditPath(patient.id, currentDirectoryLocation));
+                            }}
                             style={{ color: "var(--accent)" }}
                           >
                             <Pencil size={14} />
@@ -393,7 +445,10 @@ export default function PatientsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => navigate(`/appointments?patientId=${patient.id}`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(`/appointments?patientId=${patient.id}`);
+                          }}
                           >
                             <CalendarPlus size={14} />
                           </Button>
@@ -421,7 +476,8 @@ export default function PatientsPage() {
                   key={patient.id}
                   type="button"
                   className={`w-full rounded-xl border border-border p-3 text-start transition-colors ${patientCategoryRowClass(patient.category, index)}`}
-                  onClick={() => setSelectedPatientId(patient.id)}
+                  data-patient-id={patient.id}
+                  onClick={() => openPatientDrawer(patient.id)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -460,7 +516,7 @@ export default function PatientsPage() {
                   variant="outline"
                   size="sm"
                   disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  onClick={() => updateNavigation({ page: Math.max(1, page - 1) })}
                 >
                   <ChevronLeft size={16} />
                   {language === "ar" ? "السابق" : "Previous"}
@@ -472,7 +528,7 @@ export default function PatientsPage() {
                   variant="outline"
                   size="sm"
                   disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => updateNavigation({ page: Math.min(totalPages, page + 1) })}
                 >
                   {language === "ar" ? "التالي" : "Next"}
                   <ChevronRight size={16} />
@@ -483,13 +539,7 @@ export default function PatientsPage() {
         )}
       </Card>
 
-      {selectedPatientId && (
-        <div className="fixed inset-0 z-50 bg-black/30" onClick={() => setSelectedPatientId(null)}>
-          <div className="fixed inset-y-0 right-0 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
-          </div>
-        </div>
-      )}
+      {selectedPatientId ? <PatientDrawer patientId={selectedPatientId} onClose={() => updateNavigation({ patientId: null }, false)} /> : null}
     </div>
   );
 }

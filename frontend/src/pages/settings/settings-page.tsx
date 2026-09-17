@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Search, ShieldCheck } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useAuth } from "@/providers/auth-provider";
@@ -42,8 +43,9 @@ import {
   SETTINGS_GROUPS,
   SETTINGS_MENU_SECTIONS,
   SECTION_GROUPS,
-  initialSettingsSection,
+  buildSettingsSectionSearch,
   isSettingsMenuSectionVisible,
+  settingsSectionFromSearch,
   type SettingsGroup,
   type SettingsSection,
 } from "./settings-page.composition";
@@ -97,7 +99,7 @@ function groupLabel(t: (key: TranslationKey, params?: Record<string, string | nu
 
 export default function SettingsPage() {
   const { t } = useLanguage();
-  const [section, setSection] = useState<SettingsSection>(() => initialSettingsSection(window.location.search));
+  const [searchParams, setSearchParams] = useSearchParams();
   const [settingsQuery, setSettingsQuery] = useState("");
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("all");
   const [showReAuthModal, setShowReAuthModal] = useState(false);
@@ -106,6 +108,24 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
+  const section = settingsSectionFromSearch(searchParams, user?.role);
+
+  useEffect(() => {
+    if (!user) return;
+    const requested = searchParams.get("section");
+    const canonical = section === "menu" ? null : section;
+    if (requested === canonical) return;
+    setSearchParams(buildSettingsSectionSearch(searchParams, section), { replace: true });
+  }, [searchParams, section, setSearchParams, user]);
+
+  const openSection = (nextSection: SettingsSection) => {
+    if (nextSection === "menu" || !isSettingsMenuSectionVisible(nextSection, user?.role)) return;
+    setSearchParams(buildSettingsSectionSearch(searchParams, nextSection));
+  };
+
+  const returnToMenu = () => {
+    setSearchParams(buildSettingsSectionSearch(searchParams, "menu"));
+  };
 
   const handleReAuthSuccess = async () => {
     setShowReAuthModal(false);
@@ -209,7 +229,7 @@ export default function SettingsPage() {
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setSection(key)}
+                    onClick={() => openSection(key)}
                     className="rounded-xl border border-border bg-background p-4 text-start transition-colors hover:border-accent/40 hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-accent/30"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -233,7 +253,7 @@ export default function SettingsPage() {
       ) : (
         <div className="space-y-4">
           <button
-            onClick={() => setSection("menu")}
+            onClick={returnToMenu}
             className="pill-soft text-sm font-medium"
           >
             {t("common.back")} - {t("settings.backToMenu")}

@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { todayIsoDateLy } from "../../lib/date-format";
 import {
+  buildRegistrationSearch,
   buildRegistrationAppointmentQuery,
+  clearRegistrationSearch,
   parseRegistrationFiltersFromSearchParams,
+  readRegistrationSearch,
   REGISTRATION_DEFAULT_STATUSES,
   REGISTRATION_FILTER_STATUSES,
+  sanitizeRegistrationSearch,
   type RegistrationsFilters,
+  writeRegistrationSearch,
 } from "./registration-query";
 
 const defaults: RegistrationsFilters = {
@@ -148,5 +153,42 @@ describe("buildRegistrationAppointmentQuery", () => {
     expect(
       parseRegistrationFiltersFromSearchParams(new URLSearchParams("status=waiting&status=in-progress"), defaults).statuses,
     ).toEqual(["waiting", "in-progress"]);
+  });
+
+  it("rejects invalid URL filter values and never imports private search text", () => {
+    const parsed = parseRegistrationFiltersFromSearchParams(
+      new URLSearchParams("q=Patient%20Name&modalityId=0&status=unknown&dateMode=range&dateFrom=bad&dateTo=2026-04-27"),
+      defaults,
+    );
+    expect(parsed).toEqual(defaults);
+    expect(sanitizeRegistrationSearch(new URLSearchParams("q=Patient%20Name&appointmentId=7"))).toEqual(
+      new URLSearchParams("appointmentId=7"),
+    );
+  });
+
+  it("omits default filters, preserves appointment deep-link state, and excludes private search text", () => {
+    const next = buildRegistrationSearch(
+      new URLSearchParams("q=Patient%20Name&appointmentId=7&tab=details&source=statistics"),
+      {
+        ...defaults,
+        dateMode: "range",
+        date: "",
+        dateFrom: "2026-04-20",
+        dateTo: "2026-04-27",
+        modalityId: "2",
+        statuses: ["waiting", "in-progress"],
+        sort: "time-asc",
+      },
+      defaults,
+    );
+    expect(next.toString()).toBe("appointmentId=7&tab=details&source=statistics&dateMode=range&dateFrom=2026-04-20&dateTo=2026-04-27&modalityId=2&status=waiting&status=in-progress&sort=time-asc");
+  });
+
+  it("keeps private registration search in session storage only", () => {
+    clearRegistrationSearch();
+    writeRegistrationSearch("Patient Name");
+    expect(readRegistrationSearch()).toBe("Patient Name");
+    clearRegistrationSearch();
+    expect(readRegistrationSearch()).toBe("");
   });
 });
