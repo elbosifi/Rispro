@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, ListFilter, Search } from "lucide-react";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
@@ -19,6 +19,14 @@ import { useV2Availability } from "@/v2/appointments/api";
 import type { AvailabilityDayDto } from "@/v2/appointments/types";
 import { mapAvailabilityRow, type AvailabilityRowStatus, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/availability-row-mapper";
 import { ManageDayDialog } from "./manage-day-dialog";
+import {
+  buildCalendarSearch,
+  calendarMonthToDate,
+  parseCalendarNavigation,
+  readCalendarSearch,
+  writeCalendarSearch,
+  type CalendarNavigationState,
+} from "@/lib/navigation/calendar-navigation";
 
 interface CalendarDay {
   date: string;
@@ -71,19 +79,34 @@ type CapacityCategory = "oncology" | "non_oncology" | null;
 export default function CalendarPage() {
   const { language } = useLanguage();
   const { user } = useAuth();
-  const today = new Date();
-  const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-  const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
-  const [userSelectedDate, setUserSelectedDate] = useState(false);
-  const [modalityFilter, setModalityFilter] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigationState = useMemo(() => parseCalendarNavigation(searchParams), [searchParams]);
+  const displayDate = navigationState.month ? calendarMonthToDate(navigationState.month) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const selectedDate = navigationState.date ?? (navigationState.month ? `${navigationState.month}-01` : todayIsoDateLy());
+  const userSelectedDate = navigationState.date !== null;
+  const modalityFilter = navigationState.modalityId;
+  const categoryFilter = navigationState.category;
+  const statusFilter = navigationState.status;
+  const [searchQuery, setSearchQuery] = useState(readCalendarSearch);
   const [selectedModalitySummaryKey, setSelectedModalitySummaryKey] = useState<string | null>(null);
   const [isModalityModalOpen, setIsModalityModalOpen] = useState(false);
   const [isManageDayOpen, setIsManageDayOpen] = useState(false);
-  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    writeCalendarSearch(searchQuery);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const normalized = buildCalendarSearch(searchParams);
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Partial<CalendarNavigationState>, options: { replace?: boolean } = {}) => {
+    setSearchParams(buildCalendarSearch(searchParams, patch), options);
+  };
 
   // Load appointments for the displayed month range
   const startDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth(), 1));
@@ -242,33 +265,22 @@ export default function CalendarPage() {
   );
 
   const prevMonth = () => {
-    setDisplayDate((d) => {
-      const nextDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-      setSelectedDate(formatDate(nextDate));
-      return nextDate;
-    });
-    setUserSelectedDate(false);
+    const nextDate = new Date(displayDate.getFullYear(), displayDate.getMonth() - 1, 1);
+    updateNavigation({ month: formatDate(nextDate).slice(0, 7), date: null });
   };
 
   const nextMonth = () => {
-    setDisplayDate((d) => {
-      const nextDate = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-      setSelectedDate(formatDate(nextDate));
-      return nextDate;
-    });
-    setUserSelectedDate(false);
+    const nextDate = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 1);
+    updateNavigation({ month: formatDate(nextDate).slice(0, 7), date: null });
   };
 
   const goToday = () => {
     const now = new Date();
-    setDisplayDate(new Date(now.getFullYear(), now.getMonth(), 1));
-    setSelectedDate(formatDate(now));
-    setUserSelectedDate(true);
+    updateNavigation({ month: formatDate(now).slice(0, 7), date: formatDate(now) });
   };
 
   const selectDay = (date: string) => {
-    setSelectedDate(date);
-    setUserSelectedDate(true);
+    updateNavigation({ date });
     setSelectedModalitySummaryKey(null);
     setIsModalityModalOpen(false);
     setIsManageDayOpen(false);
@@ -336,7 +348,7 @@ export default function CalendarPage() {
               </span>
               <select
                 value={modalityFilter}
-                onChange={(event) => setModalityFilter(event.target.value)}
+                onChange={(event) => updateNavigation({ modalityId: event.target.value }, { replace: true })}
                 className="input-premium h-11 w-full"
                 aria-label={t(language, "calendar.modalityFilter")}
               >
@@ -354,7 +366,7 @@ export default function CalendarPage() {
               </span>
               <select
                 value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
+                onChange={(event) => updateNavigation({ category: event.target.value as CalendarNavigationState["category"] }, { replace: true })}
                 className="input-premium h-11 w-full"
                 aria-label={t(language, "calendar.categoryFilter")}
               >
@@ -369,7 +381,7 @@ export default function CalendarPage() {
               </span>
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
+                onChange={(event) => updateNavigation({ status: event.target.value as CalendarNavigationState["status"] }, { replace: true })}
                 className="input-premium h-11 w-full"
                 aria-label={t(language, "calendar.statusFilter")}
               >
@@ -390,9 +402,7 @@ export default function CalendarPage() {
             className="h-10 self-start xl:self-end"
             onClick={() => {
               setSearchQuery("");
-              setCategoryFilter("");
-              setStatusFilter("");
-              setModalityFilter("");
+              updateNavigation({ category: "", status: "", modalityId: "" }, { replace: true });
             }}
           >
             {t(language, "calendar.clearFilters")}
@@ -683,7 +693,7 @@ export default function CalendarPage() {
                           <button
                             type="button"
                             className="font-medium underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
-                            onClick={() => setSelectedPatientId(appointment.patientId)}
+                            onClick={() => updateNavigation({ patientId: appointment.patientId })}
                           >
                             {chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}
                           </button>
@@ -733,8 +743,8 @@ export default function CalendarPage() {
         date={effectiveSelectedDate}
         dateLabel={formatSelectedDateDisplay(effectiveSelectedDate, language)}
       />
-      {selectedPatientId ? (
-        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
+      {navigationState.patientId ? (
+        <PatientDrawer patientId={navigationState.patientId} onClose={() => updateNavigation({ patientId: null })} />
       ) : null}
     </div>
   );

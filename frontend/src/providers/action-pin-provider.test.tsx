@@ -14,6 +14,7 @@ import { LanguageProvider } from "@/providers/language-provider-component";
 import { createV2Booking } from "@/v2/appointments/api";
 import { PATIENTS_SEARCH_STORAGE_KEY } from "@/lib/navigation/patient-navigation";
 import { REGISTRATIONS_SEARCH_STORAGE_KEY } from "@/pages/registrations/registration-query";
+import { CALENDAR_SEARCH_STORAGE_KEY } from "@/lib/navigation/calendar-navigation";
 import type { Patient } from "@/types/api";
 import type { CreateBookingRequest } from "@/v2/appointments/types";
 
@@ -766,6 +767,7 @@ describe("ActionPinIdleLock", () => {
     Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, href: "" } });
     window.sessionStorage.setItem(PATIENTS_SEARCH_STORAGE_KEY, "PRIVATE SEARCH");
     window.sessionStorage.setItem(REGISTRATIONS_SEARCH_STORAGE_KEY, "PRIVATE REGISTRATION SEARCH");
+    window.sessionStorage.setItem(CALENDAR_SEARCH_STORAGE_KEY, "PRIVATE CALENDAR SEARCH");
     renderIdleLock();
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
@@ -782,6 +784,7 @@ describe("ActionPinIdleLock", () => {
     expect(window.location.href).toBe("/login");
     expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
     expect(window.sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(CALENDAR_SEARCH_STORAGE_KEY)).toBeNull();
     expect(JSON.stringify(localStorage)).not.toContain("1234");
     expect(JSON.stringify(sessionStorage)).not.toContain("1234");
     Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
@@ -793,12 +796,14 @@ describe("ActionPinIdleLock", () => {
     Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, href: "" } });
     window.sessionStorage.setItem(PATIENTS_SEARCH_STORAGE_KEY, "PRIVATE SEARCH");
     window.sessionStorage.setItem(REGISTRATIONS_SEARCH_STORAGE_KEY, "PRIVATE REGISTRATION SEARCH");
+    window.sessionStorage.setItem(CALENDAR_SEARCH_STORAGE_KEY, "PRIVATE CALENDAR SEARCH");
     renderAuthLogout();
 
     await userEvent.click(screen.getByRole("button", { name: "Log out" }));
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/auth/logout")).toBe(true));
     expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
     expect(window.sessionStorage.getItem(REGISTRATIONS_SEARCH_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(CALENDAR_SEARCH_STORAGE_KEY)).toBeNull();
     Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
   });
 });

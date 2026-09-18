@@ -6,6 +6,7 @@ import type { User } from "@/types/api";
 import { AuthContext } from "./auth-provider";
 import { clearPatientDirectorySearch } from "@/lib/navigation/patient-navigation";
 import { clearRegistrationSearch } from "@/pages/registrations/registration-query";
+import { clearCalendarSearch } from "@/lib/navigation/calendar-navigation";
 
 function safeLogoutTarget(returnTo: string): string {
   return returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/\\") ? returnTo : "/";
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: (_, returnTo) => {
       clearPatientDirectorySearch();
       clearRegistrationSearch();
+      clearCalendarSearch();
       queryClient.setQueryData(["auth-session"], null);
       queryClient.clear();
       window.location.href = safeLogoutTarget(returnTo);
