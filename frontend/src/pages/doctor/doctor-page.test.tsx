@@ -334,6 +334,11 @@ function CorePlaceholder() {
   return <div data-testid="core-page">{location.pathname}</div>;
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location-probe">{location.pathname}{location.search}</output>;
+}
+
 const normalDoctor: DoctorMe = {
   hasActiveDoctorProfile: true,
   canAccessClinicalDoctorPortal: true,
@@ -452,7 +457,7 @@ function renderDoctorPortal(initialPath = "/doctor") {
           <Routes>
             <Route path="/" element={<CorePlaceholder />} />
             <Route path="/dashboard" element={<CorePlaceholder />} />
-            <Route path="/doctor/*" element={<DoctorPage user={doctorUser} onLogout={() => {}} />} />
+            <Route path="/doctor/*" element={<><DoctorPage user={doctorUser} onLogout={() => {}} /><LocationProbe /></>} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -1658,6 +1663,89 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: /Unassigned cases/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Detailed view/i })).toBeTruthy();
     expect(screen.queryByText("Roster assignment targets")).toBeNull();
+  });
+
+  it("derives Doctor Cases filters and worklist from a deep link", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 2, nameEn: "E2E CT" }], examTypes: [] });
+    renderDoctorPortal("/doctor/today-cases?dateFrom=2026-09-18&dateTo=2026-09-25&modalityId=2&category=oncology&view=team");
+
+    expect(await screen.findByRole("heading", { name: "Today’s Cases" })).toBeTruthy();
+    await waitFor(() => {
+      expect(fetchTeamDoctorCasesMock).toHaveBeenCalledWith({
+        dateFrom: "2026-09-18",
+        dateTo: "2026-09-25",
+        modalityId: 2,
+        status: null,
+        requiresReport: true,
+        caseCategory: "oncology",
+      });
+    });
+    expect((screen.getByLabelText("From") as HTMLInputElement).value).toBe("2026-09-18");
+    expect((screen.getByLabelText("To") as HTMLInputElement).value).toBe("2026-09-25");
+    expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("2");
+    expect((screen.getByLabelText("Category") as HTMLSelectElement).value).toBe("oncology");
+    expect(screen.getByRole("button", { name: "Team cases" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("updates the Doctor Cases URL for filter changes", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 2, nameEn: "E2E CT" }], examTypes: [] });
+    renderDoctorPortal("/doctor/today-cases");
+
+    await screen.findByText("No report-required cases match these filters.");
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-19" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-09-27" } });
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Assignment"), { target: { value: "active" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "oncology" } });
+
+    await waitFor(() => {
+      const location = screen.getByTestId("location-probe").textContent ?? "";
+      expect(location).toContain("dateFrom=2026-09-19");
+      expect(location).toContain("dateTo=2026-09-27");
+      expect(location).toContain("modalityId=2");
+      expect(location).toContain("status=active");
+      expect(location).toContain("category=oncology");
+    });
+  });
+
+  it("normalizes invalid Doctor Cases query parameters to safe defaults", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/today-cases?dateFrom=bad&dateTo=2026-02-31&modalityId=-4&status=random&requiresReport=wat&category=unknown&view=banana&q=private");
+
+    await screen.findByText("No unassigned report-required cases match these filters.");
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/today-cases?requiresReport=true");
+    });
+    expect(fetchUnassignedDoctorCasesMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: null,
+      modalityId: null,
+      requiresReport: true,
+      caseCategory: null,
+    }));
+  });
+
+  it("enforces My Cases for a non-manager even when view is requested in the URL", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/today-cases?view=team");
+
+    await screen.findByText("No report-required cases match these filters.");
+    await waitFor(() => {
+      expect(fetchMyDoctorCasesMock).toHaveBeenCalled();
+      expect(fetchTeamDoctorCasesMock).not.toHaveBeenCalled();
+      expect(screen.getByTestId("location-probe").textContent).not.toContain("view=team");
+    });
+    expect(screen.getByText("My Cases")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Team cases/i })).toBeNull();
   });
 
   it("supervisor can assign an unassigned report case to a doctor", async () => {

@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,16 +16,11 @@ import {
 import type { DoctorCase, DoctorMe, DoctorProfile } from "@/types/api";
 import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { useLanguage } from "@/providers/language-provider";
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(isoDate: string, days: number): string {
-  const date = new Date(`${isoDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
+import {
+  buildDoctorCasesSearch,
+  parseDoctorCasesNavigation,
+  sanitizeDoctorCasesSearch,
+} from "@/lib/navigation/doctor-cases-navigation";
 
 function isManager(me: DoctorMe): boolean {
   return me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
@@ -282,33 +278,48 @@ function SimpleCaseAssignmentView({
 export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const canManage = isManager(me);
   const queryClient = useQueryClient();
-  const [dateFrom, setDateFrom] = useState(todayIso());
-  const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
-  const [modalityId, setModalityId] = useState("");
-  const [status, setStatus] = useState("");
-  const [requiresReport, setRequiresReport] = useState("true");
-  const [caseCategory, setCaseCategory] = useState("");
-  const [view, setView] = useState<"my" | "team" | "unassigned">(canManage ? "unassigned" : "my");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigationState = useMemo(
+    () => parseDoctorCasesNavigation(searchParams, { canManage }),
+    [canManage, searchParams],
+  );
   const [detailedView, setDetailedView] = useState(false);
   const [dropTarget, setDropTarget] = useState<{ appointmentId: number; rosterAssignmentId: number } | null>(null);
   const [dropReason, setDropReason] = useState("");
   const [dropError, setDropError] = useState("");
-  const rosterWeekStart = useMemo(() => weekStartIso(dateFrom), [dateFrom]);
+  const rosterWeekStart = useMemo(() => weekStartIso(navigationState.dateFrom), [navigationState.dateFrom]);
+
+  useEffect(() => {
+    const sanitized = sanitizeDoctorCasesSearch(searchParams, { canManage });
+    if (sanitized.toString() !== searchParams.toString()) {
+      setSearchParams(sanitized, { replace: true });
+    }
+  }, [canManage, searchParams, setSearchParams]);
+
+  const updateNavigation = (
+    patch: Parameters<typeof buildDoctorCasesSearch>[1],
+    options: { replace?: boolean } = { replace: true },
+  ) => {
+    setSearchParams(
+      buildDoctorCasesSearch(searchParams, patch, { canManage }),
+      options,
+    );
+  };
 
   const filters = useMemo(() => ({
-    dateFrom,
-    dateTo,
-    modalityId: modalityId ? Number(modalityId) : null,
-    status: status || null,
-    requiresReport: requiresReport === "" ? null : requiresReport === "true",
-    caseCategory: caseCategory || null,
-  }), [caseCategory, dateFrom, dateTo, modalityId, requiresReport, status]);
+    dateFrom: navigationState.dateFrom,
+    dateTo: navigationState.dateTo,
+    modalityId: navigationState.modalityId ? Number(navigationState.modalityId) : null,
+    status: navigationState.status || null,
+    requiresReport: navigationState.requiresReport === "" ? null : navigationState.requiresReport === "true",
+    caseCategory: navigationState.category || null,
+  }), [navigationState]);
 
   const casesQuery = useQuery({
-    queryKey: ["doctor", "cases", view, filters],
+    queryKey: ["doctor", "cases", navigationState.view, filters],
     queryFn: () => {
-      if (canManage && view === "team") return fetchTeamDoctorCases(filters);
-      if (canManage && view === "unassigned") return fetchUnassignedDoctorCases(filters);
+      if (canManage && navigationState.view === "team") return fetchTeamDoctorCases(filters);
+      if (canManage && navigationState.view === "unassigned") return fetchUnassignedDoctorCases(filters);
       return fetchMyDoctorCases(filters);
     },
   });
@@ -388,15 +399,15 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
       <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <label className="text-sm font-medium">
           From
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
+          <input type="date" value={navigationState.dateFrom} onChange={(event) => updateNavigation({ dateFrom: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
         </label>
         <label className="text-sm font-medium">
           To
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
+          <input type="date" value={navigationState.dateTo} onChange={(event) => updateNavigation({ dateTo: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
         </label>
         <label className="text-sm font-medium">
           Modality
-          <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             {(lookupsQuery.data?.modalities ?? []).map((modality) => (
               <option key={modality.id} value={modality.id}>{modality.nameEn}</option>
@@ -405,7 +416,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </label>
         <label className="text-sm font-medium">
           Assignment
-          <select value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.status} onChange={(event) => updateNavigation({ status: event.target.value as typeof navigationState.status })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="active">Active</option>
             <option value="unassigned">Unassigned</option>
@@ -413,14 +424,14 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </label>
         <label className="text-sm font-medium">
           Report
-          <select value={requiresReport} onChange={(event) => setRequiresReport(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as typeof navigationState.requiresReport })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="true">Required</option>
           </select>
         </label>
         <label className="text-sm font-medium">
           Category
-          <select value={caseCategory} onChange={(event) => setCaseCategory(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.category} onChange={(event) => updateNavigation({ category: event.target.value as typeof navigationState.category })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="oncology">Oncology</option>
             <option value="non_oncology">Non-oncology</option>
@@ -430,9 +441,9 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
 
       {canManage && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setView("my")} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: view === "my" ? "var(--accent)" : "var(--border)" }}>My cases</button>
-          <button type="button" onClick={() => setView("team")} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: view === "team" ? "var(--accent)" : "var(--border)" }}>Team cases</button>
-          <button type="button" onClick={() => setView("unassigned")} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: view === "unassigned" ? "var(--accent)" : "var(--border)" }}>Unassigned cases</button>
+          <button type="button" aria-pressed={navigationState.view === "my"} onClick={() => updateNavigation({ view: "my" }, { replace: false })} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: navigationState.view === "my" ? "var(--accent)" : "var(--border)" }}>My cases</button>
+          <button type="button" aria-pressed={navigationState.view === "team"} onClick={() => updateNavigation({ view: "team" }, { replace: false })} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: navigationState.view === "team" ? "var(--accent)" : "var(--border)" }}>Team cases</button>
+          <button type="button" aria-pressed={navigationState.view === "unassigned"} onClick={() => updateNavigation({ view: "unassigned" }, { replace: false })} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: navigationState.view === "unassigned" ? "var(--accent)" : "var(--border)" }}>Unassigned cases</button>
         </div>
       )}
 
