@@ -44,6 +44,7 @@ import { requestScansRouter } from "./routes/request-scans.js";
 import { emailSettingsRouter } from "./routes/email-settings.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 import { incidentsRouter } from "./routes/incidents.js";
+import { sopsRouter } from "./modules/sops/routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,6 +155,7 @@ export function createApp(): Application {
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
   app.use("/api/incidents", incidentsRouter);
+  app.use("/api/sops", sopsRouter);
   app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/integrations", integrationsRouter);

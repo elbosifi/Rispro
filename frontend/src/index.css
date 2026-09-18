@@ -3,6 +3,92 @@
 
 @import "tailwindcss";
 
+.sop-toolbar-button {
+  display: inline-flex;
+  min-width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.sop-toolbar-button:hover:not(:disabled),
+.sop-toolbar-button.is-active {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--accent);
+}
+
+.sop-toolbar-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.sop-toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.sop-editor-content .ProseMirror {
+  min-height: 9rem;
+  padding: 1rem;
+  outline: none;
+  line-height: 1.75;
+  unicode-bidi: plaintext;
+}
+
+.sop-editor-content .ProseMirror p {
+  margin: 0.35rem 0;
+}
+
+.sop-editor-content .ProseMirror h2,
+.sop-editor-content .ProseMirror h3 {
+  margin: 0.75rem 0 0.35rem;
+  font-weight: 700;
+}
+
+.sop-editor-content .ProseMirror h2 { font-size: 1.1rem; }
+.sop-editor-content .ProseMirror h3 { font-size: 0.98rem; }
+
+.sop-editor-content .ProseMirror ul,
+.sop-editor-content .ProseMirror ol {
+  margin: 0.5rem 0;
+  padding-inline-start: 1.5rem;
+}
+
+.sop-editor-content .ProseMirror table {
+  width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.sop-editor-content .ProseMirror th,
+.sop-editor-content .ProseMirror td {
+  min-width: 5rem;
+  border: 1px solid var(--border);
+  padding: 0.45rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.sop-editor-content .ProseMirror th {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .sop-editor-content .ProseMirror { min-height: 8rem; padding: 0.75rem; }
+  .sop-editor-content .ProseMirror table { min-width: 34rem; }
+}
+
 @theme {
   /* Color Palette */
   --color-background: var(--background);
@@ -832,4 +918,89 @@ body::before {
   background-image: radial-gradient(circle, white 1px, transparent 1px);
   background-size: 32px 32px;
   opacity: 0.03;
+}
+
+@media (max-width: 640px) {
+  section[aria-labelledby="sop-register-heading"] table {
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+
+  section[aria-labelledby="sop-register-heading"] th:nth-child(3),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(3),
+  section[aria-labelledby="sop-register-heading"] th:nth-child(6),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(6),
+  section[aria-labelledby="sop-register-heading"] th:nth-child(7),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(7) {
+    display: none;
+  }
+
+  section[aria-labelledby="sop-register-heading"] th:nth-child(1),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(1) { width: 25%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(2),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(2) { width: 32%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(4),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(4) { width: 12%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(5),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(5) { width: 15%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(8),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(8) { width: 16%; }
+
+  section[aria-labelledby="sop-register-heading"] th,
+  section[aria-labelledby="sop-register-heading"] td {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+    font-size: 0.75rem;
+  }
+
+  section[aria-labelledby="sop-register-heading"] th:nth-child(1),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(1) { width: 24%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(2),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(2) { width: 31%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(4),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(4) { width: 11%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(5),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(5) { width: 14%; }
+  section[aria-labelledby="sop-register-heading"] th:nth-child(8),
+  section[aria-labelledby="sop-register-heading"] td:nth-child(8) { width: 20%; }
+
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(4),
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(5),
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(8) {
+    font-size: 0;
+    white-space: nowrap;
+  }
+
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(4)::after { content: "Ver"; font-size: 0.65rem; }
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(5)::after { content: "State"; font-size: 0.65rem; }
+  section[aria-labelledby="sop-register-heading"] thead th:nth-child(8)::after { content: "Open"; font-size: 0.65rem; }
+
+  section[aria-labelledby="sop-register-heading"] tbody td:nth-child(8) button {
+    min-width: 2rem;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+    font-size: 0;
+    justify-content: center;
+  }
+
+  section[aria-labelledby="sop-history-heading"] table {
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+
+  section[aria-labelledby="sop-history-heading"] th:nth-child(2),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(2),
+  section[aria-labelledby="sop-history-heading"] th:nth-child(4),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(4) {
+    display: none;
+  }
+
+  section[aria-labelledby="sop-history-heading"] th:nth-child(1),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(1) { width: 16%; }
+  section[aria-labelledby="sop-history-heading"] th:nth-child(3),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(3) { width: 44%; }
+  section[aria-labelledby="sop-history-heading"] th:nth-child(5),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(5) { width: 20%; }
+  section[aria-labelledby="sop-history-heading"] th:nth-child(6),
+  section[aria-labelledby="sop-history-heading"] td:nth-child(6) { width: 20%; }
 }

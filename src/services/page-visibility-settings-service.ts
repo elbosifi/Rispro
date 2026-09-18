@@ -29,6 +29,7 @@ export const PAGE_VISIBILITY_ROUTE_KEYS = [
   "authoritative.orthanc",
   "worklist.monitor",
   "legacy",
+  "sops",
   "settings",
 ] as const;
 
@@ -60,6 +61,7 @@ export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
   "authoritative.orthanc": ["modality_staff", "supervisor", "super_admin"],
   "worklist.monitor": ["supervisor", "super_admin"],
   legacy: ["supervisor", "super_admin"],
+  sops: ["receptionist", "supervisor", "modality_staff", "doctor", "administrative", "super_admin"],
   settings: ["super_admin"],
 };
 

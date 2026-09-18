@@ -46,6 +46,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   "worklist.monitor": "MWL Monitor",
   legacy: "Legacy",
   incidents: "Safety & Incidents",
+  sops: "SOP Library",
   settings: "Settings",
 };
 

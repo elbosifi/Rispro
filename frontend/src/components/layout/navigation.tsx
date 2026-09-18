@@ -40,7 +40,8 @@ import {
   Redo2,
   Languages,
   LogOut,
-  ShieldAlert
+  ShieldAlert,
+  BookOpen
 } from "lucide-react";
 import { GlobalSearch } from "@/components/search/global-search";
 import { GlobalPrintStatusPill } from "@/components/printing/global-print-status-pill";
@@ -106,7 +107,8 @@ const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   worklistMonitor: ClipboardList,
   settings: Settings,
   legacy: History,
-  incidents: ShieldAlert
+  incidents: ShieldAlert,
+  sops: BookOpen
 };
 
 function NavIconGlyph({ icon, size = 20 }: { icon: AppNavIcon; size?: number }) {
@@ -286,7 +288,7 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
     group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["recall.requests"], ["request.scans"], ["queue"]], true),
     group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
-    group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["incidents"], ["settings"]], false),
+    group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["incidents"], ["sops"], ["settings"]], false),
     group("systems", "navGroup.systems", [["pacs"], ["authoritative.orthanc"], ["worklist.monitor"]], false),
     group("other", "navGroup.legacyFallback", [["legacy"]], false),
   ];

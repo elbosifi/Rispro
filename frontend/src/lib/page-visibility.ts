@@ -85,6 +85,7 @@ const DEFAULT_LANDING_PRIORITY: readonly PageVisibilityRouteKey[] = [
   "authoritative.orthanc",
   "worklist.monitor",
   "legacy",
+  "sops",
   "v2.appointments.admin",
   "settings",
   "queue.checkin",
