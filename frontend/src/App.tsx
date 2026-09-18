@@ -53,6 +53,7 @@ import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/S
 import { NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { hasDoctorWorkspaceAccess, shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
 import { globalPatientSearchLocation, safeInternalReturnTo } from "@/lib/navigation/patient-navigation";
+import { resolveModuleNavigationTarget, saveModuleLastLocation } from "@/lib/navigation/module-last-location";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { useLanguage } from "@/providers/language-provider";
@@ -142,6 +143,7 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
+  const userRole = user?.role;
   const { language, toggleLanguage, t } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -170,11 +172,17 @@ function AppContent() {
       const path = APP_ROUTE_PATHS[route as keyof typeof APP_ROUTE_PATHS];
       if (path) {
         localStorage.setItem("rispro-route", route);
-        navigate(search ? `${path}?${search}` : path);
+        const destination = resolveModuleNavigationTarget(path, search, user?.role);
+        navigate(destination);
       }
     },
-    [navigate]
+    [navigate, user?.role]
   );
+
+  useEffect(() => {
+    if (!userRole) return;
+    saveModuleLastLocation(location.pathname, location.search, userRole);
+  }, [location.pathname, location.search, userRole]);
 
   const handlePatientSearchSelect = useCallback((patientId: number) => {
     navigate(globalPatientSearchLocation(location.pathname, location.search, patientId));

@@ -1,3 +1,5 @@
+import { todayIsoDateLy } from "@/lib/date-format";
+
 export type RegistrationSort = "booking-desc" | "booking-asc" | "patient-asc" | "time-asc";
 
 export const REGISTRATIONS_SEARCH_STORAGE_KEY = "rispro:registrations:search";
@@ -39,6 +41,8 @@ export const REGISTRATION_FILTER_STATUSES = [
   "cancelled",
   "discontinued",
 ] as const;
+
+const REGISTRATION_APPOINTMENT_TABS = ["details", "documents", "report", "reschedule", "status", "cancel"] as const;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -171,6 +175,43 @@ export function buildRegistrationSearch(
   }
   if (filters.sort !== defaults.sort) next.set("sort", filters.sort);
   return next;
+}
+
+/** Builds only the validated, non-private Registration state suitable for module restoration. */
+export function buildRegistrationLastLocationSearch(current: URLSearchParams): URLSearchParams {
+  const patientId = normalizePositiveId(current.get("patientId"));
+  const defaults: RegistrationsFilters = {
+    dateMode: patientId ? "all" : "single",
+    date: patientId ? "" : todayIsoDateLy(),
+    dateFrom: "",
+    dateTo: "",
+    modalityId: "",
+    patientId: patientId ? String(patientId) : undefined,
+    query: "",
+    statuses: [...REGISTRATION_DEFAULT_STATUSES],
+    sort: "booking-desc",
+  };
+  const filters = parseRegistrationFiltersFromSearchParams(current, defaults);
+  const next = buildRegistrationSearch(new URLSearchParams(), filters, defaults);
+
+  for (const key of ["appointmentId", "patientId", "patientDrawerId"] as const) {
+    const value = normalizePositiveId(current.get(key));
+    if (value) next.set(key, String(value));
+  }
+
+  const tab = current.get("tab");
+  if (tab && REGISTRATION_APPOINTMENT_TABS.includes(tab as (typeof REGISTRATION_APPOINTMENT_TABS)[number])) {
+    next.set("tab", tab);
+  }
+
+  if (current.get("source") === "statistics") next.set("source", "statistics");
+  return next;
+}
+
+function normalizePositiveId(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export function buildRegistrationAppointmentQuery(filters: RegistrationsFilters) {

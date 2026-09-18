@@ -16,6 +16,7 @@ import { getUserDisplayName } from "@/lib/user-display-name";
 import { clearPatientDirectorySearch } from "@/lib/navigation/patient-navigation";
 import { clearRegistrationSearch } from "@/pages/registrations/registration-query";
 import { clearCalendarSearch } from "@/lib/navigation/calendar-navigation";
+import { clearModuleLastLocations } from "@/lib/navigation/module-last-location";
 
 interface ActionPinChallenge {
   actionKey: string;
@@ -214,6 +215,7 @@ function ActionPinIdleLockOverlay({
       clearPatientDirectorySearch();
       clearRegistrationSearch();
       clearCalendarSearch();
+      clearModuleLastLocations();
       window.location.href = "/login";
     }
   };

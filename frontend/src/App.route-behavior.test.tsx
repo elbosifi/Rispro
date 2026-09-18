@@ -8,6 +8,7 @@ import { APP_NAV_ITEMS } from "@/lib/route-registry";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 import { t as translate } from "@/lib/i18n";
 import { PATIENTS_SEARCH_STORAGE_KEY } from "@/lib/navigation/patient-navigation";
+import { MODULE_LAST_LOCATIONS_STORAGE_KEY } from "@/lib/navigation/module-last-location";
 import type { User } from "@/types/api";
 
 const testState = vi.hoisted(() => ({
@@ -251,6 +252,73 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/patients?page=2&patientId=55"));
     expect(window.sessionStorage.getItem(PATIENTS_SEARCH_STORAGE_KEY)).toBeNull();
+  });
+
+  it.each([
+    {
+      module: "patients",
+      role: "receptionist",
+      location: "/patients?category=oncology&page=3&patientId=55",
+      label: "Patients",
+      testId: "patients-page",
+    },
+    {
+      module: "registrations",
+      role: "receptionist",
+      location: "/registrations?date=2025-01-02&appointmentId=123",
+      label: "Registrations",
+      testId: "registrations-page",
+    },
+    {
+      module: "calendar",
+      role: "receptionist",
+      location: "/calendar?month=2026-09&date=2026-09-18&modalityId=2&status=scheduled",
+      label: "Calendar",
+      testId: "calendar-page",
+    },
+    {
+      module: "modality",
+      role: "supervisor",
+      location: "/modality?modalityId=2&date=2026-09-18&view=in-progress&appointmentId=123",
+      label: "Modality board",
+      testId: "modality-page",
+    },
+    {
+      module: "settings",
+      role: "super_admin",
+      location: "/settings?section=equipment",
+      label: "Settings",
+      testId: "settings-page",
+    },
+  ] as const)("restores the saved $module location through global navigation", async ({ module, role, location, label, testId }) => {
+    testState.user = {
+      id: 1,
+      username: role,
+      fullName: role,
+      role,
+    } as User;
+    window.sessionStorage.setItem(MODULE_LAST_LOCATIONS_STORAGE_KEY, JSON.stringify({ [module]: location }));
+    renderAppAt("/queue");
+
+    const user = userEvent.setup();
+    await screen.findByTestId("queue-page");
+    if (module === "settings") {
+      await user.click(screen.getByRole("button", { name: /^Administration$/ }));
+    }
+    await user.click(screen.getByRole("button", { name: new RegExp(`^${label}$`) }));
+
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe(location));
+    expect(await screen.findByTestId(testId)).toBeTruthy();
+  });
+
+  it("records the current module only after removing private query state", async () => {
+    renderAppAt("/calendar?q=Patient%20Name&month=2026-09&date=2026-09-18&modalityId=2");
+
+    await screen.findByTestId("calendar-page");
+    await waitFor(() => {
+      expect(JSON.parse(window.sessionStorage.getItem(MODULE_LAST_LOCATIONS_STORAGE_KEY) ?? "{}").calendar)
+        .toBe("/calendar?month=2026-09&date=2026-09-18&modalityId=2");
+    });
   });
 
   it.each(["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const)("allows %s to open workstation printing without exposing admin settings", async (role) => {
