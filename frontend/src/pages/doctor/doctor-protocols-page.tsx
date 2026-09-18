@@ -457,6 +457,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
   const [protocolImportInspect, setProtocolImportInspect] = useState<ProtocolImportInspect | null>(null);
   const [protocolImportPreview, setProtocolImportPreview] = useState<ProtocolImportPreview | null>(null);
   const [protocolImportSummary, setProtocolImportSummary] = useState<ProtocolImportSummary | null>(null);
+  const [protocolDeactivationDialogOpen, setProtocolDeactivationDialogOpen] = useState(false);
 
   const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: section === "protocols" || section === "importExport" });
   const anatomyQuery = useQuery({ queryKey: ["doctor", "protocol-library", "anatomy-regions"], queryFn: fetchProtocolLibraryAnatomyRegions, enabled: section === "anatomy" || section === "protocols" });
@@ -521,7 +522,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
   const exportProtocolVersionMutation = useMutation({ mutationFn: exportProtocolLibraryVersionWorkbook, onError: onMutationError });
   const inspectProtocolImportMutation = useMutation({ mutationFn: inspectProtocolImport, onError: onMutationError, onSuccess: (inspect) => { setProtocolImportInspect(inspect); setProtocolImportPreview(null); setProtocolImportSummary(null); } });
   const previewProtocolImportMutation = useMutation({ mutationFn: previewProtocolImport, onError: onMutationError, onSuccess: (preview) => { setProtocolImportPreview(preview); setProtocolImportSummary(null); } });
-  const confirmProtocolImportMutation = useMutation({ mutationFn: confirmProtocolImport, onError: onMutationError, onSuccess: async (summary) => { setProtocolImportSummary(summary); setMessage({ tone: "success", text: "Protocol workbook imported as drafts. Review and activate each protocol before clinical use." }); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] }); } });
+  const confirmProtocolImportMutation = useMutation({ mutationFn: confirmProtocolImport, onError: onMutationError, onSuccess: async (summary) => { setProtocolImportSummary(summary); setProtocolDeactivationDialogOpen(false); setMessage({ tone: "success", text: "Protocol synchronization applied: " + summary.createdProtocols + " created, " + summary.updatedProtocols + " updated, " + summary.unchangedProtocols + " unchanged, " + summary.deactivatedProtocols + " deactivated." }); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] }); } });
 
   const readMriImportFile = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -548,6 +549,14 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
     const base64 = dataUrl.split(",")[1] ?? "";
     setProtocolImportFileBase64(base64); setProtocolImportFileName(file.name); setProtocolImportInspect(null); setProtocolImportPreview(null); setProtocolImportSummary(null);
     inspectProtocolImportMutation.mutate({ fileContentBase64: base64, fileName: file.name });
+  };
+  const requestProtocolImportConfirmation = () => {
+    if (!protocolImportPreview?.canConfirm) return;
+    if (protocolImportPreview.authoritativeSync && protocolImportPreview.summary.deactivateProtocols > 0) {
+      setProtocolDeactivationDialogOpen(true);
+      return;
+    }
+    confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName, confirmMissingProtocolDeactivation: false });
   };
   const refreshBuilder = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] });
@@ -717,6 +726,30 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={protocolDeactivationDialogOpen} onClose={() => setProtocolDeactivationDialogOpen(false)}>
+        <DialogContent maxWidth="520px">
+          <DialogHeader>
+            <DialogTitle>Apply protocol library synchronization?</DialogTitle>
+            <DialogDescription>Deactivated protocols remain in RISpro history but will no longer be available for new assignments.</DialogDescription>
+          </DialogHeader>
+          {protocolImportPreview ? <div className="space-y-3 text-sm">
+            <p>This workbook will:</p>
+            <ul className="list-disc space-y-1 ps-5">
+              <li>Create {protocolImportPreview.summary.createProtocols} protocols</li>
+              <li>Update {protocolImportPreview.summary.updateProtocols} protocols</li>
+              <li>Deactivate {protocolImportPreview.summary.deactivateProtocols} protocols</li>
+            </ul>
+            <div>
+              <p className="font-semibold">Protocols to deactivate:</p>
+              <ul className="mt-1 list-disc space-y-1 ps-5">{protocolImportPreview.deactivationProtocolNames.map((name) => <li key={name}>{name}</li>)}</ul>
+            </div>
+          </div> : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setProtocolDeactivationDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" disabled={confirmProtocolImportMutation.isPending} onClick={() => confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName, confirmMissingProtocolDeactivation: true })}>Apply synchronization</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {section === "importExport" && (
         <section className="space-y-4 rounded-xl border p-4" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
           <div>
@@ -740,10 +773,10 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
             </div>
           </div> : null}
           {(protocolImportInspect || protocolImportPreview || protocolImportSummary) && <div className="space-y-3 text-sm">
-            {protocolImportInspect && <div><p className="font-semibold">Workbook inspect</p>{protocolImportInspect.sheets.map((sheet) => <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>{sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}</p>)}{protocolImportInspect.unknownSheets.length ? <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ignored extra sheets: {protocolImportInspect.unknownSheets.join(", ")}</p> : null}</div>}
-            {protocolImportFileBase64 && <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" size="sm" disabled={previewProtocolImportMutation.isPending} onClick={() => previewProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Preview import</Button><Button type="button" variant="secondary" size="sm" disabled={!protocolImportPreview?.canConfirm || confirmProtocolImportMutation.isPending} onClick={() => confirmProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Confirm import</Button></div>}
-            {protocolImportPreview && <><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><SummaryCard label="Protocols" value={protocolImportPreview.summary.protocols} /><SummaryCard label="CT phases" value={protocolImportPreview.summary.ctPhases} /><SummaryCard label="CT techniques" value={protocolImportPreview.summary.ctTechniques} /><SummaryCard label="MRI sequences" value={protocolImportPreview.summary.mriSequences} /><SummaryCard label="Errors" value={protocolImportPreview.summary.errors} /></div><div className="grid gap-2 md:grid-cols-2"><ImportPreviewList title="Protocols" rows={protocolImportPreview.protocolRows.map((row) => ({ key: `protocol-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"} - ${row.action}`, errors: row.errors }))} /><ImportPreviewList title="CT Phases" rows={protocolImportPreview.ctPhaseRows.map((row) => ({ key: `ct-phase-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="CT Techniques" rows={protocolImportPreview.ctTechniqueRows.map((row) => ({ key: `ct-technique-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="MRI Sequences" rows={protocolImportPreview.mriSequenceRows.map((row) => ({ key: `mri-sequence-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /></div></>}
-            {protocolImportSummary && <p className="text-emerald-700">Import complete: {protocolImportSummary.createdProtocols} draft protocols, {protocolImportSummary.createdCtPhases} CT phases, {protocolImportSummary.createdCtTechniques} CT techniques, and {protocolImportSummary.createdMriSequenceRows} MRI sequence rows created.</p>}
+            {protocolImportInspect && <div><p className="font-semibold">Workbook inspect</p><p className="text-xs" style={{ color: "var(--text-muted)" }}>Scope: {protocolImportInspect.scope ?? "legacy/create-only"}{protocolImportInspect.authoritativeSync ? " · authoritative synchronization" : ""}</p>{protocolImportInspect.sheets.map((sheet) => <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>{sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}</p>)}{protocolImportInspect.unknownSheets.length ? <p className="text-xs" style={{ color: "var(--text-muted)" }}>Ignored extra sheets: {protocolImportInspect.unknownSheets.join(", ")}</p> : null}</div>}
+            {protocolImportFileBase64 && <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" size="sm" disabled={previewProtocolImportMutation.isPending} onClick={() => previewProtocolImportMutation.mutate({ fileContentBase64: protocolImportFileBase64, fileName: protocolImportFileName })}>Preview import</Button><Button type="button" variant="secondary" size="sm" disabled={!protocolImportPreview?.canConfirm || confirmProtocolImportMutation.isPending} onClick={requestProtocolImportConfirmation}>Confirm import</Button></div>}
+            {protocolImportPreview && <><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><SummaryCard label="Create" value={protocolImportPreview.summary.createProtocols} /><SummaryCard label="Update" value={protocolImportPreview.summary.updateProtocols} /><SummaryCard label="Unchanged" value={protocolImportPreview.summary.unchangedProtocols} /><SummaryCard label="Deactivate" value={protocolImportPreview.summary.deactivateProtocols} /><SummaryCard label="Errors" value={protocolImportPreview.summary.errors} /></div>{protocolImportPreview.legacy && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{protocolImportPreview.notice}</p>}<div className="grid gap-2 md:grid-cols-2"><ImportPreviewList title="Protocols" rows={protocolImportPreview.protocolRows.map((row) => ({ key: `protocol-${row.rowNumber}-${row.protocolKey}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"} - ${row.action}`, errors: row.errors }))} /><ImportPreviewList title="CT Phases" rows={protocolImportPreview.ctPhaseRows.map((row) => ({ key: `ct-phase-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="CT Techniques" rows={protocolImportPreview.ctTechniqueRows.map((row) => ({ key: `ct-technique-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /><ImportPreviewList title="MRI Sequences" rows={protocolImportPreview.mriSequenceRows.map((row) => ({ key: `mri-sequence-${row.rowNumber}`, label: `Row ${row.rowNumber}: ${row.protocolKey || "missing key"}`, errors: row.errors }))} /></div></>}
+            {protocolImportSummary && <p className="text-emerald-700">Synchronization complete: {protocolImportSummary.createdProtocols} created, {protocolImportSummary.updatedProtocols} updated, {protocolImportSummary.unchangedProtocols} unchanged, {protocolImportSummary.deactivatedProtocols} deactivated.</p>}
           </div>}
         </section>
       )}

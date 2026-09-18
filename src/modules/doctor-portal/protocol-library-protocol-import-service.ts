@@ -1,17 +1,29 @@
 import { pool } from "../../db/pool.js";
 import { buildWorkbookBuffer, parseWorksheet, readWorkbookFromBase64, type ParsedWorksheet } from "../../services/workbook-service.js";
 import { HttpError } from "../../utils/http-error.js";
-import { getProtocolVersionDetail, listProtocols, type ProtocolVersionDetail } from "./protocol-library-repository.js";
+import {
+  createDraftFromActiveVersionWithClient,
+  getProtocolVersionDetail,
+  getProtocolVersionDetailWithClient,
+  listProtocols,
+  lockProtocolById,
+  updateProtocolWithClient,
+  type ProtocolLibraryDbClient,
+  type ProtocolLibraryProtocolRow,
+  type ProtocolVersionDetail,
+} from "./protocol-library-repository.js";
 
 const SHEETS = ["Protocols", "CT Phases", "CT Techniques", "MRI Sequences"] as const;
 const INSTRUCTIONS_SHEET = "Instructions";
+const METADATA_SHEET = "RISpro Metadata";
+const MANIFEST_SHEET = "RISpro Manifest";
 const REQUIRED: Record<(typeof SHEETS)[number], string[]> = {
-  "Protocols": ["protocol_key", "protocol_name", "modality"],
+  Protocols: ["protocol_key", "protocol_name", "modality"],
   "CT Phases": ["protocol_key", "order", "phase_name", "timing_type"],
   "CT Techniques": ["protocol_key", "scanner"],
   "MRI Sequences": ["protocol_key", "order", "sequence_key"],
 };
-const PROTOCOL_COLUMNS = [...REQUIRED.Protocols, "anatomy_region", "category", "indication", "contrast_policy", "oral_contrast_policy", "bowel_preparation", "preparation_notes", "protocol_notes"];
+const PROTOCOL_COLUMNS = [...REQUIRED.Protocols, "rispro_protocol_id", "rispro_source_version_id", "rispro_protocol_updated_at", "is_active", "anatomy_region", "category", "indication", "contrast_policy", "oral_contrast_policy", "bowel_preparation", "preparation_notes", "protocol_notes"];
 const CT_PHASE_COLUMNS = [...REQUIRED["CT Phases"], "delay_seconds", "bolus_tracking_site", "trigger_hu", "post_trigger_delay_seconds", "coverage", "reconstruction", "instructions", "required"];
 const CT_TECHNIQUE_COLUMNS = [...REQUIRED["CT Techniques"], "kv_mode", "kvp", "tube_current_mode", "fixed_ma", "reference_mas", "exposure_control", "noise_index", "min_ma", "max_ma", "reconstruction_method", "reconstruction_strength", "reconstruction_image_definition", "slice_thickness_mm", "reconstruction_interval_mm", "kernel"];
 const MRI_SEQUENCE_COLUMNS = [...REQUIRED["MRI Sequences"], "scanner", "plane", "coverage", "b_values", "timing", "notes", "required"];
@@ -20,49 +32,68 @@ const CONTRAST_POLICIES = new Set(["Non-contrast", "With IV contrast", "Without 
 const TIMING_TYPES = new Set(["NON_CONTRAST", "FIXED_DELAY_INJECTION_START", "FIXED_DELAY_INJECTION_END", "BOLUS_TRACKING", "MANUAL"]);
 const KV_MODES = new Set(["AUTO", "FIXED"]);
 const TUBE_CURRENT_MODES = new Set(["AUTOMATIC", "FIXED_MA", "REFERENCE_MAS"]);
+const SCOPES = new Set(["ALL_PROTOCOLS", "SINGLE_PROTOCOL", "SINGLE_VERSION", "TEMPLATE"]);
 
 type ImportInput = { fileContentBase64: string; fileName?: string | null };
+export type ProtocolImportConfirmInput = ImportInput & { confirmMissingProtocolDeactivation?: boolean };
 type ProtocolModality = "CT" | "MRI";
-type Client = { query: typeof pool.query };
-type RowAction = "create" | "invalid";
+type WorkbookScope = "ALL_PROTOCOLS" | "SINGLE_PROTOCOL" | "SINGLE_VERSION" | "TEMPLATE";
+type RowAction = "create" | "update" | "unchanged" | "ignored" | "invalid";
+type ProtocolAction = "create_protocol" | "update_protocol" | "unchanged" | "deactivate_protocol" | "already_inactive" | "invalid" | "conflict_existing_protocol" | "stale_conflict";
 
 export interface ProtocolImportInspect {
   format: "xlsx";
   sheets: Array<{ sheetName: string; columns: string[]; requiredColumns: string[]; missingRequiredColumns: string[]; rowCount: number }>;
   unknownSheets: string[];
+  scope: WorkbookScope | null;
+  authoritativeSync: boolean;
+  legacy: boolean;
 }
-
-export interface ProtocolImportPreviewRow {
-  rowNumber: number;
-  protocolKey: string;
-  action: RowAction;
-  errors: string[];
-}
-
+export interface ProtocolImportPreviewRow { rowNumber: number; protocolKey: string; action: RowAction; errors: string[]; }
 export interface ProtocolImportPreview {
-  protocolRows: Array<Omit<ProtocolImportPreviewRow, "action"> & { protocolName: string; modality: string; action: "create_protocol" | "invalid" | "conflict_existing_protocol" }>;
+  protocolRows: Array<Omit<ProtocolImportPreviewRow, "action"> & { protocolName: string; modality: string; protocolId: number | null; action: ProtocolAction }>;
   ctPhaseRows: ProtocolImportPreviewRow[];
   ctTechniqueRows: ProtocolImportPreviewRow[];
   mriSequenceRows: ProtocolImportPreviewRow[];
-  summary: { protocols: number; ctPhases: number; ctTechniques: number; mriSequences: number; errors: number };
+  summary: { protocols: number; createProtocols: number; updateProtocols: number; unchangedProtocols: number; deactivateProtocols: number; ctPhases: number; ctTechniques: number; mriSequences: number; errors: number };
+  scope: WorkbookScope | null;
+  authoritativeSync: boolean;
+  legacy: boolean;
+  notice?: string;
+  deactivationProtocolNames: string[];
   canConfirm: boolean;
 }
-
 export interface ProtocolImportSummary {
   createdProtocols: number;
+  updatedProtocols: number;
+  unchangedProtocols: number;
+  deactivatedProtocols: number;
+  alreadyInactiveProtocols: number;
   createdCtProtocols: number;
   createdMriProtocols: number;
   createdCtPhases: number;
+  updatedCtPhases: number;
+  removedCtPhases: number;
   createdCtTechniques: number;
+  updatedCtTechniques: number;
+  removedCtTechniques: number;
   createdMriSequenceRows: number;
+  updatedMriSequenceRows: number;
+  removedMriSequenceRows: number;
 }
 
-interface ParsedImport { sheetNames: string[]; worksheets: Record<(typeof SHEETS)[number], ParsedWorksheet>; }
-interface Lookup { anatomy: Map<string, number[]>; scanners: Map<string, Array<{ id: number; modality: string }>>; sequences: Map<string, number[]>; existing: Map<string, number[]>; }
-interface ProtocolInput { rowNumber: number; protocolKey: string; name: string; modality: ProtocolModality | null; anatomyRegion: string | null; category: string | null; indication: string | null; contrastPolicy: string | null; oralContrastPolicy: string | null; bowelPreparation: string | null; preparationNotes: string | null; protocolNotes: string | null; }
+interface Metadata { formatVersion: string | null; workbookType: string | null; scope: WorkbookScope | null; exportedAt: string | null; }
+interface ManifestRow { rowNumber: number; protocolId: number | null; protocolKey: string; sourceVersionId: number | null; protocolUpdatedAt: string | null; errors: string[]; }
+interface ParsedImport { sheetNames: string[]; worksheets: Record<(typeof SHEETS)[number], ParsedWorksheet>; metadata: Metadata | null; metadataSheetPresent: boolean; manifest: ManifestRow[]; manifestSheetPresent: boolean; }
+interface ProtocolInput { rowNumber: number; protocolKey: string; protocolId: number | null; sourceVersionId: number | null; sourceProtocolUpdatedAt: string | null; name: string; modality: ProtocolModality | null; isActive: boolean | null; anatomyRegion: string | null; category: string | null; indication: string | null; contrastPolicy: string | null; oralContrastPolicy: string | null; bowelPreparation: string | null; preparationNotes: string | null; protocolNotes: string | null; }
 interface CtPhaseInput { rowNumber: number; protocolKey: string; order: number | null; phaseName: string; timingType: string; delaySeconds: number | null; bolusTrackingSite: string | null; triggerHu: number | null; postTriggerDelaySeconds: number | null; coverage: string | null; reconstruction: string | null; instructions: string | null; required: boolean | null; }
 interface CtTechniqueInput { rowNumber: number; protocolKey: string; scanner: string; kvMode: string | null; kvp: number | null; tubeCurrentMode: string | null; fixedMa: number | null; referenceMas: number | null; exposureControl: string | null; noiseIndex: number | null; minMa: number | null; maxMa: number | null; reconstructionMethod: string | null; reconstructionStrength: string | null; reconstructionImageDefinition: string | null; sliceThicknessMm: number | null; reconstructionIntervalMm: number | null; kernel: string | null; }
 interface MriSequenceInput { rowNumber: number; protocolKey: string; order: number | null; sequenceKey: string; scanner: string | null; plane: string | null; coverage: string | null; bValues: string | null; timing: string | null; notes: string | null; required: boolean | null; }
+interface Lookup { anatomy: Map<string, number[]>; scanners: Map<string, Array<{ id: number; modality: string }>>; sequences: Map<string, number[]>; existing: ProtocolLibraryProtocolRow[]; }
+interface VersionRepresentation { protocolNotes: string | null; ctPhases: Array<Record<string, unknown>>; ctTechniques: Array<Record<string, unknown>>; mriSequences: Array<Record<string, unknown>>; }
+interface ProtocolPlan { input: ProtocolInput; errors: string[]; action: ProtocolAction; protocol: ProtocolLibraryProtocolRow | null; currentDetail: ProtocolVersionDetail | null; desired: VersionRepresentation; effectiveProtocolId: number | null; }
+interface DeactivationPlan { manifest: ManifestRow; protocol: ProtocolLibraryProtocolRow | null; errors: string[]; action: ProtocolAction; }
+interface ImportPlan { parsed: ParsedImport; lookup: Lookup; protocols: ProtocolPlan[]; deactivations: DeactivationPlan[]; phaseInputs: Array<{ row: CtPhaseInput; errors: string[]; ignored: boolean }>; techniqueInputs: Array<{ row: CtTechniqueInput; errors: string[]; ignored: boolean }>; sequenceInputs: Array<{ row: MriSequenceInput; errors: string[]; ignored: boolean }>; metadataErrors: string[]; preview: ProtocolImportPreview; }
 
 function text(value: unknown): string { return String(value ?? "").trim(); }
 function nullable(value: unknown): string | null { const valueText = text(value); return valueText || null; }
@@ -70,229 +101,161 @@ function key(value: string): string { return value.trim().toLocaleLowerCase(); }
 function emptySheet(): ParsedWorksheet { return { headers: [], rows: [] }; }
 function missing(sheet: ParsedWorksheet, columns: string[]): string[] { return columns.filter((column) => !sheet.headers.includes(column)); }
 function rowValues(sheet: ParsedWorksheet): ParsedWorksheet { return { headers: sheet.headers.map(text), rows: sheet.rows.map((row) => ({ rowNumber: row.rowNumber, values: Object.fromEntries(Object.entries(row.values).map(([name, value]) => [text(name), text(value)])) })) }; }
+function canonicalTimestamp(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toISOString(); }
+function sameJson(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right); }
 
+function parseMetadata(sheet: ParsedWorksheet): Metadata | null {
+  if (!sheet.rows.length) return null;
+  const values = new Map<string, string>();
+  for (const row of sheet.rows) { const item = text(row.values.key || row.values.name); if (item) values.set(item.toLowerCase(), text(row.values.value)); }
+  const scope = values.get("scope");
+  return { formatVersion: values.get("format_version") ?? null, workbookType: values.get("workbook_type") ?? null, scope: scope && SCOPES.has(scope) ? scope as WorkbookScope : null, exportedAt: values.get("exported_at") ?? null };
+}
+function parseManifest(sheet: ParsedWorksheet): ManifestRow[] {
+  return sheet.rows.map((source) => {
+    const errors: string[] = [];
+    const protocolIdText = text(source.values.rispro_protocol_id);
+    const sourceVersionText = text(source.values.source_version_id);
+    const protocolId = protocolIdText ? Number(protocolIdText) : null;
+    const sourceVersionId = sourceVersionText ? Number(sourceVersionText) : null;
+    if (!protocolIdText) errors.push("rispro_protocol_id is required");
+    if (protocolId != null && (!Number.isInteger(protocolId) || protocolId <= 0)) errors.push("rispro_protocol_id must be a positive integer");
+    if (!sourceVersionText) errors.push("source_version_id is required");
+    if (sourceVersionId != null && (!Number.isInteger(sourceVersionId) || sourceVersionId <= 0)) errors.push("source_version_id must be a positive integer");
+    if (!text(source.values.protocol_key)) errors.push("protocol_key is required");
+    const protocolUpdatedAt = nullable(source.values.protocol_updated_at);
+    if (!protocolUpdatedAt) errors.push("protocol_updated_at is required");
+    else if (!canonicalTimestamp(protocolUpdatedAt)) errors.push("protocol_updated_at must be an ISO timestamp");
+    return { rowNumber: source.rowNumber, protocolId: errors.some((error) => error.indexOf("rispro_protocol_id") >= 0) ? null : protocolId, protocolKey: text(source.values.protocol_key), sourceVersionId: errors.some((error) => error.indexOf("source_version_id") >= 0) ? null : sourceVersionId, protocolUpdatedAt, errors };
+  });
+}
 async function parseImport(input: ImportInput): Promise<ParsedImport> {
   if (input.fileName && !input.fileName.toLowerCase().endsWith(".xlsx")) throw new HttpError(400, "Protocol import accepts XLSX files only.");
   const { XLSX, workbook, sheetNames } = await readWorkbookFromBase64(input.fileContentBase64);
   const worksheets = Object.fromEntries(SHEETS.map((name) => [name, workbook.Sheets[name] ? rowValues(parseWorksheet(XLSX, workbook.Sheets[name], name)) : emptySheet()])) as ParsedImport["worksheets"];
-  return { sheetNames, worksheets };
+  const metadataSheetPresent = sheetNames.includes(METADATA_SHEET);
+  const manifestSheetPresent = sheetNames.includes(MANIFEST_SHEET);
+  return { sheetNames, worksheets, metadata: metadataSheetPresent ? parseMetadata(rowValues(parseWorksheet(XLSX, workbook.Sheets[METADATA_SHEET], METADATA_SHEET))) : null, metadataSheetPresent, manifest: manifestSheetPresent ? parseManifest(rowValues(parseWorksheet(XLSX, workbook.Sheets[MANIFEST_SHEET], MANIFEST_SHEET))) : [], manifestSheetPresent };
 }
 
-function integer(value: unknown, field: string, errors: string[], allowZero = false): number | null {
-  const raw = text(value); if (!raw) return null;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) { errors.push(`${field} must be ${allowZero ? "a non-negative integer" : "a positive integer"}`); return null; }
-  return parsed;
-}
-function number(value: unknown, field: string, errors: string[], allowZero = false): number | null {
-  const raw = text(value); if (!raw) return null;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) { errors.push(`${field} must be ${allowZero ? "a non-negative number" : "a positive number"}`); return null; }
-  return parsed;
-}
-function bool(value: unknown, field: string, errors: string[]): boolean | null {
-  const raw = text(value).toLowerCase(); if (!raw) return null;
-  if (["true", "yes", "1"].includes(raw)) return true;
-  if (["false", "no", "0"].includes(raw)) return false;
-  errors.push(`${field} must be true/false/yes/no/1/0`); return null;
-}
-function requiredSheetErrors(parsed: ParsedImport): string[] { return SHEETS.flatMap((name) => missing(parsed.worksheets[name], REQUIRED[name]).map((column) => `${name} missing ${column}`)); }
+function integer(value: unknown, field: string, errors: string[], allowZero = false): number | null { const raw = text(value); if (!raw) return null; const parsed = Number(raw); if (!Number.isInteger(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) { errors.push(field + " must be " + (allowZero ? "a non-negative integer" : "a positive integer")); return null; } return parsed; }
+function number(value: unknown, field: string, errors: string[], allowZero = false): number | null { const raw = text(value); if (!raw) return null; const parsed = Number(raw); if (!Number.isFinite(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) { errors.push(field + " must be " + (allowZero ? "a non-negative number" : "a positive number")); return null; } return parsed; }
+function bool(value: unknown, field: string, errors: string[]): boolean | null { const raw = text(value).toLowerCase(); if (!raw) return null; if (["true", "yes", "1"].includes(raw)) return true; if (["false", "no", "0"].includes(raw)) return false; errors.push(field + " must be true/false/yes/no/1/0"); return null; }
+function requiredSheetErrors(parsed: ParsedImport): string[] { return SHEETS.flatMap((name) => missing(parsed.worksheets[name], REQUIRED[name]).map((column) => name + " missing " + column)); }
 
 function protocols(sheet: ParsedWorksheet): Array<{ row: ProtocolInput; errors: string[] }> {
   return sheet.rows.map((source) => {
     const values = source.values; const errors: string[] = []; const modalityRaw = text(values.modality).toUpperCase();
-    const row: ProtocolInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), name: text(values.protocol_name), modality: modalityRaw === "CT" || modalityRaw === "MRI" ? modalityRaw : null, anatomyRegion: nullable(values.anatomy_region), category: nullable(values.category), indication: nullable(values.indication), contrastPolicy: nullable(values.contrast_policy), oralContrastPolicy: nullable(values.oral_contrast_policy), bowelPreparation: nullable(values.bowel_preparation), preparationNotes: nullable(values.preparation_notes), protocolNotes: nullable(values.protocol_notes) };
-    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.name) errors.push("protocol_name is required"); if (!row.modality) errors.push("modality must be CT or MRI");
-    if (row.category && !CATEGORIES.has(row.category)) errors.push("category is invalid"); if (row.contrastPolicy && !CONTRAST_POLICIES.has(row.contrastPolicy)) errors.push("contrast_policy is invalid");
+    const row: ProtocolInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), protocolId: integer(values.rispro_protocol_id, "rispro_protocol_id", errors), sourceVersionId: integer(values.rispro_source_version_id, "rispro_source_version_id", errors), sourceProtocolUpdatedAt: nullable(values.rispro_protocol_updated_at), name: text(values.protocol_name), modality: modalityRaw === "CT" || modalityRaw === "MRI" ? modalityRaw : null, isActive: bool(values.is_active, "is_active", errors), anatomyRegion: nullable(values.anatomy_region), category: nullable(values.category), indication: nullable(values.indication), contrastPolicy: nullable(values.contrast_policy), oralContrastPolicy: nullable(values.oral_contrast_policy), bowelPreparation: nullable(values.bowel_preparation), preparationNotes: nullable(values.preparation_notes), protocolNotes: nullable(values.protocol_notes) };
+    if (row.sourceProtocolUpdatedAt && !canonicalTimestamp(row.sourceProtocolUpdatedAt)) errors.push("rispro_protocol_updated_at must be an ISO timestamp");
+    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.name) errors.push("protocol_name is required"); if (!row.modality) errors.push("modality must be CT or MRI"); if (row.category && !CATEGORIES.has(row.category)) errors.push("category is invalid"); if (row.contrastPolicy && !CONTRAST_POLICIES.has(row.contrastPolicy)) errors.push("contrast_policy is invalid");
     return { row, errors };
   });
 }
 function ctPhases(sheet: ParsedWorksheet): Array<{ row: CtPhaseInput; errors: string[] }> {
-  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = [];
-    const row: CtPhaseInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), order: integer(values.order, "order", errors), phaseName: text(values.phase_name), timingType: text(values.timing_type).toUpperCase(), delaySeconds: integer(values.delay_seconds, "delay_seconds", errors, true), bolusTrackingSite: nullable(values.bolus_tracking_site), triggerHu: integer(values.trigger_hu, "trigger_hu", errors, true), postTriggerDelaySeconds: integer(values.post_trigger_delay_seconds, "post_trigger_delay_seconds", errors, true), coverage: nullable(values.coverage), reconstruction: nullable(values.reconstruction), instructions: nullable(values.instructions), required: bool(values.required, "required", errors) };
-    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.order) errors.push("order is required"); if (!row.phaseName) errors.push("phase_name is required"); if (!TIMING_TYPES.has(row.timingType)) errors.push("timing_type is invalid"); return { row, errors };
-  });
+  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = []; const row: CtPhaseInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), order: integer(values.order, "order", errors), phaseName: text(values.phase_name), timingType: text(values.timing_type).toUpperCase(), delaySeconds: integer(values.delay_seconds, "delay_seconds", errors, true), bolusTrackingSite: nullable(values.bolus_tracking_site), triggerHu: integer(values.trigger_hu, "trigger_hu", errors, true), postTriggerDelaySeconds: integer(values.post_trigger_delay_seconds, "post_trigger_delay_seconds", errors, true), coverage: nullable(values.coverage), reconstruction: nullable(values.reconstruction), instructions: nullable(values.instructions), required: bool(values.required, "required", errors) }; if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.order) errors.push("order is required"); if (!row.phaseName) errors.push("phase_name is required"); if (!TIMING_TYPES.has(row.timingType)) errors.push("timing_type is invalid"); return { row, errors }; });
 }
 function ctTechniques(sheet: ParsedWorksheet): Array<{ row: CtTechniqueInput; errors: string[] }> {
-  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = [];
-    const row: CtTechniqueInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), scanner: text(values.scanner), kvMode: nullable(values.kv_mode)?.toUpperCase() ?? null, kvp: integer(values.kvp, "kvp", errors), tubeCurrentMode: nullable(values.tube_current_mode)?.toUpperCase() ?? null, fixedMa: integer(values.fixed_ma, "fixed_ma", errors, true), referenceMas: number(values.reference_mas, "reference_mas", errors), exposureControl: nullable(values.exposure_control), noiseIndex: number(values.noise_index, "noise_index", errors), minMa: integer(values.min_ma, "min_ma", errors, true), maxMa: integer(values.max_ma, "max_ma", errors, true), reconstructionMethod: nullable(values.reconstruction_method), reconstructionStrength: nullable(values.reconstruction_strength), reconstructionImageDefinition: nullable(values.reconstruction_image_definition), sliceThicknessMm: number(values.slice_thickness_mm, "slice_thickness_mm", errors), reconstructionIntervalMm: number(values.reconstruction_interval_mm, "reconstruction_interval_mm", errors), kernel: nullable(values.kernel) };
-    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.scanner) errors.push("scanner is required"); if (row.kvMode && !KV_MODES.has(row.kvMode)) errors.push("kv_mode is invalid"); if (row.tubeCurrentMode && !TUBE_CURRENT_MODES.has(row.tubeCurrentMode)) errors.push("tube_current_mode is invalid");
-    if (row.kvMode === "FIXED" && !row.kvp) errors.push("kvp is required when kv_mode is FIXED"); if (row.tubeCurrentMode === "FIXED_MA" && !row.fixedMa) errors.push("fixed_ma is required when tube_current_mode is FIXED_MA"); if (row.tubeCurrentMode === "REFERENCE_MAS" && !row.referenceMas) errors.push("reference_mas is required when tube_current_mode is REFERENCE_MAS"); if (row.minMa != null && row.maxMa != null && row.minMa > row.maxMa) errors.push("min_ma cannot exceed max_ma");
+  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = []; const row: CtTechniqueInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), scanner: text(values.scanner), kvMode: nullable(values.kv_mode)?.toUpperCase() ?? null, kvp: integer(values.kvp, "kvp", errors), tubeCurrentMode: nullable(values.tube_current_mode)?.toUpperCase() ?? null, fixedMa: integer(values.fixed_ma, "fixed_ma", errors, true), referenceMas: number(values.reference_mas, "reference_mas", errors), exposureControl: nullable(values.exposure_control), noiseIndex: number(values.noise_index, "noise_index", errors), minMa: integer(values.min_ma, "min_ma", errors, true), maxMa: integer(values.max_ma, "max_ma", errors, true), reconstructionMethod: nullable(values.reconstruction_method), reconstructionStrength: nullable(values.reconstruction_strength), reconstructionImageDefinition: nullable(values.reconstruction_image_definition), sliceThicknessMm: number(values.slice_thickness_mm, "slice_thickness_mm", errors), reconstructionIntervalMm: number(values.reconstruction_interval_mm, "reconstruction_interval_mm", errors), kernel: nullable(values.kernel) };
+    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.scanner) errors.push("scanner is required"); if (row.kvMode && !KV_MODES.has(row.kvMode)) errors.push("kv_mode is invalid"); if (row.tubeCurrentMode && !TUBE_CURRENT_MODES.has(row.tubeCurrentMode)) errors.push("tube_current_mode is invalid"); if (row.kvMode === "FIXED" && !row.kvp) errors.push("kvp is required when kv_mode is FIXED"); if (row.tubeCurrentMode === "FIXED_MA" && !row.fixedMa) errors.push("fixed_ma is required when tube_current_mode is FIXED_MA"); if (row.tubeCurrentMode === "REFERENCE_MAS" && !row.referenceMas) errors.push("reference_mas is required when tube_current_mode is REFERENCE_MAS"); if (row.minMa != null && row.maxMa != null && row.minMa > row.maxMa) errors.push("min_ma cannot exceed max_ma");
     return { row, errors };
   });
 }
 function mriSequences(sheet: ParsedWorksheet): Array<{ row: MriSequenceInput; errors: string[] }> {
-  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = [];
-    const row: MriSequenceInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), order: integer(values.order, "order", errors), sequenceKey: text(values.sequence_key), scanner: nullable(values.scanner), plane: nullable(values.plane), coverage: nullable(values.coverage), bValues: nullable(values.b_values), timing: nullable(values.timing), notes: nullable(values.notes), required: bool(values.required, "required", errors) };
-    if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.order) errors.push("order is required"); if (!row.sequenceKey) errors.push("sequence_key is required"); return { row, errors };
-  });
+  return sheet.rows.map((source) => { const values = source.values; const errors: string[] = []; const row: MriSequenceInput = { rowNumber: source.rowNumber, protocolKey: text(values.protocol_key), order: integer(values.order, "order", errors), sequenceKey: text(values.sequence_key), scanner: nullable(values.scanner), plane: nullable(values.plane), coverage: nullable(values.coverage), bValues: nullable(values.b_values), timing: nullable(values.timing), notes: nullable(values.notes), required: bool(values.required, "required", errors) }; if (!row.protocolKey) errors.push("protocol_key is required"); if (!row.order) errors.push("order is required"); if (!row.sequenceKey) errors.push("sequence_key is required"); return { row, errors }; });
 }
 
 async function lookup(): Promise<Lookup> {
-  const [anatomy, scanners, sequences, existing] = await Promise.all([
-    pool.query("select id, name from protocol_anatomy_regions where is_active = true"),
-    pool.query("select id, name, modality from equipment where is_active = true and equipment_type in ('CT', 'MRI')"),
-    pool.query("select id, sequence_key from mri_sequence_presets where sequence_key is not null and is_active = true"),
-    pool.query("select id, modality, name from protocols"),
-  ]);
-  const names = (rows: Array<Record<string, unknown>>, column: string): Map<string, number[]> => {
-    const result = new Map<string, number[]>();
-    for (const row of rows) { const normalized = key(String(row[column])); result.set(normalized, [...(result.get(normalized) ?? []), Number(row.id)]); }
-    return result;
-  };
-  const scannerMap = new Map<string, Array<{ id: number; modality: string }>>();
-  for (const row of scanners.rows as Array<Record<string, unknown>>) { const normalized = key(String(row.name)); scannerMap.set(normalized, [...(scannerMap.get(normalized) ?? []), { id: Number(row.id), modality: String(row.modality).toUpperCase() }]); }
-  const existingMap = new Map<string, number[]>();
-  for (const row of existing.rows as Array<Record<string, unknown>>) { const normalized = `${String(row.modality).toUpperCase()}|${key(String(row.name))}`; existingMap.set(normalized, [...(existingMap.get(normalized) ?? []), Number(row.id)]); }
-  return { anatomy: names(anatomy.rows as Array<Record<string, unknown>>, "name"), scanners: scannerMap, sequences: names(sequences.rows as Array<Record<string, unknown>>, "sequence_key"), existing: existingMap };
+  const [anatomy, scanners, sequences, existing] = await Promise.all([pool.query("select id, name from protocol_anatomy_regions where is_active = true"), pool.query("select id, name, modality from equipment where is_active = true and equipment_type in ('CT', 'MRI')"), pool.query("select id, sequence_key from mri_sequence_presets where sequence_key is not null and is_active = true"), listProtocols()]);
+  const names = (rows: Array<Record<string, unknown>>, column: string): Map<string, number[]> => { const result = new Map<string, number[]>(); for (const row of rows) { const normalized = key(String(row[column])); result.set(normalized, [...(result.get(normalized) ?? []), Number(row.id)]); } return result; };
+  const scannerMap = new Map<string, Array<{ id: number; modality: string }>>(); for (const row of scanners.rows as Array<Record<string, unknown>>) { const normalized = key(String(row.name)); scannerMap.set(normalized, [...(scannerMap.get(normalized) ?? []), { id: Number(row.id), modality: String(row.modality).toUpperCase() }]); }
+  return { anatomy: names(anatomy.rows as Array<Record<string, unknown>>, "name"), scanners: scannerMap, sequences: names(sequences.rows as Array<Record<string, unknown>>, "sequence_key"), existing };
 }
-
-function addLookupError(errors: string[], ids: number[] | undefined, label: string, value: string): number | null { if (!ids?.length) { errors.push(`${label} \"${value}\" was not found`); return null; } if (ids.length !== 1) { errors.push(`${label} \"${value}\" is ambiguous`); return null; } return ids[0]; }
-
-async function validate(input: ImportInput): Promise<{ parsed: ParsedImport; protocolInputs: Array<{ row: ProtocolInput; errors: string[] }>; ctPhaseInputs: Array<{ row: CtPhaseInput; errors: string[] }>; ctTechniqueInputs: Array<{ row: CtTechniqueInput; errors: string[] }>; mriSequenceInputs: Array<{ row: MriSequenceInput; errors: string[] }>; lookup: Lookup }> {
-  const parsed = await parseImport(input); const requiredErrors = requiredSheetErrors(parsed); const [protocolInputs, ctPhaseInputs, ctTechniqueInputs, mriSequenceInputs] = [protocols(parsed.worksheets.Protocols), ctPhases(parsed.worksheets["CT Phases"]), ctTechniques(parsed.worksheets["CT Techniques"]), mriSequences(parsed.worksheets["MRI Sequences"])];
-  const data = await lookup(); const protocolByKey = new Map<string, ProtocolInput>(); const seenProtocolKeys = new Set<string>();
-  for (const item of protocolInputs) { item.errors.push(...requiredErrors); const normalized = key(item.row.protocolKey); if (normalized && seenProtocolKeys.has(normalized)) item.errors.push("duplicate protocol_key in Protocols"); if (normalized) { seenProtocolKeys.add(normalized); protocolByKey.set(normalized, item.row); } if (item.row.anatomyRegion) addLookupError(item.errors, data.anatomy.get(key(item.row.anatomyRegion)), "anatomy region", item.row.anatomyRegion); if (item.row.modality && item.row.name) { const matching = data.existing.get(`${item.row.modality}|${key(item.row.name)}`) ?? []; if (matching.length) item.errors.push(matching.length === 1 ? `A ${item.row.modality} protocol named \"${item.row.name}\" already exists. Existing protocols are not overwritten by bulk import.` : `Multiple existing ${item.row.modality} protocols named \"${item.row.name}\" exist.`); } }
-  const validateChild = <T extends { protocolKey: string; rowNumber: number }>(items: Array<{ row: T; errors: string[] }>, kind: "CT phase" | "CT technique" | "MRI sequence") => { const orders = new Set<string>(); for (const item of items) { item.errors.push(...requiredErrors); const protocol = protocolByKey.get(key(item.row.protocolKey)); if (!protocol) item.errors.push("protocol_key does not reference a Protocols row"); else if ((kind === "MRI sequence" ? "MRI" : "CT") !== protocol.modality) item.errors.push(`${kind} rows can only be attached to ${(kind === "MRI sequence" ? "MRI" : "CT")} protocols`); const candidate = item.row as T & { order?: number | null }; if (candidate.order) { const orderKey = `${key(item.row.protocolKey)}|${candidate.order}`; if (orders.has(orderKey)) item.errors.push(`duplicate order within protocol_key \"${item.row.protocolKey}\"`); orders.add(orderKey); } } };
-  validateChild(ctPhaseInputs, "CT phase"); validateChild(ctTechniqueInputs, "CT technique"); validateChild(mriSequenceInputs, "MRI sequence");
-  const seenTechniques = new Set<string>(); for (const item of ctTechniqueInputs) { if (item.row.scanner) { const scanner = data.scanners.get(key(item.row.scanner)); const id = addLookupError(item.errors, scanner?.map((row) => row.id), "scanner", item.row.scanner); if (id != null && scanner?.[0]?.modality !== "CT") item.errors.push(`scanner \"${item.row.scanner}\" must be CT`); const techniqueKey = `${key(item.row.protocolKey)}|${key(item.row.scanner)}`; if (seenTechniques.has(techniqueKey)) item.errors.push(`duplicate scanner technique for protocol_key \"${item.row.protocolKey}\"`); seenTechniques.add(techniqueKey); } }
-  for (const item of mriSequenceInputs) { if (item.row.sequenceKey) addLookupError(item.errors, data.sequences.get(key(item.row.sequenceKey)), "sequence_key", item.row.sequenceKey); if (item.row.scanner) { const scanner = data.scanners.get(key(item.row.scanner)); const id = addLookupError(item.errors, scanner?.map((row) => row.id), "scanner", item.row.scanner); if (id != null && scanner?.[0]?.modality !== "MRI") item.errors.push(`scanner \"${item.row.scanner}\" must be MRI`); } }
-  return { parsed, protocolInputs, ctPhaseInputs, ctTechniqueInputs, mriSequenceInputs, lookup: data };
+function addLookupError(errors: string[], ids: number[] | undefined, label: string, value: string): number | null { if (!ids?.length) { errors.push(label + " \"" + value + "\" was not found"); return null; } if (ids.length !== 1) { errors.push(label + " \"" + value + "\" is ambiguous"); return null; } return ids[0]; }
+function legacyTimingType(phase: ProtocolVersionDetail["ctPhases"][number]): string { if (phase.timingType) return phase.timingType; if (phase.presetTimingType === "BOLUS_TRACKING") return "BOLUS_TRACKING"; if (phase.presetTimingType === "FIXED_DELAY") return "FIXED_DELAY_INJECTION_START"; if (phase.presetTimingType === "MANUAL") return "MANUAL"; return "NON_CONTRAST"; }
+function desiredRepresentation(protocol: ProtocolInput, phases: CtPhaseInput[], techniques: CtTechniqueInput[], sequences: MriSequenceInput[], lookupData: Lookup): VersionRepresentation {
+  return { protocolNotes: protocol.protocolNotes, ctPhases: phases.filter((row) => key(row.protocolKey) === key(protocol.protocolKey)).map((row) => ({ order: row.order, phaseName: row.phaseName, timingType: row.timingType, delaySeconds: row.delaySeconds, bolusTrackingSite: row.bolusTrackingSite, triggerHu: row.triggerHu, postTriggerDelaySeconds: row.postTriggerDelaySeconds, coverage: row.coverage, reconstruction: row.reconstruction, instructions: row.instructions, required: row.required ?? true })), ctTechniques: techniques.filter((row) => key(row.protocolKey) === key(protocol.protocolKey)).map((row) => ({ scannerId: lookupData.scanners.get(key(row.scanner))?.[0]?.id ?? null, kvMode: row.kvMode, kvp: row.kvp, tubeCurrentMode: row.tubeCurrentMode, fixedMa: row.fixedMa, referenceMas: row.referenceMas, exposureControl: row.exposureControl, noiseIndex: row.noiseIndex, minMa: row.minMa, maxMa: row.maxMa, reconstructionMethod: row.reconstructionMethod, reconstructionStrength: row.reconstructionStrength, reconstructionImageDefinition: row.reconstructionImageDefinition, sliceThicknessMm: row.sliceThicknessMm, reconstructionIntervalMm: row.reconstructionIntervalMm, kernel: row.kernel })).sort((left, right) => Number(left.scannerId) - Number(right.scannerId)), mriSequences: sequences.filter((row) => key(row.protocolKey) === key(protocol.protocolKey)).map((row) => ({ order: row.order, scannerId: row.scanner ? lookupData.scanners.get(key(row.scanner))?.[0]?.id ?? null : null, sequenceKey: key(row.sequenceKey), sequenceId: lookupData.sequences.get(key(row.sequenceKey))?.[0] ?? null, plane: row.plane, coverage: row.coverage, bValues: row.bValues, timing: row.timing, notes: row.notes, required: row.required ?? true })) };
 }
-
-export async function inspectProtocolImport(input: ImportInput): Promise<ProtocolImportInspect> {
-  const parsed = await parseImport(input); return { format: "xlsx", sheets: SHEETS.map((sheetName) => ({ sheetName, columns: parsed.worksheets[sheetName].headers, requiredColumns: REQUIRED[sheetName], missingRequiredColumns: missing(parsed.worksheets[sheetName], REQUIRED[sheetName]), rowCount: parsed.worksheets[sheetName].rows.length })), unknownSheets: parsed.sheetNames.filter((name) => !SHEETS.includes(name as (typeof SHEETS)[number]) && name !== INSTRUCTIONS_SHEET) };
+function currentRepresentation(detail: ProtocolVersionDetail): VersionRepresentation {
+  return { protocolNotes: detail.version.protocolNotes, ctPhases: detail.ctPhases.map((phase) => ({ order: phase.orderIndex, phaseName: phase.customPhaseName ?? phase.ctPhasePresetName, timingType: legacyTimingType(phase), delaySeconds: phase.delaySeconds ?? phase.presetDelaySeconds, bolusTrackingSite: phase.bolusTrackingSite ?? phase.presetBolusTrackingSite, triggerHu: phase.triggerHu ?? phase.presetTriggerHu, postTriggerDelaySeconds: phase.postTriggerDelaySeconds, coverage: phase.coverageOverride ?? phase.presetDefaultCoverage, reconstruction: phase.reconstructionOverride ?? phase.presetReconstructionNotes, instructions: phase.instructionsOverride ?? phase.presetInstructions, required: phase.isRequired })), ctTechniques: detail.ctTechniques.map((row) => ({ scannerId: row.scannerId, kvMode: row.kvMode, kvp: row.kvp, tubeCurrentMode: row.tubeCurrentMode, fixedMa: row.fixedMa, referenceMas: row.referenceMas, exposureControl: row.exposureControl, noiseIndex: row.noiseIndex, minMa: row.minMa, maxMa: row.maxMa, reconstructionMethod: row.reconstructionMethod, reconstructionStrength: row.reconstructionStrength, reconstructionImageDefinition: row.reconstructionImageDefinition, sliceThicknessMm: row.sliceThicknessMm, reconstructionIntervalMm: row.reconstructionIntervalMm, kernel: row.kernel })).sort((left, right) => Number(left.scannerId) - Number(right.scannerId)), mriSequences: detail.mriSequences.map((row) => ({ order: row.orderIndex, scannerId: row.scannerId, sequenceKey: key(row.mriSequencePresetKey ?? ""), sequenceId: row.mriSequencePresetId, plane: row.planeOverride, coverage: row.coverageOverride, bValues: row.bValuesOverride, timing: row.timingOverride, notes: row.notesOverride, required: row.isRequired })) };
 }
+function metadataEqual(protocol: ProtocolLibraryProtocolRow, input: ProtocolInput, anatomyId: number | null): boolean { return protocol.name === input.name && protocol.modality === input.modality && protocol.anatomyRegionId === anatomyId && protocol.category === input.category && protocol.indication === input.indication && protocol.contrastPolicy === input.contrastPolicy && protocol.oralContrastPolicy === input.oralContrastPolicy && protocol.bowelPreparation === input.bowelPreparation && protocol.preparationNotes === input.preparationNotes && protocol.isActive === (input.isActive ?? true); }
+function sourceIsStale(protocol: ProtocolLibraryProtocolRow, detail: ProtocolVersionDetail | null, input: ProtocolInput): boolean { return (input.sourceVersionId != null && detail?.version.id !== input.sourceVersionId) || (input.sourceProtocolUpdatedAt != null && canonicalTimestamp(protocol.updatedAt) !== canonicalTimestamp(input.sourceProtocolUpdatedAt)); }
 
-export async function previewProtocolImport(input: ImportInput): Promise<ProtocolImportPreview> {
-  const result = await validate(input); const protocolRows = result.protocolInputs.map(({ row, errors }) => ({ rowNumber: row.rowNumber, protocolKey: row.protocolKey, protocolName: row.name, modality: row.modality ?? "", action: (errors.length ? (errors.some((error) => /already exists|Multiple existing/.test(error)) ? "conflict_existing_protocol" : "invalid") : "create_protocol") as "create_protocol" | "invalid" | "conflict_existing_protocol", errors }));
-  const detail = <T extends { rowNumber: number; protocolKey: string }>(items: Array<{ row: T; errors: string[] }>) => items.map(({ row, errors }) => ({ rowNumber: row.rowNumber, protocolKey: row.protocolKey, action: (errors.length ? "invalid" : "create") as RowAction, errors }));
-  const ctPhaseRows = detail(result.ctPhaseInputs); const ctTechniqueRows = detail(result.ctTechniqueInputs); const mriSequenceRows = detail(result.mriSequenceInputs); const globalErrors = requiredSheetErrors(result.parsed); const errors = [...protocolRows, ...ctPhaseRows, ...ctTechniqueRows, ...mriSequenceRows].reduce((total, row) => total + row.errors.length, 0) + (protocolRows.length || ctPhaseRows.length || ctTechniqueRows.length || mriSequenceRows.length ? 0 : globalErrors.length);
-  return { protocolRows, ctPhaseRows, ctTechniqueRows, mriSequenceRows, summary: { protocols: protocolRows.length, ctPhases: ctPhaseRows.length, ctTechniques: ctTechniqueRows.length, mriSequences: mriSequenceRows.length, errors }, canConfirm: errors === 0 && globalErrors.length === 0 };
-}
-
-export async function confirmProtocolImport(input: ImportInput, actorUserId: number | null): Promise<ProtocolImportSummary> {
-  const preview = await previewProtocolImport(input); if (!preview.canConfirm) throw new HttpError(400, "Protocol import has validation errors.", preview);
-  const validated = await validate(input); const client = await pool.connect(); const summary: ProtocolImportSummary = { createdProtocols: 0, createdCtProtocols: 0, createdMriProtocols: 0, createdCtPhases: 0, createdCtTechniques: 0, createdMriSequenceRows: 0 };
-  try {
-    await client.query("begin"); const versions = new Map<string, number>();
-    for (const { row } of validated.protocolInputs) {
-      const anatomyId = row.anatomyRegion ? validated.lookup.anatomy.get(key(row.anatomyRegion))![0] : null;
-      const inserted = await client.query("insert into protocols (name, modality, anatomy_region_id, category, indication, contrast_policy, oral_contrast_policy, bowel_preparation, preparation_notes, is_active) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,true) returning id", [row.name, row.modality, anatomyId, row.category, row.indication, row.contrastPolicy, row.oralContrastPolicy, row.bowelPreparation, row.preparationNotes]);
-      const version = await client.query("insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by) values ($1,'1.0','DRAFT','Initial protocol version',$2,$3) returning id", [Number(inserted.rows[0].id), row.protocolNotes, actorUserId]);
-      versions.set(key(row.protocolKey), Number(version.rows[0].id)); summary.createdProtocols += 1; if (row.modality === "CT") summary.createdCtProtocols += 1; else summary.createdMriProtocols += 1;
+async function buildPlan(input: ImportInput): Promise<ImportPlan> {
+  const parsed = await parseImport(input); const requiredErrors = requiredSheetErrors(parsed); const rawProtocols = protocols(parsed.worksheets.Protocols); const rawPhases = ctPhases(parsed.worksheets["CT Phases"]); const rawTechniques = ctTechniques(parsed.worksheets["CT Techniques"]); const rawSequences = mriSequences(parsed.worksheets["MRI Sequences"]); const lookupData = await lookup();
+  const metadataErrors: string[] = []; const metadata = parsed.metadata; const validMetadata = Boolean(metadata && metadata.formatVersion === "2" && metadata.workbookType === "protocol_library" && metadata.scope && metadata.exportedAt && canonicalTimestamp(metadata.exportedAt)); if (parsed.metadataSheetPresent && !validMetadata) metadataErrors.push("RISpro Metadata must contain format_version=2, workbook_type=protocol_library, a valid scope, and exported_at."); const legacy = !validMetadata; const scope = validMetadata ? metadata!.scope : null; const authoritativeSync = scope === "ALL_PROTOCOLS"; if (authoritativeSync && !parsed.manifestSheetPresent) metadataErrors.push("RISpro Manifest is required for an ALL_PROTOCOLS synchronization."); metadataErrors.push(...parsed.manifest.flatMap((row) => row.errors.map((error) => "RISpro Manifest row " + row.rowNumber + ": " + error))); const identityEnabled = !legacy && scope !== "TEMPLATE";
+  const protocolByKey = new Map<string, ProtocolInput>(); const seenKeys = new Set<string>(); const seenIds = new Set<number>();
+  for (const item of rawProtocols) { item.errors.push(...requiredErrors); const normalizedKey = key(item.row.protocolKey); if (normalizedKey && seenKeys.has(normalizedKey)) item.errors.push("duplicate protocol_key in Protocols"); if (normalizedKey) { seenKeys.add(normalizedKey); protocolByKey.set(normalizedKey, item.row); } if (identityEnabled && item.row.protocolId != null) { if (seenIds.has(item.row.protocolId)) item.errors.push("duplicate rispro_protocol_id in Protocols"); seenIds.add(item.row.protocolId); } if (!identityEnabled && item.row.protocolId != null) item.errors.push("Legacy/create-only workbook cannot update an existing protocol; re-export the library first."); if (item.row.anatomyRegion) addLookupError(item.errors, lookupData.anatomy.get(key(item.row.anatomyRegion)), "anatomy region", item.row.anatomyRegion); if (identityEnabled && item.row.protocolId != null) { const existing = lookupData.existing.find((protocol) => protocol.id === item.row.protocolId); if (!existing) item.errors.push("Protocol ID " + item.row.protocolId + " does not exist."); else if (item.row.modality && existing.modality !== item.row.modality) item.errors.push("Protocol ID " + item.row.protocolId + " belongs to " + existing.modality + "; modality cannot be changed."); if (item.row.isActive == null) item.errors.push("is_active is required for an existing protocol row."); } else if (item.row.modality && item.row.name) { const matching = lookupData.existing.filter((protocol) => protocol.modality === item.row.modality && key(protocol.name) === key(item.row.name)); if (matching.length) item.errors.push(matching.length === 1 ? "A " + item.row.modality + " protocol named \"" + item.row.name + "\" already exists. Blank-ID rows are create-only." : "Multiple existing " + item.row.modality + " protocols named \"" + item.row.name + "\" exist."); } }
+  if (identityEnabled) {
+    for (const item of rawProtocols) {
+      if (item.row.protocolId == null) continue;
+      if (item.row.sourceVersionId == null) item.errors.push("rispro_source_version_id is required for an existing protocol row.");
+      if (!item.row.sourceProtocolUpdatedAt) item.errors.push("rispro_protocol_updated_at is required for an existing protocol row.");
     }
-    for (const { row } of validated.ctPhaseInputs) { await client.query("insert into protocol_ct_phases (protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override, instructions_override, is_required) values ($1,$2,null,$3,null,$4,$5,$6,$7,$8,$9,$10,$11,$12)", [versions.get(key(row.protocolKey)), row.order, row.phaseName, row.timingType, row.delaySeconds, row.bolusTrackingSite, row.triggerHu, row.postTriggerDelaySeconds, row.coverage, row.reconstruction, row.instructions, row.required ?? true]); summary.createdCtPhases += 1; }
-    for (const { row } of validated.ctTechniqueInputs) { const scannerId = validated.lookup.scanners.get(key(row.scanner))![0].id; await client.query("insert into protocol_ct_techniques (protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)", [versions.get(key(row.protocolKey)), scannerId, row.kvMode, row.kvp, row.tubeCurrentMode, row.fixedMa, row.referenceMas, row.exposureControl, row.noiseIndex, row.minMa, row.maxMa, row.reconstructionMethod, row.reconstructionStrength, row.reconstructionImageDefinition, row.sliceThicknessMm, row.reconstructionIntervalMm, row.kernel]); summary.createdCtTechniques += 1; }
-    for (const { row } of validated.mriSequenceInputs) { const scannerId = row.scanner ? validated.lookup.scanners.get(key(row.scanner))![0].id : null; const presetId = validated.lookup.sequences.get(key(row.sequenceKey))![0]; await client.query("insert into protocol_mri_sequences (protocol_version_id, scanner_id, order_index, mri_sequence_preset_id, plane_override, coverage_override, b_values_override, timing_override, notes_override, is_required) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", [versions.get(key(row.protocolKey)), scannerId, row.order, presetId, row.plane, row.coverage, row.bValues, row.timing, row.notes, row.required ?? true]); summary.createdMriSequenceRows += 1; }
+  }
+  if (authoritativeSync) {
+    const manifestIds = new Set<number>();
+    for (const manifest of parsed.manifest) {
+      if (manifest.protocolId == null) continue;
+      if (manifestIds.has(manifest.protocolId)) metadataErrors.push("RISpro Manifest contains duplicate rispro_protocol_id " + manifest.protocolId + ".");
+      manifestIds.add(manifest.protocolId);
+    }
+    for (const item of rawProtocols) {
+      if (item.row.protocolId != null && !manifestIds.has(item.row.protocolId)) metadataErrors.push("RISpro Manifest is missing protocol ID " + item.row.protocolId + ".");
+    }
+  }
+  const omittedManifestKeys = new Set(parsed.manifest.map((row) => key(row.protocolKey)).filter((manifestKey) => manifestKey && !protocolByKey.has(manifestKey)));
+  const validateChild = <T extends { protocolKey: string; rowNumber: number }>(items: Array<{ row: T; errors: string[] }>, kind: "CT phase" | "CT technique" | "MRI sequence") => { const orders = new Set<string>(); return items.map((item) => { item.errors.push(...requiredErrors); const normalizedKey = key(item.row.protocolKey); const protocol = protocolByKey.get(normalizedKey); const ignored = authoritativeSync && omittedManifestKeys.has(normalizedKey); if (!protocol && !ignored) item.errors.push("protocol_key does not reference a Protocols row or an intentionally removed manifest protocol"); else if (protocol && (kind === "MRI sequence" ? "MRI" : "CT") !== protocol.modality) item.errors.push(kind + " rows can only be attached to " + (kind === "MRI sequence" ? "MRI" : "CT") + " protocols"); const candidate = item.row as T & { order?: number | null }; if (candidate.order && !ignored) { const orderKey = normalizedKey + "|" + candidate.order; if (orders.has(orderKey)) item.errors.push("duplicate order within protocol_key \"" + item.row.protocolKey + "\""); orders.add(orderKey); } return { ...item, ignored }; }); };
+  const phaseInputs = validateChild(rawPhases, "CT phase"); const techniqueInputs = validateChild(rawTechniques, "CT technique"); const sequenceInputs = validateChild(rawSequences, "MRI sequence"); const seenTechniques = new Set<string>();
+  for (const item of techniqueInputs) { if (item.ignored || !item.row.scanner) continue; const scannerRows = lookupData.scanners.get(key(item.row.scanner)); const id = addLookupError(item.errors, scannerRows?.map((row) => row.id), "scanner", item.row.scanner); if (id != null && scannerRows?.[0]?.modality !== "CT") item.errors.push("scanner \"" + item.row.scanner + "\" must be CT"); const techniqueKey = key(item.row.protocolKey) + "|" + key(item.row.scanner); if (seenTechniques.has(techniqueKey)) item.errors.push("duplicate scanner technique for protocol_key \"" + item.row.protocolKey + "\""); seenTechniques.add(techniqueKey); }
+  for (const item of sequenceInputs) { if (item.ignored) continue; if (item.row.sequenceKey) addLookupError(item.errors, lookupData.sequences.get(key(item.row.sequenceKey)), "sequence_key", item.row.sequenceKey); if (item.row.scanner) { const scannerRows = lookupData.scanners.get(key(item.row.scanner)); const id = addLookupError(item.errors, scannerRows?.map((row) => row.id), "scanner", item.row.scanner); if (id != null && scannerRows?.[0]?.modality !== "MRI") item.errors.push("scanner \"" + item.row.scanner + "\" must be MRI"); } }
+  const details = new Map<number, ProtocolVersionDetail | null>(); for (const item of rawProtocols) { const id = identityEnabled ? item.row.protocolId : null; const protocol = id == null ? null : lookupData.existing.find((candidate) => candidate.id === id) ?? null; const versionId = protocol?.latestDraftVersionId ?? protocol?.activeVersionId; if (versionId != null && !details.has(id!)) details.set(id!, await getProtocolVersionDetail(versionId)); }
+  const desiredFor = (protocol: ProtocolInput) => desiredRepresentation(protocol, phaseInputs.filter((item) => !item.ignored).map((item) => item.row), techniqueInputs.filter((item) => !item.ignored).map((item) => item.row), sequenceInputs.filter((item) => !item.ignored).map((item) => item.row), lookupData);
+  const protocolPlans: ProtocolPlan[] = rawProtocols.map(({ row, errors }) => { const effectiveProtocolId = identityEnabled ? row.protocolId : null; const protocol = effectiveProtocolId == null ? null : lookupData.existing.find((candidate) => candidate.id === effectiveProtocolId) ?? null; const anatomyId = row.anatomyRegion ? lookupData.anatomy.get(key(row.anatomyRegion))?.[0] ?? null : null; const desired = desiredFor(row); const currentDetail = effectiveProtocolId == null ? null : details.get(effectiveProtocolId) ?? null; let action: ProtocolAction = errors.length ? (errors.some((error) => error.indexOf("rispro_protocol_id") >= 0 || error.indexOf("rispro_source_version_id") >= 0) ? "invalid" : errors.some((error) => error.indexOf("already exists") >= 0 || error.indexOf("Multiple existing") >= 0 || error.indexOf("Blank-ID") >= 0) ? "conflict_existing_protocol" : "invalid") : effectiveProtocolId == null ? "create_protocol" : "update_protocol"; if (!errors.length && protocol) { const same = metadataEqual(protocol, row, anatomyId) && currentDetail !== null && sameJson(currentRepresentation(currentDetail), desired); action = same ? "unchanged" : sourceIsStale(protocol, currentDetail, row) ? "stale_conflict" : "update_protocol"; if (action === "stale_conflict") errors.push("Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); } return { input: row, errors, action, protocol, currentDetail, desired, effectiveProtocolId }; });
+  const deactivations: DeactivationPlan[] = []; if (authoritativeSync) { const presentIds = new Set(protocolPlans.map((plan) => plan.effectiveProtocolId).filter((id): id is number => id != null)); for (const manifest of parsed.manifest) { if (manifest.protocolId == null || presentIds.has(manifest.protocolId)) continue; const protocol = lookupData.existing.find((candidate) => candidate.id === manifest.protocolId) ?? null; const errors = [...manifest.errors]; let action: ProtocolAction = protocol ? (protocol.isActive ? "deactivate_protocol" : "already_inactive") : "invalid"; if (!protocol) errors.push("Manifest protocol ID " + manifest.protocolId + " does not exist."); else if (manifest.sourceVersionId != null && (protocol.latestDraftVersionId ?? protocol.activeVersionId) !== manifest.sourceVersionId) { action = "stale_conflict"; errors.push("Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); } else if (manifest.protocolUpdatedAt && canonicalTimestamp(protocol.updatedAt) !== canonicalTimestamp(manifest.protocolUpdatedAt)) { action = "stale_conflict"; errors.push("Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); } deactivations.push({ manifest, protocol, errors, action }); } }
+  const protocolRows = [...protocolPlans.map((plan) => ({ rowNumber: plan.input.rowNumber, protocolKey: plan.input.protocolKey, protocolName: plan.input.name, modality: plan.input.modality ?? "", protocolId: plan.effectiveProtocolId, action: plan.action, errors: plan.errors })), ...deactivations.map((plan) => ({ rowNumber: plan.manifest.rowNumber, protocolKey: plan.manifest.protocolKey, protocolName: plan.protocol?.name ?? "", modality: plan.protocol?.modality ?? "", protocolId: plan.manifest.protocolId, action: plan.action, errors: plan.errors }))]; const rowErrors = [...protocolRows, ...phaseInputs, ...techniqueInputs, ...sequenceInputs].reduce((total, row) => total + row.errors.length, 0); const errors = rowErrors + metadataErrors.length + (requiredErrors.length && rawProtocols.length + rawPhases.length + rawTechniques.length + rawSequences.length === 0 ? requiredErrors.length : 0); const summary = { protocols: protocolPlans.length, createProtocols: protocolRows.filter((row) => row.action === "create_protocol").length, updateProtocols: protocolRows.filter((row) => row.action === "update_protocol").length, unchangedProtocols: protocolRows.filter((row) => row.action === "unchanged" || row.action === "already_inactive").length, deactivateProtocols: protocolRows.filter((row) => row.action === "deactivate_protocol").length, ctPhases: phaseInputs.length, ctTechniques: techniqueInputs.length, mriSequences: sequenceInputs.length, errors };
+  const preview: ProtocolImportPreview = { protocolRows, ctPhaseRows: phaseInputs.map(({ row, errors, ignored }) => ({ rowNumber: row.rowNumber, protocolKey: row.protocolKey, action: ignored ? "ignored" : errors.length ? "invalid" : "create", errors })), ctTechniqueRows: techniqueInputs.map(({ row, errors, ignored }) => ({ rowNumber: row.rowNumber, protocolKey: row.protocolKey, action: ignored ? "ignored" : errors.length ? "invalid" : "create", errors })), mriSequenceRows: sequenceInputs.map(({ row, errors, ignored }) => ({ rowNumber: row.rowNumber, protocolKey: row.protocolKey, action: ignored ? "ignored" : errors.length ? "invalid" : "create", errors })), summary, scope, authoritativeSync, legacy, notice: legacy ? "Legacy/create-only workbook. Re-export the full protocol library to use synchronization." : undefined, deactivationProtocolNames: deactivations.filter((plan) => plan.action === "deactivate_protocol").map((plan) => plan.protocol?.name ?? plan.manifest.protocolKey), canConfirm: errors === 0 };
+  return { parsed, lookup: lookupData, protocols: protocolPlans, deactivations, phaseInputs, techniqueInputs, sequenceInputs, metadataErrors, preview };
+}
+
+export async function inspectProtocolImport(input: ImportInput): Promise<ProtocolImportInspect> { const parsed = await parseImport(input); const validMetadata = Boolean(parsed.metadata && parsed.metadata.formatVersion === "2" && parsed.metadata.workbookType === "protocol_library" && parsed.metadata.scope && parsed.metadata.exportedAt && canonicalTimestamp(parsed.metadata.exportedAt)); return { format: "xlsx", sheets: SHEETS.map((sheetName) => ({ sheetName, columns: parsed.worksheets[sheetName].headers, requiredColumns: REQUIRED[sheetName], missingRequiredColumns: missing(parsed.worksheets[sheetName], REQUIRED[sheetName]), rowCount: parsed.worksheets[sheetName].rows.length })), unknownSheets: parsed.sheetNames.filter((name) => !SHEETS.includes(name as (typeof SHEETS)[number]) && name !== INSTRUCTIONS_SHEET && name !== METADATA_SHEET && name !== MANIFEST_SHEET), scope: validMetadata ? parsed.metadata!.scope : null, authoritativeSync: validMetadata && parsed.metadata!.scope === "ALL_PROTOCOLS", legacy: !validMetadata }; }
+export async function previewProtocolImport(input: ImportInput): Promise<ProtocolImportPreview> { return (await buildPlan(input)).preview; }
+
+function protocolUpdateInput(row: ProtocolInput, anatomyId: number | null) { return { name: row.name, anatomyRegionId: anatomyId, category: row.category, indication: row.indication, contrastPolicy: row.contrastPolicy, oralContrastPolicy: row.oralContrastPolicy, bowelPreparation: row.bowelPreparation, preparationNotes: row.preparationNotes, isActive: row.isActive ?? true }; }
+async function insertVersion(client: ProtocolLibraryDbClient, protocolId: number, notes: string | null, actorUserId: number | null): Promise<number> { const result = await client.query("insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by) values ($1, '1.0', 'DRAFT', 'Initial protocol version', $2, $3) returning id", [protocolId, notes, actorUserId]); return Number(result.rows[0].id); }
+async function replaceVersionContent(client: ProtocolLibraryDbClient, versionId: number, protocol: ProtocolLibraryProtocolRow, plan: ProtocolPlan): Promise<{ phases: number; techniques: number; sequences: number }> { await client.query("delete from protocol_ct_phases where protocol_version_id = $1", [versionId]); await client.query("delete from protocol_ct_techniques where protocol_version_id = $1", [versionId]); await client.query("delete from protocol_mri_sequences where protocol_version_id = $1", [versionId]); let phases = 0; let techniques = 0; let sequences = 0; if (protocol.modality === "CT") { for (const item of plan.desired.ctPhases) { await client.query("insert into protocol_ct_phases (protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type, delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds, coverage_override, reconstruction_override, instructions_override, is_required) values ($1,$2,null,$3,null,$4,$5,$6,$7,$8,$9,$10,$11,$12)", [versionId, item.order, item.phaseName, item.timingType, item.delaySeconds, item.bolusTrackingSite, item.triggerHu, item.postTriggerDelaySeconds, item.coverage, item.reconstruction, item.instructions, item.required]); phases += 1; } for (const item of plan.desired.ctTechniques) { await client.query("insert into protocol_ct_techniques (protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas, exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength, reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)", [versionId, item.scannerId, item.kvMode, item.kvp, item.tubeCurrentMode, item.fixedMa, item.referenceMas, item.exposureControl, item.noiseIndex, item.minMa, item.maxMa, item.reconstructionMethod, item.reconstructionStrength, item.reconstructionImageDefinition, item.sliceThicknessMm, item.reconstructionIntervalMm, item.kernel]); techniques += 1; } } else { for (const item of plan.desired.mriSequences) { await client.query("insert into protocol_mri_sequences (protocol_version_id, scanner_id, order_index, mri_sequence_preset_id, plane_override, coverage_override, b_values_override, timing_override, notes_override, is_required) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", [versionId, item.scannerId, item.order, item.sequenceId, item.plane, item.coverage, item.bValues, item.timing, item.notes, item.required]); sequences += 1; } } return { phases, techniques, sequences }; }
+async function revalidateExisting(client: ProtocolLibraryDbClient, plan: ProtocolPlan, lookupData: Lookup): Promise<{ protocol: ProtocolLibraryProtocolRow; detail: ProtocolVersionDetail | null; action: ProtocolAction; anatomyId: number | null }> { const protocol = await lockProtocolById(client, plan.effectiveProtocolId!); if (!protocol) throw new HttpError(409, "Protocol ID " + plan.effectiveProtocolId + " no longer exists."); const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId; const detail = versionId == null ? null : await getProtocolVersionDetailWithClient(client, versionId); const anatomyId = plan.input.anatomyRegion ? lookupData.anatomy.get(key(plan.input.anatomyRegion))?.[0] ?? null : null; const same = metadataEqual(protocol, plan.input, anatomyId) && detail !== null && sameJson(currentRepresentation(detail), plan.desired); if (same) return { protocol, detail, action: "unchanged", anatomyId }; if (sourceIsStale(protocol, detail, plan.input)) throw new HttpError(409, "Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); return { protocol, detail, action: "update_protocol", anatomyId }; }
+
+export async function confirmProtocolImport(input: ProtocolImportConfirmInput, actorUserId: number | null): Promise<ProtocolImportSummary> {
+  const plan = await buildPlan(input); if (!plan.preview.canConfirm) throw new HttpError(400, "Protocol import has validation errors.", plan.preview); if (plan.preview.summary.deactivateProtocols > 0 && input.confirmMissingProtocolDeactivation !== true) throw new HttpError(400, "Explicit confirmation is required to deactivate protocols missing from the full-library workbook.", plan.preview);
+  const summary: ProtocolImportSummary = { createdProtocols: 0, updatedProtocols: 0, unchangedProtocols: 0, deactivatedProtocols: 0, alreadyInactiveProtocols: 0, createdCtProtocols: 0, createdMriProtocols: 0, createdCtPhases: 0, updatedCtPhases: 0, removedCtPhases: 0, createdCtTechniques: 0, updatedCtTechniques: 0, removedCtTechniques: 0, createdMriSequenceRows: 0, updatedMriSequenceRows: 0, removedMriSequenceRows: 0 };
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const lockIds = [...new Set([...plan.protocols.map((protocolPlan) => protocolPlan.effectiveProtocolId), ...plan.deactivations.map((deactivation) => deactivation.manifest.protocolId)].filter((id): id is number => id != null))].sort((left, right) => left - right);
+    for (const protocolId of lockIds) await lockProtocolById(client, protocolId);
+    for (const protocolPlan of plan.protocols) {
+      if (protocolPlan.errors.length) throw new HttpError(400, "Protocol import has validation errors.", plan.preview);
+      if (protocolPlan.effectiveProtocolId == null) { const anatomyId = protocolPlan.input.anatomyRegion ? plan.lookup.anatomy.get(key(protocolPlan.input.anatomyRegion))?.[0] ?? null : null; const inserted = await client.query("insert into protocols (name, modality, anatomy_region_id, category, indication, contrast_policy, oral_contrast_policy, bowel_preparation, preparation_notes, is_active) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id", [protocolPlan.input.name, protocolPlan.input.modality, anatomyId, protocolPlan.input.category, protocolPlan.input.indication, protocolPlan.input.contrastPolicy, protocolPlan.input.oralContrastPolicy, protocolPlan.input.bowelPreparation, protocolPlan.input.preparationNotes, protocolPlan.input.isActive ?? true]); const protocolId = Number(inserted.rows[0].id); const versionId = await insertVersion(client, protocolId, protocolPlan.input.protocolNotes, actorUserId); const counts = await replaceVersionContent(client, versionId, { modality: protocolPlan.input.modality! } as ProtocolLibraryProtocolRow, protocolPlan); summary.createdProtocols += 1; if (protocolPlan.input.modality === "CT") summary.createdCtProtocols += 1; else summary.createdMriProtocols += 1; summary.createdCtPhases += counts.phases; summary.createdCtTechniques += counts.techniques; summary.createdMriSequenceRows += counts.sequences; continue; }
+      const current = await revalidateExisting(client, protocolPlan, plan.lookup); if (current.action === "unchanged") { summary.unchangedProtocols += 1; continue; } const metadataChanged = !metadataEqual(current.protocol, protocolPlan.input, current.anatomyId); if (metadataChanged) await updateProtocolWithClient(client, current.protocol.id, protocolUpdateInput(protocolPlan.input, current.anatomyId)); const contentChanged = current.detail === null || !sameJson(currentRepresentation(current.detail), protocolPlan.desired); if (contentChanged) { let versionId: number; if (current.detail?.version.status === "DRAFT") versionId = current.detail.version.id; else if (current.protocol.activeVersionId) versionId = (await createDraftFromActiveVersionWithClient(client, current.protocol.id, actorUserId)).version.id; else versionId = await insertVersion(client, current.protocol.id, protocolPlan.input.protocolNotes, actorUserId); await client.query("update protocol_versions set protocol_notes = $2 where id = $1", [versionId, protocolPlan.input.protocolNotes]); const counts = await replaceVersionContent(client, versionId, current.protocol, protocolPlan); summary.updatedCtPhases += counts.phases; summary.updatedCtTechniques += counts.techniques; summary.updatedMriSequenceRows += counts.sequences; } summary.updatedProtocols += 1;
+    }
+    for (const deactivation of plan.deactivations) { if (deactivation.errors.length) throw new HttpError(409, deactivation.errors[0] ?? "Protocol deactivation conflict."); const protocol = await lockProtocolById(client, deactivation.manifest.protocolId!); if (!protocol) throw new HttpError(409, "Manifest protocol ID " + deactivation.manifest.protocolId + " no longer exists."); const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId; if (deactivation.manifest.sourceVersionId != null && versionId !== deactivation.manifest.sourceVersionId) throw new HttpError(409, "Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); if (deactivation.manifest.protocolUpdatedAt && canonicalTimestamp(protocol.updatedAt) !== canonicalTimestamp(deactivation.manifest.protocolUpdatedAt)) throw new HttpError(409, "Protocol changed in RISpro after this workbook was exported. Re-export the protocol library before synchronizing."); if (!protocol.isActive) summary.alreadyInactiveProtocols += 1; else { await client.query("update protocols set is_active = false where id = $1", [protocol.id]); summary.deactivatedProtocols += 1; } }
     await client.query("commit"); return summary;
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 
 export async function protocolImportTemplateXlsx(): Promise<{ buffer: Buffer; filename: string }> {
-  const lookups = await lookup(); const scannerRows = [...lookups.scanners.entries()].flatMap(([name, rows]) => rows.map((row) => ({ item: row.modality === "CT" ? "Active CT scanner" : "Active MRI scanner", value: name, detail: "Use this scanner name exactly; database IDs are never entered." })));
-  const anatomyRows = [...lookups.anatomy.keys()].map((name) => ({ item: "Active anatomy region", value: name, detail: "Optional Protocols.anatomy_region lookup." }));
-  const sequenceRows = [...lookups.sequences.entries()].map(([sequenceKey]) => ({ item: "Active MRI sequence_key", value: sequenceKey, detail: "Use this key in MRI Sequences; presets are not created by this import." }));
-  return { buffer: await buildWorkbookBuffer([
-    { name: "Protocols", headers: PROTOCOL_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", protocol_name: "Example CT Liver Triphasic", modality: "CT", anatomy_region: "Replace with an active anatomy region", category: "General", contrast_policy: "With IV contrast", protocol_notes: "Example only - replace or remove" }, { protocol_key: "mri_brain_routine", protocol_name: "Example MRI Brain Routine", modality: "MRI", anatomy_region: "Replace with an active anatomy region", category: "General", contrast_policy: "Non-contrast", protocol_notes: "Example only - replace or remove" }] },
-    { name: "CT Phases", headers: CT_PHASE_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", order: 1, phase_name: "Non-contrast", timing_type: "NON_CONTRAST", coverage: "Liver" }, { protocol_key: "ct_liver_triphasic", order: 2, phase_name: "Portal venous", timing_type: "FIXED_DELAY_INJECTION_START", delay_seconds: 70, coverage: "Liver" }] },
-    { name: "CT Techniques", headers: CT_TECHNIQUE_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", scanner: "Replace with an active CT scanner", kv_mode: "AUTO", tube_current_mode: "AUTOMATIC", slice_thickness_mm: 1, reconstruction_interval_mm: 1, kernel: "Standard" }] },
-    { name: "MRI Sequences", headers: MRI_SEQUENCE_COLUMNS, rows: [{ protocol_key: "mri_brain_routine", order: 1, sequence_key: "Replace with an existing MRI sequence_key", plane: "Axial", coverage: "Brain" }] },
-    { name: INSTRUCTIONS_SHEET, headers: ["item", "value", "detail"], rows: [
-      { item: "Purpose", value: "Full CT/MRI protocol import", detail: "Imports protocol metadata and associated CT phases, CT scanner techniques, or MRI preset composition." },
-      { item: "protocol_key", value: "Workbook-local join key", detail: "Required, unique case-insensitively, trimmed. It is never a database ID." },
-      { item: "Draft safety", value: "DRAFT only", detail: "Imported protocols require radiologist review and explicit activation before clinical use." },
-      { item: "Existing protocols", value: "Never overwritten", detail: "A same-modality, same-name match prevents confirmation." },
-      { item: "CT / MRI sheets", value: "Modality-specific", detail: "CT Phases and CT Techniques only reference CT protocols; MRI Sequences only references MRI protocols. Empty detail sheets are valid." },
-      { item: "Protocols required", value: REQUIRED.Protocols.join(", "), detail: `Optional: ${PROTOCOL_COLUMNS.slice(3).join(", ")}. modality: CT or MRI. category: General, Oncology, Non-oncology.` },
-      { item: "CT Phases required", value: REQUIRED["CT Phases"].join(", "), detail: `Optional: ${CT_PHASE_COLUMNS.slice(4).join(", ")}. timing_type: ${[...TIMING_TYPES].join(", ")}.` },
-      { item: "CT Techniques required", value: REQUIRED["CT Techniques"].join(", "), detail: `Optional: ${CT_TECHNIQUE_COLUMNS.slice(2).join(", ")}. kv_mode: AUTO/FIXED; tube_current_mode: AUTOMATIC/FIXED_MA/REFERENCE_MAS.` },
-      { item: "MRI Sequences required", value: REQUIRED["MRI Sequences"].join(", "), detail: `Optional: ${MRI_SEQUENCE_COLUMNS.slice(3).join(", ")}. sequence_key must already exist.` },
-      ...anatomyRows, ...scannerRows, ...sequenceRows,
-    ] },
-  ]), filename: "rispro-protocol-import-template.xlsx" };
+  const lookups = await lookup(); const scannerRows = [...lookups.scanners.entries()].flatMap(([name, rows]) => rows.map((row) => ({ item: row.modality === "CT" ? "Active CT scanner" : "Active MRI scanner", value: name, detail: "Use this scanner name exactly; database IDs are never entered." }))); const anatomyRows = [...lookups.anatomy.keys()].map((name) => ({ item: "Active anatomy region", value: name, detail: "Optional Protocols.anatomy_region lookup." })); const sequenceRows = [...lookups.sequences.keys()].map((sequenceKey) => ({ item: "Active MRI sequence_key", value: sequenceKey, detail: "Use this key in MRI Sequences; presets are not created by this import." }));
+  return { buffer: await buildWorkbookBuffer([{ name: "Protocols", headers: PROTOCOL_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", protocol_name: "Example CT Liver Triphasic", modality: "CT", is_active: "", anatomy_region: "Replace with an active anatomy region", category: "General", contrast_policy: "With IV contrast", protocol_notes: "Example only - replace or remove" }, { protocol_key: "mri_brain_routine", protocol_name: "Example MRI Brain Routine", modality: "MRI", is_active: "", anatomy_region: "Replace with an active anatomy region", category: "General", contrast_policy: "Non-contrast", protocol_notes: "Example only - replace or remove" }] }, { name: "CT Phases", headers: CT_PHASE_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", order: 1, phase_name: "Non-contrast", timing_type: "NON_CONTRAST", coverage: "Liver" }, { protocol_key: "ct_liver_triphasic", order: 2, phase_name: "Portal venous", timing_type: "FIXED_DELAY_INJECTION_START", delay_seconds: 70, coverage: "Liver" }] }, { name: "CT Techniques", headers: CT_TECHNIQUE_COLUMNS, rows: [{ protocol_key: "ct_liver_triphasic", scanner: "Replace with an active CT scanner", kv_mode: "AUTO", tube_current_mode: "AUTOMATIC", slice_thickness_mm: 1, reconstruction_interval_mm: 1, kernel: "Standard" }] }, { name: "MRI Sequences", headers: MRI_SEQUENCE_COLUMNS, rows: [{ protocol_key: "mri_brain_routine", order: 1, sequence_key: "Replace with an existing MRI sequence_key", plane: "Axial", coverage: "Brain" }] }, { name: METADATA_SHEET, headers: ["key", "value"], rows: [{ key: "format_version", value: "2" }, { key: "workbook_type", value: "protocol_library" }, { key: "scope", value: "TEMPLATE" }, { key: "exported_at", value: new Date().toISOString() }] }, { name: MANIFEST_SHEET, headers: ["rispro_protocol_id", "protocol_key", "source_version_id", "protocol_updated_at"], rows: [] }, { name: INSTRUCTIONS_SHEET, headers: ["item", "value", "detail"], rows: [{ item: "Purpose", value: "Full CT/MRI protocol import", detail: "Export All supports synchronized round-trip editing; templates and single-protocol workbooks never deactivate unrelated protocols." }, { item: "Identity", value: "rispro_protocol_id", detail: "Existing exported protocols are matched by this field. Leave RISpro identity fields blank for new rows." }, { item: "Draft safety", value: "DRAFT only", detail: "Changed content is written to a DRAFT; ACTIVE versions remain unchanged until explicit activation." }, { item: "Deactivation", value: "Export All only", detail: "Removing a protocol from a full-library export deactivates it only after explicit confirmation. History is retained." }, ...anatomyRows, ...scannerRows, ...sequenceRows] }]), filename: "rispro-protocol-import-template.xlsx" };
 }
 
-function workbookProtocolKey(detail: ProtocolVersionDetail): string {
-  const slug = detail.protocol.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 56) || "protocol";
-  return `${detail.protocol.modality.toLowerCase()}-${slug}-${detail.protocol.id}`;
+function workbookProtocolKey(detail: ProtocolVersionDetail): string { const slug = detail.protocol.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 56) || "protocol"; return detail.protocol.modality.toLowerCase() + "-" + slug + "-" + detail.protocol.id; }
+function safeFilenamePart(name: string): string { return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72) || "protocol"; }
+export async function buildProtocolExportWorkbook(details: ProtocolVersionDetail[], filename: string, scope: WorkbookScope = details.length > 1 ? "ALL_PROTOCOLS" : "SINGLE_PROTOCOL"): Promise<{ buffer: Buffer; filename: string }> {
+  const exportedAt = new Date().toISOString(); const protocolRows = details.map((detail) => ({ protocol_key: workbookProtocolKey(detail), protocol_name: detail.protocol.name, modality: detail.protocol.modality, rispro_protocol_id: detail.protocol.id, rispro_source_version_id: detail.version.id, rispro_protocol_updated_at: detail.protocol.updatedAt, is_active: detail.protocol.isActive, anatomy_region: detail.protocol.anatomyRegionName, category: detail.protocol.category, indication: detail.protocol.indication, contrast_policy: detail.protocol.contrastPolicy, oral_contrast_policy: detail.protocol.oralContrastPolicy, bowel_preparation: detail.protocol.bowelPreparation, preparation_notes: detail.protocol.preparationNotes, protocol_notes: detail.version.protocolNotes })); const ctPhaseRows = details.flatMap((detail) => detail.ctPhases.map((phase) => ({ protocol_key: workbookProtocolKey(detail), order: phase.orderIndex, phase_name: phase.customPhaseName ?? phase.ctPhasePresetName, timing_type: legacyTimingType(phase), delay_seconds: phase.delaySeconds ?? phase.presetDelaySeconds, bolus_tracking_site: phase.bolusTrackingSite ?? phase.presetBolusTrackingSite, trigger_hu: phase.triggerHu ?? phase.presetTriggerHu, post_trigger_delay_seconds: phase.postTriggerDelaySeconds, coverage: phase.coverageOverride ?? phase.presetDefaultCoverage, reconstruction: phase.reconstructionOverride ?? phase.presetReconstructionNotes, instructions: phase.instructionsOverride ?? phase.presetInstructions, required: phase.isRequired }))); const ctTechniqueRows = details.flatMap((detail) => detail.ctTechniques.map((technique) => ({ protocol_key: workbookProtocolKey(detail), scanner: technique.scannerName, kv_mode: technique.kvMode, kvp: technique.kvp, tube_current_mode: technique.tubeCurrentMode, fixed_ma: technique.fixedMa, reference_mas: technique.referenceMas, exposure_control: technique.exposureControl, noise_index: technique.noiseIndex, min_ma: technique.minMa, max_ma: technique.maxMa, reconstruction_method: technique.reconstructionMethod, reconstruction_strength: technique.reconstructionStrength, reconstruction_image_definition: technique.reconstructionImageDefinition, slice_thickness_mm: technique.sliceThicknessMm, reconstruction_interval_mm: technique.reconstructionIntervalMm, kernel: technique.kernel }))); const mriSequenceRows = details.flatMap((detail) => detail.mriSequences.map((sequence) => ({ protocol_key: workbookProtocolKey(detail), order: sequence.orderIndex, sequence_key: sequence.mriSequencePresetKey, scanner: sequence.scannerName, plane: sequence.planeOverride, coverage: sequence.coverageOverride, b_values: sequence.bValuesOverride, timing: sequence.timingOverride, notes: sequence.notesOverride, required: sequence.isRequired }))); const manifestRows = details.map((detail) => ({ rispro_protocol_id: detail.protocol.id, protocol_key: workbookProtocolKey(detail), source_version_id: detail.version.id, protocol_updated_at: detail.protocol.updatedAt }));
+  return { buffer: await buildWorkbookBuffer([{ name: "Protocols", headers: PROTOCOL_COLUMNS, rows: protocolRows }, { name: "CT Phases", headers: CT_PHASE_COLUMNS, rows: ctPhaseRows }, { name: "CT Techniques", headers: CT_TECHNIQUE_COLUMNS, rows: ctTechniqueRows }, { name: "MRI Sequences", headers: MRI_SEQUENCE_COLUMNS, rows: mriSequenceRows }, { name: METADATA_SHEET, headers: ["key", "value"], rows: [{ key: "format_version", value: "2" }, { key: "workbook_type", value: "protocol_library" }, { key: "scope", value: scope }, { key: "exported_at", value: exportedAt }] }, { name: MANIFEST_SHEET, headers: ["rispro_protocol_id", "protocol_key", "source_version_id", "protocol_updated_at"], rows: manifestRows }, { name: INSTRUCTIONS_SHEET, headers: ["item", "value", "detail"], rows: [{ item: "Export version selection", value: "Export all", detail: "For each protocol, RISpro exports its latest DRAFT when present; otherwise its ACTIVE version." }, { item: "Identity", value: "rispro_protocol_id", detail: "Existing protocols are matched by this stable ID, not by name. Renaming a row updates the same protocol." }, { item: "Draft safety", value: "DRAFT only", detail: "Changed content is synchronized to an existing or newly created DRAFT. ACTIVE versions remain unchanged." }, { item: "Deactivation", value: "Export All only", detail: "A protocol removed from the Protocols sheet is deactivated only after explicit confirmation. Protocol history is never hard-deleted." }] }]), filename };
 }
-
-function safeFilenamePart(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72) || "protocol";
-}
-
-function legacyTimingType(detail: ProtocolVersionDetail["ctPhases"][number]): string {
-  if (detail.timingType) return detail.timingType;
-  if (detail.presetTimingType === "BOLUS_TRACKING") return "BOLUS_TRACKING";
-  if (detail.presetTimingType === "FIXED_DELAY") return "FIXED_DELAY_INJECTION_START";
-  if (detail.presetTimingType === "MANUAL") return "MANUAL";
-  return "NON_CONTRAST";
-}
-
-export async function buildProtocolExportWorkbook(details: ProtocolVersionDetail[], filename: string): Promise<{ buffer: Buffer; filename: string }> {
-  const protocolRows = details.map((detail) => ({
-    protocol_key: workbookProtocolKey(detail), protocol_name: detail.protocol.name, modality: detail.protocol.modality,
-    anatomy_region: detail.protocol.anatomyRegionName, category: detail.protocol.category, indication: detail.protocol.indication,
-    contrast_policy: detail.protocol.contrastPolicy, oral_contrast_policy: detail.protocol.oralContrastPolicy,
-    bowel_preparation: detail.protocol.bowelPreparation, preparation_notes: detail.protocol.preparationNotes,
-    protocol_notes: detail.version.protocolNotes,
-  }));
-  const ctPhaseRows = details.flatMap((detail) => detail.ctPhases.map((phase) => ({
-    protocol_key: workbookProtocolKey(detail), order: phase.orderIndex, phase_name: phase.customPhaseName ?? phase.ctPhasePresetName,
-    timing_type: legacyTimingType(phase), delay_seconds: phase.delaySeconds ?? phase.presetDelaySeconds,
-    bolus_tracking_site: phase.bolusTrackingSite ?? phase.presetBolusTrackingSite, trigger_hu: phase.triggerHu ?? phase.presetTriggerHu,
-    post_trigger_delay_seconds: phase.postTriggerDelaySeconds, coverage: phase.coverageOverride ?? phase.presetDefaultCoverage,
-    reconstruction: phase.reconstructionOverride ?? phase.presetReconstructionNotes, instructions: phase.instructionsOverride ?? phase.presetInstructions,
-    required: phase.isRequired,
-  })));
-  const ctTechniqueRows = details.flatMap((detail) => detail.ctTechniques.map((technique) => ({
-    protocol_key: workbookProtocolKey(detail), scanner: technique.scannerName, kv_mode: technique.kvMode, kvp: technique.kvp,
-    tube_current_mode: technique.tubeCurrentMode, fixed_ma: technique.fixedMa, reference_mas: technique.referenceMas,
-    exposure_control: technique.exposureControl, noise_index: technique.noiseIndex, min_ma: technique.minMa, max_ma: technique.maxMa,
-    reconstruction_method: technique.reconstructionMethod, reconstruction_strength: technique.reconstructionStrength,
-    reconstruction_image_definition: technique.reconstructionImageDefinition, slice_thickness_mm: technique.sliceThicknessMm,
-    reconstruction_interval_mm: technique.reconstructionIntervalMm, kernel: technique.kernel,
-  })));
-  const mriSequenceRows = details.flatMap((detail) => detail.mriSequences.map((sequence) => ({
-    protocol_key: workbookProtocolKey(detail), order: sequence.orderIndex, sequence_key: sequence.mriSequencePresetKey,
-    scanner: sequence.scannerName, plane: sequence.planeOverride, coverage: sequence.coverageOverride,
-    b_values: sequence.bValuesOverride, timing: sequence.timingOverride, notes: sequence.notesOverride, required: sequence.isRequired,
-  })));
-  return {
-    buffer: await buildWorkbookBuffer([
-      { name: "Protocols", headers: PROTOCOL_COLUMNS, rows: protocolRows },
-      { name: "CT Phases", headers: CT_PHASE_COLUMNS, rows: ctPhaseRows },
-      { name: "CT Techniques", headers: CT_TECHNIQUE_COLUMNS, rows: ctTechniqueRows },
-      { name: "MRI Sequences", headers: MRI_SEQUENCE_COLUMNS, rows: mriSequenceRows },
-      { name: INSTRUCTIONS_SHEET, headers: ["item", "value", "detail"], rows: [
-        { item: "Export version selection", value: "Export all", detail: "For each protocol, RISpro exports its latest DRAFT (highest version row ID) when present; otherwise it exports the active version. Protocols with neither are omitted." },
-        { item: "Specific version export", value: "Exact version", detail: "A version export contains exactly the requested DRAFT, ACTIVE, or RETIRED version." },
-        { item: "protocol_key", value: "Workbook-local relationship key", detail: "Generated deterministically from modality, protocol name, and protocol ID. It is not a clinical or database input field." },
-        { item: "Import safety", value: "Create-only DRAFT import", detail: "Re-import never overwrites an existing same-modality/name protocol; imported records remain DRAFT until explicitly activated." },
-      ] },
-    ]),
-    filename,
-  };
-}
-
-export async function exportAllProtocolsXlsx(): Promise<{ buffer: Buffer; filename: string }> {
-  const protocols = await listProtocols();
-  const selectedVersionIds = protocols.map((protocol) => protocol.latestDraftVersionId ?? protocol.activeVersionId).filter((id): id is number => id !== null);
-  const details = (await Promise.all(selectedVersionIds.map((id) => getProtocolVersionDetail(id)))).filter((detail): detail is ProtocolVersionDetail => detail !== null);
-  return buildProtocolExportWorkbook(details, "rispro-protocols.xlsx");
-}
-
-export async function exportProtocolXlsx(protocolId: number): Promise<{ buffer: Buffer; filename: string } | null> {
-  const protocol = (await listProtocols()).find((item) => item.id === protocolId);
-  if (!protocol) return null;
-  const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId;
-  if (versionId === null) throw new HttpError(409, "Protocol has no exportable version.");
-  const detail = await getProtocolVersionDetail(versionId);
-  return detail ? buildProtocolExportWorkbook([detail], `rispro-protocol-${safeFilenamePart(detail.protocol.name)}.xlsx`) : null;
-}
-
-export async function exportProtocolVersionXlsx(versionId: number): Promise<{ buffer: Buffer; filename: string } | null> {
-  const detail = await getProtocolVersionDetail(versionId);
-  return detail ? buildProtocolExportWorkbook([detail], `rispro-protocol-${safeFilenamePart(detail.protocol.name)}-v${detail.version.versionNumber}.xlsx`) : null;
-}
+export async function exportAllProtocolsXlsx(): Promise<{ buffer: Buffer; filename: string }> { const protocols = await listProtocols(); const selectedVersionIds = protocols.map((protocol) => protocol.latestDraftVersionId ?? protocol.activeVersionId).filter((id): id is number => id !== null); const details = (await Promise.all(selectedVersionIds.map((id) => getProtocolVersionDetail(id)))).filter((detail): detail is ProtocolVersionDetail => detail !== null); return buildProtocolExportWorkbook(details, "rispro-protocols.xlsx", "ALL_PROTOCOLS"); }
+export async function exportProtocolXlsx(protocolId: number): Promise<{ buffer: Buffer; filename: string } | null> { const protocol = (await listProtocols()).find((item) => item.id === protocolId); if (!protocol) return null; const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId; if (versionId === null) throw new HttpError(409, "Protocol has no exportable version."); const detail = await getProtocolVersionDetail(versionId); return detail ? buildProtocolExportWorkbook([detail], "rispro-protocol-" + safeFilenamePart(detail.protocol.name) + ".xlsx", "SINGLE_PROTOCOL") : null; }
+export async function exportProtocolVersionXlsx(versionId: number): Promise<{ buffer: Buffer; filename: string } | null> { const detail = await getProtocolVersionDetail(versionId); return detail ? buildProtocolExportWorkbook([detail], "rispro-protocol-" + safeFilenamePart(detail.protocol.name) + "-v" + detail.version.versionNumber + ".xlsx", "SINGLE_VERSION") : null; }

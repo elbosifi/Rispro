@@ -1330,20 +1330,45 @@ export type ProtocolImportInspect = {
   format: "xlsx";
   sheets: Array<{ sheetName: string; columns: string[]; requiredColumns: string[]; missingRequiredColumns: string[]; rowCount: number }>;
   unknownSheets: string[];
+  scope: "ALL_PROTOCOLS" | "SINGLE_PROTOCOL" | "SINGLE_VERSION" | "TEMPLATE" | null;
+  authoritativeSync: boolean;
+  legacy: boolean;
 };
 
-export type ProtocolImportPreviewRow = { rowNumber: number; protocolKey: string; action: "create" | "invalid"; errors: string[] };
+export type ProtocolImportPreviewRow = { rowNumber: number; protocolKey: string; action: "create" | "update" | "unchanged" | "ignored" | "invalid"; errors: string[] };
 
 export type ProtocolImportPreview = {
-  protocolRows: Array<Omit<ProtocolImportPreviewRow, "action"> & { protocolName: string; modality: string; action: "create_protocol" | "invalid" | "conflict_existing_protocol" }>;
+  protocolRows: Array<Omit<ProtocolImportPreviewRow, "action"> & { protocolName: string; modality: string; protocolId: number | null; action: "create_protocol" | "update_protocol" | "unchanged" | "deactivate_protocol" | "already_inactive" | "invalid" | "conflict_existing_protocol" | "stale_conflict" }>;
   ctPhaseRows: ProtocolImportPreviewRow[];
   ctTechniqueRows: ProtocolImportPreviewRow[];
   mriSequenceRows: ProtocolImportPreviewRow[];
-  summary: { protocols: number; ctPhases: number; ctTechniques: number; mriSequences: number; errors: number };
+  summary: { protocols: number; createProtocols: number; updateProtocols: number; unchangedProtocols: number; deactivateProtocols: number; ctPhases: number; ctTechniques: number; mriSequences: number; errors: number };
+  scope: "ALL_PROTOCOLS" | "SINGLE_PROTOCOL" | "SINGLE_VERSION" | "TEMPLATE" | null;
+  authoritativeSync: boolean;
+  legacy: boolean;
+  notice?: string;
+  deactivationProtocolNames: string[];
   canConfirm: boolean;
 };
 
-export type ProtocolImportSummary = { createdProtocols: number; createdCtProtocols: number; createdMriProtocols: number; createdCtPhases: number; createdCtTechniques: number; createdMriSequenceRows: number };
+export type ProtocolImportSummary = {
+  createdProtocols: number;
+  updatedProtocols: number;
+  unchangedProtocols: number;
+  deactivatedProtocols: number;
+  alreadyInactiveProtocols: number;
+  createdCtProtocols: number;
+  createdMriProtocols: number;
+  createdCtPhases: number;
+  updatedCtPhases: number;
+  removedCtPhases: number;
+  createdCtTechniques: number;
+  updatedCtTechniques: number;
+  removedCtTechniques: number;
+  createdMriSequenceRows: number;
+  updatedMriSequenceRows: number;
+  removedMriSequenceRows: number;
+};
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -1416,7 +1441,7 @@ export async function previewProtocolImport(payload: { fileContentBase64: string
   return api<ProtocolImportPreview>("/doctor/protocol-library/protocols/import/preview", { method: "POST", body: JSON.stringify(payload) }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
 }
 
-export async function confirmProtocolImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<ProtocolImportSummary> {
+export async function confirmProtocolImport(payload: { fileContentBase64: string; fileName?: string | null; confirmMissingProtocolDeactivation?: boolean }): Promise<ProtocolImportSummary> {
   const raw = await api<{ summary: ProtocolImportSummary }>("/doctor/protocol-library/protocols/import/confirm", { method: "POST", body: JSON.stringify(payload) }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
   return raw.summary;
 }

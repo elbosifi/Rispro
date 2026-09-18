@@ -120,6 +120,10 @@ const me = {
   canAccessCoreWorkspace: true,
 } as DoctorMe;
 
+function protocolImportConfirmCalls(): unknown[][] {
+  return (apiHooks.confirmProtocolImport as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+}
+
 describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
     mockFetchAppointments.mockResolvedValue([appointment]);
@@ -1129,6 +1133,55 @@ describe("Protocol workbook import controls", () => {
     expect(await screen.findByRole("button", { name: "Download XLSX template" })).toBeTruthy();
     expect(screen.getByText("Import protocols XLSX")).toBeTruthy();
     expect(screen.getByText(/saved as drafts and require review before activation/i)).toBeTruthy();
+  });
+
+  it("shows synchronization counts and requires explicit confirmation for deactivation", async () => {
+    vi.mocked(apiHooks.inspectProtocolImport).mockClear();
+    vi.mocked(apiHooks.previewProtocolImport).mockClear();
+    vi.mocked(apiHooks.confirmProtocolImport).mockClear();
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
+    vi.mocked(apiHooks.inspectProtocolImport).mockResolvedValue({ format: "xlsx", sheets: [], unknownSheets: [], scope: "ALL_PROTOCOLS", authoritativeSync: true, legacy: false });
+    vi.mocked(apiHooks.previewProtocolImport).mockResolvedValue({ protocolRows: [{ rowNumber: 2, protocolKey: "old", protocolName: "Old MRI", modality: "MRI", protocolId: 17, action: "deactivate_protocol", errors: [] }], ctPhaseRows: [], ctTechniqueRows: [], mriSequenceRows: [], summary: { protocols: 1, createProtocols: 1, updateProtocols: 2, unchangedProtocols: 4, deactivateProtocols: 1, ctPhases: 0, ctTechniques: 0, mriSequences: 0, errors: 0 }, scope: "ALL_PROTOCOLS", authoritativeSync: true, legacy: false, deactivationProtocolNames: ["Old MRI"], canConfirm: true });
+    vi.mocked(apiHooks.confirmProtocolImport).mockResolvedValue({ createdProtocols: 1, updatedProtocols: 2, unchangedProtocols: 4, deactivatedProtocols: 1, alreadyInactiveProtocols: 0, createdCtProtocols: 1, createdMriProtocols: 0, createdCtPhases: 0, updatedCtPhases: 0, removedCtPhases: 0, createdCtTechniques: 0, updatedCtTechniques: 0, removedCtTechniques: 0, createdMriSequenceRows: 0, updatedMriSequenceRows: 0, removedMriSequenceRows: 0 });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Import / Export" }));
+    const file = new File(["xlsx"], "protocols.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    fireEvent.change(screen.getByLabelText("Import protocols XLSX"), { target: { files: [file] } });
+    await waitFor(() => expect(apiHooks.inspectProtocolImport).toHaveBeenCalled());
+    await userEvent.click(await screen.findByRole("button", { name: "Preview import" }));
+    expect(screen.getByText("Create")).toBeTruthy();
+    expect(screen.getByText("Deactivate")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+    expect(screen.getByRole("heading", { name: "Apply protocol library synchronization?" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(apiHooks.confirmProtocolImport).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply synchronization" }));
+    await waitFor(() => expect(protocolImportConfirmCalls().at(-1)?.[0]).toEqual(expect.objectContaining({ confirmMissingProtocolDeactivation: true })));
+    expect(screen.getByText("Protocol synchronization applied: 1 created, 2 updated, 4 unchanged, 1 deactivated.")).toBeTruthy();
+  });
+
+  it("confirms a synchronized workbook directly when no protocols are deactivated", async () => {
+    vi.mocked(apiHooks.inspectProtocolImport).mockClear();
+    vi.mocked(apiHooks.previewProtocolImport).mockClear();
+    vi.mocked(apiHooks.confirmProtocolImport).mockClear();
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
+    vi.mocked(apiHooks.inspectProtocolImport).mockResolvedValue({ format: "xlsx", sheets: [], unknownSheets: [], scope: "SINGLE_PROTOCOL", authoritativeSync: false, legacy: false });
+    vi.mocked(apiHooks.previewProtocolImport).mockResolvedValue({ protocolRows: [], ctPhaseRows: [], ctTechniqueRows: [], mriSequenceRows: [], summary: { protocols: 0, createProtocols: 0, updateProtocols: 0, unchangedProtocols: 0, deactivateProtocols: 0, ctPhases: 0, ctTechniques: 0, mriSequences: 0, errors: 0 }, scope: "SINGLE_PROTOCOL", authoritativeSync: false, legacy: false, deactivationProtocolNames: [], canConfirm: true });
+    vi.mocked(apiHooks.confirmProtocolImport).mockResolvedValue({ createdProtocols: 0, updatedProtocols: 0, unchangedProtocols: 0, deactivatedProtocols: 0, alreadyInactiveProtocols: 0, createdCtProtocols: 0, createdMriProtocols: 0, createdCtPhases: 0, updatedCtPhases: 0, removedCtPhases: 0, createdCtTechniques: 0, updatedCtTechniques: 0, removedCtTechniques: 0, createdMriSequenceRows: 0, updatedMriSequenceRows: 0, removedMriSequenceRows: 0 });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={{ ...me, canSupervise: true }} /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Protocol Library" }));
+    await userEvent.click(screen.getByRole("button", { name: "Library setup" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Import / Export" }));
+    const file = new File(["xlsx"], "protocol.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    fireEvent.change(screen.getByLabelText("Import protocols XLSX"), { target: { files: [file] } });
+    await waitFor(() => expect(apiHooks.inspectProtocolImport).toHaveBeenCalled());
+    await userEvent.click(await screen.findByRole("button", { name: "Preview import" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Confirm import" }));
+    await waitFor(() => expect(protocolImportConfirmCalls()[0]?.[0]).toEqual(expect.objectContaining({ confirmMissingProtocolDeactivation: false })));
+    expect(screen.queryByRole("heading", { name: "Apply protocol library synchronization?" })).toBeNull();
   });
 });
 

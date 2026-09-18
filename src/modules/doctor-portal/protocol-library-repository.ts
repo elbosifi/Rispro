@@ -102,7 +102,8 @@ export interface ProtocolLibraryProtocolRow {
 }
 
 type RawRecord = Record<string, unknown>;
-type DbClient = { query: typeof pool.query };
+export type ProtocolLibraryDbClient = { query: typeof pool.query };
+type DbClient = ProtocolLibraryDbClient;
 export type ProtocolVersionStatus = "DRAFT" | "ACTIVE" | "RETIRED";
 
 export interface ProtocolInput {
@@ -994,17 +995,68 @@ export async function getProtocolDetail(protocolId: number): Promise<{ protocol:
 }
 
 export async function getProtocolVersionDetail(versionId: number): Promise<ProtocolVersionDetail | null> {
-  const version = await versionById(pool, versionId);
+  return getProtocolVersionDetailWithClient(pool, versionId);
+}
+
+export async function getProtocolVersionDetailWithClient(client: ProtocolLibraryDbClient, versionId: number): Promise<ProtocolVersionDetail | null> {
+  const version = await versionById(client, versionId);
   if (!version) return null;
-  const protocol = await protocolById(pool, version.protocolId);
+  const protocol = await protocolById(client, version.protocolId);
   if (!protocol) return null;
   return {
     protocol,
     version,
-    ctPhases: await ctPhasesForVersion(pool, versionId),
-    mriSequences: await mriSequencesForVersion(pool, versionId),
-    ctTechniques: await ctTechniquesForVersion(pool, versionId),
+    ctPhases: await ctPhasesForVersion(client, versionId),
+    mriSequences: await mriSequencesForVersion(client, versionId),
+    ctTechniques: await ctTechniquesForVersion(client, versionId),
   };
+}
+
+export async function lockProtocolById(client: ProtocolLibraryDbClient, protocolId: number): Promise<ProtocolLibraryProtocolRow | null> {
+  const lock = await client.query("select id from protocols where id = $1 for update", [protocolId]);
+  if (!lock.rows[0]) return null;
+  return protocolById(client, protocolId);
+}
+
+export async function updateProtocolWithClient(client: ProtocolLibraryDbClient, protocolId: number, input: ProtocolUpdateInput): Promise<ProtocolLibraryProtocolRow | null> {
+  const result = await client.query(
+    `
+      update protocols
+      set
+        name = coalesce($2, name),
+        anatomy_region_id = case when $3::boolean then $4 else anatomy_region_id end,
+        category = case when $5::boolean then $6 else category end,
+        indication = case when $7::boolean then $8 else indication end,
+        contrast_policy = case when $9::boolean then $10 else contrast_policy end,
+        oral_contrast_policy = case when $11::boolean then $12 else oral_contrast_policy end,
+        bowel_preparation = case when $13::boolean then $14 else bowel_preparation end,
+        preparation_notes = case when $15::boolean then $16 else preparation_notes end,
+        is_active = coalesce($17, is_active)
+      where id = $1
+      returning id
+    `,
+    [
+      protocolId,
+      input.name,
+      "anatomyRegionId" in input,
+      input.anatomyRegionId ?? null,
+      "category" in input,
+      input.category ?? null,
+      "indication" in input,
+      input.indication ?? null,
+      "contrastPolicy" in input,
+      input.contrastPolicy ?? null,
+      "oralContrastPolicy" in input,
+      input.oralContrastPolicy ?? null,
+      "bowelPreparation" in input,
+      input.bowelPreparation ?? null,
+      "preparationNotes" in input,
+      input.preparationNotes ?? null,
+      input.isActive,
+    ]
+  );
+  if (!result.rows[0]) return null;
+  return protocolById(client, protocolId);
 }
 
 export async function createProtocolWithDraft(input: ProtocolInput, actorUserId: number | null): Promise<{ protocol: ProtocolLibraryProtocolRow; version: ProtocolVersionRow }> {
@@ -1318,6 +1370,68 @@ function nextDraftVersionNumber(versionNumber: string, revisionType: "MINOR" | "
   const minor = Number(minorText ?? "0");
   if (!Number.isInteger(major) || !Number.isInteger(minor)) throw new HttpError(400, "Active protocol version number is invalid.");
   return revisionType === "MAJOR" ? `${major + 1}.0` : `${major}.${minor + 1}`;
+}
+
+export async function createDraftFromActiveVersionWithClient(client: ProtocolLibraryDbClient, protocolId: number, actorUserId: number | null, revisionType: "MINOR" | "MAJOR" = "MINOR"): Promise<ProtocolVersionDetail> {
+  const protocol = await protocolById(client, protocolId);
+  if (!protocol?.activeVersionId) throw new HttpError(400, "Protocol has no active version.");
+  const activeVersion = await versionById(client, protocol.activeVersionId);
+  if (!activeVersion) throw new HttpError(400, "Protocol has no active version.");
+  const versionResult = await client.query(
+    `
+      insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by)
+      values ($1, $2, 'DRAFT', $3, $4, $5)
+      returning id
+    `,
+    [protocolId, nextDraftVersionNumber(activeVersion.versionNumber, revisionType), `Draft from active ${activeVersion.versionNumber}`, activeVersion.protocolNotes, actorUserId]
+  );
+  const draftId = Number(versionResult.rows[0].id);
+  await client.query(
+    `
+      insert into protocol_ct_phases (
+        protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
+        delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
+        coverage_override, reconstruction_override, instructions_override, is_required
+      )
+      select $1, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
+             delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
+             coverage_override, reconstruction_override, instructions_override, is_required
+      from protocol_ct_phases
+      where protocol_version_id = $2
+    `,
+    [draftId, activeVersion.id]
+  );
+  await client.query(
+    `
+      insert into protocol_mri_sequences (
+        protocol_version_id, scanner_id, order_index, mri_sequence_preset_id, plane_override,
+        coverage_override, b_values_override, timing_override, notes_override, is_required
+      )
+      select $1, scanner_id, order_index, mri_sequence_preset_id, plane_override,
+             coverage_override, b_values_override, timing_override, notes_override, is_required
+      from protocol_mri_sequences
+      where protocol_version_id = $2
+    `,
+    [draftId, activeVersion.id]
+  );
+  if (protocol.modality === "CT") {
+    await client.query(
+      `
+        insert into protocol_ct_techniques (
+          protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
+          exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
+          reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
+        )
+        select $1, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
+               exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
+               reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
+        from protocol_ct_techniques
+        where protocol_version_id = $2
+      `,
+      [draftId, activeVersion.id]
+    );
+  }
+  return (await getProtocolVersionDetailWithClient(client, draftId))!;
 }
 
 export async function activateProtocolVersion(versionId: number, actorUserId: number | null): Promise<ProtocolVersionDetail> {

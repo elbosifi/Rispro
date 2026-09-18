@@ -485,7 +485,8 @@ router.post(
   "/protocols/import/confirm",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolLibraryAdminAccess(req);
-    res.json({ summary: await confirmProtocolImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, actorUserId(req)) });
+    const body = asUnknownRecord(req.body);
+    res.json({ summary: await confirmProtocolImport({ fileContentBase64: requiredText(body.fileContentBase64, "fileContentBase64"), fileName: optionalText(body.fileName), confirmMissingProtocolDeactivation: body.confirmMissingProtocolDeactivation === true }, actorUserId(req)) });
   })
 );
 
