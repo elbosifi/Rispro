@@ -6,6 +6,7 @@ import DoctorPage from "./doctor-page";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import type { DoctorMe, ReportingBoardCaseRow, User } from "@/types/api";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
+import { MODULE_LAST_LOCATIONS_STORAGE_KEY } from "@/lib/navigation/module-last-location";
 
 const fetchDoctorMeMock = vi.fn();
 const fetchPageVisibilityMatrixMock = vi.fn();
@@ -1121,6 +1122,54 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByText("Export CSV")).toBeTruthy();
     expect(screen.getByText("Export XLSX")).toBeTruthy();
     expect(screen.getByText("Import CSV/XLSX")).toBeTruthy();
+  });
+
+  it("restores a safe Doctor location through Doctor Portal navigation", async () => {
+    window.sessionStorage.setItem(MODULE_LAST_LOCATIONS_STORAGE_KEY, JSON.stringify({
+      doctorTodayCases: "/doctor/today-cases?dateFrom=2026-09-18&dateTo=2026-09-25&view=team",
+    }));
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Today/i }));
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/today-cases?requiresReport=true&view=team"));
+  });
+
+  it("keeps Team Workload filters URL-authoritative across direct links and changes", async () => {
+    fetchAppointmentLookupsMock.mockResolvedValue({
+      modalities: [
+        { id: 2, code: "CT", nameEn: "CT", nameAr: "CT" },
+        { id: 3, code: "MRI", nameEn: "MRI", nameAr: "MRI" },
+      ],
+      examTypes: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/team-workload?startDate=2026-09-19&modalityId=2&requiresReport=false&category=oncology");
+
+    expect(await screen.findByDisplayValue("2026-09-19")).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "MRI" })).toBeTruthy();
+    expect((screen.getAllByRole("combobox")[2] as HTMLSelectElement).value).toBe("false");
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "3" } });
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/team-workload?startDate=2026-09-19&modalityId=3&requiresReport=false&category=oncology"));
+  });
+
+  it("sanitizes an unauthorized Advanced Setup section from the URL", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/advanced-setup?section=doctors");
+
+    expect(await screen.findByRole("heading", { name: "Advanced Setup" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/advanced-setup"));
+    expect(screen.queryByText("Doctor CSV/XLSX import and export")).toBeNull();
   });
 
   it("normal doctors do not see admin-only Advanced Setup cards", async () => {

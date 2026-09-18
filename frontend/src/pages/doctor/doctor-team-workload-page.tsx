@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createWorkloadCatalogRule,
@@ -12,17 +13,16 @@ import {
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { CaseAssignmentType, DoctorMe, TeamWorkloadSummaryRow, WorkloadCalculationSummary, WorkloadCatalogRule } from "@/types/api";
+import {
+  buildDoctorTeamWorkloadSearch,
+  parseDoctorTeamWorkloadNavigation,
+  sanitizeDoctorTeamWorkloadSearch,
+} from "@/lib/navigation/doctor-team-workload-navigation";
 
 const ASSIGNMENT_TYPES: CaseAssignmentType[] = ["imaging", "protocol", "reporting", "ultrasound_operator", "mammography_episode"];
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(isoDate: string, days: number): string {
-  const date = new Date(`${isoDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
 
 function isManager(me: DoctorMe): boolean {
@@ -258,13 +258,24 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
   const { language } = useLanguage();
   const canManage = isManager(me);
   const queryClient = useQueryClient();
-  const [startDate, setStartDate] = useState(todayIso());
-  const [endDate, setEndDate] = useState(addDays(todayIso(), 7));
-  const [modalityId, setModalityId] = useState("");
-  const [requiresReport, setRequiresReport] = useState("");
-  const [caseCategory, setCaseCategory] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigationState = useMemo(
+    () => parseDoctorTeamWorkloadNavigation(searchParams),
+    [searchParams],
+  );
   const [summary, setSummary] = useState<WorkloadCalculationSummary | null>(null);
   const canEditCatalog = me.moduleCapabilities.includes("doctor_admin");
+
+  useEffect(() => {
+    const sanitized = sanitizeDoctorTeamWorkloadSearch(searchParams);
+    if (sanitized.toString() !== searchParams.toString()) setSearchParams(sanitized, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Parameters<typeof buildDoctorTeamWorkloadSearch>[1]) => {
+    setSearchParams(buildDoctorTeamWorkloadSearch(searchParams, patch), { replace: true });
+  };
+
+  const { startDate, endDate, modalityId, requiresReport, category: caseCategory } = navigationState;
 
   const filters = useMemo(() => ({
     startDate,
@@ -317,11 +328,11 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
       </div>
 
       <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <label className="text-sm font-medium">{t(language, "doctor.protocols.from")}<input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
-        <label className="text-sm font-medium">{t(language, "doctor.protocols.to")}<input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.modality")}<select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option>{(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}</select></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.report")}<select value={requiresReport} onChange={(event) => setRequiresReport(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="true">{t(language, "doctor.protocols.required")}</option><option value="false">{t(language, "doctor.protocols.noReport")}</option></select></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.category")}<select value={caseCategory} onChange={(event) => setCaseCategory(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="oncology">{t(language, "appointments.create.oncology")}</option><option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option></select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.protocols.from")}<input type="date" value={startDate} onChange={(event) => updateNavigation({ startDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
+        <label className="text-sm font-medium">{t(language, "doctor.protocols.to")}<input type="date" value={endDate} onChange={(event) => updateNavigation({ endDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.modality")}<select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option>{(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}</select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.report")}<select value={requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as "" | "true" | "false" })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="true">{t(language, "doctor.protocols.required")}</option><option value="false">{t(language, "doctor.protocols.noReport")}</option></select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.category")}<select value={caseCategory} onChange={(event) => updateNavigation({ category: event.target.value as "" | "oncology" | "non_oncology" })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="oncology">{t(language, "appointments.create.oncology")}</option><option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option></select></label>
       </section>
 
       <CalculationSummary summary={summary} />

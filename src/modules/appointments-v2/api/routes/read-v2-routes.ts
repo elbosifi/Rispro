@@ -994,6 +994,7 @@ router.get(
             p.english_full_name,
             p.phone_1,
             p.national_id,
+            b.modality_id,
             m.name_ar as modality_name_ar,
             m.name_en as modality_name_en,
             et.name_ar as exam_name_ar,

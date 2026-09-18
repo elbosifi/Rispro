@@ -1,15 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw, Settings, Wrench } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/providers/auth-provider";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useLanguage } from "@/providers/language-provider";
-
-type MonitorTab = "orthanc" | "sante";
-type MonitorStatus = "all" | "failed" | "pending" | "synced" | "waiting_for_protocol" | "waiting_for_queue";
+import {
+  buildWorklistMonitorSearch,
+  parseWorklistMonitorNavigation,
+  readWorklistMonitorSearch,
+  writeWorklistMonitorSearch,
+  type WorklistMonitorNavigationState,
+  type WorklistMonitorStatus,
+} from "@/lib/navigation/worklist-monitor-navigation";
 
 type CountRow = { status: string; count: number };
 type ModalityOption = { id: number; code?: string | null; nameEn?: string | null; nameAr?: string | null; name_en?: string | null; name_ar?: string | null };
@@ -87,12 +92,6 @@ type SanteSummaryResponse = {
   };
 };
 
-function isoDateDaysFromNow(offsetDays: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  return date.toISOString().slice(0, 10);
-}
-
 function countLabel(items: CountRow[] | undefined): string {
   if (!items?.length) return "none";
   return items.map((item) => `${item.status}: ${item.count}`).join(" / ");
@@ -118,15 +117,28 @@ export default function WorklistMonitorPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
-  const [tab, setTab] = useState<MonitorTab>("orthanc");
-  const [dateFrom, setDateFrom] = useState(() => isoDateDaysFromNow(0));
-  const [dateTo, setDateTo] = useState(() => isoDateDaysFromNow(0));
-  const [modalityId, setModalityId] = useState("");
-  const [status, setStatus] = useState<MonitorStatus>("all");
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useMemo(() => parseWorklistMonitorNavigation(searchParams), [searchParams]);
+  const { tab, dateFrom, dateTo, modalityId, status } = navigation;
+  const [search, setSearch] = useState(readWorklistMonitorSearch);
   const [selected, setSelected] = useState<WorklistEntry | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showReauth, setShowReauth] = useState(false);
+
+  useEffect(() => {
+    writeWorklistMonitorSearch(search);
+  }, [search]);
+
+  useEffect(() => {
+    const normalized = buildWorklistMonitorSearch(searchParams);
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Partial<WorklistMonitorNavigationState>, replace = true) => {
+    setSearchParams(buildWorklistMonitorSearch(searchParams, patch), { replace });
+  };
 
   const params = useMemo(() => {
     const next = new URLSearchParams({ dateFrom, dateTo, status, limit: "200" });
@@ -274,16 +286,16 @@ export default function WorklistMonitorPage() {
       </div>
 
       <div className="flex flex-wrap gap-2 border-b border-stone-200 dark:border-stone-700">
-        <TabButton active={tab === "orthanc"} onClick={() => setTab("orthanc")}>Orthanc DICOM MWL</TabButton>
-        <TabButton active={tab === "sante"} onClick={() => setTab("sante")}>Sante HL7 Worklist</TabButton>
+        <TabButton active={tab === "orthanc"} onClick={() => updateNavigation({ tab: "orthanc" }, false)}>Orthanc DICOM MWL</TabButton>
+        <TabButton active={tab === "sante"} onClick={() => updateNavigation({ tab: "sante" }, false)}>Sante HL7 Worklist</TabButton>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-        <Field label="Date from" value={dateFrom} onChange={setDateFrom} type="date" />
-        <Field label="Date to" value={dateTo} onChange={setDateTo} type="date" />
+        <Field label="Date from" value={dateFrom} onChange={(value) => updateNavigation({ dateFrom: value })} type="date" />
+        <Field label="Date to" value={dateTo} onChange={(value) => updateNavigation({ dateTo: value })} type="date" />
         <label className="space-y-1 text-sm">
           <span className="text-stone-600 dark:text-stone-300">Modality</span>
-          <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
+          <select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
             <option value="">All modalities</option>
             {(modalityOptions.data || []).map((modality) => (
               <option key={modality.id} value={String(modality.id)}>
@@ -294,7 +306,7 @@ export default function WorklistMonitorPage() {
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-stone-600 dark:text-stone-300">Status</span>
-          <select value={status} onChange={(event) => setStatus(event.target.value as MonitorStatus)} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
+          <select value={status} onChange={(event) => updateNavigation({ status: event.target.value as WorklistMonitorStatus })} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
             <option value="all">All</option>
             <option value="failed">Failed</option>
             <option value="pending">Pending</option>

@@ -1911,6 +1911,7 @@ export interface QueueEntry {
   isWalkIn: boolean;
   notes?: string | null;
   patientId: number;
+  modalityId: number;
   arabicFullName: string;
   englishFullName?: string | null;
   phone1?: string | null;

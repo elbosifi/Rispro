@@ -17,6 +17,10 @@ import { clearPatientDirectorySearch } from "@/lib/navigation/patient-navigation
 import { clearRegistrationSearch } from "@/pages/registrations/registration-query";
 import { clearCalendarSearch } from "@/lib/navigation/calendar-navigation";
 import { clearModuleLastLocations } from "@/lib/navigation/module-last-location";
+import { clearQueueSearch } from "@/lib/navigation/queue-navigation";
+import { clearWorklistMonitorSearch } from "@/lib/navigation/worklist-monitor-navigation";
+import { clearComparisonsSearch } from "@/lib/navigation/comparisons-navigation";
+import { clearDoctorProtocolsSearch } from "@/lib/navigation/doctor-protocols-navigation";
 
 interface ActionPinChallenge {
   actionKey: string;
@@ -215,6 +219,10 @@ function ActionPinIdleLockOverlay({
       clearPatientDirectorySearch();
       clearRegistrationSearch();
       clearCalendarSearch();
+      clearQueueSearch();
+      clearWorklistMonitorSearch();
+      clearComparisonsSearch();
+      clearDoctorProtocolsSearch();
       clearModuleLastLocations();
       window.location.href = "/login";
     }

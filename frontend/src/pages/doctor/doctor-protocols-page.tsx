@@ -2,7 +2,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreVertical, Pencil, Plus, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   activateProtocolLibraryVersion,
   cancelDoctorProtocolAssignment,
@@ -87,6 +87,16 @@ import { ComplementaryRecallRequestDialog } from "@/components/doctor/complement
 import { ComplementaryRecallWithdrawDialog } from "@/components/doctor/complementary-recall-withdraw-dialog";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
 import { useLanguage } from "@/providers/language-provider";
+import {
+  buildDoctorProtocolsSearch,
+  parseDoctorProtocolsNavigation,
+  readDoctorProtocolingSearch,
+  readDoctorProtocolLibrarySearch,
+  writeDoctorProtocolingSearch,
+  writeDoctorProtocolLibrarySearch,
+  type DoctorProtocolsNavigationState,
+  type DoctorProtocolLibraryFilter,
+} from "@/lib/navigation/doctor-protocols-navigation";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -413,9 +423,12 @@ function inputClass() {
   return "mt-1 w-full rounded-lg border px-3 py-2 text-sm";
 }
 
-function ProtocolLibraryPanel() {
+function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: DoctorProtocolsNavigationState; onNavigationChange: (patch: Partial<DoctorProtocolsNavigationState>, replace?: boolean) => void }) {
   const queryClient = useQueryClient();
-  const [section, setSection] = useState<LibrarySection>("protocols");
+  const section = navigation.section;
+  const protocolFilter = navigation.protocolFilter;
+  const setSection = (nextSection: LibrarySection) => onNavigationChange({ section: nextSection }, false);
+  const setProtocolFilter = (nextFilter: DoctorProtocolLibraryFilter) => onNavigationChange({ protocolFilter: nextFilter });
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [regionDraft, setRegionDraft] = useState<ProtocolAnatomyRegionPayload | null>(null);
   const [editingRegionId, setEditingRegionId] = useState<number | null>(null);
@@ -426,8 +439,7 @@ function ProtocolLibraryPanel() {
   const [protocolDraft, setProtocolDraft] = useState<ProtocolLibraryProtocolPayload | null>(null);
   const [newProtocolDialogOpen, setNewProtocolDialogOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
-  const [protocolFilter, setProtocolFilter] = useState<"all" | "CT" | "MRI" | "active" | "draft">("all");
-  const [protocolSearch, setProtocolSearch] = useState("");
+  const [protocolSearch, setProtocolSearch] = useState(() => readDoctorProtocolLibrarySearch());
   const [ctRowDraft, setCtRowDraft] = useState<ProtocolLibraryCtPhaseRowPayload | null>(null);
   const [editingCtRowId, setEditingCtRowId] = useState<number | null>(null);
   const [mriRowDraft, setMriRowDraft] = useState<ProtocolLibraryMriSequenceRowPayload | null>(null);
@@ -745,7 +757,7 @@ function ProtocolLibraryPanel() {
           anatomy={anatomy}
           saving={createProtocolMutation.isPending}
           setFilter={setProtocolFilter}
-          setSearch={setProtocolSearch}
+          setSearch={(value) => { setProtocolSearch(value); writeDoctorProtocolLibrarySearch(value); }}
           setDraft={setProtocolDraft}
           onManageAnatomy={() => setSection("anatomy")}
           onCreate={() => protocolDraft && createProtocolMutation.mutate(protocolDraft)}
@@ -1533,21 +1545,47 @@ function MriProtocolCreateForm({ draft, anatomy, saving, setDraft, onManageAnato
   return <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3"><Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Anatomy region"><select aria-label="Anatomy region" className={inputClass()} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">No region</option>{anatomy.filter((region) => region.isActive && (region.modalityScope === "MRI" || region.modalityScope === "BOTH")).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></Field><Field label="Category"><select aria-label="Category" className={inputClass()} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: editableText(event.target.value) })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Indication"><input aria-label="Indication" className={inputClass()} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field><Field label="IV contrast policy"><select aria-label="IV contrast policy" className={inputClass()} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: editableText(event.target.value) })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Oral contrast policy"><input aria-label="Oral contrast policy" className={inputClass()} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field><Field label="Bowel preparation"><input aria-label="Bowel preparation" className={inputClass()} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field><Field label="Preparation notes"><textarea aria-label="Preparation notes" className={`${inputClass()} min-h-20`} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field><Field label="Initial change summary"><input aria-label="Initial change summary" className={inputClass()} value={textValue(draft.changeSummary)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field><Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} value={textValue(draft.protocolNotes)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field><div className="md:col-span-3"><button type="button" className="text-xs underline" onClick={onManageAnatomy}>Manage anatomy regions</button></div><FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} /></div></td></tr>;
 }
 
-function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose, onEmbeddedUpdated }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void; onEmbeddedUpdated?: () => void | Promise<void> }) {
+type ProtocolingNavigationProps = {
+  navigation?: DoctorProtocolsNavigationState;
+  onNavigationChange?: (patch: Partial<DoctorProtocolsNavigationState>, replace?: boolean) => void;
+};
+
+function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose, onEmbeddedUpdated, navigation, onNavigationChange }: { canAssign: boolean; embeddedAppointmentId?: number; onEmbeddedClose?: () => void; onEmbeddedUpdated?: () => void | Promise<void> } & ProtocolingNavigationProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
-  const [dateFrom, setDateFrom] = useState(todayIso());
-  const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
-  const [modality, setModality] = useState<"" | "CT" | "MRI">("");
-  const [protocolStatus, setProtocolStatus] = useState<"NOT_PROTOCOLLED" | "ASSIGNED" | "ALL">("NOT_PROTOCOLLED");
-  const [appointmentStatus, setAppointmentStatus] = useState<"" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show">("");
-  const [waitingFirst, setWaitingFirst] = useState(false);
-  const [search, setSearch] = useState("");
+  const [localDateFrom, setLocalDateFrom] = useState(todayIso());
+  const [localDateTo, setLocalDateTo] = useState(addDays(todayIso(), 7));
+  const [localModality, setLocalModality] = useState<"" | "CT" | "MRI">("");
+  const [localProtocolStatus, setLocalProtocolStatus] = useState<"NOT_PROTOCOLLED" | "ASSIGNED" | "ALL">("NOT_PROTOCOLLED");
+  const [localAppointmentStatus, setLocalAppointmentStatus] = useState<"" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show">("");
+  const [localWaitingFirst, setLocalWaitingFirst] = useState(false);
+  const [localWaitingFirstPreference, setLocalWaitingFirstPreference] = useState(() => navigation?.waitingFirst ?? false);
+  const [search, setSearch] = useState(() => readDoctorProtocolingSearch());
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const dateFrom = navigation?.dateFrom ?? localDateFrom;
+  const dateTo = navigation?.dateTo ?? localDateTo;
+  const modality = navigation?.modality ?? localModality;
+  const protocolStatus = navigation?.protocolStatus ?? localProtocolStatus;
+  const appointmentStatus = navigation?.appointmentStatus ?? localAppointmentStatus;
+  const waitingFirst = navigation?.appointmentStatus ? localWaitingFirstPreference : (navigation?.waitingFirst ?? localWaitingFirst);
+  const setDateFrom = (value: string) => navigation ? onNavigationChange?.({ dateFrom: value }) : setLocalDateFrom(value);
+  const setDateTo = (value: string) => navigation ? onNavigationChange?.({ dateTo: value }) : setLocalDateTo(value);
+  const setModality = (value: "" | "CT" | "MRI") => navigation ? onNavigationChange?.({ modality: value }) : setLocalModality(value);
+  const setProtocolStatus = (value: "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL") => navigation ? onNavigationChange?.({ protocolStatus: value }) : setLocalProtocolStatus(value);
+  const setAppointmentStatus = (value: "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show") => {
+    if (!navigation) { setLocalAppointmentStatus(value); return; }
+    onNavigationChange?.({ appointmentStatus: value, waitingFirst: value ? false : localWaitingFirstPreference });
+  };
+  const setWaitingFirst = (value: boolean) => {
+    setLocalWaitingFirstPreference(value);
+    if (navigation) onNavigationChange?.({ waitingFirst: value });
+    else setLocalWaitingFirst(value);
+  };
+  const setSearchValue = (value: string) => { setSearch(value); writeDoctorProtocolingSearch(value); };
   const embedded = embeddedAppointmentId !== undefined;
-  const selectedAppointmentId = embeddedAppointmentId ?? (() => {
+  const selectedAppointmentId = embeddedAppointmentId ?? navigation?.appointmentId ?? (() => {
     const appointmentId = Number(new URLSearchParams(location.search).get("appointmentId"));
     return Number.isInteger(appointmentId) && appointmentId > 0 ? appointmentId : null;
   })();
@@ -1556,14 +1594,18 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
       if (appointmentId === null) onEmbeddedClose?.();
       return;
     }
+    if (onNavigationChange) {
+      onNavigationChange({ appointmentId }, appointmentId === null);
+      return;
+    }
     const params = new URLSearchParams(location.search);
     if (appointmentId === null) {
       params.delete("appointmentId");
     } else {
       params.set("appointmentId", String(appointmentId));
     }
-    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: true });
-  }, [embeddedAppointmentId, location.pathname, location.search, navigate, onEmbeddedClose]);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" }, { replace: appointmentId === null });
+  }, [embeddedAppointmentId, location.pathname, location.search, navigate, onEmbeddedClose, onNavigationChange]);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -1700,7 +1742,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
         <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
         <label className="text-sm font-medium">Appointment status<select value={appointmentStatus} onChange={(event) => setAppointmentStatus(event.target.value as "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All statuses</option><option value="scheduled">Scheduled</option><option value="arrived">Arrived</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="no-show">No-show</option></select></label>
         <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={waitingFirst} onCheckedChange={(value) => setWaitingFirst(Boolean(value))} disabled={appointmentStatus !== ""} />Waiting patients first</label>
-        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
+        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearchValue(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
       </section> : null}
 
       {!canAssign ? null : appointmentsQuery.isLoading ? (
@@ -2401,7 +2443,17 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
 export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
   const canEditLibrary = canManageProtocolLibrary(me);
   const canAssign = Boolean(me.canAssignProtocols);
-  const [activeArea, setActiveArea] = useState<"protocoling" | "library">(canAssign ? "protocoling" : "library");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigationPermissions = useMemo(() => ({ canAssign, canManageLibrary: canEditLibrary }), [canAssign, canEditLibrary]);
+  const navigation = parseDoctorProtocolsNavigation(searchParams, navigationPermissions);
+  const updateNavigation = useCallback((patch: Partial<DoctorProtocolsNavigationState>, replace = true) => {
+    setSearchParams(buildDoctorProtocolsSearch(searchParams, patch, navigationPermissions), { replace });
+  }, [navigationPermissions, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const sanitized = buildDoctorProtocolsSearch(searchParams, {}, navigationPermissions);
+    if (sanitized.toString() !== searchParams.toString()) setSearchParams(sanitized, { replace: true });
+  }, [navigationPermissions, searchParams, setSearchParams]);
 
   if (!canAssign && !canEditLibrary) {
     return (
@@ -2414,10 +2466,12 @@ export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
   return (
     <div className="space-y-4">
       <div className="flex gap-2 overflow-x-auto">
-        {canAssign && <SectionButton label="Protocoling" active={activeArea === "protocoling"} onClick={() => setActiveArea("protocoling")} />}
-        {canEditLibrary && <SectionButton label="Protocol Library" active={activeArea === "library"} onClick={() => setActiveArea("library")} />}
+        {canAssign && <SectionButton label="Protocoling" active={navigation.area === "protocoling"} onClick={() => updateNavigation({ area: "protocoling" }, false)} />}
+        {canEditLibrary && <SectionButton label="Protocol Library" active={navigation.area === "library"} onClick={() => updateNavigation({ area: "library" }, false)} />}
       </div>
-      {activeArea === "library" && canEditLibrary ? <ProtocolLibraryPanel /> : <ProtocolingWorklist canAssign={canAssign} />}
+      {navigation.area === "library" && canEditLibrary
+        ? <ProtocolLibraryPanel navigation={navigation} onNavigationChange={updateNavigation} />
+        : <ProtocolingWorklist canAssign={canAssign} navigation={navigation} onNavigationChange={updateNavigation} />}
     </div>
   );
 }

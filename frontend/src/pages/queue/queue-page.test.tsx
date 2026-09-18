@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import QueuePage from "./queue-page";
 import { ApiError } from "@/lib/api-client";
@@ -32,7 +32,12 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 vi.mock("@/components/patients/patient-drawer", () => ({
-  PatientDrawer: () => null,
+  PatientDrawer: ({ patientId, onClose }: { patientId: number; onClose: () => void }) => (
+    <aside data-testid="queue-patient-drawer">
+      Patient {patientId}
+      <button type="button" onClick={onClose}>Close drawer</button>
+    </aside>
+  ),
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -65,6 +70,7 @@ const queueSnapshot: QueueSnapshot = {
       appointmentStatus: "scheduled",
       isWalkIn: false,
       patientId: 22,
+      modalityId: 1,
       arabicFullName: "Patient Name",
       englishFullName: "Patient Name",
       phone1: null,
@@ -153,13 +159,19 @@ const enteredQueueSnapshot: QueueSnapshot = {
       arrivedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
       modalityNameAr: "MRI",
       modalityNameEn: "MRI",
+      modalityId: 2,
       examNameAr: "Brain",
       examNameEn: "Brain",
     },
   ],
 };
 
-function renderPage() {
+function LocationProbe() {
+  const [searchParams] = useSearchParams();
+  return <output data-testid="queue-location">{searchParams.toString()}</output>;
+}
+
+function renderPage(initialEntry = "/queue") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -168,10 +180,11 @@ function renderPage() {
   });
 
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
         <LanguageProvider>
           <QueuePage />
+          <LocationProbe />
         </LanguageProvider>
       </QueryClientProvider>
     </MemoryRouter>
@@ -469,5 +482,58 @@ describe("QueuePage command center layout", () => {
       type: "info",
       title: "Already checked in",
     }));
+  });
+});
+
+describe("QueuePage navigation state", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.sessionStorage.clear();
+    localStorage.setItem("rispro-language", "en");
+    fetchQueueSnapshotMock.mockResolvedValue(enteredQueueSnapshot);
+    fetchAppointmentLookupsMock.mockResolvedValue({
+      modalities: [
+        { id: 1, nameAr: "CT", nameEn: "CT" },
+        { id: 2, nameAr: "MRI", nameEn: "MRI" },
+      ],
+    });
+    fetchSettingsMock.mockResolvedValue({ walk_in_queue: "disabled" });
+  });
+
+  it("uses safe URL filters and strips invalid or private query state", async () => {
+    renderPage("/queue?view=entered&modalityId=002&patientId=22&q=Patient%20Name&query=MRN");
+
+    await screen.findByText(/ACC-45/);
+    expect(screen.queryByText(/ACC-44/)).toBeNull();
+    expect(screen.getByTestId("queue-location").textContent).toBe("view=entered&modalityId=2&patientId=22");
+  });
+
+  it("updates view and numeric modality in the URL while keeping search private", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const searchInput = await screen.findByPlaceholderText(/Name, accession, phone/i);
+    await user.type(searchInput, "Patient Name MRN-22");
+    await waitFor(() => expect(window.sessionStorage.getItem("rispro:queue:search")).toBe("Patient Name MRN-22"));
+    expect(screen.getByTestId("queue-location").textContent).toBe("");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "View" }), "entered");
+    expect(screen.getByTestId("queue-location").textContent).toBe("view=entered");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Modality" }), "2");
+    expect(screen.getByTestId("queue-location").textContent).toBe("view=entered&modalityId=2");
+    expect(window.sessionStorage.getItem("rispro:queue:search")).toBe("Patient Name MRN-22");
+  });
+
+  it("opens the patient drawer through patientId and removes it on close", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click((await screen.findAllByRole("button", { name: "Patient Name" }))[0]);
+    expect(screen.getByTestId("queue-patient-drawer")).toBeTruthy();
+    expect(screen.getByTestId("queue-location").textContent).toBe("patientId=22");
+
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    expect(screen.queryByTestId("queue-patient-drawer")).toBeNull();
+    expect(screen.getByTestId("queue-location").textContent).toBe("");
   });
 });

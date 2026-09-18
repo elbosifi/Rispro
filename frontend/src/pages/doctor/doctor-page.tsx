@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -42,6 +42,12 @@ import { EnglishLanguageScope } from "@/providers/language-provider-component";
 import RecallRequestsPage from "@/pages/recall-requests/recall-requests-page";
 import { DoctorIrReferralsPage } from "./doctor-ir-referrals-page";
 import IrReferralDetailPage from "@/pages/comparisons/ir-referral-detail-page";
+import {
+  buildDoctorAdvancedSetupSearch,
+  parseDoctorAdvancedSetupNavigation,
+  sanitizeDoctorAdvancedSetupSearch,
+} from "@/lib/navigation/doctor-advanced-setup-navigation";
+import { resolveModuleNavigationTarget, saveModuleLastLocation } from "@/lib/navigation/module-last-location";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -203,7 +209,18 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
   const canManageRoster = canManageClinicalRoster(me);
   const canManageDoctors = canAccessDoctorAdmin(me);
   const canAccessManagementSetup = canManageClinicalRoster(me) || canAccessDoctorAdmin(me);
-  const [selectedSection, setSelectedSection] = useState<"roster" | "doctors" | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigationContext = { canManageRoster, canManageDoctors };
+  const selectedSection = parseDoctorAdvancedSetupNavigation(searchParams, navigationContext).section;
+
+  useEffect(() => {
+    const sanitized = sanitizeDoctorAdvancedSetupSearch(searchParams, navigationContext);
+    if (sanitized.toString() !== searchParams.toString()) setSearchParams(sanitized, { replace: true });
+  }, [canManageDoctors, canManageRoster, searchParams, setSearchParams]);
+
+  const updateSection = (section: "roster" | "doctors" | null) => {
+    setSearchParams(buildDoctorAdvancedSetupSearch(searchParams, { section }, navigationContext));
+  };
 
   return (
     <div className="space-y-4">
@@ -220,7 +237,7 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
               title="Roster setup"
               body="Duty types, ABC mappings, XML import, templates, draft generation, exports, and notifications."
               active={selectedSection === "roster"}
-              onClick={() => setSelectedSection("roster")}
+              onClick={() => updateSection("roster")}
             />
           )}
           {canManageDoctors && (
@@ -228,7 +245,7 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
               title="Doctor import/export"
               body="Download templates, export doctors, import CSV/XLSX, preview rows, and confirm imports."
               active={selectedSection === "doctors"}
-              onClick={() => setSelectedSection("doctors")}
+              onClick={() => updateSection("doctors")}
             />
           )}
           {canAccessClinical && (
@@ -468,6 +485,14 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   });
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
 
+  useEffect(() => {
+    saveModuleLastLocation(location.pathname, location.search, user.role);
+  }, [location.pathname, location.search, user.role]);
+
+  const navigateDoctor = (path: string) => {
+    navigate(resolveModuleNavigationTarget(path, undefined, user.role));
+  };
+
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
     const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV.filter((item) => (item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) && (item.path !== "/doctor/additional-imaging" || me.canAssignProtocols)) : [];
@@ -559,7 +584,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
                 <button
                   key={`${item.path}-${item.label}`}
                   type="button"
-                  onClick={() => navigate(item.path)}
+                  onClick={() => navigateDoctor(item.path)}
                   className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium lg:w-full"
                   style={{
                     borderColor: active ? "var(--accent)" : "transparent",
@@ -579,7 +604,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
           <DoctorPortalRoutes me={me} />
         </main>
       </div>
-      <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} onNavigate={navigate} onClose={() => setMobileNavOpen(false)} />
+      <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} onNavigate={navigateDoctor} onClose={() => setMobileNavOpen(false)} />
       {searchSelection ? <DoctorReadOnlyDetailsDrawer
         patientId={searchSelection.patientId}
         appointmentId={searchSelection.kind === "registration" ? searchSelection.appointmentId : null}

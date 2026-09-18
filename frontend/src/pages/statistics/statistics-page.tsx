@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups, recordReportOutput } from "@/lib/api-hooks";
-import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import {
@@ -34,6 +34,12 @@ import { resolveDirectPrintFailureAction } from "@/services/printing/direct-prin
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import { shouldUseBrowserPrint } from "@/services/printing/browser-printing";
 import { pushToast } from "@/lib/toast";
+import {
+  buildStatisticsSearch,
+  parseStatisticsNavigation,
+  statisticsPresetRange,
+  type StatisticsNavigationState,
+} from "@/lib/navigation/statistics-navigation";
 
 type QuickRange = "today" | "yesterday" | "last7" | "last31" | "month" | "custom";
 
@@ -63,10 +69,6 @@ const DRILLDOWN_WORKFLOW_STATUSES = [
 
 const MAX_RANGE_DAYS = 366;
 
-function monthStartIso(today: string): string {
-  return `${today.slice(0, 8)}01`;
-}
-
 function isoDateToUtcDay(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const time = new Date(`${value}T00:00:00Z`).getTime();
@@ -91,50 +93,12 @@ function rangeValidationMessageKey(reason: ReturnType<typeof validateRange>): Pa
   return null;
 }
 
-function rangeForPreset(range: QuickRange): { dateFrom: string; dateTo: string } {
-  const today = todayIsoDateLy();
-  if (range === "yesterday") {
-    const yesterday = isoDateDaysFromNow(-1);
-    return { dateFrom: yesterday, dateTo: yesterday };
-  }
-  if (range === "last7") return { dateFrom: isoDateDaysFromNow(-6), dateTo: today };
-  if (range === "last31") return { dateFrom: isoDateDaysFromNow(-30), dateTo: today };
-  if (range === "month") return { dateFrom: monthStartIso(today), dateTo: today };
-  return { dateFrom: today, dateTo: today };
-}
-
 function quickRangeForDates(dateFrom: string, dateTo: string): QuickRange {
-  for (const range of ["today", "yesterday", "last7", "last31", "month"] as QuickRange[]) {
-    const preset = rangeForPreset(range);
+  for (const range of ["today", "yesterday", "last7", "last31", "month"] as Exclude<QuickRange, "custom">[]) {
+    const preset = statisticsPresetRange(range);
     if (preset.dateFrom === dateFrom && preset.dateTo === dateTo) return range;
   }
   return "custom";
-}
-
-function parseInitialStatisticsFilters(searchParams: URLSearchParams): { dateFrom: string; dateTo: string; modalityId: string; quickRange: QuickRange } {
-  const today = rangeForPreset("today");
-  const date = searchParams.get("date")?.trim() ?? "";
-  const requestedDateFrom = searchParams.get("dateFrom")?.trim() ?? "";
-  const requestedDateTo = searchParams.get("dateTo")?.trim() ?? "";
-  const modalityId = searchParams.get("modalityId")?.trim() ?? "";
-  const suppliedDateValues = [date, requestedDateFrom, requestedDateTo].filter(Boolean);
-
-  if (suppliedDateValues.some((value) => isoDateToUtcDay(value) == null)) {
-    return { ...today, modalityId: "", quickRange: "today" };
-  }
-
-  const dateFrom = date || requestedDateFrom || requestedDateTo || today.dateFrom;
-  const dateTo = date || requestedDateTo || requestedDateFrom || dateFrom;
-  if (validateRange(dateFrom, dateTo)) {
-    return { ...today, modalityId: "", quickRange: "today" };
-  }
-
-  return {
-    dateFrom,
-    dateTo,
-    modalityId: /^\d+$/.test(modalityId) && Number(modalityId) > 0 ? modalityId : "",
-    quickRange: quickRangeForDates(dateFrom, dateTo),
-  };
 }
 
 function sortStatusRows(rows: AppointmentStatisticsStatusRow[]): AppointmentStatisticsStatusRow[] {
@@ -267,15 +231,24 @@ function OperationalMetricCard({
 
 export default function StatisticsPage() {
   const { language } = useLanguage();
-  const [searchParams] = useSearchParams();
-  const [initialFilters] = useState(() => parseInitialStatisticsFilters(searchParams));
-  const [quickRange, setQuickRange] = useState<QuickRange>(initialFilters.quickRange);
-  const [dateFrom, setDateFrom] = useState(initialFilters.dateFrom);
-  const [dateTo, setDateTo] = useState(initialFilters.dateTo);
-  const [modalityId, setModalityId] = useState(initialFilters.modalityId);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useMemo(() => parseStatisticsNavigation(searchParams), [searchParams]);
+  const { dateFrom, dateTo, modalityId } = navigation;
+  const quickRange = useMemo(() => quickRangeForDates(dateFrom, dateTo), [dateFrom, dateTo]);
   const rangeValidation = useMemo(() => validateRange(dateFrom, dateTo), [dateFrom, dateTo]);
   const rangeValidationMessage = rangeValidationMessageKey(rangeValidation);
   const hasValidRange = !rangeValidation;
+
+  useEffect(() => {
+    const normalized = buildStatisticsSearch(searchParams);
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Partial<StatisticsNavigationState>, replace = true) => {
+    setSearchParams(buildStatisticsSearch(searchParams, patch), { replace });
+  };
 
   const lookupsQuery = useQuery({
     queryKey: ["lookups"],
@@ -317,11 +290,9 @@ export default function StatisticsPage() {
   ));
 
   const applyQuickRange = (range: QuickRange) => {
-    setQuickRange(range);
     if (range === "custom") return;
-    const next = rangeForPreset(range);
-    setDateFrom(next.dateFrom);
-    setDateTo(next.dateTo);
+    const next = statisticsPresetRange(range);
+    updateNavigation(next);
   };
 
   const auditOutput = async (outputType: "csv" | "print", rowCount: number) => {
@@ -511,23 +482,17 @@ export default function StatisticsPage() {
             <DateInput
               label={t(language, "statistics.dateFrom")}
               value={dateFrom}
-              onChange={(value) => {
-                setQuickRange("custom");
-                setDateFrom(value);
-              }}
+              onChange={(value) => updateNavigation({ dateFrom: value })}
             />
             <DateInput
               label={t(language, "statistics.dateTo")}
               value={dateTo}
-              onChange={(value) => {
-                setQuickRange("custom");
-                setDateTo(value);
-              }}
+              onChange={(value) => updateNavigation({ dateTo: value })}
             />
             <Select
               label={t(language, "statistics.modalityCol")}
               value={modalityId}
-              onChange={setModalityId}
+              onChange={(value) => updateNavigation({ modalityId: value })}
               options={[
                 { value: "", label: t(language, "statistics.all") },
                 ...(lookupsQuery.data?.modalities ?? []).map((m) => ({

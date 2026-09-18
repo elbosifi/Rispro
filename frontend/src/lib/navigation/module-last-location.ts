@@ -11,6 +11,20 @@ import {
   settingsSectionFromSearch,
   type SettingsSection,
 } from "@/pages/settings/settings-page.composition";
+import { sanitizeDoctorCasesSearch } from "./doctor-cases-navigation";
+import {
+  sanitizeDoctorTeamWorkloadSearch,
+} from "./doctor-team-workload-navigation";
+import { REPORTING_BOARD_QUERY_KEYS } from "./reporting-board-navigation";
+import { buildQueueSearch } from "./queue-navigation";
+import { buildWorklistMonitorSearch } from "./worklist-monitor-navigation";
+import { buildStatisticsSearch } from "./statistics-navigation";
+import { buildComparisonsSearch } from "./comparisons-navigation";
+import { sanitizeDoctorProtocolsSearch } from "./doctor-protocols-navigation";
+import {
+  buildDoctorAdvancedSetupSearch,
+  parseDoctorAdvancedSetupNavigation,
+} from "./doctor-advanced-setup-navigation";
 
 export const MODULE_LAST_LOCATIONS_STORAGE_KEY = "rispro:navigation:last-locations:v1";
 
@@ -20,6 +34,15 @@ export const RESTORABLE_MODULE_PATHS = {
   calendar: "/calendar",
   settings: "/settings",
   modality: "/modality",
+  doctorTodayCases: "/doctor/today-cases",
+  doctorReportingBoard: "/doctor/reporting-board",
+  doctorTeamWorkload: "/doctor/team-workload",
+  queue: "/queue",
+  worklistMonitor: "/worklist-monitor",
+  statistics: "/statistics",
+  comparisons: "/comparisons",
+  doctorProtocols: "/doctor/protocols",
+  doctorAdvancedSetup: "/doctor/advanced-setup",
 } as const;
 
 export type RestorableModule = keyof typeof RESTORABLE_MODULE_PATHS;
@@ -36,10 +59,30 @@ function canonicalizeSettingsSearch(current: URLSearchParams, role?: string): UR
   return buildSettingsSectionSearch(new URLSearchParams(), section);
 }
 
+function isDoctorSavedViewPath(pathname: string): boolean {
+  return /^\/doctor\/reporting-board\/saved\/[A-Za-z0-9_-]+$/.test(pathname);
+}
+
+function canonicalizeDoctorReportingBoardSearch(current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams();
+  for (const key of REPORTING_BOARD_QUERY_KEYS) {
+    const value = current.get(key);
+    if (value !== null) next.set(key, value);
+  }
+  return next;
+}
+
+function doctorAdvancedSetupContext(role?: string): { canManageRoster: boolean; canManageDoctors: boolean } {
+  const canManageRoster = role === "supervisor" || role === "super_admin" || role === "doctor_admin";
+  const canManageDoctors = role === "super_admin" || role === "doctor_admin";
+  return { canManageRoster, canManageDoctors };
+}
+
 export function restorableModuleForPath(pathname: string): RestorableModule | null {
   for (const [module, path] of Object.entries(RESTORABLE_MODULE_PATHS) as Array<[RestorableModule, string]>) {
     if (pathname === path) return module;
   }
+  if (isDoctorSavedViewPath(pathname)) return "doctorReportingBoard";
   return null;
 }
 
@@ -69,6 +112,33 @@ export function canonicalizeModuleLocation(pathname: string, search = "", role?:
     case "modality":
       canonicalSearch = buildModalitySearch(new URLSearchParams(), parseModalityNavigation(current));
       break;
+    case "doctorTodayCases":
+      canonicalSearch = sanitizeDoctorCasesSearch(current, { canManage: true });
+      break;
+    case "doctorReportingBoard":
+      canonicalSearch = canonicalizeDoctorReportingBoardSearch(current);
+      break;
+    case "doctorTeamWorkload":
+      canonicalSearch = sanitizeDoctorTeamWorkloadSearch(current);
+      break;
+    case "queue":
+      canonicalSearch = buildQueueSearch(current);
+      break;
+    case "worklistMonitor":
+      canonicalSearch = buildWorklistMonitorSearch(current);
+      break;
+    case "statistics":
+      canonicalSearch = buildStatisticsSearch(current);
+      break;
+    case "comparisons":
+      canonicalSearch = buildComparisonsSearch(current);
+      break;
+    case "doctorProtocols":
+      canonicalSearch = sanitizeDoctorProtocolsSearch(current);
+      break;
+    case "doctorAdvancedSetup":
+      canonicalSearch = buildDoctorAdvancedSetupSearch(new URLSearchParams(), parseDoctorAdvancedSetupNavigation(current, doctorAdvancedSetupContext(role)), doctorAdvancedSetupContext(role));
+      break;
   }
 
   const query = canonicalSearch.toString();
@@ -81,7 +151,7 @@ function isSafeStoredLocation(value: string, module: RestorableModule): boolean 
   try {
     const parsed = new URL(value, INTERNAL_ORIGIN);
     return parsed.origin === INTERNAL_ORIGIN
-      && parsed.pathname === RESTORABLE_MODULE_PATHS[module]
+      && restorableModuleForPath(parsed.pathname) === module
       && parsed.hash === "";
   } catch {
     return false;

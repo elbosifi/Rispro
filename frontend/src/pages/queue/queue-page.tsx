@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect, type FormEvent } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink, RefreshCw, Search, UserRound } from "lucide-react";
 import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, cancelAppointment, searchPatients, fetchAppointmentLookups, fetchSettings } from "@/lib/api-hooks";
 import type { QueueEntry, QueueSnapshot, Patient } from "@/types/api";
@@ -11,8 +11,14 @@ import { getPatientRequirementReasonCodes, getPatientRequirementStaffMessage } f
 import { pushToast } from "@/lib/toast";
 import { Alert, AlertDescription, AlertTitle, Button, Card, Input, Badge, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
-
-type QueueView = "all" | "entered" | "not_entered" | "walk_in";
+import {
+  buildQueueSearch,
+  parseQueueNavigation,
+  readQueueSearch,
+  writeQueueSearch,
+  type QueueNavigationState,
+  type QueueView,
+} from "@/lib/navigation/queue-navigation";
 
 interface PatientRequirementAlert {
   message: string;
@@ -106,16 +112,31 @@ export default function QueuePage() {
   const [walkInResults, setWalkInResults] = useState<Patient[]>([]);
   const [selectedWalkIn, setSelectedWalkIn] = useState<Patient | null>(null);
   const [selectedModalityId, setSelectedModalityId] = useState("");
-  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
-  const [queueSearch, setQueueSearch] = useState("");
-  const [queueView, setQueueView] = useState<QueueView>("all");
-  const [queueModalityId, setQueueModalityId] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [queueSearch, setQueueSearch] = useState(readQueueSearch);
   const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingScanEntryRef = useRef<QueueEntry | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const navigation = useMemo(() => parseQueueNavigation(searchParams), [searchParams]);
+  const { view: queueView, modalityId: queueModalityId, patientId: selectedPatientId } = navigation;
+
+  useEffect(() => {
+    writeQueueSearch(queueSearch);
+  }, [queueSearch]);
+
+  useEffect(() => {
+    const normalized = buildQueueSearch(searchParams);
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Partial<QueueNavigationState>, replace = true) => {
+    setSearchParams(buildQueueSearch(searchParams, patch), { replace });
+  };
 
   // Fetch modalities for walk-in form
   const { data: lookups } = useQuery({
@@ -315,13 +336,12 @@ export default function QueuePage() {
     cancelMutation.mutate({ appointmentId });
   };
   const normalizeText = (value: unknown) => String(value ?? "").trim().toLowerCase();
-  const modalityKey = (nameAr: unknown, nameEn: unknown) => `${normalizeText(nameAr)}|${normalizeText(nameEn)}`;
   const queueSearchTerm = normalizeText(queueSearch);
   const filteredQueueEntries = (queue?.queueEntries ?? []).filter((entry) => {
     if (queueView === "entered" && entry.appointmentStatus === "scheduled") return false;
     if (queueView === "not_entered" && entry.appointmentStatus !== "scheduled") return false;
     if (queueView === "walk_in" && !entry.isWalkIn) return false;
-    if (queueModalityId && modalityKey(entry.modalityNameAr, entry.modalityNameEn) !== queueModalityId) return false;
+    if (queueModalityId && entry.modalityId !== Number(queueModalityId)) return false;
     if (!queueSearchTerm) return true;
 
     return [
@@ -354,8 +374,8 @@ export default function QueuePage() {
   const walkInLabel = t("queue.summary.walkIn");
   const clearQueueFilters = () => {
     setQueueSearch("");
-    setQueueView("all");
-    setQueueModalityId("");
+    writeQueueSearch("");
+    updateNavigation({ view: "all", modalityId: "" });
   };
   const filteredEmptyMessage = t("queue.emptyFiltered");
   const filteredClearLabel = t("queue.clearFilters");
@@ -418,7 +438,7 @@ export default function QueuePage() {
             <button
               type="button"
               className="text-start font-medium text-lg underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
-              onClick={() => setSelectedPatientId(entry.patientId)}
+              onClick={() => updateNavigation({ patientId: entry.patientId }, false)}
             >
               {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
             </button>
@@ -466,7 +486,7 @@ export default function QueuePage() {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setSelectedPatientId(entry.patientId)}
+              onClick={() => updateNavigation({ patientId: entry.patientId }, false)}
           >
             <UserRound size={14} />
             {t("queue.patientProfile")}
@@ -547,7 +567,7 @@ export default function QueuePage() {
               type="button"
               aria-label={`${item.label}: ${item.value}`}
               aria-pressed={queueView === item.view}
-              onClick={() => setQueueView(item.view)}
+              onClick={() => updateNavigation({ view: item.view }, false)}
               className={`min-w-0 px-3 py-2.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 queueView === item.view ? "bg-accent/10 text-foreground" : "hover:bg-muted/40"
               }`}
@@ -703,7 +723,7 @@ export default function QueuePage() {
               </span>
               <select
                 value={queueView}
-                onChange={(event) => setQueueView(event.target.value as QueueView)}
+                onChange={(event) => updateNavigation({ view: event.target.value as QueueView }, false)}
                 className="input-premium h-10 w-full"
               >
                 <option value="all">{t("queue.viewAll")}</option>
@@ -718,12 +738,12 @@ export default function QueuePage() {
               </span>
               <select
                 value={queueModalityId}
-                onChange={(event) => setQueueModalityId(event.target.value)}
+                onChange={(event) => updateNavigation({ modalityId: event.target.value })}
                 className="input-premium h-10 w-full"
               >
                 <option value="">{t("registrations.all")}</option>
                 {modalities.map((modality) => (
-                  <option key={modality.id} value={modalityKey(modality.nameAr, modality.nameEn)}>
+                  <option key={modality.id} value={modality.id}>
                     {chooseLocalized(language, modality.nameAr, modality.nameEn)}
                   </option>
                 ))}
@@ -793,7 +813,7 @@ export default function QueuePage() {
         </Card>
       </div>
       {selectedPatientId ? (
-        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
+        <PatientDrawer patientId={selectedPatientId} onClose={() => updateNavigation({ patientId: null }, false)} />
       ) : null}
       <Dialog open={!!patientRequirementAlert} onClose={() => setPatientRequirementAlert(null)}>
         <DialogContent

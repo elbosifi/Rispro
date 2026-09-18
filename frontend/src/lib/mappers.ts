@@ -590,6 +590,7 @@ function mapQueueEntry(raw: RawRecord): QueueEntry {
     isWalkIn: bool(raw, 'is_walk_in', bool(raw, 'isWalkIn', false)),
     notes: strOrNull(raw, 'notes'),
     patientId: num(raw, 'patient_id') || num(raw, 'patientId'),
+    modalityId: num(raw, 'modality_id') || num(raw, 'modalityId'),
     arabicFullName: str(raw, 'arabic_full_name') || str(raw, 'arabicFullName'),
     englishFullName: strOrNull(raw, 'english_full_name') ?? strOrNull(raw, 'englishFullName'),
     phone1: strOrNull(raw, 'phone_1') ?? strOrNull(raw, 'phone1'),

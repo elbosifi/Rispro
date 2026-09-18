@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CheckCircle2, ExternalLink, ImageUp, Search, XCircle } from "lucide-react";
 import {
   Badge,
@@ -36,6 +36,14 @@ import { RequestIrReferralModal } from "@/components/patients/request-ir-referra
 import { fetchIrReferrals } from "@/lib/api/ir-referrals";
 import type { IrReferral } from "@/lib/api/ir-referrals";
 import { ComparisonDocumentsPanel } from "./comparison-documents-panel";
+import {
+  buildComparisonsSearch,
+  parseComparisonsNavigation,
+  readComparisonsSearch,
+  writeComparisonsSearch,
+  type ComparisonsNavigationState,
+  type ComparisonStatus,
+} from "@/lib/navigation/comparisons-navigation";
 
 const CONFIRM_ROLES = new Set(["receptionist", "modality_staff", "doctor", "supervisor", "super_admin"]);
 const CANCEL_ROLES = new Set(["supervisor", "super_admin"]);
@@ -301,17 +309,28 @@ export default function ComparisonsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { language } = useLanguage();
-  const [requestKind, setRequestKind] = useState<"all" | "comparisons" | "ir">("all");
   const { user } = useAuth();
-  const [comparisonStatus, setComparisonStatus] = useState(() => user?.role === "receptionist" ? "pending" : "active");
-  const [irStatus, setIrStatus] = useState<(typeof IR_STATUS_OPTIONS)[number]>("all");
-  const [searchDraft, setSearchDraft] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const defaultComparisonStatus: ComparisonStatus = user?.role === "receptionist" ? "pending" : "active";
+  const navigation = useMemo(() => parseComparisonsNavigation(searchParams, defaultComparisonStatus), [defaultComparisonStatus, searchParams]);
+  const { requestKind, comparisonStatus, irStatus } = navigation;
+  const [searchDraft, setSearchDraft] = useState(readComparisonsSearch);
+  const [search, setSearch] = useState(readComparisonsSearch);
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
   const [patientQuery, setPatientQuery] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [createComparisonOpen, setCreateComparisonOpen] = useState(false);
   const [createIrOpen, setCreateIrOpen] = useState(false);
+  useEffect(() => {
+    const normalized = buildComparisonsSearch(searchParams, {}, defaultComparisonStatus);
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [defaultComparisonStatus, searchParams, setSearchParams]);
+
+  const updateNavigation = (patch: Partial<ComparisonsNavigationState>, replace = true) => {
+    setSearchParams(buildComparisonsSearch(searchParams, patch, defaultComparisonStatus), { replace });
+  };
   const patientsQuery = useQuery({ queryKey: ["comparison-patient-search", patientQuery.trim()], queryFn: () => searchPatients(patientQuery.trim()), enabled: patientSearchOpen && patientQuery.trim().length >= 2 });
   const canConfirm = Boolean(user && CONFIRM_ROLES.has(user.role));
   const canCancel = Boolean(user && CANCEL_ROLES.has(user.role));
@@ -351,10 +370,10 @@ export default function ComparisonsPage() {
       {!selectedId ? (
         <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex h-10 items-end gap-1" role="tablist" aria-label={t(language, "reviewRequests.title")}><Button type="button" size="sm" variant={requestKind === "all" ? "secondary" : "ghost"} onClick={() => setRequestKind("all")}>{t(language, "reviewRequests.all")}</Button><Button type="button" size="sm" variant={requestKind === "comparisons" ? "secondary" : "ghost"} onClick={() => setRequestKind("comparisons")}>{t(language, "reviewRequests.comparisons")}</Button><Button type="button" size="sm" variant={requestKind === "ir" ? "secondary" : "ghost"} onClick={() => setRequestKind("ir")}>{t(language, "reviewRequests.irConsultations")}</Button></div>
-            {requestKind === "comparisons" ? <label className="grid min-w-44 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.comparisonStatusAria")} value={comparisonStatus} onChange={(event) => setComparisonStatus(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{t(language, `comparisons.filter.${value}` as TranslationKey)}</option>)}</select></label> : null}
-            {requestKind === "ir" ? <label className="grid min-w-52 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.irStatusAria")} value={irStatus} onChange={(event) => setIrStatus(event.target.value as (typeof IR_STATUS_OPTIONS)[number])} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{IR_STATUS_OPTIONS.map((value) => <option key={value} value={value}>{value === "all" ? t(language, "reviewRequests.allStatuses") : irReferralStatusLabel(language, value)}</option>)}</select></label> : null}
-            <form className="flex min-w-[min(100%,18rem)] flex-1 items-end gap-2" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+            <div className="flex h-10 items-end gap-1" role="tablist" aria-label={t(language, "reviewRequests.title")}><Button type="button" size="sm" variant={requestKind === "all" ? "secondary" : "ghost"} onClick={() => updateNavigation({ requestKind: "all" }, false)}>{t(language, "reviewRequests.all")}</Button><Button type="button" size="sm" variant={requestKind === "comparisons" ? "secondary" : "ghost"} onClick={() => updateNavigation({ requestKind: "comparisons" }, false)}>{t(language, "reviewRequests.comparisons")}</Button><Button type="button" size="sm" variant={requestKind === "ir" ? "secondary" : "ghost"} onClick={() => updateNavigation({ requestKind: "ir" }, false)}>{t(language, "reviewRequests.irConsultations")}</Button></div>
+            {requestKind === "comparisons" ? <label className="grid min-w-44 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.comparisonStatusAria")} value={comparisonStatus} onChange={(event) => updateNavigation({ comparisonStatus: event.target.value as ComparisonStatus })} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{t(language, `comparisons.filter.${value}` as TranslationKey)}</option>)}</select></label> : null}
+            {requestKind === "ir" ? <label className="grid min-w-52 gap-1 text-xs font-semibold">{t(language, "reviewRequests.status")}<select aria-label={t(language, "reviewRequests.irStatusAria")} value={irStatus} onChange={(event) => updateNavigation({ irStatus: event.target.value as (typeof IR_STATUS_OPTIONS)[number] })} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal">{IR_STATUS_OPTIONS.map((value) => <option key={value} value={value}>{value === "all" ? t(language, "reviewRequests.allStatuses") : irReferralStatusLabel(language, value)}</option>)}</select></label> : null}
+            <form className="flex min-w-[min(100%,18rem)] flex-1 items-end gap-2" onSubmit={(event) => { event.preventDefault(); const nextSearch = searchDraft.trim(); writeComparisonsSearch(nextSearch); setSearch(nextSearch); }}>
               <label className="grid min-w-0 flex-1 gap-1 text-xs font-semibold">{t(language, "reviewRequests.search")}<input aria-label={t(language, "reviewRequests.search")} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal" placeholder={t(language, "reviewRequests.searchPlaceholder")} /></label>
               <Button type="submit" variant="secondary"><Search size={15} />{t(language, "reviewRequests.search")}</Button>
             </form>

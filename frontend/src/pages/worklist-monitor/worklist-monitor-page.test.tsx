@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import WorklistMonitorPage from "./worklist-monitor-page";
@@ -14,12 +14,18 @@ vi.mock("@/providers/language-provider", () => ({
 }));
 vi.mock("@/components/auth/supervisor-reauth-modal", () => ({ SupervisorReAuthModal: () => null }));
 
-function renderPage() {
+function LocationProbe() {
+  const [searchParams] = useSearchParams();
+  return <output data-testid="worklist-location">{searchParams.toString()}</output>;
+}
+
+function renderPage(initialEntry = "/worklist-monitor") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
         <WorklistMonitorPage />
+        <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>
   );
@@ -28,6 +34,7 @@ function renderPage() {
 describe("Worklist Monitor protocol hold", () => {
   beforeEach(() => {
     api.mockReset();
+    window.sessionStorage.clear();
     api.mockImplementation(async (url: string) => {
       if (url.startsWith("/dicom/worklist-monitor/entries")) return {
         ok: true,
@@ -63,5 +70,23 @@ describe("Worklist Monitor protocol hold", () => {
     expect(await screen.findByText("V2-000001")).toBeTruthy();
     expect((await screen.findAllByText("Waiting for protocol")).length).toBeGreaterThanOrEqual(3);
     expect(screen.queryByText("Failed")).toBeTruthy();
+  });
+
+  it("restores validated URL state and keeps monitor search private", async () => {
+    renderPage("/worklist-monitor?tab=sante&dateFrom=2042-08-12&dateTo=2042-08-15&modalityId=7&status=waiting_for_queue&q=private");
+
+    expect(await screen.findByText("V2-000001")).toBeTruthy();
+    expect((screen.getByText("Sante HL7 Worklist").closest("button") as HTMLButtonElement).className).toContain("border-b-2");
+    expect(screen.getByTestId("worklist-location").textContent)
+      .toBe("tab=sante&dateFrom=2042-08-12&dateTo=2042-08-15&modalityId=7&status=waiting_for_queue");
+  });
+
+  it("writes search to session storage without placing it in the URL", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    renderPage();
+    const search = await screen.findByPlaceholderText("Accession, ID, name");
+    await user.type(search, "Patient Name MRN-1");
+    expect(window.sessionStorage.getItem("rispro:worklist-monitor:search")).toBe("Patient Name MRN-1");
+    expect(screen.getByTestId("worklist-location").textContent).toBe("");
   });
 });

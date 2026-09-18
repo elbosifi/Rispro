@@ -132,12 +132,14 @@ function renderPage(pathname = "/comparisons") {
 
 afterEach(() => {
   cleanup();
+  window.sessionStorage.clear();
   authState.role = "supervisor";
   languageState.language = "en";
   vi.clearAllMocks();
 });
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   apiMocks.fetchIrReferrals.mockResolvedValue([]);
 });
 
