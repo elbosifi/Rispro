@@ -1,6 +1,6 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   BadgeCheck,
   Ban,
@@ -45,6 +45,7 @@ import type { Language } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
 import { pushToast } from "@/lib/toast";
 import { historicalDicomDateToIso, shouldHideHistoricalCandidateStudy } from "@/lib/historical-pacs-presentation";
+import { buildModalitySearch, parseModalityNavigation, type ModalityView } from "@/lib/navigation/modality-navigation";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, AppointmentStatus, HistoricalPacsCandidate, HistoricalPacsStudy, ModalityProtocolAssignment, ProtocolingPatientHistoryResponse } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
@@ -55,7 +56,7 @@ const LIVE_BOARD_STATUSES = new Set<AppointmentStatus>(["in-progress", "arrived"
 const PROBLEM_STATUSES = new Set<AppointmentStatus>(["no-show", "cancelled", "discontinued"]);
 const EMPTY_VALUE = "—";
 
-type BoardFilter = "operational" | "ready" | "waiting" | "arrived" | "in-progress" | "not-arrived" | "completed" | "problem" | "all";
+type BoardFilter = ModalityView;
 type DocumentFilter = "all" | "missing" | "uploaded";
 type BoardStatusAction = {
   appointment: AppointmentWithDetails;
@@ -520,17 +521,19 @@ export default function ModalityPage() {
   const { language: rawLanguage, isArabic } = useLanguage();
   const language = rawLanguage as Language;
   const queryClient = useQueryClient();
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedRef = useRef<HTMLTableRowElement | null>(null);
+  const navigationState = useMemo(() => parseModalityNavigation(searchParams), [searchParams]);
 
-  const [modalityId, setModalityId] = useState(() => searchParams.get("modalityId") || "");
-  const [date, setDate] = useState(todayIsoDateLy());
-  const [scope, setScope] = useState<"day" | "all">("day");
-  const [boardFilter, setBoardFilter] = useState<BoardFilter>("operational");
+  const modalityId = navigationState.modalityId;
+  const date = navigationState.date ?? todayIsoDateLy();
+  const scope = navigationState.scope;
+  const boardFilter = navigationState.view;
   const [documentFilter, setDocumentFilter] = useState<DocumentFilter>("all");
   const [documentAppointmentId, setDocumentAppointmentId] = useState<number | null>(null);
-  const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
+  const selectedAppointmentId = navigationState.appointmentId;
   const [selectedAppointmentTab, setSelectedAppointmentTab] = useState<"appointment" | "previousStudies">("appointment");
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
@@ -555,6 +558,22 @@ export default function ModalityPage() {
   const modalities = lookups?.modalities ?? [];
   const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
   const activeModalityId = currentModality?.isActive ? currentModality.id : null;
+  const updateNavigation = useCallback((patch: Parameters<typeof buildModalitySearch>[1], options: { replace?: boolean } = {}) => {
+    setSearchParams(buildModalitySearch(searchParams, patch, todayIsoDateLy()), options);
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (location.pathname !== "/modality" && location.pathname !== "/modality/") return;
+    const normalized = buildModalitySearch(searchParams, {}, todayIsoDateLy());
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true });
+    }
+  }, [location.pathname, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!lookups || !navigationState.modalityId || currentModality?.isActive) return;
+    updateNavigation({ modalityId: "", appointmentId: null }, { replace: true });
+  }, [currentModality?.isActive, lookups, navigationState.modalityId, updateNavigation]);
 
   const { data: requestScanStatus } = useQuery({
     queryKey: ["request-scans", "status", "modality", activeModalityId],
@@ -572,17 +591,17 @@ export default function ModalityPage() {
     isFetching,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ["modality-worklist", modalityId, date, scope],
-    queryFn: () => fetchModalityWorklist(modalityId, date, scope),
-    enabled: !!modalityId,
+    queryKey: ["modality-worklist", activeModalityId, date, scope],
+    queryFn: () => fetchModalityWorklist(String(activeModalityId), date, scope),
+    enabled: activeModalityId != null,
     staleTime: 1000 * 10,
     refetchInterval: 15_000,
   });
 
   const { data: statistics } = useQuery({
-    queryKey: ["modality-statistics", modalityId, date, scope],
-    queryFn: () => fetchStatistics(scope === "all" ? "" : date, modalityId),
-    enabled: !!modalityId,
+    queryKey: ["modality-statistics", activeModalityId, date, scope],
+    queryFn: () => fetchStatistics(scope === "all" ? "" : date, String(activeModalityId)),
+    enabled: activeModalityId != null,
     staleTime: 1000 * 10,
     refetchInterval: 15_000,
   });
@@ -594,13 +613,13 @@ export default function ModalityPage() {
   const selectedProtocolQuery = useQuery({
     queryKey: ["modality", "protocol-assignment", selectedAppointmentId],
     queryFn: () => fetchModalityProtocolAssignment(selectedAppointmentId as number),
-    enabled: selectedAppointmentId != null && isProtocolModality(selectedAppointment),
+    enabled: selectedAppointment != null && isProtocolModality(selectedAppointment),
     refetchInterval: 15_000,
   });
   const cdDestinationsQuery = useQuery({ queryKey: ["modality", "cd-robots"], queryFn: fetchCdRobotDestinations, staleTime: 60_000 });
   const cdHistoryQuery = useQuery({ queryKey: ["modality", "cd-deliveries", cdDialog?.appointment.id], queryFn: () => fetchCdRobotDeliveries(cdDialog!.appointment.id), enabled: cdDialog != null });
-  const previousStudiesHistoryQuery = useQuery<ProtocolingPatientHistoryResponse>({ queryKey: ["modality", "previous-studies", "history", selectedAppointmentId], queryFn: () => fetchModalityPatientHistory(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
-  const historicalPacsCandidatesQuery = useQuery<ModalityHistoricalPacsCandidatesResponse>({ queryKey: ["modality", "previous-studies", "historical-candidates", selectedAppointmentId], queryFn: () => fetchModalityHistoricalPacsCandidates(selectedAppointmentId as number), enabled: selectedAppointmentId != null && selectedAppointmentTab === "previousStudies" });
+  const previousStudiesHistoryQuery = useQuery<ProtocolingPatientHistoryResponse>({ queryKey: ["modality", "previous-studies", "history", selectedAppointmentId], queryFn: () => fetchModalityPatientHistory(selectedAppointmentId as number), enabled: selectedAppointment != null && selectedAppointmentTab === "previousStudies" });
+  const historicalPacsCandidatesQuery = useQuery<ModalityHistoricalPacsCandidatesResponse>({ queryKey: ["modality", "previous-studies", "historical-candidates", selectedAppointmentId], queryFn: () => fetchModalityHistoricalPacsCandidates(selectedAppointmentId as number), enabled: selectedAppointment != null && selectedAppointmentTab === "previousStudies" });
   const oldPacsPatientIdMutation = useMutation({ mutationFn: ({ appointmentId, patientId }: { appointmentId: number; patientId: string }) => searchModalityHistoricalPacsPatientId(appointmentId, patientId) });
   const attestationMutation = useMutation({ mutationFn: ({ studyInstanceUid, status }: { studyInstanceUid: string; status: "confirmed" | "denied" }) => recordModalityHistoricalPacsAttestation(selectedAppointmentId as number, studyInstanceUid, status), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["modality", "previous-studies", "historical-candidates", selectedAppointmentId] }), onError: () => pushToast({ type: "error", title: t(language, "modality.previousStudies.saveFailed") }) });
 
@@ -624,6 +643,14 @@ export default function ModalityPage() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [openMoreMenu]);
+
+  useEffect(() => {
+    if (selectedAppointmentId == null || activeModalityId == null || isLoading || isFetching) return;
+    if (!appointments.some((appointment) => appointment.id === selectedAppointmentId)) {
+      updateNavigation({ appointmentId: null }, { replace: true });
+      setSelectedAppointmentTab("appointment");
+    }
+  }, [activeModalityId, appointments, isFetching, isLoading, selectedAppointmentId, updateNavigation]);
 
   const completeMutation = useMutation({
     mutationFn: completeAppointment,
@@ -697,21 +724,27 @@ export default function ModalityPage() {
     void queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
   };
   const handleModalityChange = (value: string) => {
-    setModalityId(value);
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set("modalityId", value); else next.delete("modalityId");
-    setSearchParams(next, { replace: true });
-    setSelectedAppointmentId(null);
+    updateNavigation({ modalityId: value, appointmentId: null }, { replace: true });
     setConfirmTargetId(null);
     setConfirmVerified(false);
   };
 
+  const handleDateChange = (value: string) => {
+    updateNavigation({ date: value, scope: "day" }, { replace: true });
+  };
+
+  const handleScopeChange = (value: "day" | "all") => {
+    updateNavigation({ scope: value });
+  };
+
+  const handleBoardFilterChange = (value: BoardFilter) => {
+    updateNavigation({ view: value });
+  };
+
   const handleResetView = () => {
-    setBoardFilter("operational");
     setDocumentFilter("all");
-    setDate(todayIsoDateLy());
-    setScope("day");
-    setSelectedAppointmentId(null);
+    updateNavigation({ view: "operational", date: todayIsoDateLy(), scope: "day", appointmentId: null }, { replace: true });
+    setSelectedAppointmentTab("appointment");
     setConfirmTargetId(null);
     setConfirmVerified(false);
     setOpenMoreMenu(null);
@@ -722,7 +755,11 @@ export default function ModalityPage() {
   };
   const openSelectedAppointment = (appointmentId: number, tab: "appointment" | "previousStudies" = "appointment") => {
     setSelectedAppointmentTab(tab);
-    setSelectedAppointmentId(appointmentId);
+    updateNavigation({ appointmentId });
+  };
+  const closeSelectedAppointment = () => {
+    updateNavigation({ appointmentId: null });
+    setSelectedAppointmentTab("appointment");
   };
   const openSpecimenLabel = (appointment: AppointmentWithDetails) => {
     setSpecimenLabelText("");
@@ -882,7 +919,7 @@ export default function ModalityPage() {
                     type="button"
                     aria-label={`${chip.label} ${chip.value}`}
                     aria-pressed={boardFilter === chip.filter}
-                    onClick={() => setBoardFilter(chip.filter)}
+                    onClick={() => handleBoardFilterChange(chip.filter)}
                     className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition ${chip.className} ${
                       boardFilter === chip.filter ? "ring-2 ring-accent/35" : ""
                     }`}
@@ -932,13 +969,13 @@ export default function ModalityPage() {
               />
             </div>
             <div className="w-full min-w-[180px] sm:w-[180px]">
-              <DateInput label={t(language, "modality.date")} value={date} onChange={setDate} disabled={scope === "all"} />
+              <DateInput label={t(language, "modality.date")} value={date} onChange={handleDateChange} disabled={scope === "all"} />
             </div>
             <div className="min-w-[220px]">
               <p className="mb-1.5 text-xs font-mono-data uppercase tracking-[0.08em] text-muted-foreground">{t(language, "modality.scope")}</p>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant={scope === "day" ? "primary" : "secondary"} size="sm" onClick={() => setScope("day")} className="justify-center">{t(language, "modality.scopeToday")}</Button>
-                <Button type="button" variant={scope === "all" ? "primary" : "secondary"} size="sm" onClick={() => setScope("all")} className="justify-center">{t(language, "modality.scopeAll")}</Button>
+                <Button type="button" variant={scope === "day" ? "primary" : "secondary"} size="sm" onClick={() => handleScopeChange("day")} className="justify-center">{t(language, "modality.scopeToday")}</Button>
+                <Button type="button" variant={scope === "all" ? "primary" : "secondary"} size="sm" onClick={() => handleScopeChange("all")} className="justify-center">{t(language, "modality.scopeAll")}</Button>
               </div>
             </div>
           </div>
@@ -969,7 +1006,7 @@ export default function ModalityPage() {
                       type="button"
                       variant={boardFilter === filter ? "primary" : "secondary"}
                       size="sm"
-                      onClick={() => setBoardFilter(filter)}
+                      onClick={() => handleBoardFilterChange(filter)}
                       aria-pressed={boardFilter === filter}
                       className="h-7 px-2 text-[11px] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                     >
@@ -1557,7 +1594,7 @@ export default function ModalityPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(selectedAppointment)} onClose={() => { setSelectedAppointmentId(null); setSelectedAppointmentTab("appointment"); }}>
+      <Dialog open={Boolean(selectedAppointment)} onClose={closeSelectedAppointment}>
         <DialogContent
           maxWidth="min(98vw, 1560px)"
           scrollable={false}
@@ -1674,7 +1711,7 @@ export default function ModalityPage() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => { setSelectedAppointmentId(null); setSelectedAppointmentTab("appointment"); }}
+                  onClick={closeSelectedAppointment}
                 >
                   <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
                 </Button>

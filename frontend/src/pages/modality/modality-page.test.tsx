@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -41,7 +41,11 @@ const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
 const mriPrimaryScreeningBadgesSource = readFileSync(join(process.cwd(), "src/components/appointments/mri-primary-screening-badges.tsx"), "utf8");
-function LocationProbe() { const location = useLocation(); return <span data-testid="location">{location.pathname}{location.search}</span>; }
+function LocationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <><span data-testid="location">{location.pathname}{location.search}</span><span data-testid="history-back" onClick={() => navigate(-1)} /><span data-testid="history-forward" onClick={() => navigate(1)} /></>;
+}
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -518,8 +522,88 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("1"));
     expect((screen.getByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(false);
     active.unmount();
+    fetchModalityWorklistMock.mockReset();
     renderPage([], "/modality?modalityId=999");
     await waitFor(() => expect((screen.getByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality"));
+    expect(fetchModalityWorklistMock).not.toHaveBeenCalled();
+  });
+
+  it("restores URL-backed modality, date, scope, and operational view state", async () => {
+    const user = userEvent.setup();
+    renderPage(
+      [appointment({ id: 42, status: "completed", appointmentDate: "2026-06-18" })],
+      "/modality?source=e2e-navigation&modalityId=1&date=2026-06-17&scope=all&view=completed",
+    );
+
+    await screen.findByRole("option", { name: "CT" });
+    expect(screen.getByRole("combobox")).toHaveProperty("value", "1");
+    expect(screen.getByLabelText("Date")).toHaveProperty("value", "17/06/2026");
+    expect(screen.getByRole("button", { name: "Completed" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("location").textContent).toBe("/modality?source=e2e-navigation&modalityId=1&date=2026-06-17&scope=all&view=completed");
+
+    await user.click(screen.getByRole("button", { name: "In Progress 0" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("view=in-progress"));
+    await user.click(screen.getByRole("button", { name: "All Dates" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("scope=all"));
+  });
+
+  it("writes modality, date, and view changes to the URL without a synchronization loop", async () => {
+    const user = userEvent.setup();
+    renderPage([], "/modality", [], {
+      modalities: [
+        { id: 1, nameAr: "CT", nameEn: "CT", code: "CT", isActive: true },
+        { id: 2, nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true },
+      ],
+    });
+
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "2");
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=2"));
+
+    const dateInput = screen.getByLabelText("Date");
+    await user.clear(dateInput);
+    await user.type(dateInput, "19/06/2026");
+    await user.tab();
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=2&date=2026-06-19"));
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=2&date=2026-06-19&view=completed"));
+  });
+
+  it("deep-links the appointment drawer and uses browser history without losing Modality context", async () => {
+    const user = userEvent.setup();
+    renderPage(
+      [appointment({ id: 42, status: "completed", appointmentDate: "2026-06-18" })],
+      "/modality?modalityId=1&date=2026-06-18&view=completed",
+    );
+
+    await screen.findByRole("option", { name: "CT" });
+    await user.click(await screen.findByTestId("modality-board-row-42"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=1&date=2026-06-18&view=completed&appointmentId=42"));
+    expect(screen.getByTestId("selected-appointment-drawer")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("history-back"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=1&date=2026-06-18&view=completed"));
+    expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("history-forward"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("appointmentId=42"));
+    expect(screen.getByTestId("selected-appointment-drawer")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=1&date=2026-06-18&view=completed"));
+    expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
+  });
+
+  it("restores a direct appointment drawer link after a reload-style remount", async () => {
+    const directLink = "/modality?modalityId=1&date=2026-06-18&view=completed&appointmentId=42";
+    const first = renderPage([appointment({ id: 42, status: "completed" })], directLink);
+    expect(await screen.findByTestId("selected-appointment-drawer")).toBeTruthy();
+    first.unmount();
+
+    renderPage([appointment({ id: 42, status: "completed" })], directLink);
+    expect(await screen.findByTestId("selected-appointment-drawer")).toBeTruthy();
   });
 
   it("sorts arrived rows by arrivedAt ascending after in-progress rows", async () => {
