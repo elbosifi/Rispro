@@ -164,3 +164,86 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   expect(pageErrors, `Unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);
   expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join(" | ")}`).toEqual([]);
 });
+
+test("SOP V1 hardening protects unsaved publish state, draft isolation, and dirty navigation", async ({ page }) => {
+  test.setTimeout(120_000);
+  const code = `RAD-HARD-E2E-${Date.now().toString().slice(-6)}`;
+  const editors = () => page.locator(".ProseMirror");
+
+  await signInWithSession(page, "e2e_supervisor");
+  await page.goto("/sops/new");
+  await expect(page.getByRole("heading", { name: "Create new SOP", exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Title" }).fill("SOP Hardening Safety");
+  await page.getByRole("textbox", { name: "SOP Code" }).fill(code);
+  await page.getByRole("combobox", { name: "Category" }).selectOption("Patient Safety");
+  await page.locator("input[type='date']").fill("2026-12-01");
+  await page.getByRole("textbox", { name: "Change summary" }).fill("Hardening baseline");
+  await editors().nth(0).click();
+  await page.keyboard.insertText("Purpose baseline.");
+  await editors().nth(1).click();
+  await page.keyboard.insertText("Scope baseline.");
+  await editors().nth(2).click();
+  await page.keyboard.insertText("Responsibilities baseline.");
+  await editors().nth(5).click();
+  await page.keyboard.insertText("Procedure baseline.");
+  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+  await expect(page).toHaveURL(/\/sops\/\d+\?version=1\.0/);
+  const sopPath = new URL(page.url()).pathname;
+  await page.reload({ waitUntil: "domcontentloaded" });
+
+  await editors().nth(0).click();
+  await editors().nth(0).press("Control+A");
+  await page.keyboard.insertText("Latest edit confirmed without manual save.");
+  await page.getByRole("button", { name: "Publish SOP", exact: true }).click();
+  const patchResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/api/sops/"));
+  const publishResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/publish"));
+  await page.getByRole("dialog").getByRole("button", { name: "Publish SOP", exact: true }).click();
+  expect((await patchResponse).status()).toBe(200);
+  expect((await publishResponse).status()).toBe(200);
+  await expect(page.getByText("Published SOP", { exact: true })).toBeVisible();
+  await expect(page.getByText("Latest edit confirmed without manual save.", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Create New Revision", exact: true }).click();
+  const revisionDialog = page.getByRole("dialog");
+  await revisionDialog.getByRole("textbox", { name: "Change summary" }).fill("Hardening revision");
+  await revisionDialog.getByRole("textbox", { name: "Effective date" }).fill("2027-01-01");
+  await revisionDialog.getByRole("button", { name: "Create draft revision", exact: true }).click();
+  await expect(page).toHaveURL(/version=1\.1/);
+  await expect(page.getByRole("heading", { name: /Edit draft/ })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Title" })).toHaveAttribute("readonly", "");
+  await expect(page.getByRole("combobox", { name: "Category" })).toBeDisabled();
+
+  const revisionEditor = editors().nth(5);
+  await revisionEditor.click();
+  await revisionEditor.press("Control+A");
+  await page.keyboard.insertText("Unsaved revision edit preserved by guard.");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  const guardDialog = page.getByRole("dialog");
+  await expect(guardDialog).toContainText("SOP edits have not been saved.");
+  await guardDialog.getByRole("button", { name: "Keep editing", exact: true }).click();
+  await expect(revisionEditor).toContainText("Unsaved revision edit preserved by guard.");
+  const revisionPatch = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/api/sops/"));
+  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+  expect((await revisionPatch).status()).toBe(200);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByText("Published SOP", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 1.0", { exact: true })).toBeVisible();
+
+  await signInWithSession(page, "e2e_reception");
+  await page.goto("/sops");
+  const row = page.locator("tr").filter({ hasText: code });
+  await expect(row).toContainText("1.0");
+  await expect(row).not.toContainText("1.1");
+  await row.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.getByText("Version 1.0", { exact: true })).toBeVisible();
+  await expect(page.getByText("1.1", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Unsaved revision edit preserved by guard.", { exact: true })).toHaveCount(0);
+  await page.goto(`${sopPath}?version=1.1`);
+  await expect(page.getByText("Version 1.0", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Edit draft/ })).toHaveCount(0);
+
+  await signInWithSession(page, "e2e_supervisor");
+  await page.goto(`${sopPath}?version=1.1`);
+  await expect(page.getByRole("heading", { name: /Edit draft/ })).toBeVisible();
+  await expect(page.getByText("Unsaved revision edit preserved by guard.", { exact: true })).toBeVisible();
+});

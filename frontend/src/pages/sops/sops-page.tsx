@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -49,6 +49,7 @@ import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { registerUnsavedNavigationGuard } from "@/lib/unsaved-navigation-guard";
 
 const FALLBACK_SECTIONS: SopSectionDefinition[] = [
   { key: "purpose", title: "Purpose", required: true },
@@ -102,6 +103,47 @@ const versionStatusLabel = (version: SopVersion, current: string | null) =>
     : version.status === "superseded"
       ? "Superseded"
       : "Draft";
+
+function editorNodeText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  const ownText = typeof record.text === "string" ? record.text : "";
+  const children = Array.isArray(record.content)
+    ? record.content.map(editorNodeText).join(" ")
+    : "";
+  return `${ownText} ${children}`.trim();
+}
+
+function draftSignature(input: {
+  title: string;
+  category: string;
+  version: string;
+  effectiveDate: string;
+  changeSummary: string;
+  document: SopDocument;
+}): string {
+  return JSON.stringify(input);
+}
+
+function publishValidationError(input: {
+  title: string;
+  category: string;
+  version: string;
+  effectiveDate: string;
+  document: SopDocument;
+}): string | null {
+  if (!input.title.trim()) return "Title is required before publishing.";
+  if (!input.category) return "Category is required before publishing.";
+  if (!input.version.trim()) return "Version is required before publishing.";
+  if (!input.effectiveDate) return "Effective date is required before publishing.";
+  const missing = input.document.sections.find(
+    (section) => section.required && !editorNodeText(section.content).trim(),
+  );
+  return missing
+    ? `${missing.title} must contain meaningful content before publishing.`
+    : null;
+}
 
 function PageShell({ children }: { children: React.ReactNode }) {
   const { language } = useLanguage();
@@ -272,7 +314,7 @@ function LibraryPage() {
                     management={management}
                     onOpen={() =>
                       navigate(
-                        `/sops/${sop.id}?version=${encodeURIComponent(sop.draftVersion ?? sop.currentVersion ?? "")}`,
+                        `/sops/${sop.id}?version=${encodeURIComponent((management ? sop.draftVersion ?? sop.currentVersion : sop.currentVersion) ?? "")}`,
                       )
                     }
                     language={language}
@@ -298,7 +340,7 @@ function LibraryRow({
   onOpen: () => void;
   language: string;
 }) {
-  const version = sop.draftVersion ?? sop.currentVersion;
+  const version = management ? sop.draftVersion ?? sop.currentVersion : sop.currentVersion;
   return (
     <tr className="border-t border-border align-middle hover:bg-muted/20">
       <td className="p-3">
@@ -356,6 +398,8 @@ function MetadataFields({
   setChangeSummary,
   categories,
   codeReadOnly = false,
+  titleReadOnly = false,
+  categoryReadOnly = false,
 }: {
   title: string;
   setTitle: (value: string) => void;
@@ -371,6 +415,8 @@ function MetadataFields({
   setChangeSummary: (value: string) => void;
   categories: string[];
   codeReadOnly?: boolean;
+  titleReadOnly?: boolean;
+  categoryReadOnly?: boolean;
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
@@ -379,6 +425,7 @@ function MetadataFields({
         <Input
           aria-label="Title"
           value={title}
+          readOnly={titleReadOnly}
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
@@ -399,6 +446,7 @@ function MetadataFields({
           aria-label="Category"
           className="input-premium h-10"
           value={category}
+          disabled={categoryReadOnly}
           onChange={(event) => setCategory(event.target.value)}
         >
           {categories.map((item) => (
@@ -455,7 +503,7 @@ function EditorForm({
   meta: { categories: string[]; sections: SopSectionDefinition[] };
   onSaved: (sopId: number, version: string) => void;
   onCancel: () => void;
-  onPublish?: () => void;
+  onPublish?: (version: string) => Promise<void> | void;
   publishing?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -474,9 +522,56 @@ function EditorForm({
   const [document, setDocument] = useState<SopDocument>(
     () => existingVersion?.contentJson ?? createEmptySopDocument(meta.sections),
   );
+  const [savedSignature, setSavedSignature] = useState(() =>
+    draftSignature({
+      title: existingSop?.title ?? "",
+      category: existingSop?.category ?? meta.categories[0] ?? "General",
+      version: existingVersion?.version ?? "1.0",
+      effectiveDate: existingVersion?.effectiveDate ?? "",
+      changeSummary: existingVersion?.changeSummary ?? "Initial SOP version",
+      document: existingVersion?.contentJson ?? createEmptySopDocument(meta.sections),
+    }),
+  );
   const [error, setError] = useState<string | null>(null);
   const isExisting = Boolean(existingSop && existingVersion);
+  const metadataReadOnly = Boolean(existingSop?.currentVersion);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const publishInFlight = useRef(false);
+  const currentSignature = draftSignature({
+    title,
+    category,
+    version,
+    effectiveDate,
+    changeSummary,
+    document,
+  });
+  const dirty = currentSignature !== savedSignature;
+  const requestLeave = useCallback(
+    (proceed: () => void) => {
+      if (!dirty) {
+        proceed();
+        return;
+      }
+      setPendingNavigation(() => proceed);
+      setDiscardOpen(true);
+    },
+    [dirty],
+  );
+
+  useEffect(() => registerUnsavedNavigationGuard(requestLeave), [requestLeave]);
+  useEffect(() => {
+    if (!dirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
+
   const save = useMutation({
     mutationFn: () =>
       isExisting
@@ -498,6 +593,7 @@ function EditorForm({
           }),
     onSuccess: async (result) => {
       setError(null);
+      setSavedSignature(currentSignature);
       await queryClient.invalidateQueries({ queryKey: ["sops"] });
       onSaved(result.sop.id, result.version.version);
     },
@@ -508,12 +604,45 @@ function EditorForm({
           : "Unable to save the SOP draft.",
       ),
   });
+  const publishCurrentDraft = async () => {
+    if (publishInFlight.current || !isExisting) return;
+    const validationError = publishValidationError({
+      title,
+      category,
+      version,
+      effectiveDate,
+      document,
+    });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    publishInFlight.current = true;
+    setPublishBusy(true);
+    setError(null);
+    try {
+      const saved = await save.mutateAsync();
+      await onPublish(saved.version.version);
+      setPublishOpen(false);
+    } catch (value) {
+      setError(
+        value instanceof Error
+          ? value.message
+          : "Unable to save and publish the SOP.",
+      );
+    } finally {
+      publishInFlight.current = false;
+      setPublishBusy(false);
+    }
+  };
   const canSave =
     title.trim() &&
     code.trim() &&
     category &&
     version.trim() &&
-    !save.isPending;
+    !save.isPending &&
+    !publishBusy &&
+    !publishing;
   return (
     <PageShell>
       <header className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -549,6 +678,8 @@ function EditorForm({
           setChangeSummary={setChangeSummary}
           categories={meta.categories}
           codeReadOnly={Boolean(existingSop)}
+          titleReadOnly={metadataReadOnly}
+          categoryReadOnly={metadataReadOnly}
         />
       </section>
       <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
@@ -578,8 +709,8 @@ function EditorForm({
         <Button
           type="button"
           variant="secondary"
-          onClick={onCancel}
-          disabled={save.isPending || publishing}
+          onClick={() => requestLeave(onCancel)}
+          disabled={save.isPending || publishing || publishBusy}
         >
           Cancel
         </Button>
@@ -596,8 +727,11 @@ function EditorForm({
         {isExisting ? (
           <Button
             type="button"
-            onClick={() => setPublishOpen(true)}
-            disabled={save.isPending || publishing}
+            onClick={() => {
+              setError(null);
+              setPublishOpen(true);
+            }}
+            disabled={save.isPending || publishing || publishBusy}
           >
             {publishing ? "Publishing…" : "Publish SOP"}
           </Button>
@@ -606,7 +740,7 @@ function EditorForm({
       <Dialog
         open={publishOpen}
         onClose={() => {
-          if (!publishing) setPublishOpen(false);
+          if (!publishing && !publishBusy && !save.isPending) setPublishOpen(false);
         }}
       >
         <DialogContent maxWidth="520px">
@@ -624,19 +758,53 @@ function EditorForm({
               type="button"
               variant="secondary"
               onClick={() => setPublishOpen(false)}
-              disabled={publishing}
+              disabled={publishing || publishBusy || save.isPending}
             >
               Cancel
             </Button>
             <Button
               type="button"
-              onClick={() => {
-                setPublishOpen(false);
-                onPublish();
-              }}
-              disabled={publishing}
+              onClick={() => void publishCurrentDraft()}
+              disabled={publishing || publishBusy || save.isPending}
             >
               {publishing ? "Publishing…" : "Publish SOP"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={discardOpen}
+        onClose={() => {
+          if (!publishBusy && !save.isPending) setDiscardOpen(false);
+        }}
+      >
+        <DialogContent maxWidth="460px">
+          <DialogHeader>
+            <DialogTitle>Discard unsaved changes?</DialogTitle>
+            <DialogDescription>SOP edits have not been saved.</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm">
+            Keep editing or discard the changes made in this SOP editor.
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDiscardOpen(false)}
+            >
+              Keep editing
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                const proceed = pendingNavigation;
+                setPendingNavigation(null);
+                setDiscardOpen(false);
+                proceed?.();
+              }}
+            >
+              Discard changes
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -747,14 +915,16 @@ function DetailPage({ id }: { id: number }) {
   const selectedVersion = useMemo(
     () =>
       data?.versions.find((version) => version.version === selectedVersionId) ??
-      data?.versions.find(
-        (version) => version.version === data.sop.draftVersion,
-      ) ??
+        (management
+          ? data?.versions.find(
+              (version) => version.version === data.sop.draftVersion,
+            )
+          : undefined) ??
       data?.versions.find(
         (version) => version.version === data.sop.currentVersion,
       ) ??
       data?.versions[0],
-    [data, selectedVersionId],
+    [data, management, selectedVersionId],
   );
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionVersion, setRevisionVersion] = useState("1.1");
@@ -795,7 +965,7 @@ function DetailPage({ id }: { id: number }) {
       ),
   });
   const publish = useMutation({
-    mutationFn: () => publishSopVersion(id, selectedVersion!.version),
+    mutationFn: (version: string) => publishSopVersion(id, version),
     onSuccess: async () => {
       setActionError(null);
       await queryClient.invalidateQueries({ queryKey: ["sops"] });
@@ -854,11 +1024,13 @@ function DetailPage({ id }: { id: number }) {
           queryKey: ["sops", "detail", sopId],
         });
       }}
-      onPublish={() => publish.mutate()}
+      onPublish={(version) => publish.mutateAsync(version).then(() => undefined)}
       publishing={publish.isPending}
       onCancel={() =>
         navigate(
-          `/sops/${id}?version=${encodeURIComponent(data.sop.currentVersion ?? selectedVersion.version)}`,
+          data.sop.currentVersion
+            ? `/sops/${id}?version=${encodeURIComponent(data.sop.currentVersion)}`
+            : "/sops",
         )
       }
     />

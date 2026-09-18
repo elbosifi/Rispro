@@ -61,6 +61,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
+import { requestNavigationWithUnsavedGuard } from "@/lib/unsaved-navigation-guard";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
   getDefaultLandingRouteForRole,
@@ -172,9 +173,11 @@ function AppContent() {
     (route: string, search?: string) => {
       const path = APP_ROUTE_PATHS[route as keyof typeof APP_ROUTE_PATHS];
       if (path) {
-        localStorage.setItem("rispro-route", route);
         const destination = resolveModuleNavigationTarget(path, search, user?.role);
-        navigate(destination);
+        requestNavigationWithUnsavedGuard(() => {
+          localStorage.setItem("rispro-route", route);
+          navigate(destination);
+        });
       }
     },
     [navigate, user?.role]
@@ -186,7 +189,9 @@ function AppContent() {
   }, [location.pathname, location.search, userRole]);
 
   const handlePatientSearchSelect = useCallback((patientId: number) => {
-    navigate(globalPatientSearchLocation(location.pathname, location.search, patientId));
+    requestNavigationWithUnsavedGuard(() => {
+      navigate(globalPatientSearchLocation(location.pathname, location.search, patientId));
+    });
   }, [location.pathname, location.search, navigate]);
 
   const currentRoute = (() => {
@@ -267,7 +272,7 @@ function AppContent() {
         pageAction={isPatientCreate || isPatientEdit ? (
           <button
             type="button"
-            onClick={() => navigate(isPatientEdit ? safeInternalReturnTo(new URLSearchParams(location.search).get("returnTo")) : "/patients")}
+            onClick={() => requestNavigationWithUnsavedGuard(() => navigate(isPatientEdit ? safeInternalReturnTo(new URLSearchParams(location.search).get("returnTo")) : "/patients"))}
             aria-label={language === "ar" ? "رجوع" : "Back"}
             className="inline-flex h-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium whitespace-nowrap shadow-sm transition-all hover:shadow-md active:scale-95 lg:h-10 lg:gap-2 lg:px-3 lg:text-xs"
             style={{
@@ -288,19 +293,19 @@ function AppContent() {
         )}
         accountMenuActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
         canAccessSettings={canRoleAccessRoute(normalizedMatrix, "settings", user.role)}
-        onSettings={() => navigate("/settings")}
-        onUndo={() => navigate(-1)}
-        onRedo={() => navigate(1)}
+        onSettings={() => requestNavigationWithUnsavedGuard(() => navigate("/settings"))}
+        onUndo={() => requestNavigationWithUnsavedGuard(() => navigate(-1))}
+        onRedo={() => requestNavigationWithUnsavedGuard(() => navigate(1))}
         onToggleLanguage={toggleLanguage}
-        onLogout={logout}
+        onLogout={() => requestNavigationWithUnsavedGuard(() => { void logout(); })}
         onMobileNavToggle={() => setMobileNavOpen(true)}
         canSearchPatients={canRoleAccessRoute(normalizedMatrix, "patients", user.role)}
         canSearchRegistrations={canRoleAccessRoute(normalizedMatrix, "registrations", user.role)}
         onPatientSearchSelect={handlePatientSearchSelect}
-        onRegistrationSearchSelect={(appointment) => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`)}
+        onRegistrationSearchSelect={(appointment) => requestNavigationWithUnsavedGuard(() => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`))}
         canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctorMe)}
         canAccessCoreWorkspace
-        onWorkspaceNavigate={navigate}
+        onWorkspaceNavigate={(path) => requestNavigationWithUnsavedGuard(() => navigate(path))}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -374,7 +379,7 @@ function AppContent() {
         onNavigate={handleNavigate}
         onClose={() => setMobileNavOpen(false)}
         onToggleLanguage={toggleLanguage}
-        onLogout={logout}
+        onLogout={() => requestNavigationWithUnsavedGuard(() => { void logout(); })}
         menuActions={<SchedulingOverrideApprovalCenter user={user} trigger="mobile-menu" />}
         accountActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
       />

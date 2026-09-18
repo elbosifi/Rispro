@@ -75,10 +75,10 @@ const VERSION_SELECT = `
   left join users published_by on published_by.id = v.published_by_user_id
 `;
 
-function toSummary(row: SopRow): SopSummary {
+function toSummary(row: SopRow, exposeDraftVersion = true): SopSummary {
   return {
     id: Number(row.id), code: row.code, title: row.title, category: row.category as SopSummary["category"],
-    status: row.status as SopSummary["status"], currentVersion: row.current_version, draftVersion: row.draft_version,
+    status: row.status as SopSummary["status"], currentVersion: row.current_version, draftVersion: exposeDraftVersion ? row.draft_version : null,
     currentEffectiveDate: row.current_effective_date, createdByUserId: Number(row.created_by_user_id), createdByName: row.created_by_name,
     createdAt: row.created_at, updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id), updatedByName: row.updated_by_name, updatedAt: row.updated_at,
   };
@@ -104,12 +104,12 @@ export async function listSopSummaries(filters: SopFilters, includeAll: boolean,
   if (filters.category?.trim()) where.push(`s.category = ${add(filters.category.trim())}`);
   if (filters.status?.trim()) where.push(`s.status = ${add(filters.status.trim())}`);
   const result = await executor.query<SopRow>(`${SOP_SELECT} ${where.length ? `where ${where.join(" and ")}` : ""} order by s.updated_at desc, s.id desc`, values);
-  return result.rows.map(toSummary);
+  return result.rows.map((row) => toSummary(row, includeAll));
 }
 
-export async function findSop(id: number, executor: DbExecutor = pool): Promise<SopSummary | null> {
+export async function findSop(id: number, executor: DbExecutor = pool, exposeDraftVersion = true): Promise<SopSummary | null> {
   const result = await executor.query<SopRow>(`${SOP_SELECT} where s.id = $1 limit 1`, [id]);
-  return result.rows[0] ? toSummary(result.rows[0]) : null;
+  return result.rows[0] ? toSummary(result.rows[0], exposeDraftVersion) : null;
 }
 
 export async function findSopByCode(code: string, executor: DbExecutor = pool): Promise<SopSummary | null> {
@@ -130,7 +130,7 @@ export async function findSopVersion(sopId: number, version: string, includeAll:
 }
 
 export async function getSopDetail(sopId: number, includeAll: boolean, executor: DbExecutor = pool): Promise<{ sop: SopSummary; versions: SopVersion[] } | null> {
-  const sop = await findSop(sopId, executor);
+  const sop = await findSop(sopId, executor, includeAll);
   if (!sop) return null;
   return { sop, versions: await listSopVersions(sopId, includeAll, executor) };
 }

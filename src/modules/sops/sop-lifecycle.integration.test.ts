@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { pool } from "../../db/pool.js";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
-import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, listSops, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
+import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopVersionForUser, listSops, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
 import type { SopDocument } from "./types.js";
 
 function documentWith(text: string): SopDocument {
@@ -50,7 +50,16 @@ test("SOP lifecycle preserves published Unicode versions and enforces authorizat
     assert.match(JSON.stringify(revision.contentJson), /مصطلح MRI/);
     const beforeRevisionPublish = await getSopDetailForUser(sopId, "receptionist");
     assert.equal(beforeRevisionPublish.sop.currentVersion, "1.0");
+    assert.equal(beforeRevisionPublish.sop.draftVersion, null);
+    assert.equal(beforeRevisionPublish.sop.title, published.sop.title);
+    assert.equal(beforeRevisionPublish.sop.category, published.sop.category);
     assert.equal(beforeRevisionPublish.versions.length, 1);
+    assert.equal((await listSops({ search: code }, "receptionist"))[0]?.currentVersion, "1.0");
+    await assert.rejects(() => updateSopDraftForUser(sopId, "2.0", { title: "Changed published title", category: "CT", effectiveDate: "2026-11-01", changeSummary: "Rejected metadata", contentJson: documentWith("Rejected metadata") }, actor, "supervisor"), (error: unknown) => (error as { statusCode?: number }).statusCode === 409);
+    const supervisorRevision = await getSopDetailForUser(sopId, "supervisor");
+    assert.equal(supervisorRevision.sop.draftVersion, "2.0");
+    assert.equal(supervisorRevision.versions.some((item) => item.version === "2.0" && item.status === "draft"), true);
+    await assert.rejects(() => getSopVersionForUser(sopId, "2.0", "receptionist"), (error: unknown) => (error as { statusCode?: number }).statusCode === 404);
     await updateSopDraftForUser(sopId, "2.0", { title: "MRI Safety عربية", category: "MRI", effectiveDate: "2026-11-01", changeSummary: "Published revision", contentJson: documentWith("Revision MRI") }, actor, "supervisor");
     await publishSopVersionForUser(sopId, "2.0", actor, "supervisor");
     const afterRevision = await getSopDetailForUser(sopId, "receptionist");
