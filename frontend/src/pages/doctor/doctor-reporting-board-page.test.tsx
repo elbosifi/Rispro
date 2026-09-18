@@ -1,6 +1,6 @@
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
@@ -21,6 +21,8 @@ const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
+const rotateReportingBoardSavedViewTokenMock = vi.fn();
+const revokeReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardPushConfigMock = vi.fn();
 const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const sendReportingBoardSavedViewTestPushMock = vi.fn();
@@ -68,6 +70,8 @@ vi.mock("@/lib/api-hooks", () => ({
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
+  rotateReportingBoardSavedViewToken: (...args: unknown[]) => rotateReportingBoardSavedViewTokenMock(...args),
+  revokeReportingBoardSavedView: (...args: unknown[]) => revokeReportingBoardSavedViewMock(...args),
   fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
   subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   sendReportingBoardSavedViewTestPush: (...args: unknown[]) => sendReportingBoardSavedViewTestPushMock(...args),
@@ -229,13 +233,20 @@ function renderPage(path = "/doctor/reporting-board", me: DoctorMe = managerMe) 
     <LanguageProvider>
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[path]}>
+          <LocationProbe />
           <Routes>
             <Route path="/doctor/reporting-board" element={<DoctorReportingBoardPage me={me} />} />
+            <Route path="/doctor/reporting-board/saved/:token" element={<DoctorReportingBoardPage me={me} />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
     </LanguageProvider>
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location-probe">{`${location.pathname}${location.search}`}</output>;
 }
 
 function setNavigatorPlatform(platform: string) {
@@ -358,9 +369,11 @@ describe("DoctorReportingBoardPage", () => {
     fetchReportingBoardSavedViewsMock.mockResolvedValue([
       { id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent", offset: 50 }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" },
     ]);
-    fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent" }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" });
+    fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent", offset: 50 }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" });
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 10, name: "Saved", token: "tok-10", filters: {}, notificationSettings: {}, active: true });
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 9, name: "Urgent CT", token: "tok-9", filters: {}, notificationSettings: {}, active: true });
+    rotateReportingBoardSavedViewTokenMock.mockResolvedValue({ id: 9, name: "Urgent CT", token: "tok-rotated", filters: { priorityCode: "urgent", offset: 50 }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" });
+    revokeReportingBoardSavedViewMock.mockResolvedValue({ id: 9, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent", offset: 50 }, notificationSettings: {}, active: false, createdAt: "", updatedAt: "" });
     fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
@@ -1274,6 +1287,7 @@ describe("DoctorReportingBoardPage", () => {
     fetchReportingBoardSavedViewsMock.mockResolvedValue([
       { id: 12, ownerUserId: 10, ownerDoctorId: 1, name: "Comparisons only", token: "tok-12", filters: { caseSource: "comparisons" }, notificationSettings: {}, active: true, createdAt: "", updatedAt: "" },
     ]);
+    fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 12, ownerUserId: 10, ownerDoctorId: 1, name: "Comparisons only", token: "tok-12", filters: { caseSource: "comparisons" }, notificationSettings: {}, active: true, createdAt: "", updatedAt: "" });
     renderPage();
 
     await openSavedViews();
@@ -1349,6 +1363,152 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => {
       expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent" }));
     });
+    expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-9");
+  });
+
+  it("restores safe filters from a normal-board URL", async () => {
+    renderPage("/doctor/reporting-board?modalityId=1&assignmentStatus=unassigned&category=oncology&reportStatus=draft&sortBy=study_date&sortDirection=desc");
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({
+      modalityId: 1,
+      modalityCode: null,
+      assignmentStatus: "unassigned",
+      assignedDoctorId: null,
+      caseCategory: "oncology",
+      reportStatus: "draft",
+      sortBy: "study_date",
+      sortDirection: "desc",
+      offset: 0,
+    })));
+    await waitFor(() => expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("1"));
+    expect((screen.getByLabelText("Assigned doctor") as HTMLSelectElement).value).toBe("unassigned");
+    await openFilters();
+    expect((screen.getByLabelText("Category") as HTMLSelectElement).value).toBe("oncology");
+    expect((screen.getByLabelText("Report status") as HTMLSelectElement).value).toBe("draft");
+  });
+
+  it("writes ordinary filter changes to canonical URL state", async () => {
+    renderPage();
+    await screen.findByText("Reporting Assignment Board");
+    await openFilters();
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "non_oncology" } });
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board?category=non_oncology"));
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseCategory: "non_oncology", offset: 0 })));
+  });
+
+  it("keeps applied search private while passing it to the board API", async () => {
+    renderPage();
+    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    fireEvent.change(search, { target: { value: "PRIVATE-PATIENT-SEARCH" } });
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "PRIVATE-PATIENT-SEARCH" })));
+    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("PRIVATE-PATIENT-SEARCH");
+    expect(screen.getByTestId("location-probe").textContent).not.toContain("PRIVATE-PATIENT-SEARCH");
+    expect(screen.getByTestId("location-probe").textContent).not.toMatch(/[?&](q|query|search)=/);
+  });
+
+  it("sanitizes legacy private search without ingesting it", async () => {
+    renderPage("/doctor/reporting-board?q=SENSITIVE_VALUE&query=ALSO_PRIVATE&search=NOPE&category=oncology");
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board?category=oncology"));
+    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("");
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.not.objectContaining({ q: "SENSITIVE_VALUE" })));
+  });
+
+  it("merges safe overrides over a saved-view baseline", async () => {
+    renderPage("/doctor/reporting-board/saved/tok-9?category=non_oncology");
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent", caseCategory: "non_oncology" })));
+    expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-9?category=non_oncology");
+  });
+
+  it("resets a modified saved view to the ordinary board route", async () => {
+    renderPage("/doctor/reporting-board/saved/tok-9?category=non_oncology");
+    await screen.findByText("Reporting Assignment Board");
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default board" }));
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board"));
+    const latestFilters = fetchReportingBoardCasesMock.mock.lastCall?.[0] as Record<string, unknown>;
+    expect(latestFilters.priorityCode).toBeUndefined();
+    expect(latestFilters.caseCategory).toBeUndefined();
+  });
+
+  it("canonicalizes creation and rotation of saved-view routes", async () => {
+    const savedFilters = { caseSource: "comparisons" as const, category: undefined };
+    createReportingBoardSavedViewMock.mockResolvedValue({ id: 10, ownerUserId: 10, ownerDoctorId: 1, name: "Comparison pool", token: "tok-new", filters: { caseSource: "comparisons" }, notificationSettings: {}, active: true, createdAt: "", updatedAt: "" });
+    renderPage();
+    await openSavedViews();
+    await openFilters();
+    fireEvent.change(screen.getByLabelText("Case type"), { target: { value: savedFilters.caseSource } });
+    fireEvent.change(screen.getByPlaceholderText("Saved view name"), { target: { value: "Comparison pool" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save new view" }));
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-new"));
+
+    cleanup();
+    renderPage("/doctor/reporting-board/saved/tok-9");
+    await openSavedViews();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Rotate link" }));
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-rotated"));
+    expect(screen.getByTestId("location-probe").textContent).not.toContain("tok-9");
+    confirmSpy.mockRestore();
+  });
+
+  it("canonicalizes an active saved-view update against its new baseline", async () => {
+    updateReportingBoardSavedViewMock.mockResolvedValue({
+      id: 9,
+      ownerUserId: 10,
+      ownerDoctorId: 1,
+      name: "Urgent CT",
+      token: "tok-9",
+      filters: { priorityCode: "urgent", caseCategory: "non_oncology" },
+      notificationSettings: { notifyUnassignedUrgent: true },
+      active: true,
+      createdAt: "",
+      updatedAt: "",
+    });
+    renderPage("/doctor/reporting-board/saved/tok-9?category=non_oncology");
+    await openSavedViews();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Update from current filters" }));
+
+    await waitFor(() => expect(updateReportingBoardSavedViewMock).toHaveBeenCalledWith(9, expect.objectContaining({ active: true, filters: expect.objectContaining({ priorityCode: "urgent", caseCategory: "non_oncology" }) })));
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-9"));
+    confirmSpy.mockRestore();
+  });
+
+  it("navigates to the duplicate saved-view token route", async () => {
+    createReportingBoardSavedViewMock.mockResolvedValue({
+      id: 10,
+      ownerUserId: 10,
+      ownerDoctorId: 1,
+      name: "Urgent CT copy",
+      token: "tok-10",
+      filters: { priorityCode: "urgent" },
+      notificationSettings: { notifyUnassignedUrgent: true },
+      active: true,
+      createdAt: "",
+      updatedAt: "",
+    });
+    renderPage("/doctor/reporting-board/saved/tok-9");
+    await openSavedViews();
+    fireEvent.click(await screen.findByRole("button", { name: "Duplicate view" }));
+
+    await waitFor(() => expect(createReportingBoardSavedViewMock).toHaveBeenCalledWith(expect.objectContaining({ name: "Urgent CT copy", filters: expect.objectContaining({ priorityCode: "urgent" }) })));
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board/saved/tok-10"));
+  });
+
+  it("leaves a revoked saved-view route while preserving safe effective filters", async () => {
+    renderPage("/doctor/reporting-board/saved/tok-9?category=non_oncology");
+    await openSavedViews();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke link" }));
+
+    await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board?category=non_oncology&priorityCode=urgent"));
+    expect(screen.getByTestId("location-probe").textContent).not.toContain("saved/tok-9");
+    confirmSpy.mockRestore();
   });
 
   it("sends a test web push notification for the loaded saved view", async () => {

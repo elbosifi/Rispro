@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Pause, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
@@ -9,6 +9,11 @@ import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { useLanguage } from "@/providers/language-provider";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Textarea } from "@/components/shared";
 import { ProtocolingAppointmentWorkspace } from "@/pages/doctor/doctor-protocols-page";
+import {
+  buildReportingBoardSearch,
+  parseReportingBoardNavigation,
+  sanitizeReportingBoardSearch,
+} from "@/lib/navigation/reporting-board-navigation";
 import {
   bulkAssignNextReportingCases,
   bulkPlaceSelectedReportingCasesOnHold,
@@ -1724,11 +1729,10 @@ function BoardSettingsModal({
 export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
   const savedViewToken = params.token ?? searchParams.get("savedViewToken");
-  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, caseSource: "all", limit: 100, offset: 0 });
-  const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
   const [selectedCaseKeys, setSelectedCaseKeys] = useState<string[]>([]);
   const [saveName, setSaveName] = useState("");
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
@@ -1754,6 +1758,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [boardActionMessage, setBoardActionMessage] = useState<{ tone: "success" | "error"; text: string; detail?: string | null } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
+  const [privateSearch, setPrivateSearch] = useState<string | null>(null);
   const [boardRefreshing, setBoardRefreshing] = useState(false);
   const [fullResyncPending, setFullResyncPending] = useState(false);
   const [fullResync, setFullResync] = useState<FullResyncState | null>(storedFullResync);
@@ -1771,6 +1776,31 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
+  const initialBoardDefaults = useMemo(() => defaultFilters(undefined), []);
+  const [settingsBoardDefaults, setSettingsBoardDefaults] = useState<ReportingBoardFilters | null>(null);
+  const defaultBoardFilters = settingsBoardDefaults ?? initialBoardDefaults;
+  const tokenQuery = useQuery({
+    queryKey: ["doctor", "reporting-board", "saved-view-token", savedViewToken],
+    queryFn: () => fetchReportingBoardSavedViewByToken(savedViewToken || ""),
+    enabled: Boolean(savedViewToken),
+  });
+  const loadedSavedView = tokenQuery.data ?? null;
+  const navigationContext = useMemo(() => ({
+    defaultFilters: defaultBoardFilters,
+    savedViewFilters: loadedSavedView?.filters ?? null,
+  }), [defaultBoardFilters, loadedSavedView?.filters]);
+  const navigationState = useMemo(
+    () => parseReportingBoardNavigation(searchParams, navigationContext),
+    [navigationContext, searchParams],
+  );
+  const latestSearchParamsRef = useRef(searchParams);
+  useEffect(() => {
+    latestSearchParamsRef.current = searchParams;
+  }, [searchParams]);
+  const filters = useMemo(
+    () => ({ ...navigationState.filters, q: privateSearch }),
+    [navigationState.filters, privateSearch],
+  );
   const ohifAvailabilityQuery = useQuery({ queryKey: ["ohif", "availability"], queryFn: fetchOhifViewerAvailability });
   const boardRefreshInterval = Math.max(15, settingsQuery.data?.refreshIntervalSeconds ?? 30) * 1000;
   const casesQuery = useQuery({
@@ -1864,28 +1894,51 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not undo scheduled job assignments." }),
     onSettled: () => setBusyScheduledJobId(null),
   });
-  const tokenQuery = useQuery({
-    queryKey: ["doctor", "reporting-board", "saved-view-token", savedViewToken],
-    queryFn: () => fetchReportingBoardSavedViewByToken(savedViewToken || ""),
-    enabled: Boolean(savedViewToken),
-  });
-
   useEffect(() => {
     if (!settingsQuery.data) return;
-    setFilters((current) => ({ ...defaultFilters(settingsQuery.data), ...current }));
+    setSettingsBoardDefaults(defaultFilters(settingsQuery.data));
     setSettingsDraft(settingsQuery.data);
   }, [settingsQuery.data]);
 
   useEffect(() => {
-    if (!tokenQuery.data) return;
-    setLoadedSavedView(tokenQuery.data);
-    setFilters({ ...defaultFilters(settingsQuery.data), ...tokenQuery.data.filters });
-    setNotifications({ ...EMPTY_NOTIFICATIONS, ...tokenQuery.data.notificationSettings });
-  }, [settingsQuery.data, tokenQuery.data]);
+    if (tokenQuery.data) setNotifications({ ...EMPTY_NOTIFICATIONS, ...tokenQuery.data.notificationSettings });
+  }, [tokenQuery.data]);
 
   useEffect(() => {
-    setSearchText(filters.q ?? "");
-  }, [filters.q]);
+    setPrivateSearch(tokenQuery.data?.filters.q ?? null);
+  }, [savedViewToken, tokenQuery.data?.token]);
+
+  useEffect(() => {
+    if (!params.token && searchParams.has("savedViewToken")) return;
+    const sanitized = sanitizeReportingBoardSearch(searchParams, navigationContext);
+    if (sanitized.toString() !== searchParams.toString()) setSearchParams(sanitized, { replace: true });
+  }, [navigationContext, params.token, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!params.token && !searchParams.has("savedViewToken")) return;
+    if (params.token) return;
+    const legacyToken = searchParams.get("savedViewToken");
+    const safeSearch = sanitizeReportingBoardSearch(searchParams, navigationContext).toString();
+    if (legacyToken) {
+      navigate({ pathname: `/doctor/reporting-board/saved/${encodeURIComponent(legacyToken)}`, search: safeSearch ? `?${safeSearch}` : "" }, { replace: true });
+    } else {
+      navigate({ pathname: "/doctor/reporting-board", search: safeSearch ? `?${safeSearch}` : "" }, { replace: true });
+    }
+  }, [navigate, navigationContext, params.token, searchParams]);
+
+  useEffect(() => {
+    setSearchText(privateSearch ?? "");
+  }, [privateSearch]);
+
+  const navigateToSavedView = (view: Pick<ReportingBoardSavedView, "token" | "filters">, targetFilters: ReportingBoardFilters, replace: boolean) => {
+    const search = buildReportingBoardSearch(new URLSearchParams(), targetFilters, { defaultFilters: defaultBoardFilters, savedViewFilters: view.filters });
+    navigate({ pathname: `/doctor/reporting-board/saved/${encodeURIComponent(view.token)}`, search: search.toString() ? `?${search.toString()}` : "" }, { replace });
+  };
+
+  const navigateToDefaultBoard = (targetFilters: ReportingBoardFilters, replace: boolean) => {
+    const search = buildReportingBoardSearch(new URLSearchParams(), targetFilters, { defaultFilters: defaultBoardFilters });
+    navigate({ pathname: "/doctor/reporting-board", search: search.toString() ? `?${search.toString()}` : "" }, { replace });
+  };
 
   useEffect(() => {
     if (casesQuery.dataUpdatedAt > 0) setLastRefreshedAt(new Date(casesQuery.dataUpdatedAt));
@@ -1894,7 +1947,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const saveViewMutation = useMutation({
     mutationFn: () => createReportingBoardSavedView({ name: saveName, filters: compactFilters(filters), notificationSettings: notifications }),
     onSuccess: async (view) => {
-      setLoadedSavedView(view);
+      queryClient.setQueryData(["doctor", "reporting-board", "saved-view-token", view.token], view);
+      navigateToSavedView(view, filters, false);
       setSaveName("");
       setSavedViewQr(null);
       setSavedViewMessage({ tone: "success", text: "Saved view created." });
@@ -1910,9 +1964,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       active,
     }),
     onSuccess: async (view) => {
-      setLoadedSavedView(view.active ? view : null);
+      queryClient.setQueryData(["doctor", "reporting-board", "saved-view-token", view.token], view);
       setSavedViewQr(null);
       setSavedViewMessage({ tone: "success", text: view.active ? "Saved view updated." : "Saved view deactivated." });
+      if (view.active) navigateToSavedView(view, filters, true);
+      else navigateToDefaultBoard(filters, true);
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
     },
     onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update view." }),
@@ -1920,7 +1976,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const rotateViewMutation = useMutation({
     mutationFn: () => rotateReportingBoardSavedViewToken(loadedSavedView!.id),
     onSuccess: async (view) => {
-      setLoadedSavedView(view);
+      queryClient.setQueryData(["doctor", "reporting-board", "saved-view-token", view.token], view);
+      navigateToSavedView(view, filters, true);
       setSavedViewQr(null);
       setSavedViewMessage({ tone: "success", text: "Mobile link rotated. Previous QR codes no longer work." });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
@@ -1930,7 +1987,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const revokeViewMutation = useMutation({
     mutationFn: () => revokeReportingBoardSavedView(loadedSavedView!.id),
     onSuccess: async (view) => {
-      setLoadedSavedView(null);
+      navigateToDefaultBoard(filters, true);
       setSavedViewQr(null);
       setSavedViewMessage({ tone: "success", text: `${view.name} was revoked.` });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
@@ -1940,7 +1997,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const updateExpiryMutation = useMutation({
     mutationFn: (expiresAt: string | null) => updateReportingBoardSavedView(loadedSavedView!.id, { expiresAt }),
     onSuccess: async (view) => {
-      setLoadedSavedView(view);
+      queryClient.setQueryData(["doctor", "reporting-board", "saved-view-token", view.token], view);
       setSavedViewMessage({ tone: "success", text: view.expiresAt ? "Saved-view expiry updated." : "Saved-view expiry cleared." });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
     },
@@ -2160,7 +2217,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     .map((row) => row.comparisonRequestId!);
   const selectedHeldAppointmentRows = selectedRows.filter((row) => row.caseType === "appointment" && Boolean(row.reportingHold));
   const selectedUnheldAppointmentRows = selectedRows.filter((row) => row.caseType === "appointment" && !row.reportingHold);
-  const effectiveFilters = casesQuery.data?.filters ?? filters;
+  const effectiveFilters = { ...(casesQuery.data?.filters ?? {}), ...filters };
   const statsSummary = statsQuery.data?.summary;
   const doctorStats = statsQuery.data?.byDoctor ?? [];
   const canEditSettings = isManager(me);
@@ -2197,7 +2254,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const showCategoryMarker = visibleCategoryCount > 1;
   const activeAssignedDoctorId = filters.assignedDoctorId ?? effectiveFilters.assignedDoctorId ?? null;
   const showAssignedDoctorColumn = !activeAssignedDoctorId;
-  const boardDefaults = defaultFilters(settingsQuery.data);
+  const boardDefaults = defaultBoardFilters;
 
   const refreshReportingBoardAfterProtocolUpdate = async () => {
     await Promise.all([
@@ -2206,16 +2263,26 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     ]);
   };
 
+  const updateNavigation = (patch: Partial<ReportingBoardFilters>, options: { replace?: boolean } = { replace: true }) => {
+    const next = buildReportingBoardSearch(latestSearchParamsRef.current, patch, navigationContext);
+    latestSearchParamsRef.current = next;
+    setSearchParams(next, options);
+  };
+
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
-    setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
+    if (key === "q") {
+      setPrivateSearch(typeof value === "string" ? value : null);
+      return;
+    }
+    updateNavigation({ [key]: value } as Partial<ReportingBoardFilters>);
   };
 
   const setAssignmentShortcut = (assignmentStatus: ReportingBoardFilters["assignmentStatus"]) => {
-    setFilters((current) => ({ ...current, assignmentStatus, assignedDoctorId: null, offset: 0 }));
+    updateNavigation({ assignmentStatus, assignedDoctorId: null });
   };
 
   const setModalityShortcut = (modalityCode: string) => {
-    setFilters((current) => ({ ...current, modalityCode, modalityId: null, offset: 0 }));
+    updateNavigation({ modalityCode, modalityId: null });
   };
 
   const setPriorityShortcut = (priorityCode: string) => {
@@ -2224,62 +2291,40 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   };
 
   const applySearch = () => {
-    setFilter("q", searchText.trim() || null);
+    setPrivateSearch(searchText.trim() || null);
   };
 
   const clearSearch = () => {
     setSearchText("");
-    setFilter("q", null);
+    setPrivateSearch(null);
   };
 
   const resetToDefaultBoard = () => {
-    setLoadedSavedView(null);
-    setSearchParams({});
+    navigate("/doctor/reporting-board");
+    setPrivateSearch(null);
     setSearchText("");
-    setFilters(defaultFilters(settingsQuery.data));
   };
 
   const clearFilter = (key: string) => {
-    if (key === "q") setSearchText("");
-    setFilters((current) => {
-      const next: ReportingBoardFilters = { ...current, offset: 0 };
-      if (key === "dateFrom") {
-        next.dateFrom = null;
-        next.cutoffDate = null;
-      } else if (key === "dateTo") {
-        next.dateTo = null;
-      } else if (key === "modality") {
-        next.modalityId = null;
-        next.modalityCode = null;
-      } else if (key === "assignment") {
-        next.assignedDoctorId = null;
-        next.assignmentStatus = "all";
-      } else if (key === "finalizedByDoctorId") {
-        next.finalizedByDoctorId = null;
-      } else if (key === "assignmentMatch") {
-        next.assignmentMatch = "all";
-      } else if (key === "reportStatus") {
-        next.reportStatus = boardDefaults.reportStatus;
-      } else if (key === "requiresReport") {
-        next.requiresReport = boardDefaults.requiresReport;
-      } else if (key === "caseCategory") {
-        next.caseCategory = null;
-      } else if (key === "priorityCode") {
-        next.priorityCode = null;
-      } else if (key === "q") {
-        next.q = null;
-      } else if (key === "caseSource") {
-        next.caseSource = "all";
-      } else if (key === "sort") {
-        next.sortBy = "priority_study_date";
-        next.sortDirection = "asc";
-      } else if (key === "pinUrgentToTop") {
-        next.pinUrgentToTop = true;
-      } else if (key === "limit") {
-        next.limit = 100;
-      }
-      return next;
-    });
+    if (key === "q") {
+      setSearchText("");
+      setPrivateSearch(null);
+      return;
+    }
+    if (key === "dateFrom") updateNavigation({ dateFrom: null });
+    else if (key === "dateTo") updateNavigation({ dateTo: null });
+    else if (key === "modality") updateNavigation({ modalityId: null, modalityCode: null });
+    else if (key === "assignment") updateNavigation({ assignedDoctorId: null, assignmentStatus: "all" });
+    else if (key === "finalizedByDoctorId") updateNavigation({ finalizedByDoctorId: null });
+    else if (key === "assignmentMatch") updateNavigation({ assignmentMatch: "all" });
+    else if (key === "reportStatus") updateNavigation({ reportStatus: boardDefaults.reportStatus });
+    else if (key === "requiresReport") updateNavigation({ requiresReport: boardDefaults.requiresReport });
+    else if (key === "caseCategory") updateNavigation({ caseCategory: null });
+    else if (key === "priorityCode") updateNavigation({ priorityCode: null });
+    else if (key === "caseSource") updateNavigation({ caseSource: "all" });
+    else if (key === "sort") updateNavigation({ sortBy: "priority_study_date", sortDirection: "asc" });
+    else if (key === "pinUrgentToTop") updateNavigation({ pinUrgentToTop: true });
+    else if (key === "limit") updateNavigation({ limit: 100 });
   };
 
   const selectedModality = filters.modalityId
@@ -2523,7 +2568,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <Field label="Modality" compact>
             <select
               value={filters.modalityId ?? ""}
-              onChange={(event) => setFilters((current) => ({ ...current, modalityId: event.target.value ? Number(event.target.value) : null, modalityCode: null, offset: 0 }))}
+              onChange={(event) => setFilter("modalityId", event.target.value ? Number(event.target.value) : null)}
               className={inputClass()}
             >
               <option value="">Configured CT/MR</option>
@@ -2535,10 +2580,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               value={assignmentFilterValue}
               onChange={(event) => {
                 const value = event.target.value;
-                if (value === "all") setFilters((current) => ({ ...current, assignmentStatus: "all", assignedDoctorId: null, offset: 0 }));
-                else if (value === "unassigned") setFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, offset: 0 }));
-                else if (value === "assigned") setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: null, offset: 0 }));
-                else if (value.startsWith("doctor:")) setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: Number(value.slice(7)), offset: 0 }));
+                if (value === "all") updateNavigation({ assignmentStatus: "all", assignedDoctorId: null });
+                else if (value === "unassigned") updateNavigation({ assignmentStatus: "unassigned", assignedDoctorId: null });
+                else if (value === "assigned") updateNavigation({ assignmentStatus: "assigned", assignedDoctorId: null });
+                else if (value.startsWith("doctor:")) updateNavigation({ assignmentStatus: "assigned", assignedDoctorId: Number(value.slice(7)) });
               }}
               className={inputClass()}
             >
@@ -2889,15 +2934,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   </button>
                 </div>
                 <div className="mt-3 space-y-2">
-                  {(savedViewsQuery.data ?? []).map((view) => (
-                    <button key={view.id} type="button" aria-label={view.name} onClick={() => {
-                      setLoadedSavedView(view);
-                      setFilters({ ...defaultFilters(settingsQuery.data), ...view.filters });
-                      setNotifications({ ...EMPTY_NOTIFICATIONS, ...view.notificationSettings });
-                      setSearchParams({ savedViewToken: view.token });
-                      setSavedViewQr(null);
-                      setSavedViewMessage({ tone: "success", text: `Loaded saved view: ${view.name}.` });
-                    }} className="block w-full rounded-lg border px-3 py-2 text-left text-sm" style={{ borderColor: loadedSavedView?.id === view.id ? "var(--accent)" : "var(--border)" }}>
+                   {(savedViewsQuery.data ?? []).map((view) => (
+                     <button key={view.id} type="button" aria-label={view.name} onClick={() => {
+                       navigateToSavedView(view, { ...defaultBoardFilters, ...view.filters, q: view.filters.q ?? null }, false);
+                       setSavedViewQr(null);
+                       setSavedViewMessage({ tone: "success", text: `Loaded saved view: ${view.name}.` });
+                     }} className="block w-full rounded-lg border px-3 py-2 text-left text-sm" style={{ borderColor: loadedSavedView?.id === view.id ? "var(--accent)" : "var(--border)" }}>
                       <span className="flex items-center justify-between gap-2"><span>{view.name}</span><span className={view.active && !view.revokedAt ? "rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700" : "rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"}>{view.active && !view.revokedAt ? "Active" : "Inactive"}</span></span>
                       <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>{view.matchingCaseCount ?? "-"} matching cases · Last opened {view.lastAccessedAt ? new Date(view.lastAccessedAt).toLocaleString() : "never"}</span>
                       {view.expiresAt && <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Expires {new Date(view.expiresAt).toLocaleDateString()}</span>}
@@ -2942,7 +2984,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         <Copy size={14} /> Copy mobile link
                       </button>
                       <a href={mobileSavedViewLink} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Open mobile preview</a>
-                      <button type="button" disabled={saveViewMutation.isPending} onClick={() => createReportingBoardSavedView({ name: `${loadedSavedView.name} copy`, filters: compactFilters(loadedSavedView.filters), notificationSettings: loadedSavedView.notificationSettings }).then(async (view) => { setLoadedSavedView(view); await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] }); }).catch((err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not duplicate saved view." }))} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate view</button>
+                      <button type="button" disabled={saveViewMutation.isPending} onClick={() => createReportingBoardSavedView({ name: `${loadedSavedView.name} copy`, filters: compactFilters(loadedSavedView.filters), notificationSettings: loadedSavedView.notificationSettings }).then(async (view) => { queryClient.setQueryData(["doctor", "reporting-board", "saved-view-token", view.token], view); navigateToSavedView(view, { ...defaultBoardFilters, ...view.filters, q: view.filters.q ?? null }, false); await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] }); }).catch((err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not duplicate saved view." }))} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate view</button>
                       <button type="button" disabled={rotateViewMutation.isPending || !loadedSavedView.active || Boolean(loadedSavedView.revokedAt)} title={!loadedSavedView.active || loadedSavedView.revokedAt ? "Inactive or revoked links cannot be rotated." : undefined} onClick={() => { if (window.confirm("Rotate this link? Old QR codes will stop working immediately.")) rotateViewMutation.mutate(); }} className="h-9 rounded-lg border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Rotate link</button>
                       <button type="button" disabled={revokeViewMutation.isPending} onClick={() => { if (window.confirm("Revoke this public mobile link? It cannot be opened again.")) revokeViewMutation.mutate(); }} className="h-9 rounded-lg border px-3 text-sm font-semibold text-red-700" style={{ borderColor: "var(--border)" }}>Revoke link</button>
                       <button type="button" onClick={() => void showSavedViewQr()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
