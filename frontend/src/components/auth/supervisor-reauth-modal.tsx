@@ -18,6 +18,10 @@ function getErrorMessage(error: unknown): string | null {
   return null;
 }
 
+function isUnauthorizedError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "status" in error && (error as { status?: unknown }).status === 401);
+}
+
 export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = true }: SupervisorReAuthModalProps) {
   const { reAuth, reAuthWithPasskey } = useAuth();
   const { language } = useLanguage();
@@ -49,7 +53,7 @@ export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = true 
       await reAuth(password);
       onSuccess();
     } catch (err: unknown) {
-      setError(getErrorMessage(err) || t(language, "reauth.failed"));
+      setError(isUnauthorizedError(err) ? t(language, "reauth.invalidCredentials") : getErrorMessage(err) || t(language, "reauth.failed"));
     } finally {
       setIsPending(false);
     }
@@ -62,7 +66,7 @@ export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = true 
       await reAuthWithPasskey();
       onSuccess();
     } catch (err: unknown) {
-      setError(getErrorMessage(err) || t(language, "reauth.failed"));
+      setError(isUnauthorizedError(err) ? t(language, "reauth.invalidCredentials") : getErrorMessage(err) || t(language, "reauth.failed"));
     } finally {
       setIsPending(false);
     }
@@ -89,9 +93,9 @@ export function SupervisorReAuthModal({ onClose, onSuccess, allowPasskey = true 
               disabled={isPending}
               className="w-full py-2 px-4 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-50 text-stone-700 dark:text-stone-300 font-medium rounded-lg transition-colors text-sm"
             >
-              Use Passkey
+              {t(language, "reauth.usePasskey")}
             </button>
-            <p className="text-center text-xs text-stone-500 dark:text-stone-400">or use your password</p>
+            <p className="text-center text-xs text-stone-500 dark:text-stone-400">{t(language, "reauth.usePasswordInstead")}</p>
           </>
         ) : null}
 

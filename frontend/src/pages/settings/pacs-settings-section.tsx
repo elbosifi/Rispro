@@ -325,7 +325,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     const status = settingsError instanceof ApiError ? settingsError.status : undefined;
     const msg = (settingsError as Error).message;
     if (status === 401 || status === 403 || msg?.includes("re-authentication") || msg?.includes("403")) {
-      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["pacs", "orthanc-modalities"])} />;
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["pacs", "auto-completion-settings"])} />;
     }
     return <QueryError message={msg} />;
   }
@@ -408,7 +408,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                         {t(language, "settings.pacs.default")}
                       </span>
                     )}
-                    {modality.isCdRobot && <span className="px-1.5 py-0.5 text-xs bg-violet-100 text-violet-700 rounded">CD Robot</span>}
+                    {modality.isCdRobot && <span className="px-1.5 py-0.5 text-xs bg-violet-100 text-violet-700 rounded">{t(language, "settings.pacs.cdRobot")}</span>}
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
                     {modality.host || t(language, "settings.pacs.missingHost")}:{modality.port ?? t(language, "settings.pacs.invalidPort")} | {t(language, "settings.pacs.aet")}: {modality.aet || t(language, "settings.pacs.missingAet")}
@@ -833,7 +833,7 @@ function OrthancModalityForm({
       </label>
       <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
         <input type="checkbox" checked={form.isCdRobot} onChange={(e) => onChange({ ...form, isCdRobot: e.target.checked })} />
-        CD robot destination
+        {t(language, "settings.pacs.cdRobotDestination")}
       </label>
       <div className="flex gap-2">
         <button

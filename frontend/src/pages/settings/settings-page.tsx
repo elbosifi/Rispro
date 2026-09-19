@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Search, ShieldCheck } from "lucide-react";
@@ -49,48 +49,8 @@ import {
   type SettingsGroup,
   type SettingsSection,
 } from "./settings-page.composition";
-function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
-  if (section === "patient_import") {
-    return "Patient Import";
-  }
-  if (section === "patient_duplicate_resolver") {
-    return "Patient Duplicate Resolver";
-  }
-  if (section === "patient_qr_self_service") {
-    return "إعدادات صفحة المريض ورمز QR";
-  }
-  if (section === "passkey_configuration") {
-    return "Passkey Configuration";
-  }
-  if (section === "appointment_slip") {
-    return "Appointment Slip Settings";
-  }
-  if (section === "qz_tray") {
-    return "Printing → QZ Tray";
-  }
-  if (section === "sonicdicom_reports") {
-    return "SonicDICOM Reports";
-  }
-  if (section === "ohif_viewer") {
-    return "OHIF Viewer";
-  }
-  if (section === "action_pin_policy") {
-    return "Action PIN Policy";
-  }
-  if (section === "sante_worklist_hl7") {
-    return "Sante Worklist Server";
-  }
-  if (section === "system_diagnostics") {
-    return "System Diagnostics";
-  }
-  if (section === "request_scan_automation") {
-    return "Request Scan Automation";
-  }
-  if (section === "email_notifications") return "Email & Notifications";
-  if (section === "authoritative_orthanc") {
-    return "Authoritative Orthanc";
-  }
-  return _t(`settings.section.${section}` as TranslationKey);
+function sectionLabel(t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
+  return t(`settings.section.${section}` as TranslationKey);
 }
 
 function groupLabel(t: (key: TranslationKey, params?: Record<string, string | number>) => string, group: SettingsGroup): string {
@@ -137,17 +97,18 @@ export default function SettingsPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["auth-session"] }),
       ...keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
+      queryClient.invalidateQueries({ refetchType: "active" }),
     ]);
   };
 
-  const requestReAuth = (queryKey: string[]) => {
+  const requestReAuth = useCallback((queryKey: string[]) => {
     setPendingReAuthKeys((prev) =>
       prev.some((key) => key.length === queryKey.length && key.every((part, index) => part === queryKey[index]))
         ? prev
         : [...prev, queryKey]
     );
     setShowReAuthModal(true);
-  };
+  }, []);
 
   const visibleSections = SETTINGS_MENU_SECTIONS.filter((key) => {
     if (!isSettingsMenuSectionVisible(key, user?.role)) return false;

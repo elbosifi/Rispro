@@ -17,13 +17,20 @@ describe("i18n catalog parity", () => {
     const englishKeys = Object.keys(__i18nTestables.en).sort();
     const arabicKeys = Object.keys(__i18nTestables.ar).sort();
 
-    expect(englishKeys).toHaveLength(2867);
+    expect(englishKeys).toHaveLength(2886);
     expect(arabicKeys).toEqual(englishKeys);
   });
 
   it("keeps every translation key and value byte-for-byte stable", () => {
-    expect(catalogHash(__i18nTestables.en)).toBe("2f8442dbfdccd6a7e635213864770f3b22c7138021c9ef380c19fafe13d9214d");
-    expect(catalogHash(__i18nTestables.ar)).toBe("4eb22921fd491a5b1242b89302f1fe7eea41847308ae2f073451a5b1358d6fb1");
+    expect(catalogHash(__i18nTestables.en)).toBe("b96fd74c05472735a598875e1ddd15dccd973dd5d7d8f1546c05c28e99fedc14");
+    expect(catalogHash(__i18nTestables.ar)).toBe("aa313ba90d09c18aedbec5859c93d563d70a68f335cd2ce5369db8229a63ff55");
+  });
+
+  it("keeps interpolation placeholders aligned between English and Arabic", () => {
+    const placeholders = (value: string) => [...value.matchAll(/\{([^{}]+)\}/g)].map((match) => match[1]).sort();
+    for (const key of Object.keys(__i18nTestables.en) as Array<keyof typeof __i18nTestables.en>) {
+      expect(placeholders(__i18nTestables.ar[key]), key).toEqual(placeholders(__i18nTestables.en[key]));
+    }
   });
 
   it("preserves interpolation and localized fallback behavior", () => {
@@ -68,5 +75,10 @@ describe("i18n catalog parity", () => {
       expect(t("ar", key)).not.toBe(key);
       expect(t("ar", key)).not.toBe(t("en", key));
     }
+
+    expect(t("en", "settings.section.patient_import")).toBe("Patient Import");
+    expect(t("ar", "settings.section.patient_import")).toBe("استيراد المرضى");
+    expect(t("en", "reauth.usePasskey")).toBe("Use Passkey");
+    expect(t("ar", "reauth.usePasskey")).toBe("استخدم مفتاح المرور");
   });
 });
