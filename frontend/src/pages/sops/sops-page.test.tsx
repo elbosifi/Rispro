@@ -125,6 +125,28 @@ describe("SopsPage", () => {
     expect(api.confirmSopXlsxImport).toHaveBeenCalledWith(7, "1.0", expect.objectContaining({ expectedDraftUpdatedAt: draftVersion.updatedAt }));
   });
 
+  it("blocks preview when inspect reports row-level workbook errors", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    api.inspectSopXlsxImport.mockResolvedValueOnce({
+      format: "xlsx",
+      formatVersion: "1",
+      sheetName: "SOP",
+      columns: [],
+      missingColumns: [],
+      sectionCount: 8,
+      metadata: { sopCode: "RAD-MRI-001", title: "MRI Safety", category: "MRI", sourceVersion: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial draft" },
+      structuralErrors: ["Row 7: Required section 'procedure' cannot be blank."],
+    });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    await user.click(await screen.findByRole("button", { name: "Import Excel" }));
+    await user.upload(screen.getByLabelText("Excel workbook"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    expect(await screen.findByText("Workbook needs attention")).toBeTruthy();
+    expect(screen.getByText("Row 7: Required section 'procedure' cannot be blank.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview changes" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Confirm import" })).toBeNull();
+  });
+
   it("starts the fixed eight-section editor with required controls and saves a draft", async () => {
     const user = userEvent.setup();
     renderPage();

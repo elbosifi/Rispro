@@ -151,6 +151,16 @@ test("SOP XLSX export, external edit, preview, confirm, invalid validation, Arab
   await expect(page.getByRole("button", { name: "Confirm import", exact: true })).toHaveCount(0);
   await screenshot("04-sop-xlsx-import-validation-error.png");
 
+  const blankProcedurePath = testInfo.outputPath("sop-invalid-blank-procedure.xlsx");
+  await writeWorkbook(initialPath, blankProcedurePath, { procedure: "" });
+  await page.getByRole("button", { name: "Choose another workbook", exact: true }).click();
+  await page.getByLabel("Excel workbook").setInputFiles(blankProcedurePath);
+  await expect(page.getByText("Workbook needs attention")).toBeVisible();
+  await expect(page.getByText("Row 7: Required section 'procedure' cannot be blank.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview changes", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Confirm import", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Publish SOP", exact: true })).toBeVisible();
+
   expect(pageErrors, `Unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);
   expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join(" | ")}`).toEqual([]);
 });

@@ -369,8 +369,13 @@ function parseSopWorksheet(worksheet: ParsedWorksheet): ParsedSopWorkbook {
   return { columns, rows, formatVersion, metadata, structuralErrors, metadataErrors: [...new Set(metadataErrors)] };
 }
 
+function workbookValidationErrors(parsed: ParsedSopWorkbook): string[] {
+  const rowErrors = parsed.rows.flatMap((row) => row.errors.map((error) => `Row ${row.rowNumber}: ${error}`));
+  return [...new Set([...parsed.structuralErrors, ...parsed.metadataErrors, ...rowErrors])];
+}
+
 function normalizeIdentityMetadata(parsed: ParsedSopWorkbook, target: SopSummary): { errors: string[]; sourceVersion: string; effectiveDate: string | null; changeSummary: string } {
-  const errors = [...parsed.structuralErrors, ...parsed.metadataErrors];
+  const errors = workbookValidationErrors(parsed);
   let sourceVersion = parsed.metadata.source_version ?? "";
   if (sourceVersion) {
     try { sourceVersion = normalizeSopVersion(sourceVersion); } catch { errors.push("source_version must use the form 1.0."); }
@@ -404,7 +409,7 @@ function buildPlan(parsed: ParsedSopWorkbook, target: SopImportTarget): SopImpor
     const row = sectionRow(parsed, section.key);
     const currentText = sopSectionContentToPlainText(section.content);
     const importedText = normalizeSopXlsxText(row?.content ?? "");
-    const errors = row?.errors ? [...row.errors] : [`Section '${section.key}' is missing from the workbook.`];
+    const errors = row ? row.errors.map((error) => `Row ${row.rowNumber}: ${error}`) : [`Section '${section.key}' is missing from the workbook.`];
     const action: SopXlsxSectionPreview["action"] = errors.length || metadata.errors.length ? "invalid" : normalizeSopXlsxText(currentText) === importedText ? "unchanged" : "changed";
     if (action === "changed") importedContent.set(section.key, sopPlainTextToContent(importedText));
     return { sectionKey: section.key, sectionTitle: section.title, action, errors, currentText, importedText };
@@ -502,7 +507,7 @@ export async function inspectSopXlsxImport(sopIdValue: unknown, versionValue: un
       effectiveDate: parsed.metadata.effective_date,
       changeSummary: parsed.metadata.change_summary,
     },
-    structuralErrors: [...new Set([...identity.errors])],
+    structuralErrors: [...new Set(identity.errors)],
   };
 }
 

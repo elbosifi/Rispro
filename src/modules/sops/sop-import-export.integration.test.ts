@@ -37,6 +37,13 @@ async function workbookWithChanges(base64: string, changes: Record<string, unkno
   return (await buildWorkbookBuffer([{ name: "SOP", headers: Object.keys(rows[0] ?? {}), rows: changedRows }])).toString("base64");
 }
 
+async function workbookWithRowMutations(base64: string, mutate: (row: Record<string, unknown>, index: number) => Record<string, unknown>): Promise<string> {
+  const { XLSX, workbook } = await readWorkbookFromBase64(base64);
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.SOP, { defval: "", raw: false });
+  const changedRows = rows.map((row, index) => mutate({ ...row }, index));
+  return (await buildWorkbookBuffer([{ name: "SOP", headers: Object.keys(rows[0] ?? {}), rows: changedRows }])).toString("base64");
+}
+
 test("SOP XLSX round trip preserves unchanged rich JSON and imports Arabic/list edits into a draft", async () => {
   const marker = crypto.randomUUID().slice(0, 8).toUpperCase();
   const code = `RAD-XLSX-${marker}`;
@@ -127,4 +134,56 @@ test("SOP XLSX text conversion preserves Arabic and normalizes changed lists", (
   const content = sopPlainTextToContent(text);
   assert.equal(sopSectionContentToPlainText(content), "- سلامة MRI\n- Check identity\n1. First\n2. Second");
   assert.equal(JSON.stringify(content).includes('"dir":"auto"'), true);
+});
+
+test("SOP XLSX inspect surfaces row-level section validation errors", async () => {
+  const marker = crypto.randomUUID().slice(0, 8).toUpperCase();
+  const code = `RAD-XLSX-INSPECT-${marker}`;
+  const user = await pool.query<{ id: number }>("insert into users(username,full_name,password_hash,role,is_active) values($1,$2,'test','supervisor',true) returning id", [`sop_inspect_${marker.toLowerCase()}`, "SOP inspect test"]);
+  const actor = Number(user.rows[0]!.id);
+  let sopId: number | null = null;
+  try {
+    const created = await createSop({ title: "Inspect Validation SOP", code, category: "MRI", version: "1.0", effectiveDate: "2026-10-01", changeSummary: "Inspect validation", contentJson: documentWithRichContent() }, actor, "supervisor");
+    sopId = created.sop.id;
+    const exported = await exportSopVersionXlsx(sopId, "1.0", "supervisor");
+    const input = { fileContentBase64: exported.buffer.toString("base64"), fileName: exported.filename };
+    assert.deepEqual((await inspectSopXlsxImport(sopId, "1.0", input, "supervisor")).structuralErrors, []);
+
+    const cases = [
+      {
+        name: "blank required section",
+        mutate: (row: Record<string, unknown>) => row.section_key === "procedure" ? { ...row, content: "" } : row,
+        expected: "Row 7: Required section 'procedure' cannot be blank.",
+      },
+      {
+        name: "duplicate section key",
+        mutate: (row: Record<string, unknown>) => row.section_key === "responsibilities" ? { ...row, section_key: "scope" } : row,
+        expected: "Row 4: Duplicate section_key 'scope'.",
+      },
+      {
+        name: "incorrect canonical order",
+        mutate: (row: Record<string, unknown>, index: number) => index === 0 ? { ...row, order: "8" } : row,
+        expected: "Row 2: Canonical section order must be 1.",
+      },
+      {
+        name: "wrong section title",
+        mutate: (row: Record<string, unknown>) => row.section_key === "procedure" ? { ...row, section_title: "Steps" } : row,
+        expected: "Row 7: Expected section_title 'Procedure'.",
+      },
+    ];
+
+    for (const scenario of cases) {
+      const mutated = await workbookWithRowMutations(input.fileContentBase64, scenario.mutate);
+      const inspected = await inspectSopXlsxImport(sopId, "1.0", { ...input, fileContentBase64: mutated }, "supervisor");
+      assert.ok(inspected.structuralErrors.includes(scenario.expected), `${scenario.name} was not surfaced: ${inspected.structuralErrors.join(" | ")}`);
+      assert.ok(inspected.structuralErrors.length > 0);
+    }
+  } finally {
+    if (sopId != null) {
+      await pool.query("delete from audit_log where entity_type='sop' and entity_id=$1", [sopId]);
+      await pool.query("delete from sop_versions where sop_id=$1", [sopId]);
+      await pool.query("delete from sops where id=$1", [sopId]);
+    }
+    await pool.query("delete from users where id=$1", [actor]);
+  }
 });
