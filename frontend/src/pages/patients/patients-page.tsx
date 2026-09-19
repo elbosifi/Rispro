@@ -481,7 +481,7 @@ export default function PatientsPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-semibold">{patient.arabicFullName}</p>
+                      <p className="break-words font-semibold leading-snug">{patient.arabicFullName}</p>
                       <p className="mt-1 font-mono text-xs text-muted-foreground">{patient.mrn || "—"}</p>
                     </div>
                     <Badge variant={patient.nextAppointment ? "info" : "neutral"} size="sm">

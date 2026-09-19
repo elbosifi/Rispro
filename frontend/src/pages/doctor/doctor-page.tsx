@@ -600,7 +600,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
             })}
           </nav>
         </aside>
-        <main className={`p-4 lg:h-full lg:min-h-0 lg:min-w-0 lg:p-6 ${isReportingBoardRoute ? "lg:overflow-hidden" : "lg:overflow-y-auto lg:overscroll-contain"}`}>
+        <main className={`min-w-0 p-4 lg:h-full lg:min-h-0 lg:min-w-0 lg:p-6 ${isReportingBoardRoute ? "lg:overflow-hidden" : "lg:overflow-y-auto lg:overscroll-contain"}`}>
           <DoctorPortalRoutes me={me} />
         </main>
       </div>

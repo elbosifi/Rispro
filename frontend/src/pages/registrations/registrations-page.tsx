@@ -1053,14 +1053,14 @@ export default function RegistrationsPage() {
                       {[categoryLabel, modalityName, examName, formatDateLy(apt.appointmentDate)].filter(Boolean).join(" • ")}
                     </p>
                     <ProtocolStatus appointment={apt} />
-                    <div className="mt-3 grid grid-cols-6 gap-1" onClick={(event) => event.stopPropagation()}>
-                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
+                    <div className="mt-3 grid grid-cols-3 gap-1.5 sm:grid-cols-6" onClick={(event) => event.stopPropagation()}>
+                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.print")} title={t("registrations.print")} className="h-10 w-full px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
                         <Printer size={15} />
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.previewSlip")} title={t("registrations.previewSlip")} className="h-9 px-0" onClick={() => openSlipPreview(apt)}>
+                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.previewSlip")} title={t("registrations.previewSlip")} className="h-10 w-full px-0" onClick={() => openSlipPreview(apt)}>
                         <Eye size={15} />
                       </Button>
-                      <Button type="button" size="sm" variant="ghost" className="h-9 px-0" onClick={() => void handleViewAppointmentLink(apt)}>
+                      <Button type="button" size="sm" variant="ghost" aria-label={t("registrations.link")} title={t("registrations.viewAppointmentLink")} className="h-10 w-full px-0" onClick={() => void handleViewAppointmentLink(apt)}>
                         <ExternalLink size={15} />
                       </Button>
                       <Button
@@ -1069,16 +1069,16 @@ export default function RegistrationsPage() {
                         variant="secondary"
                         aria-label={t("registrations.report")}
                         title={publicAppointmentToken(apt) ? t("registrations.report") : t("registrations.reportUnavailable")}
-                        className="h-9 px-0"
+                        className="h-10 w-full px-0"
                         disabled={!publicAppointmentToken(apt)}
                         onClick={() => openReportPanel(apt, true)}
                       >
                         <FileText size={15} />
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" disabled={!apt.phone1} onClick={() => openWhatsappDialog(apt)}>
+                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.whatsapp")} title={apt.phone1 ? t("registrations.whatsapp") : t("registrations.whatsappNoPhone")} className="h-10 w-full px-0" disabled={!apt.phone1} onClick={() => openWhatsappDialog(apt)}>
                         WA
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" disabled={!apt.patientWebPushSubscribed} onClick={() => openPatientNotificationDialog(apt)}>
+                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.webPushSend")} title={apt.patientWebPushSubscribed ? t("registrations.webPushSend") : t("registrations.webPushUnavailable")} className="h-10 w-full px-0" disabled={!apt.patientWebPushSubscribed} onClick={() => openPatientNotificationDialog(apt)}>
                         <Bell size={15} />
                       </Button>
                     </div>

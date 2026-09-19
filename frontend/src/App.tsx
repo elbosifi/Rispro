@@ -319,7 +319,7 @@ function AppContent() {
           onNavigate={handleNavigate}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
           <Routes>
             <Route path="/" element={<Navigate to={effectiveDefaultLandingPath} replace />} />
             <Route path="/dashboard" element={guardedPage("dashboard", <DashboardPage />)} />

@@ -2683,8 +2683,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         />}
       </section>
 
-      <div className={`${savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"} lg:min-h-0 lg:flex-1`}>
-        <section className="space-y-3 lg:flex lg:min-h-0 lg:flex-col lg:space-y-2">
+      <div className={`${savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"} min-w-0 lg:min-h-0 lg:flex-1`}>
+        <section className="min-w-0 space-y-3 lg:flex lg:min-h-0 lg:flex-col lg:space-y-2">
           {selectedCaseKeys.length === 0 && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
           {selectedCaseKeys.length > 0 && (
           <div className="sticky top-0 z-30 rounded-lg border p-3 shadow-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
