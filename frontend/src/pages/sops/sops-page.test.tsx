@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import SopsPage from "./sops-page";
@@ -35,6 +35,11 @@ function renderPage(role = "supervisor", entry = "/sops") {
 }
 
 describe("SopsPage", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     api.fetchSopMeta.mockResolvedValue(meta);
@@ -186,6 +191,84 @@ describe("SopsPage", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "SOP Library" })).toBeTruthy());
     expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+  });
+
+  it("uses the existing discard dialog for native Back and keeps the editor state", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({ idx: 1, key: "draft" }, "", "/sops/7?version=1.0");
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Native history edit");
+
+    const historyGo = vi.spyOn(window.history, "go").mockImplementation((delta) => {
+      if (delta === 1) {
+        window.history.replaceState({ idx: 1, key: "draft" }, "", "/sops/7?version=1.0");
+        window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+      }
+    });
+    window.history.replaceState({ idx: 0, key: "library" }, "", "/sops");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+
+    expect(await screen.findByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
+    expect(historyGo).toHaveBeenCalledWith(1);
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Native history edit");
+    expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+  });
+
+  it("replays the pending native Back once when discard is confirmed", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({ idx: 1, key: "draft" }, "", "/sops/7?version=1.0");
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Discard through native history");
+
+    const historyGo = vi.spyOn(window.history, "go").mockImplementation((delta) => {
+      if (delta === 1) {
+        window.history.replaceState({ idx: 1, key: "draft" }, "", "/sops/7?version=1.0");
+        window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+      }
+      if (delta === -1) {
+        window.history.replaceState({ idx: 0, key: "library" }, "", "/sops");
+      }
+    });
+    window.history.replaceState({ idx: 0, key: "library" }, "", "/sops");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+    expect(historyGo).toHaveBeenNthCalledWith(1, 1);
+    expect(historyGo).toHaveBeenNthCalledWith(2, -1);
+    expect(historyGo).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+  });
+
+  it("removes native history protection after a successful save and on editor unmount", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({ idx: 1, key: "draft" }, "", "/sops/7?version=1.0");
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    api.fetchSop.mockResolvedValue({ sop: draftSop, versions: [draftVersion] });
+    const rendered = renderPage("supervisor", "/sops/7?version=1.0");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Saved native history edit");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(api.updateSopDraft).toHaveBeenCalled());
+
+    const historyGo = vi.spyOn(window.history, "go");
+    window.history.replaceState({ idx: 0, key: "library" }, "", "/sops");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    expect(historyGo).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+
+    await user.clear(title);
+    await user.type(title, "Dirty before unmount");
+    rendered.unmount();
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    expect(historyGo).not.toHaveBeenCalled();
   });
 
   it("exposes revision and archive actions only to management users", async () => {

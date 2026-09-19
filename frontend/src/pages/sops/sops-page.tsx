@@ -49,7 +49,10 @@ import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
-import { registerUnsavedNavigationGuard } from "@/lib/unsaved-navigation-guard";
+import {
+  proceedWithUnsavedNavigation,
+  registerUnsavedNavigationGuard,
+} from "@/lib/unsaved-navigation-guard";
 
 const FALLBACK_SECTIONS: SopSectionDefinition[] = [
   { key: "purpose", title: "Purpose", required: true },
@@ -561,7 +564,10 @@ function EditorForm({
     [dirty],
   );
 
-  useEffect(() => registerUnsavedNavigationGuard(requestLeave), [requestLeave]);
+  useEffect(() => {
+    if (!dirty) return;
+    return registerUnsavedNavigationGuard(requestLeave);
+  }, [dirty, requestLeave]);
   useEffect(() => {
     if (!dirty) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -801,7 +807,7 @@ function EditorForm({
                 const proceed = pendingNavigation;
                 setPendingNavigation(null);
                 setDiscardOpen(false);
-                proceed?.();
+                if (proceed) proceedWithUnsavedNavigation(proceed);
               }}
             >
               Discard changes
