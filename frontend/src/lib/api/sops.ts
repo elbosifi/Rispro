@@ -43,6 +43,61 @@ export interface SopSummary {
 }
 export interface SopDetail { sop: SopSummary; versions: SopVersion[]; }
 export interface SopMeta { categories: string[]; sections: SopSectionDefinition[]; }
+export interface SopXlsxSectionPreview {
+  sectionKey: string;
+  sectionTitle: string;
+  action: "changed" | "unchanged" | "invalid";
+  errors: string[];
+  currentText: string;
+  importedText: string;
+}
+export interface SopXlsxInspect {
+  format: "xlsx";
+  formatVersion: string | null;
+  sheetName: string;
+  columns: string[];
+  missingColumns: string[];
+  sectionCount: number;
+  metadata: {
+    sopCode: string | null;
+    title: string | null;
+    category: string | null;
+    sourceVersion: string | null;
+    effectiveDate: string | null;
+    changeSummary: string | null;
+  };
+  structuralErrors: string[];
+}
+export interface SopXlsxPreview {
+  format: "xlsx";
+  formatVersion: string | null;
+  sheetName: string;
+  columns: string[];
+  missingColumns: string[];
+  sectionCount: number;
+  sopCode: string | null;
+  title: string | null;
+  category: string | null;
+  sourceVersion: string | null;
+  targetVersion: string;
+  targetUpdatedAt: string;
+  sections: SopXlsxSectionPreview[];
+  effectiveDate: { current: string | null; imported: string | null; changed: boolean };
+  changeSummary: { current: string; imported: string; changed: boolean };
+  errors: string[];
+  canConfirm: boolean;
+}
+export interface SopXlsxConfirmResult {
+  sop: SopSummary;
+  version: SopVersion;
+  summary: {
+    changedSectionKeys: string[];
+    effectiveDateChanged: boolean;
+    changeSummaryChanged: boolean;
+    sourceVersion: string;
+    targetVersion: string;
+  };
+}
 
 export const fetchSopMeta = () => api<SopMeta>("/sops/meta");
 export const fetchSops = (filters: { search?: string; category?: string; status?: string } = {}) => {
@@ -60,3 +115,30 @@ export const updateSopDraft = (id: number, version: string, payload: { title: st
 export const createSopRevision = (id: number, payload: { version: string; changeSummary: string; effectiveDate?: string }) => api<{ version: SopVersion }>(`/sops/${id}/revisions`, { method: "POST", body: JSON.stringify(payload) });
 export const publishSopVersion = (id: number, version: string) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}/publish`, { method: "POST", body: JSON.stringify({}) });
 export const archiveSop = (id: number) => api<{ sop: SopSummary }>(`/sops/${id}/archive`, { method: "POST", body: JSON.stringify({}) });
+
+export async function downloadSopXlsx(id: number, version: string): Promise<void> {
+  const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/export.xlsx`, { credentials: "include" });
+  if (!response.ok) {
+    let message = "Workbook download failed.";
+    try {
+      const body = await response.json() as { error?: { message?: string } };
+      message = body.error?.message || message;
+    } catch { /* Keep the safe fallback for non-JSON download errors. */ }
+    throw new Error(message);
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `sop-v${version}.xlsx`;
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export const inspectSopXlsxImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null }) =>
+  api<SopXlsxInspect>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/inspect`, { method: "POST", body: JSON.stringify(payload) });
+export const previewSopXlsxImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null }) =>
+  api<SopXlsxPreview>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/preview`, { method: "POST", body: JSON.stringify(payload) });
+export const confirmSopXlsxImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null; expectedDraftUpdatedAt: string }) =>
+  api<SopXlsxConfirmResult>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/confirm`, { method: "POST", body: JSON.stringify(payload) });

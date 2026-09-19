@@ -7,7 +7,7 @@ import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import SopsPage from "./sops-page";
 
-const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn() } }));
+const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn() } }));
 vi.mock("@/lib/api/sops", () => api);
 vi.mock("./sop-editor", () => ({
   createEmptySopDocument: (definitions: Array<{ key: string; title: string; required: boolean }>) => ({ type: "sop", version: 1, sections: definitions.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph" }] } })) }),
@@ -50,6 +50,10 @@ describe("SopsPage", () => {
     api.createSopRevision.mockResolvedValue({ version: draftVersion });
     api.publishSopVersion.mockResolvedValue({ sop: publishedSop, version: publishedVersion });
     api.archiveSop.mockResolvedValue({ sop: { ...publishedSop, status: "archived" } });
+    api.downloadSopXlsx.mockResolvedValue(undefined);
+    api.inspectSopXlsxImport.mockResolvedValue({ format: "xlsx", formatVersion: "1", sheetName: "SOP", columns: [], missingColumns: [], sectionCount: 8, metadata: { sopCode: "RAD-MRI-001", title: "MRI Safety", category: "MRI", sourceVersion: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial draft" }, structuralErrors: [] });
+    api.previewSopXlsxImport.mockResolvedValue({ format: "xlsx", formatVersion: "1", sheetName: "SOP", columns: [], missingColumns: [], sectionCount: 8, sopCode: "RAD-MRI-001", title: "MRI Safety", category: "MRI", sourceVersion: "1.0", targetVersion: "1.0", targetUpdatedAt: draftVersion.updatedAt, sections: sections.map((section, index) => ({ sectionKey: section.key, sectionTitle: section.title, action: index === 0 ? "changed" : "unchanged", errors: [], currentText: "Current text", importedText: index === 0 ? "Imported text" : "Current text" })), effectiveDate: { current: "2026-10-01", imported: "2026-10-02", changed: true }, changeSummary: { current: "Initial draft", imported: "Imported summary", changed: true }, errors: [], canConfirm: true });
+    api.confirmSopXlsxImport.mockResolvedValue({ sop: draftSop, version: { ...draftVersion, effectiveDate: "2026-10-02", changeSummary: "Imported summary" }, summary: { changedSectionKeys: ["purpose"], effectiveDateChanged: true, changeSummaryChanged: true, sourceVersion: "1.0", targetVersion: "1.0" } });
   });
 
   it("renders the library and sends search, category, and status filters", async () => {
@@ -82,6 +86,43 @@ describe("SopsPage", () => {
     api.fetchSops.mockResolvedValueOnce({ sops: [] });
     renderPage();
     expect(await screen.findByText("No SOPs match the selected filters.")).toBeTruthy();
+  });
+
+  it("shows Export Excel for readable versions and Import Excel only for a clean management draft", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: publishedSop, versions: [publishedVersion, oldVersion] });
+    const reception = renderPage("receptionist", "/sops/7?version=1.0");
+    expect(await screen.findByRole("button", { name: "Export Excel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Import Excel" })).toBeNull();
+    expect(api.downloadSopXlsx).not.toHaveBeenCalled();
+    reception.unmount();
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    expect(await screen.findByRole("button", { name: "Import Excel" })).toBeTruthy();
+    const title = screen.getByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Unsaved title");
+    expect(screen.getByRole("button", { name: "Import Excel" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("Save the current RISpro draft before importing Excel.")).toBeTruthy();
+  });
+
+  it("validates, previews, and confirms an uploaded workbook through the draft editor", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    api.fetchSop.mockResolvedValue({ sop: draftSop, versions: [draftVersion] });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    await user.click(await screen.findByRole("button", { name: "Import Excel" }));
+    await user.upload(screen.getByLabelText("Excel workbook"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    expect(await screen.findByText("Workbook structure is valid")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(await screen.findByText("Workbook summary")).toBeTruthy();
+    expect(screen.getAllByText("Changed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unchanged").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Changed sections are imported as normalized SOP text/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Confirm import" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Excel changes imported into draft v1.0. 1 section changed.");
+    expect((screen.getByLabelText("Change summary") as HTMLTextAreaElement).value).toBe("Imported summary");
+    expect(api.confirmSopXlsxImport).toHaveBeenCalledWith(7, "1.0", expect.objectContaining({ expectedDraftUpdatedAt: draftVersion.updatedAt }));
   });
 
   it("starts the fixed eight-section editor with required controls and saves a draft", async () => {

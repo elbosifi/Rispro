@@ -4,8 +4,10 @@ import {
   Archive,
   BookOpen,
   CirclePlus,
+  Download,
   Eye,
   FileClock,
+  FileSpreadsheet,
   Pencil,
   ShieldCheck,
 } from "lucide-react";
@@ -35,6 +37,7 @@ import {
   archiveSop,
   createSop,
   createSopRevision,
+  downloadSopXlsx,
   fetchSop,
   fetchSopMeta,
   fetchSops,
@@ -44,9 +47,11 @@ import {
   type SopSectionDefinition,
   type SopSummary,
   type SopVersion,
+  type SopXlsxConfirmResult,
 } from "@/lib/api/sops";
 import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
+import { SopXlsxImportDialog } from "./sop-xlsx-import-dialog";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import {
@@ -542,6 +547,9 @@ function EditorForm({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
   const publishInFlight = useRef(false);
   const currentSignature = draftSignature({
     title,
@@ -641,6 +649,42 @@ function EditorForm({
       setPublishBusy(false);
     }
   };
+  const exportCurrentDraft = async () => {
+    if (!isExisting || exportBusy || save.isPending || publishBusy || publishing) return;
+    setExportBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const saved = dirty ? await save.mutateAsync() : null;
+      await downloadSopXlsx(saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
+    } finally {
+      setExportBusy(false);
+    }
+  };
+  const handleImported = async (result: SopXlsxConfirmResult) => {
+    setTitle(result.sop.title);
+    setCode(result.sop.code);
+    setCategory(result.sop.category);
+    setVersion(result.version.version);
+    setEffectiveDate(result.version.effectiveDate ?? "");
+    setChangeSummary(result.version.changeSummary);
+    setDocument(result.version.contentJson);
+    setSavedSignature(draftSignature({
+      title: result.sop.title,
+      category: result.sop.category,
+      version: result.version.version,
+      effectiveDate: result.version.effectiveDate ?? "",
+      changeSummary: result.version.changeSummary,
+      document: result.version.contentJson,
+    }));
+    setImportOpen(false);
+    setError(null);
+    setSuccess(`Excel changes imported into draft v${result.version.version}. ${result.summary.changedSectionKeys.length} section${result.summary.changedSectionKeys.length === 1 ? "" : "s"} changed.`);
+    await queryClient.invalidateQueries({ queryKey: ["sops", "detail", result.sop.id] });
+    await queryClient.invalidateQueries({ queryKey: ["sops"] });
+  };
   const canSave =
     title.trim() &&
     code.trim() &&
@@ -731,6 +775,29 @@ function EditorForm({
           {save.isPending ? "Saving…" : "Save Draft"}
         </Button>
         {isExisting ? (
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void exportCurrentDraft()}
+              disabled={save.isPending || exportBusy || publishBusy || publishing}
+            >
+              <Download className="h-4 w-4" />
+              {exportBusy ? "Exporting…" : "Export Excel"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setError(null); setSuccess(null); setImportOpen(true); }}
+              disabled={dirty || save.isPending || exportBusy || publishBusy || publishing}
+              title={dirty ? "Save the current RISpro draft before importing Excel." : undefined}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Import Excel
+            </Button>
+          </>
+        ) : null}
+        {isExisting ? (
           <Button
             type="button"
             onClick={() => {
@@ -743,6 +810,9 @@ function EditorForm({
           </Button>
         ) : null}
       </div>
+      {isExisting && dirty ? <p className="text-end text-xs text-amber-700">Save the current RISpro draft before importing Excel.</p> : null}
+      {success ? <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p> : null}
+      {isExisting ? <SopXlsxImportDialog open={importOpen} sopId={existingSop!.id} version={version} sopCode={existingSop!.code} onClose={() => setImportOpen(false)} onConfirmed={(result) => void handleImported(result)} /> : null}
       <Dialog
         open={publishOpen}
         onClose={() => {
@@ -938,6 +1008,7 @@ function DetailPage({ id }: { id: number }) {
   const [revisionDate, setRevisionDate] = useState("");
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
   // The detail query arrives asynchronously; seed the next revision field when it does.
   useEffect(() => {
     if (!data) return;
@@ -995,6 +1066,18 @@ function DetailPage({ id }: { id: number }) {
         value instanceof Error ? value.message : "Unable to archive the SOP.",
       ),
   });
+  const exportSelectedVersion = async () => {
+    if (!selectedVersion || exportBusy) return;
+    setExportBusy(true);
+    setActionError(null);
+    try {
+      await downloadSopXlsx(id, selectedVersion.version);
+    } catch (value) {
+      setActionError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
+    } finally {
+      setExportBusy(false);
+    }
+  };
   if (detail.isLoading)
     return (
       <PageShell>
@@ -1063,6 +1146,10 @@ function DetailPage({ id }: { id: number }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={() => void exportSelectedVersion()} disabled={exportBusy}>
+            <Download className="h-4 w-4" />
+            {exportBusy ? "Exporting…" : "Export Excel"}
+          </Button>
           {management && data.sop.status === "published" ? (
             <>
               <Button
@@ -1092,6 +1179,7 @@ function DetailPage({ id }: { id: number }) {
           </Button>
         </div>
       </header>
+      {management && data.sop.status === "published" && !data.sop.draftVersion ? <p className="text-sm text-muted-foreground">Create a new revision before importing Excel changes.</p> : null}
       <Card className="p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
