@@ -40,6 +40,7 @@ interface BookingStatusRow {
   patient_id: string | number;
   status: BookingStatus;
   booking_date?: string;
+  uses_special_quota?: boolean;
   auto_completed_by?: string | null;
   auto_completed_at?: string | null;
   acquisition_status_source?: "pacs" | "mpps" | null;
@@ -403,6 +404,7 @@ export async function updateBookingStatusManual(
           patient_id,
           status,
           booking_date::text,
+          uses_special_quota,
           auto_completed_by,
           auto_completed_at,
           acquisition_status_source,
@@ -420,8 +422,56 @@ export async function updateBookingStatusManual(
     if (booking.status === "voided" || targetStatus === "voided") {
       throw new SchedulingError(409, "Voided bookings cannot be changed from manual status management.", ["manual_status_voided_rejected"]);
     }
-    if (booking.status === "discontinued" && targetStatus !== "discontinued") {
-      throw new SchedulingError(409, "Discontinued bookings cannot be reactivated through manual status management.", ["booking_discontinued_terminal"]);
+    const reactivatingDiscontinued = booking.status === "discontinued" && targetStatus !== "discontinued";
+    if (reactivatingDiscontinued && userRole !== "super_admin") {
+      throw new SchedulingError(409, "Discontinued bookings can only be reactivated by a super administrator.", ["booking_discontinued_terminal"]);
+    }
+    if (reactivatingDiscontinued && !cleanReason) {
+      throw new SchedulingError(400, "A reason is required to reactivate a discontinued booking.", ["discontinued_reactivation_reason_required"]);
+    }
+    if (reactivatingDiscontinued && booking.uses_special_quota) {
+      throw new SchedulingError(409, "Discontinued bookings that used special quota cannot be reactivated through manual status management.", ["discontinued_reactivation_special_quota_rejected"]);
+    }
+    if (reactivatingDiscontinued) {
+      const reopenedRecall = await client.query<{ id: number }>(
+        `
+          select recall.id
+          from appointments_v2.complementary_recall_requests recall
+          where recall.status = 'pending_scheduling'
+            and recall.recall_appointment_id is null
+            and exists (
+              select 1
+              from audit_log audit
+              where audit.entity_type = 'complementary_recall_request'
+                and audit.entity_id = recall.id
+                and audit.action_type = 'complementary_recall_reopened_after_uncompleted_booking'
+                and audit.new_values ->> 'previousRecallAppointmentId' = $1::text
+                and audit.new_values ->> 'reason' = 'discontinued'
+            )
+          limit 1
+          for update
+        `,
+        [bookingId]
+      );
+      if (reopenedRecall.rows[0]) {
+        throw new SchedulingError(409, "Discontinued bookings with a reopened complementary recall cannot be reactivated through manual status management.", ["discontinued_reactivation_recall_reversal_unavailable"]);
+      }
+
+      const cancelledReportingIntent = await client.query<{ id: number }>(
+        `
+          select id
+          from doctor_portal.reporting_assignment_intents
+          where appointment_id = $1
+            and status = 'cancelled'
+            and cancelled_reason in ('status_discontinued', 'booking_status_discontinued')
+          limit 1
+          for update
+        `,
+        [bookingId]
+      );
+      if (cancelledReportingIntent.rows[0]) {
+        throw new SchedulingError(409, "Discontinued bookings with a cancelled reporting assignment intent cannot be reactivated through manual status management.", ["discontinued_reactivation_reporting_intent_reversal_unavailable"]);
+      }
     }
     if (booking.status === "completed" && targetStatus === "arrived" && !cleanReason) {
       throw new SchedulingError(400, "A reason is required to reopen a completed booking.", ["completed_reopen_reason_required"]);

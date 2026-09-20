@@ -485,6 +485,39 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("heading", { name: "Change appointment status" })).toBeTruthy();
   });
 
+  it("does not offer discontinued reactivation to non-super-admin users", async () => {
+    mocks.userRole = "supervisor";
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, status: "discontinued" as const });
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    expect(screen.queryByRole("menuitem", { name: "Change status" })).toBeNull();
+  });
+
+  it("allows a super admin to reactivate a discontinued appointment only with an audited reason", async () => {
+    const reactivatedAppointment = { ...appointment, status: "scheduled" as const };
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, status: "discontinued" as const }).mockResolvedValueOnce(reactivatedAppointment);
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change status" }));
+    fireEvent.change(screen.getByLabelText("New status"), { target: { value: "scheduled" } });
+
+    expect(screen.getByText("Reactivating a discontinued appointment is an audited super-admin action.")).toBeTruthy();
+    expect(screen.getByLabelText("Reason")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save status" });
+    expect(save).toHaveProperty("disabled", true);
+
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Entered discontinued status in error" } });
+    expect(save).toHaveProperty("disabled", false);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mocks.updateAppointmentStatus).toHaveBeenCalledWith(42, "scheduled", "Entered discontinued status in error"));
+  });
+
   it("updates the visible status and closes the compact dialog after a successful mutation", async () => {
     const updatedAppointment = { ...appointment, status: "completed" as const };
     mocks.getAppointmentById.mockResolvedValueOnce(appointment).mockResolvedValueOnce(updatedAppointment);

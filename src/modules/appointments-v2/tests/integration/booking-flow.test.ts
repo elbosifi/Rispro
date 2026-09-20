@@ -551,6 +551,154 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         "Appointment cancellation must use the dedicated cancellation workflow."
       );
     });
+
+    it("allows only a super admin with a reason to reactivate an uncomplicated discontinued booking", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2039-08-14", await createPatientForStatusTest("DiscontinuedReactivation"));
+      const statusPath = `/api/v2/read/appointments/${bookingId}/status`;
+      const postStatusAs = (role: "receptionist" | "supervisor" | "super_admin", status: string, reason?: string) =>
+        fetch(statusPath, {
+          method: "POST",
+          cookie: createTestAuthCookie(testData.userId, role),
+          body: { status, ...(reason == null ? {} : { reason }) },
+        });
+
+      assert.equal((await postStatusAs("supervisor", "discontinued", "Procedure stopped in error")).status, 200);
+
+      const receptionist = await postStatusAs("receptionist", "scheduled", "Correcting status");
+      assert.equal(receptionist.status, 409);
+
+      const supervisor = await postStatusAs("supervisor", "scheduled", "Correcting status");
+      assert.equal(supervisor.status, 409);
+
+      const noReason = await postStatusAs("super_admin", "scheduled");
+      assert.equal(noReason.status, 400);
+
+      const reason = "Entered discontinued status in error";
+      assert.equal((await postStatusAs("super_admin", "scheduled", reason)).status, 200);
+
+      const audit = await pool.query<{
+        old_values: { status: string };
+        new_values: { status: string; reason: string };
+        changed_by_user_id: number;
+      }>(
+        `select old_values, new_values, changed_by_user_id
+         from audit_log
+         where entity_type = 'appointment_v2_booking'
+           and entity_id = $1
+           and action_type = 'manual_status_change'
+           and old_values ->> 'status' = 'discontinued'
+         order by id desc
+         limit 1`,
+        [bookingId]
+      );
+      assert.equal(audit.rows[0]?.old_values.status, "discontinued");
+      assert.equal(audit.rows[0]?.new_values.status, "scheduled");
+      assert.equal(audit.rows[0]?.new_values.reason, reason);
+      assert.equal(Number(audit.rows[0]?.changed_by_user_id), testData.userId);
+    });
+
+    it("keeps patient queue requirements and void rejection when manually reactivating", async () => {
+      guard();
+      const patientId = await createPatientForStatusTest("DiscontinuedQueueRequirements");
+      const bookingId = await createBookingForStatusTest("2039-08-15", patientId);
+      const statusPath = `/api/v2/read/appointments/${bookingId}/status`;
+      const superAdminCookie = createTestAuthCookie(testData.userId, "super_admin");
+
+      await pool.query("update patients set phone_1 = null where id = $1", [patientId]);
+
+      assert.equal((await fetch(statusPath, {
+        method: "POST",
+        body: { status: "discontinued", reason: "Procedure stopped in error" },
+      })).status, 200);
+      const arrived = await fetch(statusPath, {
+        method: "POST",
+        cookie: superAdminCookie,
+        body: { status: "arrived", reason: "Correcting status" },
+      });
+      assert.equal(arrived.status, 422);
+      assert.equal((await readWorkflowTimestamps(bookingId)).status, "discontinued");
+
+      await pool.query("update appointments_v2.bookings set status = 'voided' where id = $1", [bookingId]);
+      const voided = await fetch(statusPath, {
+        method: "POST",
+        cookie: superAdminCookie,
+        body: { status: "scheduled", reason: "Correcting status" },
+      });
+      assert.equal(voided.status, 409);
+    });
+
+    it("rejects reactivation when discontinuation left recall or reporting state without a canonical reversal", async () => {
+      guard();
+      const superAdminCookie = createTestAuthCookie(testData.userId, "super_admin");
+      const originalBookingId = await createBookingForStatusTest("2039-08-16", await createPatientForStatusTest("RecallOriginal"));
+      const recallBookingId = await createBookingForStatusTest("2039-08-17", await createPatientForStatusTest("RecallBooking"));
+      const recall = await pool.query<{ id: number }>(
+        `insert into appointments_v2.complementary_recall_requests (
+           original_appointment_id, recall_appointment_id, technologist_instruction,
+           status, requested_by_user_id, scheduled_at
+         ) values ($1, $2, 'Repeat the examination', 'scheduled', $3, now())
+         returning id`,
+        [originalBookingId, recallBookingId, testData.userId]
+      );
+
+      assert.equal((await fetch(`/api/v2/read/appointments/${recallBookingId}/status`, {
+        method: "POST",
+        body: { status: "discontinued", reason: "Procedure stopped in error" },
+      })).status, 200);
+      const recallReactivation = await fetch(`/api/v2/read/appointments/${recallBookingId}/status`, {
+        method: "POST",
+        cookie: superAdminCookie,
+        body: { status: "scheduled", reason: "Correcting status" },
+      });
+      assert.equal(recallReactivation.status, 409);
+      const recallState = await pool.query<{ status: string; recall_appointment_id: number | null }>(
+        "select status, recall_appointment_id from appointments_v2.complementary_recall_requests where id = $1",
+        [recall.rows[0]?.id]
+      );
+      assert.equal(recallState.rows[0]?.status, "pending_scheduling");
+      assert.equal(recallState.rows[0]?.recall_appointment_id, null);
+
+      const reportingBookingId = await createBookingForStatusTest("2039-08-18", await createPatientForStatusTest("ReportingIntent"));
+      await pool.query("update appointments_v2.bookings set requires_report = true where id = $1", [reportingBookingId]);
+      const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
+      const reportingUser = await pool.query<{ id: number }>(
+        `insert into users (username, full_name, password_hash, role)
+         values ($1, $2, 'test-password-hash', 'doctor')
+         returning id`,
+        [`${TEST_PREFIX.toLowerCase()}reactivationdoctor${suffix}`, "Reactivation Test Doctor"]
+      );
+      const doctor = await pool.query<{ id: number }>(
+        `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role)
+         values ($1, 'Reactivation Test Doctor', 'consultant')
+         returning id`,
+        [reportingUser.rows[0]?.id]
+      );
+      await pool.query(
+        `insert into doctor_portal.reporting_assignment_intents (
+           appointment_id, intended_doctor_id, status, requested_by_user_id, created_from_context
+         ) values ($1, $2, 'pending', $3, 'test')`,
+        [reportingBookingId, doctor.rows[0]?.id, testData.userId]
+      );
+
+      assert.equal((await fetch(`/api/v2/read/appointments/${reportingBookingId}/status`, {
+        method: "POST",
+        body: { status: "discontinued", reason: "Procedure stopped in error" },
+      })).status, 200);
+      const reportingIntent = await pool.query<{ status: string; cancelled_reason: string | null }>(
+        "select status, cancelled_reason from doctor_portal.reporting_assignment_intents where appointment_id = $1",
+        [reportingBookingId]
+      );
+      assert.equal(reportingIntent.rows[0]?.status, "cancelled");
+      assert.equal(reportingIntent.rows[0]?.cancelled_reason, "booking_status_discontinued");
+      const reportingReactivation = await fetch(`/api/v2/read/appointments/${reportingBookingId}/status`, {
+        method: "POST",
+        cookie: superAdminCookie,
+        body: { status: "scheduled", reason: "Correcting status" },
+      });
+      assert.equal(reportingReactivation.status, 409);
+      assert.equal((await readWorkflowTimestamps(reportingBookingId)).status, "discontinued");
+    });
   });
 
   describe("Modality worklist workflow timestamps", () => {

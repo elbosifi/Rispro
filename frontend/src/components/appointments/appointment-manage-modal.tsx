@@ -303,6 +303,7 @@ export function AppointmentManageModal({
   });
   const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes(open && normalizedAppointmentId !== null);
   const isSuperAdmin = user?.role === "super_admin";
+  const canManageManualStatus = Boolean(appointment && (appointment.status !== "discontinued" || isSuperAdmin));
   const canAttachDocuments = user?.role === "receptionist" || user?.role === "supervisor" || user?.role === "super_admin";
   const canUseNonStandardCapacityModes = user?.role === "supervisor" || user?.role === "super_admin";
   const selectedCanReschedule = Boolean(appointment && RESCHEDULABLE_STATUSES.includes(appointment.status as BookingStatus));
@@ -389,7 +390,7 @@ export function AppointmentManageModal({
     if (tab === "status") {
       setActionMenuOpen(false);
       setStatusDialogError(null);
-      setStatusDialogOpen(true);
+      if (canManageManualStatus) setStatusDialogOpen(true);
       return;
     }
     if (tab !== "documents") setDocumentReviewExpanded(false);
@@ -649,7 +650,7 @@ export function AppointmentManageModal({
     setVoidDialogOpen(false);
     setVoidReason("");
     const statusKey = `${normalizedAppointmentId ?? "none"}`;
-    if (initialTab === "status" && legacyStatusKeyRef.current !== statusKey) {
+    if (initialTab === "status" && canManageManualStatus && legacyStatusKeyRef.current !== statusKey) {
       legacyStatusKeyRef.current = statusKey;
       setStatusDialogOpen(true);
       setStatusDialogError(null);
@@ -658,7 +659,7 @@ export function AppointmentManageModal({
       setStatusDialogOpen(false);
       setStatusDialogError(null);
     }
-  }, [initialTab, normalizedAppointmentId]);
+  }, [canManageManualStatus, initialTab, normalizedAppointmentId]);
 
   useEffect(() => {
     if (appointment && !appointment.requiresReport && activeTab === "report") {
@@ -730,7 +731,8 @@ export function AppointmentManageModal({
   if (!open) return null;
 
   const dialogTitle = appointment ? chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName) : t("registrations.manage");
-  const statusReasonRequired = Boolean(appointment && (STATUS_REASON_REQUIRED.has(manualStatus) || (appointment.status === "completed" && manualStatus === "arrived")));
+  const reactivatingDiscontinued = Boolean(appointment && appointment.status === "discontinued" && manualStatus !== "discontinued");
+  const statusReasonRequired = Boolean(appointment && (STATUS_REASON_REQUIRED.has(manualStatus) || (appointment.status === "completed" && manualStatus === "arrived") || reactivatingDiscontinued));
   const reportPanel = appointment?.requiresReport ? (
     <section className="rounded-xl border border-border bg-background p-2 md:p-3">
       <div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">{chooseLocalized(language, "الصور والتقرير", "Images and report")}</h3><p className="mt-1 text-[11px] text-muted-foreground"><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span> · {chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)}</p></div><FileText size={17} className="text-muted-foreground" aria-hidden="true" /></div>
@@ -760,7 +762,7 @@ export function AppointmentManageModal({
   const canOpenOriginalAppointment = typeof originalAppointmentId === "number" && Number.isSafeInteger(originalAppointmentId) && originalAppointmentId > 0;
   const moreMenuItems = appointment ? <>
     {selectedCanReschedule ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("reschedule"); }}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button> : null}
-    <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("status"); }}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button>
+    {canManageManualStatus ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("status"); }}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button> : null}
     {selectedCanCancel ? <><div role="separator" className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => { setActionMenuOpen(false); selectTab("cancel"); }}><X size={15} aria-hidden="true" />{t("registrations.cancelAppointment")}</button></> : null}
     {canVoidAppointment ? <><div role="separator" className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => { setActionMenuOpen(false); setVoidReason(""); setVoidDialogOpen(true); }}><X size={15} aria-hidden="true" />{t("appointmentEditor.void")}</button></> : null}
   </> : null;
@@ -921,13 +923,13 @@ export function AppointmentManageModal({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={statusDialogOpen && Boolean(appointment)} onClose={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>
+      <Dialog open={statusDialogOpen && canManageManualStatus} onClose={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>
         <DialogContent maxWidth="min(94vw, 460px)" role="dialog" aria-labelledby="appointment-status-dialog-title" aria-describedby="appointment-status-dialog-description" className="!p-5">
           <DialogHeader closeLabel={t("toast.close")}>
             <DialogTitle id="appointment-status-dialog-title">{chooseLocalized(language, "تغيير حالة الموعد", "Change appointment status")}</DialogTitle>
             <DialogDescription id="appointment-status-dialog-description">{chooseLocalized(language, "حدّث الحالة مع الحفاظ على صفحة الموعد مفتوحة.", "Update the status while keeping the appointment workspace open.")}</DialogDescription>
           </DialogHeader>
-          {appointment ? <div className="space-y-4"><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span><Badge variant="neutral" size="sm">{statusLabel(language, appointment.status)}</Badge></div><div><label htmlFor="appointment-status-select" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "الحالة الجديدة", "New status")}</label><select id="appointment-status-select" value={manualStatus} onChange={(event) => { setManualStatus(event.target.value as (typeof MANUAL_STATUS_OPTIONS)[number]); setStatusDialogError(null); }} className="input-premium w-full" aria-describedby={statusReasonRequired ? "appointment-status-reason-help" : undefined}>{MANUAL_STATUS_OPTIONS.map((status) => <option key={status} value={status} disabled={status === appointment.status}>{statusLabel(language, status)}</option>)}</select></div>{statusReasonRequired ? <div><label htmlFor="appointment-status-reason" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "السبب", "Reason")}</label><textarea id="appointment-status-reason" value={manualStatusReason} onChange={(event) => { setManualStatusReason(event.target.value); setStatusDialogError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")} required /><p id="appointment-status-reason-help" className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "هذا التغيير يتطلب سبباً.", "A reason is required for this change.")}</p></div> : null}{statusDialogError ? <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">{statusDialogError}</p> : null}</div> : null}
+          {appointment ? <div className="space-y-4"><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span><Badge variant="neutral" size="sm">{statusLabel(language, appointment.status)}</Badge></div><div><label htmlFor="appointment-status-select" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "الحالة الجديدة", "New status")}</label><select id="appointment-status-select" value={manualStatus} onChange={(event) => { setManualStatus(event.target.value as (typeof MANUAL_STATUS_OPTIONS)[number]); setStatusDialogError(null); }} className="input-premium w-full" aria-describedby={statusReasonRequired ? "appointment-status-reason-help" : undefined}>{MANUAL_STATUS_OPTIONS.map((status) => <option key={status} value={status} disabled={status === appointment.status}>{statusLabel(language, status)}</option>)}</select></div>{reactivatingDiscontinued ? <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{chooseLocalized(language, "إعادة تفعيل موعد موقوف إجراء مدقق يقتصر على مدير النظام.", "Reactivating a discontinued appointment is an audited super-admin action.")}</p> : null}{statusReasonRequired ? <div><label htmlFor="appointment-status-reason" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "السبب", "Reason")}</label><textarea id="appointment-status-reason" value={manualStatusReason} onChange={(event) => { setManualStatusReason(event.target.value); setStatusDialogError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")} required /><p id="appointment-status-reason-help" className="mt-1 text-xs text-muted-foreground">{reactivatingDiscontinued ? chooseLocalized(language, "يتطلب هذا الإجراء سبباً مدققاً.", "A reason is required for this audited action.") : chooseLocalized(language, "هذا التغيير يتطلب سبباً.", "A reason is required for this change.")}</p></div> : null}{statusDialogError ? <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">{statusDialogError}</p> : null}</div> : null}
           <DialogFooter className="mt-5"><Button type="button" variant="secondary" onClick={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>{t("common.cancel")}</Button><Button type="button" disabled={!appointment || statusMutation.isPending || manualStatus === appointment.status || (statusReasonRequired && !manualStatusReason.trim())} onClick={() => { if (!appointment) return; statusMutation.mutate({ appointmentId: appointment.id, status: manualStatus, reason: manualStatusReason.trim() || null }); }}>{statusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{chooseLocalized(language, "جار الحفظ", "Saving")}</span> : chooseLocalized(language, "حفظ الحالة", "Save status")}</Button></DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1014,7 +1014,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(sourceSecondTry.status, 201);
   });
 
-  it("discontinue releases special quota exactly once and is terminal", async () => {
+  it("discontinue releases special quota exactly once and safely rejects super-admin reactivation", async () => {
     guard();
     const date = uniqueDate();
     await setModalityCapacity(2);
@@ -1071,11 +1071,26 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(Number(lifecycle.rows[0]?.totalConsumptionCount), 1);
     assert.equal(lifecycle.rows[0]?.releaseReason, "discontinued");
 
-    const reactivate = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+    const reactivate = await fetchWithCookie(superAdminReauthCookie, `/api/v2/read/appointments/${bookingId}/status`, {
       method: "POST",
-      body: { status: "scheduled" },
+      body: { status: "scheduled", reason: "Correcting discontinued status" },
     });
     assert.equal(reactivate.status, 409);
+
+    const afterReactivationAttempt = await pool.query<{
+      status: string;
+      activeConsumptionCount: string;
+    }>(
+      `select booking.status,
+              count(consumption.id) filter (where consumption.released_at is null)::text as "activeConsumptionCount"
+         from appointments_v2.bookings booking
+         left join appointments_v2.special_quota_consumptions consumption on consumption.booking_id = booking.id
+        where booking.id = $1
+        group by booking.id`,
+      [bookingId]
+    );
+    assert.equal(afterReactivationAttempt.rows[0]?.status, "discontinued");
+    assert.equal(Number(afterReactivationAttempt.rows[0]?.activeConsumptionCount), 0);
 
     const replacement = await createBooking({
       patientId: await createPatient(),

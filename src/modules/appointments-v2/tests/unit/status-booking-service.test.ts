@@ -42,9 +42,21 @@ describe("status booking service source guards", () => {
     assert.match(source, /status_reason_required/);
   });
 
-  it("treats discontinued as terminal in generic manual status management", () => {
-    assert.match(source, /booking\.status === "discontinued" && targetStatus !== "discontinued"/);
+  it("allows only audited super-admin reactivation of uncomplicated discontinued bookings", () => {
+    assert.match(source, /const reactivatingDiscontinued = booking\.status === "discontinued" && targetStatus !== "discontinued"/);
+    assert.match(source, /reactivatingDiscontinued && userRole !== "super_admin"/);
     assert.match(source, /booking_discontinued_terminal/);
+    assert.match(source, /reactivatingDiscontinued && !cleanReason/);
+    assert.match(source, /discontinued_reactivation_reason_required/);
+  });
+
+  it("rejects discontinued reactivation when terminal side effects cannot be safely reversed", () => {
+    assert.match(source, /reactivatingDiscontinued && booking\.uses_special_quota/);
+    assert.match(source, /discontinued_reactivation_special_quota_rejected/);
+    assert.match(source, /complementary_recall_reopened_after_uncompleted_booking/);
+    assert.match(source, /discontinued_reactivation_recall_reversal_unavailable/);
+    assert.match(source, /cancelled_reason in \('status_discontinued', 'booking_status_discontinued'\)/);
+    assert.match(source, /discontinued_reactivation_reporting_intent_reversal_unavailable/);
   });
 
   it("locks and releases active special quota consumption when discontinuing", () => {
@@ -96,6 +108,7 @@ describe("status booking service source guards", () => {
 
   it("syncs worklists after status changes", () => {
     assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
+    assert.match(source, /if \(terminalTransition\?\.transitioned[\s\S]*\) \{[\s\S]*\} else \{\s*scheduleBookingWorklistSync\(bookingId\);/);
     assert.match(source, /for \(const bookingId of markedIds\)/);
   });
 
