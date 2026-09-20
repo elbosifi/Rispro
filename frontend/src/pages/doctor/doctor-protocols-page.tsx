@@ -1692,6 +1692,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
     mutationFn: (appointmentId: number) => cancelDoctorProtocolAssignment(appointmentId),
     onSuccess: invalidate,
   });
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   const appointments = useMemo(() => appointmentsQuery.data ?? [], [appointmentsQuery.data]);
   const [sortField, setSortField] = useState<"default" | "dateTime" | "patient" | "modality" | "exam">("default");
@@ -2003,15 +2004,31 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           }}
           onClear={() => {
             if (!selectedAppointment.assignment) return;
-            if (!window.confirm("Clear this protocol assignment?")) return;
-            setAssignmentError(null);
-            clearAssignmentMutation.mutate(selectedAppointment.appointmentId, {
-              onSuccess: () => void handleAssignmentSuccess("Protocol assignment cleared.", selectedAppointment.appointmentId, false),
-              onError: handleAssignmentError,
-            });
+            setConfirmClearOpen(true);
           }}
         />
       )}
+      <Dialog open={confirmClearOpen} onClose={() => { if (!clearAssignmentMutation.isPending) setConfirmClearOpen(false); }}>
+        <DialogContent maxWidth="460px">
+          <DialogHeader>
+            <DialogTitle>Clear protocol assignment?</DialogTitle>
+            <DialogDescription>The current protocol assignment for this appointment will be removed.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setConfirmClearOpen(false)} disabled={clearAssignmentMutation.isPending}>Cancel</Button>
+            <Button variant="destructive" disabled={clearAssignmentMutation.isPending || !selectedAppointment?.assignment} onClick={() => {
+              if (!selectedAppointment?.assignment) return;
+              setAssignmentError(null);
+              clearAssignmentMutation.mutate(selectedAppointment.appointmentId, {
+                onSuccess: () => { setConfirmClearOpen(false); void handleAssignmentSuccess("Protocol assignment cleared.", selectedAppointment.appointmentId, false); },
+                onError: (error) => { setConfirmClearOpen(false); handleAssignmentError(error); },
+              });
+            }}>
+              {clearAssignmentMutation.isPending ? "Clearing…" : "Clear assignment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -2091,6 +2108,8 @@ function ProtocolAssignmentModal({
   const [reportDraft, setReportDraft] = useState(appointment.requiresReport);
   const [reportOverride, setReportOverride] = useState<{ appointmentId: number; value: boolean } | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState({ right: 8, bottom: 56 });
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+  const pendingLeaveDirectionRef = useRef<-1 | 1 | "close" | null>(null);
   const actionMenuAnchorRef = useRef<HTMLDivElement>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const title = existing ? "Change assigned protocol" : "Assign protocol";
@@ -2201,10 +2220,21 @@ function ProtocolAssignmentModal({
   const formDirty = modeTouched || protocolId !== String(existing?.protocolId ?? "") || scannerId !== String(existing?.scannerId ?? "") || protocolNotes !== (existing?.protocolNotes ?? "") || contrastNotes !== (existing?.contrastNotes ?? "") || freeTextProtocol !== (existing?.freeTextProtocol ?? "");
   const hasUnsavedChanges = formDirty || annotationDirty;
   const canSaveAssignment = !saving && !annotationDirty && (protocolMode === "saved" ? Boolean(protocolId) : Boolean(freeTextProtocol.trim()));
-  const requestClose = useCallback(() => { if (hasUnsavedChanges && !window.confirm("You have unsaved changes. Leave this appointment without saving?")) return; onClose(); }, [hasUnsavedChanges, onClose]);
+  const requestClose = useCallback(() => {
+    if (hasUnsavedChanges) {
+      pendingLeaveDirectionRef.current = "close";
+      setConfirmLeaveOpen(true);
+    } else {
+      onClose();
+    }
+  }, [hasUnsavedChanges, onClose]);
   const requestNavigate = useCallback((direction: -1 | 1) => {
-    if (hasUnsavedChanges && !window.confirm("You have unsaved changes. Leave this appointment without saving?")) return;
-    onNavigate(direction);
+    if (hasUnsavedChanges) {
+      pendingLeaveDirectionRef.current = direction;
+      setConfirmLeaveOpen(true);
+    } else {
+      onNavigate(direction);
+    }
   }, [hasUnsavedChanges, onNavigate]);
 
   const examTokens = (appointment.examTypeName ?? "")

@@ -5,7 +5,7 @@ import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSo
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { loadAppointmentAcquisitionSummaries } from "../../services/appointment-acquisition-summary.js";
-import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
+import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../services/protocoling-modality.js";
 import { discoverHistoricalPacsCandidatesForPatient, getHistoricalPacsReconciliationForPatient, lookupHistoricalPacsByPatientId, type HistoricalPacsCandidate } from "../../services/historical-pacs-index-service.js";
 import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
 import { getPatientIdentityReconciliationForStudies, requestPatientIdentityReconciliation } from "../../services/patient-identity-reconciliation-service.js";
@@ -744,7 +744,7 @@ async function assertProtocolingDocument(documentId: number): Promise<void> {
      from documents d
      join appointments_v2.bookings b on b.id = d.v2_booking_id
      join modalities m on m.id = b.modality_id
-     where d.id = $1 and m.code in ('CT', 'MRI')
+     where d.id = $1 and (${protocolingModalityCodeSql("m.code")}) is not null
      limit 1`,
     [documentId]
   );

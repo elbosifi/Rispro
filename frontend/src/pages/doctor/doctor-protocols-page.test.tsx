@@ -53,10 +53,10 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockCancelAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCancelAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
-  activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
+  activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: mockCancelAssignment, createDoctorProtocolAssignment: mockCreateAssignment,
   createComplementaryRecallRequest: mockCreateComplementaryRecall,
   withdrawComplementaryRecallRequest: mockWithdrawComplementaryRecall,
   createProtocolLibraryAnatomyRegion: vi.fn(), createProtocolLibraryCtPhasePreset: vi.fn(), createProtocolLibraryCtPhaseRow: vi.fn(),
@@ -151,6 +151,8 @@ describe("Doctor protocoling request documents", () => {
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
     mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
+    mockCancelAssignment.mockReset();
+    mockCancelAssignment.mockResolvedValue({ success: true });
     mockRequestReconciliation.mockReset();mockRequestReconciliation.mockResolvedValue({job:{id:1,status:"queued"}});
   });
 
@@ -939,6 +941,24 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
     expect(screen.queryByRole("menu")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Clear assignment" }));
+    expect(await screen.findByRole("heading", { name: "Clear protocol assignment?" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Clear assignment" }));
+    expect(mockCancelAssignment).toHaveBeenCalledWith(42);
+  });
+
+  it("prompts to discard unsaved changes through a dialog when closing", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Free-text protocol" }), "Axial T1");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByRole("dialog", { name: "Assign protocol" })).toBeNull();
   });
 
   it("edits examination type within the current modality and refreshes the header", async () => {

@@ -1,4 +1,5 @@
 import { pool } from "../../db/pool.js";
+import { HttpError } from "../../utils/http-error.js";
 import { scheduleBookingWorklistDetailReplacement } from "../../services/dicom-service.js";
 import type { PoolClient } from "pg";
 import type {
@@ -253,6 +254,7 @@ export async function updateProtocol(
     ]
   );
   const updated = result.rows[0];
+  if (!updated) throw new HttpError(409, "Protocol record no longer exists; it may have been deleted concurrently.");
   await insertProtocolAudit(pool, {
     protocolId: updated.id,
     appointmentId,
@@ -348,7 +350,7 @@ export async function listProtocolAuditEvents(appointmentId: number): Promise<Pr
       select
         pae.event_type as "eventType",
         pae.changed_by_doctor_id as "changedByDoctorId",
-        coalesce(pae.changed_by_name_ar_snapshot, u.full_name, dp.display_name) as "changedByDoctorName",
+        coalesce(pae.changed_by_name_en_snapshot, u.full_name, dp.display_name) as "changedByDoctorName",
         coalesce(pae.changed_by_name_ar_snapshot, u.full_name, dp.display_name) as "changedByDoctorNameAr",
         pae.changed_by_name_en_snapshot as "changedByDoctorNameEn",
         pae.created_at as "createdAt",
