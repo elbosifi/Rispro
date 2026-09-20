@@ -898,7 +898,14 @@ function SettingsTable({ headers, emptyText, tableClassName = "", children }: { 
 function ImportPreviewList({ title, rows }: { title: string; rows: Array<{ key: string; label: string; errors: string[] }> }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{title}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{title}</p>
+        {rows.length > 20 ? (
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Showing first 20 of {rows.length} rows
+          </span>
+        ) : null}
+      </div>
       <div className="mt-1 max-h-40 overflow-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
         {rows.length ? rows.slice(0, 20).map((row) => (
           <div key={row.key} className="border-b px-2 py-1 last:border-b-0" style={{ borderColor: "var(--border)" }}>
@@ -1912,7 +1919,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
       </section> : null}
 
       {!canAssign ? null : appointmentsQuery.isLoading ? (
-        <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+        <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
           Loading protocoling appointments...
         </div>
       ) : appointmentsQuery.isError ? (
@@ -1924,8 +1931,14 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           No appointments need protocol assignment.
         </div>
       ) : (
-        <SettingsTable
-          emptyText="No appointments need protocol assignment."
+        <div className="space-y-3">
+          {appointments.length >= 500 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800" role="status">
+              Showing first 500 appointments. Please narrow the date range or filters to view more specific results.
+            </div>
+          ) : null}
+          <SettingsTable
+            emptyText="No appointments need protocol assignment."
           headers={[
             <button key="h-datetime" type="button" onClick={() => toggleSort("dateTime")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Date/time{sortField === "dateTime" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
             <button key="h-patient" type="button" onClick={() => toggleSort("patient")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Patient{sortField === "patient" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
@@ -1965,6 +1978,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             </tr>
           ))}
         </SettingsTable>
+        </div>
       )}
 
       </> : null}
@@ -2236,6 +2250,16 @@ function ProtocolAssignmentModal({
       onNavigate(direction);
     }
   }, [hasUnsavedChanges, onNavigate]);
+  const handleDiscardLeave = useCallback(() => {
+    const target = pendingLeaveDirectionRef.current;
+    setConfirmLeaveOpen(false);
+    pendingLeaveDirectionRef.current = null;
+    if (target === "close") {
+      onClose();
+    } else if (target === -1 || target === 1) {
+      onNavigate(target);
+    }
+  }, [onClose, onNavigate]);
 
   const examTokens = (appointment.examTypeName ?? "")
     .toLowerCase()
@@ -2422,7 +2446,7 @@ function ProtocolAssignmentModal({
         </header>
 
         {loading ? (
-          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
             Loading appointment protocol details...
           </div>
         ) : (
@@ -2450,7 +2474,7 @@ function ProtocolAssignmentModal({
                       <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
                       <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
                     </div>
-                    {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load patient history.</p> : <>
+                    {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Unable to load patient history.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historyQuery.refetch()}>Retry patient history</Button></div> : <>
                       {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
                       {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
                       <div className="mt-3 flex flex-wrap gap-1" aria-label="History modality filters"><button type="button" onClick={() => setSelectedHistoryModalities([])} aria-pressed={selectedHistoryModalities.length === 0} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.length === 0 ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>All</button>{historyModalities.map((modality) => <button key={modality} type="button" onClick={() => setSelectedHistoryModalities((current) => current.includes(modality) ? current.filter((entry) => entry !== modality) : [...current, modality])} aria-pressed={selectedHistoryModalities.includes(modality)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.includes(modality) ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>{modality}</button>)}</div>
@@ -2648,6 +2672,19 @@ function ProtocolAssignmentModal({
         <ComplementaryRecallRequestDialog open={recallDialogOpen} onClose={() => setRecallDialogOpen(false)} examLabel={appointment.examTypeName ?? "Unspecified"} submitting={recallMutation.isPending} error={recallMutation.error instanceof Error ? recallMutation.error.message : null} onSubmit={(payload) => recallMutation.mutate(payload)} />
         <ComplementaryRecallWithdrawDialog open={withdrawRecallDialogOpen} status={appointment.activeComplementaryRecall?.status ?? "pending_scheduling"} submitting={withdrawRecallMutation.isPending} error={withdrawRecallMutation.error instanceof Error ? withdrawRecallMutation.error.message : null} onClose={() => setWithdrawRecallDialogOpen(false)} onConfirm={() => withdrawRecallMutation.mutate()} />
         <Dialog open={Boolean(reconciliationStudy)} onClose={()=>{if(!reconciliationMutation.isPending){setReconciliationStudy(null);setReconciliationConfirmed(false);}}}><DialogContent maxWidth="680px"><DialogHeader><DialogTitle>Patient Identity Reconciliation</DialogTitle><DialogDescription>Only the DICOM Patient ID will change. Historical demographics and all imaging identifiers will remain unchanged.</DialogDescription></DialogHeader>{reconciliationStudy?<div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-lg border p-3"><h4 className="font-semibold">Historical DICOM identity</h4><p>Patient ID: {reconciliationStudy.historicalPatientId||"Unavailable"}</p><p>Patient name: {reconciliationStudy.historicalPatientName||"Unavailable"}</p><p>DOB: {reconciliationStudy.historicalPatientBirthDate||"Unavailable"}</p></div><div className="rounded-lg border p-3"><h4 className="font-semibold">Current RISpro identity</h4><p>Patient ID: {historyQuery.data?.currentPatient?.patientId||"Unavailable"}</p><p>Patient name: {historyQuery.data?.currentPatient?.name||"Unavailable"}</p><p>DOB: {historyQuery.data?.currentPatient?.birthDate||"Unavailable"}</p></div><div className="md:col-span-2 rounded-lg border p-3"><p>Study date: {reconciliationStudy.date||"Unknown"}</p><p>Study: {reconciliationStudy.description||"Study"}</p><p>Accession: {reconciliationStudy.accessionNumber||"Unavailable"}</p><p className="break-all text-xs text-muted-foreground">StudyInstanceUID: {reconciliationStudy.studyInstanceUid}</p></div><label className="md:col-span-2 flex items-start gap-2"><Checkbox checked={reconciliationConfirmed} onCheckedChange={(value)=>setReconciliationConfirmed(Boolean(value))}/><span>I confirm that this historical study belongs to the selected RISpro patient.</span></label>{reconciliationMutation.isError?<p role="alert" className="md:col-span-2 text-red-700">{(reconciliationMutation.error as Error).message}</p>:null}</div>:null}<DialogFooter><Button variant="secondary" onClick={()=>setReconciliationStudy(null)} disabled={reconciliationMutation.isPending}>Cancel</Button><Button onClick={()=>reconciliationMutation.mutate()} disabled={!reconciliationConfirmed||reconciliationMutation.isPending}>{reconciliationMutation.isPending?"Submitting...":"Reconcile patient identity"}</Button></DialogFooter></DialogContent></Dialog>
+        <Dialog open={confirmLeaveOpen} onClose={() => { setConfirmLeaveOpen(false); pendingLeaveDirectionRef.current = null; }}>
+          <DialogContent maxWidth="460px">
+            <DialogHeader>
+              <DialogTitle>Discard unsaved changes?</DialogTitle>
+              <DialogDescription>You have unsaved changes to this protocol assignment.</DialogDescription>
+            </DialogHeader>
+            <p className="text-sm">Leave this appointment without saving? Any unsaved changes will be lost.</p>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => { setConfirmLeaveOpen(false); pendingLeaveDirectionRef.current = null; }}>Keep editing</Button>
+              <Button variant="destructive" onClick={handleDiscardLeave}>Discard changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </section>
     </div>
   );
@@ -2783,7 +2820,7 @@ function ProtocolVersionPreview({
   }
   if (loading) {
     return (
-      <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+      <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
         Loading protocol preview...
       </section>
     );

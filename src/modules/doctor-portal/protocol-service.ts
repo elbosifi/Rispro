@@ -11,6 +11,7 @@ import {
   updateProtocol,
 } from "./protocol-repository.js";
 import type { ProtocolInput, ProtocolStatus } from "./protocol-types.js";
+import type { ProtocolAuditEventType, ProtocolInput, ProtocolStatus } from "./protocol-types.js";
 
 interface Actor {
   userId: UserId;
@@ -96,11 +97,21 @@ export async function saveProtocolForAppointment(
   if (!details.protocol) {
     return createProtocol({ ...input, appointmentId, doctorId: me.profile!.id, status });
   }
+  const eventType: ProtocolAuditEventType =
+    status === "assigned"
+      ? "protocol_assigned"
+      : status === "clarification_needed"
+        ? "clarification_requested"
+        : status === "cancelled"
+          ? "protocol_cancelled"
+          : "protocol_updated";
+
   return updateProtocol(appointmentId, {
     ...input,
     doctorId: me.profile!.id,
     status,
     eventType: status === "assigned" ? "protocol_assigned" : "protocol_updated",
+    eventType,
   });
 }
 

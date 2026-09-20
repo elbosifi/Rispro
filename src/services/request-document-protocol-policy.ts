@@ -2,10 +2,14 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { loadSettingsMap } from "./settings-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "./protocoling-modality.js";
+import { getCached, setCached } from "../utils/cache.js";
 
 export const REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY = "documents_and_uploads";
 export const REQUEST_DOCUMENT_PROTOCOL_SETTING_KEY = "require_request_document_for_protocol_queue";
 export const QUALIFYING_REQUEST_DOCUMENT_TYPE = "appointment_request";
+
+const SETTING_CACHE_KEY = "request_document_protocol_policy_required";
+const SETTING_CACHE_TTL_MS = 30_000;
 
 export type RequestDocumentProtocolPolicy = {
   requireRequestDocumentForProtocolQueue: boolean;
@@ -18,8 +22,15 @@ function isEnabled(value: unknown): boolean {
 }
 
 export async function isRequestDocumentRequiredForProtocolQueue(): Promise<boolean> {
+  const cached = getCached<boolean>(SETTING_CACHE_KEY);
+  if (cached !== null) {
+    return cached;
+  }
   const settings = await loadSettingsMap([REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY]);
   return isEnabled(settings[REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY]?.[REQUEST_DOCUMENT_PROTOCOL_SETTING_KEY]);
+  const required = isEnabled(settings[REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY]?.[REQUEST_DOCUMENT_PROTOCOL_SETTING_KEY]);
+  setCached(SETTING_CACHE_KEY, required, SETTING_CACHE_TTL_MS);
+  return required;
 }
 
 export function qualifyingRequestDocumentExistsSql(bookingIdSql: string): string {

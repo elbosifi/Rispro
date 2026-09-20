@@ -14,6 +14,7 @@ export interface ProtocolInput {
   specialPreparation: string | null;
   technologistNotes: string | null;
   protocolStatus?: ProtocolStatus;
+  expectedVersion?: number;
 }
 
 export interface AppointmentProtocolRow {

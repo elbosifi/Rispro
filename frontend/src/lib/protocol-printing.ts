@@ -1,5 +1,6 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { ModalityProtocolAssignment } from "@/types/api";
+import { pushToast } from "@/lib/toast";
 
 export type ProtocolPrintModality = "CT" | "MRI";
 
@@ -143,6 +144,7 @@ function mriTable(sequences: ProtocolPrintMriSequence[]): string {
 
 function html(sheet: ProtocolPrintSheet): string {
   const printedAt = new Date().toLocaleString();
+  const printedAt = new Date().toLocaleString("en-GB");
   const detailTable = sheet.modality === "CT"
     ? ctTable(sheet.ctPhases ?? [])
     : mriTable(sheet.mriSequences ?? []);
@@ -224,6 +226,11 @@ export function openProtocolPrintWindow(): Window | null {
   const printWindow = window.open("", "_blank", "width=980,height=900");
   if (!printWindow) {
     console.warn("Unable to open protocol print window. Check popup blocker settings.");
+    pushToast({
+      type: "error",
+      title: "Popup blocked",
+      message: "Please allow popups for RISpro to print protocol sheets.",
+    });
     return null;
   }
   return printWindow;
@@ -241,8 +248,14 @@ export function writeProtocolPrintSheet(printWindow: Window, sheet: ProtocolPrin
 }
 
 export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
+export function printProtocolSheet(sheet: ProtocolPrintSheet): boolean {
   const printWindow = openProtocolPrintWindow();
   if (printWindow) writeProtocolPrintSheet(printWindow, sheet);
+  if (printWindow) {
+    writeProtocolPrintSheet(printWindow, sheet);
+    return true;
+  }
+  return false;
 }
 
 function effectiveValue(override: string | null | undefined, fallback: string | number | null | undefined): string | null {

@@ -584,31 +584,40 @@ export async function listCtPhasePresets(): Promise<CtPhasePresetRow[]> {
   return result.rows.map(mapCtPhasePreset);
 }
 
+const MRI_SEQUENCE_PRESET_BASE_SELECT = `
+  select msp.id, msp.sequence_key, msp.scanner_id, s.name as scanner_name, msp.vendor, msp.name, msp.vendor_sequence_name,
+         msp.generic_family, msp.weighting, msp.default_plane, msp.fat_suppression, msp.acquisition_type,
+         msp.contrast_relation, msp.default_coverage,
+         msp.default_b_values, msp.default_dynamic_timing, msp.estimated_scan_time_minutes, msp.notes,
+         msp.is_active, msp.created_at, msp.updated_at,
+         coalesce(aliases.items, '[]'::json) as scanner_aliases
+  from mri_sequence_presets msp
+  left join equipment s on s.id = msp.scanner_id
+  left join lateral (
+    select json_agg(json_build_object(
+      'id', alias.id,
+      'mri_sequence_preset_id', alias.mri_sequence_preset_id,
+      'scanner_id', alias.scanner_id,
+      'scanner_name', alias_scanner.name,
+      'vendor_sequence_name', alias.vendor_sequence_name,
+      'notes', alias.notes,
+      'created_at', alias.created_at,
+      'updated_at', alias.updated_at
+    ) order by alias_scanner.name asc, alias.id asc) as items
+    from mri_sequence_scanner_aliases alias
+    left join equipment alias_scanner on alias_scanner.id = alias.scanner_id
+    where alias.mri_sequence_preset_id = msp.id
+  ) aliases on true
+`;
+
+export async function getMriSequencePreset(id: number, db: DbClient = pool): Promise<MriSequencePresetRow | null> {
+  const result = await db.query(`${MRI_SEQUENCE_PRESET_BASE_SELECT} where msp.id = $1 limit 1`, [id]);
+  return result.rows[0] ? mapMriSequencePreset(result.rows[0]) : null;
+}
+
 export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> {
   const result = await pool.query(`
-    select msp.id, msp.sequence_key, msp.scanner_id, s.name as scanner_name, msp.vendor, msp.name, msp.vendor_sequence_name,
-           msp.generic_family, msp.weighting, msp.default_plane, msp.fat_suppression, msp.acquisition_type,
-           msp.contrast_relation, msp.default_coverage,
-           msp.default_b_values, msp.default_dynamic_timing, msp.estimated_scan_time_minutes, msp.notes,
-           msp.is_active, msp.created_at, msp.updated_at,
-           coalesce(aliases.items, '[]'::json) as scanner_aliases
-    from mri_sequence_presets msp
-    left join equipment s on s.id = msp.scanner_id
-    left join lateral (
-      select json_agg(json_build_object(
-        'id', alias.id,
-        'mri_sequence_preset_id', alias.mri_sequence_preset_id,
-        'scanner_id', alias.scanner_id,
-        'scanner_name', alias_scanner.name,
-        'vendor_sequence_name', alias.vendor_sequence_name,
-        'notes', alias.notes,
-        'created_at', alias.created_at,
-        'updated_at', alias.updated_at
-      ) order by alias_scanner.name asc, alias.id asc) as items
-      from mri_sequence_scanner_aliases alias
-      left join equipment alias_scanner on alias_scanner.id = alias.scanner_id
-      where alias.mri_sequence_preset_id = msp.id
-    ) aliases on true
+    ${MRI_SEQUENCE_PRESET_BASE_SELECT}
     order by msp.is_active desc, coalesce(s.name, ''), msp.name asc
   `);
   return result.rows.map(mapMriSequencePreset);
@@ -795,8 +804,9 @@ export async function createMriSequencePreset(input: MriSequencePresetInput): Pr
     const id = Number(result.rows[0].id);
     if (input.scannerAliases) await replaceMriSequenceScannerAliases(client, id, input.scannerAliases);
     await client.query("commit");
-    const rows = await listMriSequencePresets();
-    return rows.find((row) => row.id === id)!;
+    const preset = await getMriSequencePreset(id);
+    if (!preset) throw new HttpError(500, "Created MRI sequence preset not found.");
+    return preset;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -872,8 +882,7 @@ export async function updateMriSequencePreset(id: number, input: Partial<MriSequ
     }
     if ("scannerAliases" in input && input.scannerAliases) await replaceMriSequenceScannerAliases(client, id, input.scannerAliases);
     await client.query("commit");
-    const rows = await listMriSequencePresets();
-    return rows.find((row) => row.id === id) ?? null;
+    return getMriSequencePreset(id);
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1471,64 +1480,9 @@ export async function createDraftFromActiveVersion(protocolId: number, actorUser
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const protocol = await protocolById(client, protocolId);
-    if (!protocol?.activeVersionId) throw new HttpError(400, "Protocol has no active version.");
-    const activeVersion = await versionById(client, protocol.activeVersionId);
-    if (!activeVersion) throw new HttpError(400, "Protocol has no active version.");
-    const versionResult = await client.query(
-      `
-        insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes, created_by)
-        values ($1, $2, 'DRAFT', $3, $4, $5)
-        returning id, protocol_id, version_number, status, change_summary, protocol_notes, created_by, approved_by,
-                  approved_at, retired_at, created_at, updated_at
-      `,
-      [protocolId, nextDraftVersionNumber(activeVersion.versionNumber, revisionType), `Draft from active ${activeVersion.versionNumber}`, activeVersion.protocolNotes, actorUserId]
-    );
-    const draft = mapVersion(versionResult.rows[0]);
-    await client.query(
-      `
-        insert into protocol_ct_phases (
-          protocol_version_id, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
-          delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
-          coverage_override, reconstruction_override, instructions_override, is_required
-        )
-        select $1, order_index, ct_phase_preset_id, custom_phase_name, timing_override, timing_type,
-               delay_seconds, bolus_tracking_site, trigger_hu, post_trigger_delay_seconds,
-               coverage_override, reconstruction_override, instructions_override, is_required
-        from protocol_ct_phases
-        where protocol_version_id = $2
-      `,
-      [draft.id, activeVersion.id]
-    );
-    await client.query(
-      `
-        insert into protocol_mri_sequences (
-          protocol_version_id, scanner_id, order_index, mri_sequence_preset_id, plane_override,
-          coverage_override, b_values_override, timing_override, notes_override, is_required
-        )
-        select $1, scanner_id, order_index, mri_sequence_preset_id, plane_override,
-               coverage_override, b_values_override, timing_override, notes_override, is_required
-        from protocol_mri_sequences
-        where protocol_version_id = $2
-      `,
-      [draft.id, activeVersion.id]
-    );
-    if (protocol.modality === "CT") {
-      await client.query(`
-        insert into protocol_ct_techniques (
-          protocol_version_id, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
-          exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
-          reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
-        )
-        select $1, scanner_id, kv_mode, kvp, tube_current_mode, fixed_ma, reference_mas,
-               exposure_control, noise_index, min_ma, max_ma, reconstruction_method, reconstruction_strength,
-               reconstruction_image_definition, slice_thickness_mm, reconstruction_interval_mm, kernel
-        from protocol_ct_techniques where protocol_version_id = $2
-      `, [draft.id, activeVersion.id]);
-    }
+    const detail = await createDraftFromActiveVersionWithClient(client, protocolId, actorUserId, revisionType);
     await client.query("commit");
-    const detail = await getProtocolVersionDetail(draft.id);
-    return detail!;
+    return detail;
   } catch (error) {
     await client.query("rollback");
     throw error;

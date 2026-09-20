@@ -754,6 +754,22 @@ describe("Doctor protocoling request documents", () => {
     expect(history.queryByText("Unable to load patient history.")).toBeNull();
   });
 
+  it("exposes a retry button when patient history loading fails", async () => {
+    mockFetchProtocolingPatientHistory.mockRejectedValueOnce(new Error("network error"));
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const history = within(screen.getByRole("heading", { name: "Patient history" }).closest("aside")!);
+
+    expect(await history.findByText("Unable to load patient history.")).toBeTruthy();
+    const retryButton = history.getByRole("button", { name: "Retry patient history" });
+    expect(retryButton).toBeTruthy();
+
+    mockFetchProtocolingPatientHistory.mockResolvedValueOnce({ pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null, items: [] });
+    await userEvent.click(retryButton);
+    await waitFor(() => expect(mockFetchProtocolingPatientHistory).toHaveBeenCalledTimes(2));
+  });
+
   it("shows an explicit empty result only after historical PACS search completes", async () => {
     let resolveHistorical!: (value: { historicalCandidates: []; historicalPacsIndexStatus: "ready"; historicalPacsLastSuccessAt: null }) => void;
     mockFetchHistoricalPacsCandidates.mockReturnValue(new Promise((resolve) => { resolveHistorical = resolve; }));

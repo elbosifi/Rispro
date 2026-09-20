@@ -75,6 +75,7 @@ function protocolInput(body: Record<string, unknown>): ProtocolInput & { protoco
     technologistNotes: asOptionalString(body.technologistNotes) ?? null,
     protocolStatus: optionalStatus(body.protocolStatus) ?? undefined,
     reason: asOptionalString(body.reason) ?? null,
+    expectedVersion: optionalPositiveInteger(body.expectedVersion ?? body.version, "expectedVersion") ?? undefined,
   };
 }
 
@@ -83,6 +84,7 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const tasks = await getProtocolTasks(actor(req), filters(req));
     res.json({ tasks });
+    res.json({ tasks, hasMore: tasks.length >= 500 });
   })
 );
 

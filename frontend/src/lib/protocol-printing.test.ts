@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pushToast } from "./toast";
 import { printProtocolSheet, type ProtocolPrintSheet } from "./protocol-printing";
+
+vi.mock("./toast", () => ({ pushToast: vi.fn() }));
 
 const sheet: ProtocolPrintSheet = {
   patientName: "Protocol Patient",
@@ -75,12 +78,20 @@ describe("printProtocolSheet", () => {
   });
 
   it("warns when the print window is blocked", () => {
+  it("warns and triggers a toast when the print window is blocked", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.spyOn(window, "open").mockReturnValue(null);
 
     printProtocolSheet(sheet);
+    const result = printProtocolSheet(sheet);
 
+    expect(result).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith("Unable to open protocol print window. Check popup blocker settings.");
+    expect(pushToast).toHaveBeenCalledWith({
+      type: "error",
+      title: "Popup blocked",
+      message: "Please allow popups for RISpro to print protocol sheets.",
+    });
   });
 
   it("does not add a version suffix to a free-text protocol", () => {
