@@ -116,6 +116,17 @@ export const createSopRevision = (id: number, payload: { version: string; change
 export const publishSopVersion = (id: number, version: string) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}/publish`, { method: "POST", body: JSON.stringify({}) });
 export const archiveSop = (id: number) => api<{ sop: SopSummary }>(`/sops/${id}/archive`, { method: "POST", body: JSON.stringify({}) });
 
+export const sopPrintUrl = (id: number, version: string) => `/api/sops/${id}/versions/${encodeURIComponent(version)}/print`;
+
+export function openSopPrintWindow(): Window | null {
+  return window.open("about:blank", "_blank");
+}
+
+export function navigateSopPrintWindow(printWindow: Window, id: number, version: string, onLoad?: () => void): void {
+  if (onLoad) printWindow.addEventListener("load", onLoad, { once: true });
+  printWindow.location.assign(sopPrintUrl(id, version));
+}
+
 export async function downloadSopXlsx(id: number, version: string): Promise<void> {
   const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/export.xlsx`, { credentials: "include" });
   if (!response.ok) {
@@ -134,6 +145,30 @@ export async function downloadSopXlsx(id: number, version: string): Promise<void
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadSopPdf(id: number, version: string): Promise<void> {
+  const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/pdf`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) {
+    let message = response.status === 503 ? "The PDF renderer is busy. Try again shortly." : "Unable to generate the SOP PDF.";
+    try {
+      const body = await response.json() as { error?: { message?: string; details?: { code?: string } } };
+      if (body.error?.details?.code !== "CHROMIUM_RENDER_BUSY") message = body.error?.message || message;
+    } catch { /* Keep the safe fallback for non-JSON download errors. */ }
+    throw new Error(message);
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const filename = encodedFilename ? decodeURIComponent(encodedFilename) : disposition.match(/filename="?([^";]+)"?/i)?.[1] || `sop-v${version}.pdf`;
+  const url = URL.createObjectURL(await response.blob());
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export const inspectSopXlsxImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null }) =>

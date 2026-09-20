@@ -7,7 +7,7 @@ import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import SopsPage from "./sops-page";
 
-const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn() } }));
+const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), downloadSopPdf: vi.fn(), openSopPrintWindow: vi.fn(), navigateSopPrintWindow: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn() } }));
 vi.mock("@/lib/api/sops", () => api);
 vi.mock("./sop-editor", () => ({
   createEmptySopDocument: (definitions: Array<{ key: string; title: string; required: boolean }>) => ({ type: "sop", version: 1, sections: definitions.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph" }] } })) }),
@@ -51,6 +51,9 @@ describe("SopsPage", () => {
     api.publishSopVersion.mockResolvedValue({ sop: publishedSop, version: publishedVersion });
     api.archiveSop.mockResolvedValue({ sop: { ...publishedSop, status: "archived" } });
     api.downloadSopXlsx.mockResolvedValue(undefined);
+    api.downloadSopPdf.mockResolvedValue(undefined);
+    api.openSopPrintWindow.mockReturnValue({ focus: vi.fn(), print: vi.fn(), close: vi.fn() });
+    api.navigateSopPrintWindow.mockImplementation((_window: Window, _id: number, _version: string, onLoad?: () => void) => onLoad?.());
     api.inspectSopXlsxImport.mockResolvedValue({ format: "xlsx", formatVersion: "1", sheetName: "SOP", columns: [], missingColumns: [], sectionCount: 8, metadata: { sopCode: "RAD-MRI-001", title: "MRI Safety", category: "MRI", sourceVersion: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial draft" }, structuralErrors: [] });
     api.previewSopXlsxImport.mockResolvedValue({ format: "xlsx", formatVersion: "1", sheetName: "SOP", columns: [], missingColumns: [], sectionCount: 8, sopCode: "RAD-MRI-001", title: "MRI Safety", category: "MRI", sourceVersion: "1.0", targetVersion: "1.0", targetUpdatedAt: draftVersion.updatedAt, sections: sections.map((section, index) => ({ sectionKey: section.key, sectionTitle: section.title, action: index === 0 ? "changed" : "unchanged", errors: [], currentText: "Current text", importedText: index === 0 ? "Imported text" : "Current text" })), effectiveDate: { current: "2026-10-01", imported: "2026-10-02", changed: true }, changeSummary: { current: "Initial draft", imported: "Imported summary", changed: true }, errors: [], canConfirm: true });
     api.confirmSopXlsxImport.mockResolvedValue({ sop: draftSop, version: { ...draftVersion, effectiveDate: "2026-10-02", changeSummary: "Imported summary" }, summary: { changedSectionKeys: ["purpose"], effectiveDateChanged: true, changeSummaryChanged: true, sourceVersion: "1.0", targetVersion: "1.0" } });
@@ -104,6 +107,41 @@ describe("SopsPage", () => {
     await user.type(title, "Unsaved title");
     expect(screen.getByRole("button", { name: "Import Excel" })).toHaveProperty("disabled", true);
     expect(screen.getByText("Save the current RISpro draft before importing Excel.")).toBeTruthy();
+  });
+
+  it("offers Print and Download PDF for readable versions", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: publishedSop, versions: [publishedVersion, oldVersion] });
+    renderPage("receptionist", "/sops/7?version=1.0");
+    expect(await screen.findByRole("button", { name: "Print" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Download PDF" }));
+    await waitFor(() => expect(api.downloadSopPdf).toHaveBeenCalledWith(7, "1.0"));
+    await user.click(screen.getByRole("button", { name: "Print" }));
+    expect(api.openSopPrintWindow).toHaveBeenCalled();
+    expect(api.navigateSopPrintWindow).toHaveBeenCalledWith(expect.anything(), 7, "1.0", expect.any(Function));
+  });
+
+  it("saves dirty draft content before PDF and browser-print actions", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    api.updateSopDraft.mockResolvedValue({ sop: draftSop, version: draftVersion });
+    const firstRender = renderPage("supervisor", "/sops/7?version=1.0");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Latest print draft");
+    await user.click(screen.getByRole("button", { name: "Download PDF" }));
+    await waitFor(() => expect(api.downloadSopPdf).toHaveBeenCalledWith(7, "1.0"));
+    expect(api.updateSopDraft.mock.invocationCallOrder[0]).toBeLessThan(api.downloadSopPdf.mock.invocationCallOrder[0]!);
+
+    firstRender.unmount();
+    api.fetchSop.mockResolvedValueOnce({ sop: draftSop, versions: [draftVersion] });
+    renderPage("supervisor", "/sops/7?version=1.0");
+    const printTitle = await screen.findByLabelText("Title");
+    await user.clear(printTitle);
+    await user.type(printTitle, "Latest browser print draft");
+    await user.click(screen.getByRole("button", { name: "Print" }));
+    await waitFor(() => expect(api.navigateSopPrintWindow).toHaveBeenCalled());
+    expect(api.updateSopDraft.mock.invocationCallOrder.at(-1)).toBeLessThan(api.navigateSopPrintWindow.mock.invocationCallOrder.at(-1)!);
   });
 
   it("validates, previews, and confirms an uploaded workbook through the draft editor", async () => {

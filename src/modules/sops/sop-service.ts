@@ -5,6 +5,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { SOP_CATEGORIES, SOP_MANAGEMENT_ROLES, SOP_SECTION_DEFINITIONS, SOP_STATUSES } from "./constants.js";
 import { archiveSop, findSop, findSopByCode, findSopVersion, getSopDetail, insertSop, insertSopRevision, listSopSummaries, updateSopDraft, publishSopVersion } from "./sop-repository.js";
 import { normalizeSopCategory, normalizeSopCode, normalizeSopDate, normalizeSopVersion, requiredText, validateSopDocument } from "./sop-validation.js";
+import { deriveSopPrintStatus } from "./sop-print-service.js";
 import type { SopDocument, SopFilters, SopSummary, SopVersion } from "./types.js";
 
 export const SOP_META = { categories: [...SOP_CATEGORIES], sections: SOP_SECTION_DEFINITIONS.map((section) => ({ ...section })) };
@@ -30,6 +31,16 @@ export async function getSopDetailForUser(sopIdValue: unknown, role: string | un
   if (!role) throw new HttpError(401, "Authentication required."); const sopId = positiveId(sopIdValue, "sopId"); const detail = await getSopDetail(sopId, managementRole(role)); if (!detail) throw new HttpError(404, "SOP not found."); if (!managementRole(role) && detail.sop.status !== "published") throw new HttpError(404, "SOP not found."); return toDetail(detail.sop, detail.versions);
 }
 export async function getSopVersionForUser(sopIdValue: unknown, versionValue: unknown, role: string | undefined): Promise<SopVersion> { if (!role) throw new HttpError(401, "Authentication required."); const sopId = positiveId(sopIdValue, "sopId"); const sop = await findSop(sopId); if (!sop || (!managementRole(role) && sop.status !== "published")) throw new HttpError(404, "SOP version not found."); const version = normalizeSopVersion(versionValue); const result = await findSopVersion(sopId, version, managementRole(role)); if (!result) throw new HttpError(404, "SOP version not found."); return result; }
+export async function getSopPrintDocumentForUser(sopIdValue: unknown, versionValue: unknown, role: string | undefined) {
+  if (!role) throw new HttpError(401, "Authentication required.");
+  const sopId = positiveId(sopIdValue, "sopId");
+  const includeAll = managementRole(role);
+  const sop = await findSop(sopId, pool, includeAll);
+  if (!sop || (!includeAll && sop.status !== "published")) throw new HttpError(404, "SOP version not found.");
+  const version = await findSopVersion(sopId, normalizeSopVersion(versionValue), includeAll);
+  if (!version) throw new HttpError(404, "SOP version not found.");
+  return { sop, version, status: deriveSopPrintStatus(sop, version) };
+}
 
 export async function createSop(body: unknown, actorUserIdValue: unknown, actorRole: string | undefined) {
   requireSopManagement(actorRole);

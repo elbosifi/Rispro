@@ -7,8 +7,10 @@ import {
   Download,
   Eye,
   FileClock,
+  FileDown,
   FileSpreadsheet,
   Pencil,
+  Printer,
   ShieldCheck,
 } from "lucide-react";
 import {
@@ -37,10 +39,13 @@ import {
   archiveSop,
   createSop,
   createSopRevision,
+  downloadSopPdf,
   downloadSopXlsx,
   fetchSop,
   fetchSopMeta,
   fetchSops,
+  navigateSopPrintWindow,
+  openSopPrintWindow,
   publishSopVersion,
   updateSopDraft,
   type SopDocument,
@@ -132,6 +137,11 @@ function draftSignature(input: {
   document: SopDocument;
 }): string {
   return JSON.stringify(input);
+}
+
+function pdfActionError(value: unknown, translate: (key: "sops.pdfRendererBusy" | "sops.unableGeneratePdf") => string): string {
+  const message = value instanceof Error ? value.message : "";
+  return message.toLowerCase().includes("busy") ? translate("sops.pdfRendererBusy") : message || translate("sops.unableGeneratePdf");
 }
 
 function publishValidationError(input: {
@@ -548,8 +558,11 @@ function EditorForm({
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+  const { t } = useLanguage();
   const publishInFlight = useRef(false);
   const currentSignature = draftSignature({
     title,
@@ -661,6 +674,41 @@ function EditorForm({
       setError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
     } finally {
       setExportBusy(false);
+    }
+  };
+  const printCurrentDraft = async () => {
+    if (!isExisting || printBusy || pdfBusy || save.isPending || publishBusy || publishing) return;
+    const printWindow = openSopPrintWindow();
+    if (!printWindow) {
+      setError(t("sops.unableOpenPrint"));
+      return;
+    }
+    setPrintBusy(true);
+    setError(null);
+    try {
+      const saved = dirty ? await save.mutateAsync() : null;
+      navigateSopPrintWindow(printWindow, saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version, () => {
+        printWindow.focus();
+        printWindow.print();
+      });
+    } catch (value) {
+      printWindow.close();
+      setError(value instanceof Error ? value.message : t("sops.unableOpenPrint"));
+    } finally {
+      setPrintBusy(false);
+    }
+  };
+  const downloadCurrentPdf = async () => {
+    if (!isExisting || printBusy || pdfBusy || save.isPending || publishBusy || publishing) return;
+    setPdfBusy(true);
+    setError(null);
+    try {
+      const saved = dirty ? await save.mutateAsync() : null;
+      await downloadSopPdf(saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version);
+    } catch (value) {
+      setError(pdfActionError(value, t));
+    } finally {
+      setPdfBusy(false);
     }
   };
   const handleImported = async (result: SopXlsxConfirmResult) => {
@@ -776,14 +824,22 @@ function EditorForm({
         </Button>
         {isExisting ? (
           <>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void exportCurrentDraft()}
-              disabled={save.isPending || exportBusy || publishBusy || publishing}
-            >
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void exportCurrentDraft()}
+            disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}
+          >
               <Download className="h-4 w-4" />
               {exportBusy ? "Exporting…" : "Export Excel"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void printCurrentDraft()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}>
+              <Printer className="h-4 w-4" />
+              {printBusy ? t("sops.preparingPrint") : t("sops.print")}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void downloadCurrentPdf()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}>
+              <FileDown className="h-4 w-4" />
+              {pdfBusy ? t("sops.preparingPdf") : t("sops.downloadPdf")}
             </Button>
             <Button
               type="button"
@@ -1009,6 +1065,9 @@ function DetailPage({ id }: { id: number }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const { t } = useLanguage();
   // The detail query arrives asynchronously; seed the next revision field when it does.
   useEffect(() => {
     if (!data) return;
@@ -1017,7 +1076,6 @@ function DetailPage({ id }: { id: number }) {
       .filter(Number.isFinite);
     const next = (Math.max(...numbers, 1) + 0.1).toFixed(1);
     // This state mirrors asynchronously loaded version data for the revision dialog.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRevisionVersion(next);
   }, [data]);
   const revision = useMutation({
@@ -1076,6 +1134,39 @@ function DetailPage({ id }: { id: number }) {
       setActionError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
     } finally {
       setExportBusy(false);
+    }
+  };
+  const printSelectedVersion = () => {
+    if (!selectedVersion || printBusy || pdfBusy) return;
+    const printWindow = openSopPrintWindow();
+    if (!printWindow) {
+      setActionError(t("sops.unableOpenPrint"));
+      return;
+    }
+    setPrintBusy(true);
+    setActionError(null);
+    try {
+      navigateSopPrintWindow(printWindow, id, selectedVersion.version, () => {
+        printWindow.focus();
+        printWindow.print();
+      });
+    } catch (value) {
+      printWindow.close();
+      setActionError(value instanceof Error ? value.message : t("sops.unableOpenPrint"));
+    } finally {
+      setPrintBusy(false);
+    }
+  };
+  const downloadSelectedPdf = async () => {
+    if (!selectedVersion || printBusy || pdfBusy) return;
+    setPdfBusy(true);
+    setActionError(null);
+    try {
+      await downloadSopPdf(id, selectedVersion.version);
+    } catch (value) {
+      setActionError(pdfActionError(value, t));
+    } finally {
+      setPdfBusy(false);
     }
   };
   if (detail.isLoading)
@@ -1146,6 +1237,14 @@ function DetailPage({ id }: { id: number }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={printSelectedVersion} disabled={printBusy || pdfBusy}>
+            <Printer className="h-4 w-4" />
+            {printBusy ? t("sops.preparingPrint") : t("sops.print")}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void downloadSelectedPdf()} disabled={printBusy || pdfBusy}>
+            <FileDown className="h-4 w-4" />
+            {pdfBusy ? t("sops.preparingPdf") : t("sops.downloadPdf")}
+          </Button>
           <Button type="button" variant="secondary" onClick={() => void exportSelectedVersion()} disabled={exportBusy}>
             <Download className="h-4 w-4" />
             {exportBusy ? "Exporting…" : "Export Excel"}

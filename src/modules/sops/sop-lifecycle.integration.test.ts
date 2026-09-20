@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { pool } from "../../db/pool.js";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
-import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopVersionForUser, listSops, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
+import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopPrintDocumentForUser, getSopVersionForUser, listSops, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
 import type { SopDocument } from "./types.js";
 
 function documentWith(text: string): SopDocument {
@@ -43,6 +43,10 @@ test("SOP lifecycle preserves published Unicode versions and enforces authorizat
     assert.equal(published.sop.currentVersion, "1.0");
     assert.equal(published.versions[0]!.status, "published");
     assert.match(JSON.stringify(published.versions[0]!.contentJson), /مصطلح MRI/);
+    const currentPrint = await getSopPrintDocumentForUser(sopId, "1.0", "receptionist");
+    assert.equal(currentPrint.status, "CURRENT");
+    assert.match(JSON.stringify(currentPrint.version.contentJson), /مصطلح MRI/);
+    await assert.rejects(() => getSopPrintDocumentForUser(sopId, "1.0", undefined), (error: unknown) => (error as { statusCode?: number }).statusCode === 401);
     await assert.rejects(() => updateSopDraftForUser(sopId, "1.0", { title: "Changed", category: "MRI", effectiveDate: "2026-10-02", changeSummary: "No", contentJson: documentWith("No") }, actor, "supervisor"), (error: unknown) => (error as { statusCode?: number }).statusCode === 409);
 
     const revision = await createSopRevisionForUser(sopId, { version: "2.0", changeSummary: "Updated safety language", effectiveDate: "2026-11-01" }, actor, "supervisor");
@@ -59,6 +63,10 @@ test("SOP lifecycle preserves published Unicode versions and enforces authorizat
     const supervisorRevision = await getSopDetailForUser(sopId, "supervisor");
     assert.equal(supervisorRevision.sop.draftVersion, "2.0");
     assert.equal(supervisorRevision.versions.some((item) => item.version === "2.0" && item.status === "draft"), true);
+    const draftPrint = await getSopPrintDocumentForUser(sopId, "2.0", "supervisor");
+    assert.equal(draftPrint.status, "DRAFT");
+    assert.match(JSON.stringify(draftPrint.version.contentJson), /مصطلح MRI/);
+    await assert.rejects(() => getSopPrintDocumentForUser(sopId, "2.0", "receptionist"), (error: unknown) => (error as { statusCode?: number }).statusCode === 404);
     await assert.rejects(() => getSopVersionForUser(sopId, "2.0", "receptionist"), (error: unknown) => (error as { statusCode?: number }).statusCode === 404);
     await updateSopDraftForUser(sopId, "2.0", { title: "MRI Safety عربية", category: "MRI", effectiveDate: "2026-11-01", changeSummary: "Published revision", contentJson: documentWith("Revision MRI") }, actor, "supervisor");
     await publishSopVersionForUser(sopId, "2.0", actor, "supervisor");
@@ -66,7 +74,16 @@ test("SOP lifecycle preserves published Unicode versions and enforces authorizat
     assert.equal(afterRevision.sop.currentVersion, "2.0");
     assert.equal(afterRevision.versions.find((item) => item.version === "1.0")?.status, "superseded");
     assert.match(JSON.stringify(afterRevision.versions.find((item) => item.version === "1.0")?.contentJson), /مصطلح MRI/);
+    const historicalPrint = await getSopPrintDocumentForUser(sopId, "1.0", "receptionist");
+    assert.equal(historicalPrint.status, "SUPERSEDED");
+    assert.match(JSON.stringify(historicalPrint.version.contentJson), /مصطلح MRI/);
+    assert.doesNotMatch(JSON.stringify(historicalPrint.version.contentJson), /Revision MRI/);
+    const currentRevisionPrint = await getSopPrintDocumentForUser(sopId, "2.0", "receptionist");
+    assert.equal(currentRevisionPrint.status, "CURRENT");
     await archiveSopForUser(sopId, actor, "supervisor");
+    const archivedPrint = await getSopPrintDocumentForUser(sopId, "2.0", "supervisor");
+    assert.equal(archivedPrint.status, "ARCHIVED");
+    await assert.rejects(() => getSopPrintDocumentForUser(sopId, "2.0", "receptionist"), (error: unknown) => (error as { statusCode?: number }).statusCode === 404);
     assert.equal((await listSops({ search: code }, "receptionist")).length, 0);
     assert.equal((await listSops({ search: code, status: "archived" }, "supervisor")).length, 1);
     const auditRows = await pool.query<{ action_type: string; new_values: Record<string, unknown> }>("select action_type, new_values from audit_log where entity_type='sop' and entity_id=$1 order by id", [sopId]);
