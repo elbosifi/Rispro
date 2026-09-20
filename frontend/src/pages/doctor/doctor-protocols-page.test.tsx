@@ -1488,3 +1488,151 @@ describe("CT protocol library workbench", () => {
     expect((screen.getByLabelText("Noise Index") as HTMLInputElement).value).toBe("30");
   });
 });
+
+describe("Doctor protocoling usability enhancements", () => {
+  beforeEach(() => {
+    mockFetchAppointments.mockReset();
+    mockFetchAppointmentDetail.mockReset();
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    mockFetchHistoricalPacsCandidates.mockResolvedValue({ historicalCandidates: [], historicalPacsIndexStatus: "ready", historicalPacsLastSuccessAt: null });
+    mockSearchHistoricalPacsPatientId.mockResolvedValue([]);
+    mockGetAppointmentById.mockResolvedValue(appointment);
+    mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
+    mockCreateAssignment.mockReset();
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(null);
+    vi.mocked(apiHooks.fetchProtocolLibraryScanners).mockResolvedValue([]);
+  });
+
+  it("supports worklist quick-filtering by modality and waiting status with dynamic counts", async () => {
+    const ctApt = { ...appointment, appointmentId: 101, modalityCode: "CT", appointmentStatus: "scheduled", patientEnglishName: "CT Patient" };
+    const mriApt = { ...appointment, appointmentId: 102, modalityCode: "MRI", appointmentStatus: "scheduled", patientEnglishName: "MRI Patient" };
+    const waitingApt = { ...appointment, appointmentId: 103, modalityCode: "CT", appointmentStatus: "waiting", patientEnglishName: "Waiting Patient" };
+
+    mockFetchAppointments.mockResolvedValue([ctApt, mriApt, waitingApt]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    expect(await screen.findByRole("button", { name: "All (3)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CT (2)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "MRI (1)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Waiting in Clinic (1)" })).toBeTruthy();
+
+    expect(screen.getByText("CT Patient")).toBeTruthy();
+    expect(screen.getByText("MRI Patient")).toBeTruthy();
+    expect(screen.getByText("Waiting Patient")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "MRI (1)" }));
+    expect(screen.queryByText("CT Patient")).toBeNull();
+    expect(screen.getByText("MRI Patient")).toBeTruthy();
+    expect(screen.queryByText("Waiting Patient")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Waiting in Clinic (1)" }));
+    expect(screen.queryByText("CT Patient")).toBeNull();
+    expect(screen.queryByText("MRI Patient")).toBeNull();
+    expect(screen.getByText("Waiting Patient")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "All (3)" }));
+    expect(screen.getByText("CT Patient")).toBeTruthy();
+    expect(screen.getByText("MRI Patient")).toBeTruthy();
+    expect(screen.getByText("Waiting Patient")).toBeTruthy();
+  });
+
+  it("sorts worklist appointments when column headers are clicked", async () => {
+    const aptA = { ...appointment, appointmentId: 101, patientEnglishName: "Alpha Patient", examTypeName: "Zebra Scan" };
+    const aptB = { ...appointment, appointmentId: 102, patientEnglishName: "Beta Patient", examTypeName: "Apple Scan" };
+
+    mockFetchAppointments.mockResolvedValue([aptA, aptB]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await screen.findByText("Alpha Patient");
+
+    await userEvent.click(screen.getByRole("button", { name: /Exam type/i }));
+    const rows = screen.getAllByRole("row");
+    expect(rows[1].textContent).toContain("Beta Patient");
+    expect(rows[2].textContent).toContain("Alpha Patient");
+  });
+
+  it("keeps patient history and protocol entry pane simultaneously visible when history is opened", async () => {
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    expect(screen.getByTestId("protocol-entry-pane")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+
+    expect(await screen.findByRole("region", { name: "Historical imaging" })).toBeTruthy();
+    expect(screen.getByTestId("protocol-entry-pane")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("displays smart protocol suggestions matching exam type and supports customizing as free-text", async () => {
+    const chestProtocol = { ...libraryProtocol, id: 108, name: "CT Chest Standard", activeVersionId: 208, activeVersionNumber: "1.0", activeVersionStatus: "ACTIVE" as const };
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([chestProtocol]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue({
+      protocol: chestProtocol,
+      version: { ...activeVersion, id: 208, protocolNotes: "Standard chest protocol notes" },
+      ctPhases: [phase(1, 1, "Arterial Phase")],
+      mriSequences: [],
+      ctTechniques: [],
+    });
+
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    expect(await screen.findByText("Suggested for CT Chest")).toBeTruthy();
+    const suggestionBtn = screen.getByRole("button", { name: "CT Chest Standard" });
+    expect(suggestionBtn).toBeTruthy();
+
+    await userEvent.click(suggestionBtn);
+
+    const customizeBtn = await screen.findByRole("button", { name: "Customize as free-text" });
+    expect(customizeBtn).toBeTruthy();
+
+    await userEvent.click(customizeBtn);
+
+    const textarea = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
+    expect(textarea.value).toContain("CT Chest Standard");
+    expect(textarea.value).toContain("Arterial Phase");
+    expect(textarea.value).toContain("Standard chest protocol notes");
+  });
+
+  it("triggers assign and save via Ctrl+Enter and Ctrl+S keyboard shortcuts", async () => {
+    mockCreateAssignment.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Free-text protocol" }), "Stat CT Chest with IV contrast");
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    await waitFor(() => {
+      expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: "Stat CT Chest with IV contrast" }));
+    });
+
+    mockCreateAssignment.mockClear();
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    await waitFor(() => {
+      expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: "Stat CT Chest with IV contrast" }));
+    });
+  });
+});
+

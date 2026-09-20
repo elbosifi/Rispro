@@ -882,13 +882,13 @@ function RowActions({ active, onEdit, onToggle }: { active: boolean; onEdit: () 
   );
 }
 
-function SettingsTable({ headers, emptyText, tableClassName = "", children }: { headers: string[]; emptyText: string; tableClassName?: string; children: ReactNode }) {
+function SettingsTable({ headers, emptyText, tableClassName = "", children }: { headers: Array<string | ReactNode>; emptyText: string; tableClassName?: string; children: ReactNode }) {
   const childArray = Children.toArray(children);
   const hasRows = childArray.length > 0;
   return (
     <div className="overflow-x-auto rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <table className={`min-w-full text-sm ${tableClassName}`.trim()}>
-        <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+        <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header, idx) => <th key={typeof header === "string" ? header : idx} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
         <tbody>{hasRows ? childArray : <tr><td className="p-6 text-sm" colSpan={headers.length} style={{ color: "var(--text-muted)" }}>{emptyText}</td></tr>}</tbody>
       </table>
     </div>
@@ -1694,6 +1694,37 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
   });
 
   const appointments = appointmentsQuery.data ?? [];
+  const [sortField, setSortField] = useState<"default" | "dateTime" | "patient" | "modality" | "exam">("default");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const toggleSort = (field: "dateTime" | "patient" | "modality" | "exam") => {
+    if (sortField === field) {
+      if (sortAsc) setSortAsc(false);
+      else { setSortField("default"); setSortAsc(true); }
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  const displayedAppointments = useMemo(() => {
+    if (sortField === "default") return appointments;
+    const items = [...appointments];
+    return items.sort((a, b) => {
+      let comp = 0;
+      if (sortField === "dateTime") {
+        comp = `${a.appointmentDate} ${a.appointmentTime || ""}`.localeCompare(`${b.appointmentDate} ${b.appointmentTime || ""}`);
+      } else if (sortField === "patient") {
+        comp = protocolingPatientName(a).localeCompare(protocolingPatientName(b));
+      } else if (sortField === "modality") {
+        comp = (a.modalityCode || "").localeCompare(b.modalityCode || "");
+      } else if (sortField === "exam") {
+        comp = (a.examTypeName || "").localeCompare(b.examTypeName || "");
+      }
+      return sortAsc ? comp : -comp;
+    });
+  }, [appointments, sortField, sortAsc]);
+
   const selectedAppointment = appointmentDetailQuery.data?.appointment ?? appointments.find((appointment) => appointment.appointmentId === selectedAppointmentId) ?? null;
   const selectedDetail = appointmentDetailQuery.data ?? null;
   const assignmentBusy = createAssignmentMutation.isPending || updateAssignmentMutation.isPending || clearAssignmentMutation.isPending;
@@ -1742,6 +1773,15 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
     />;
   }
 
+  const resetQuickFilters = () => {
+    if (navigation) {
+      onNavigationChange?.({ modality: "", appointmentStatus: "" });
+    } else {
+      setLocalModality("");
+      setLocalAppointmentStatus("");
+    }
+  };
+
   return (
     <section className={embeddedAppointmentId !== undefined ? "contents" : "space-y-4"}>
       {embeddedAppointmentId === undefined ? <>
@@ -1764,6 +1804,69 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
       ) : null}
 
       {canAssign ? <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="flex flex-wrap items-center gap-1.5 md:col-span-3 lg:col-span-6 border-b pb-3 mb-1" style={{ borderColor: "var(--border)" }} data-testid="protocol-quick-filters">
+          <span className="text-xs font-semibold uppercase text-muted-foreground me-1">Quick Filters:</span>
+          <button
+            type="button"
+            onClick={resetQuickFilters}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              !modality && !appointmentStatus
+                ? "bg-teal-700 text-white"
+                : "border bg-background hover:bg-muted text-foreground"
+            }`}
+            style={{ borderColor: "var(--border)" }}
+          >
+            All <span className="ms-1 rounded-full bg-white/20 px-1.5 py-0.2 text-[10px]">{appointments.length}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModality(modality === "CT" ? "" : "CT")}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              modality === "CT"
+                ? "bg-teal-700 text-white"
+                : "border bg-background hover:bg-muted text-foreground"
+            }`}
+            style={{ borderColor: "var(--border)" }}
+          >
+            CT <span className="ms-1 rounded-full bg-sky-100 text-sky-800 px-1.5 py-0.2 text-[10px]">{appointments.filter((a) => a.modalityCode === "CT").length}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModality(modality === "MRI" ? "" : "MRI")}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              modality === "MRI"
+                ? "bg-teal-700 text-white"
+                : "border bg-background hover:bg-muted text-foreground"
+            }`}
+            style={{ borderColor: "var(--border)" }}
+          >
+            MRI <span className="ms-1 rounded-full bg-violet-100 text-violet-800 px-1.5 py-0.2 text-[10px]">{appointments.filter((a) => a.modalityCode === "MRI").length}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setAppointmentStatus(appointmentStatus === "waiting" ? "" : "waiting")}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              appointmentStatus === "waiting"
+                ? "bg-amber-600 text-white"
+                : "border bg-amber-50/50 hover:bg-amber-100/50 text-amber-900 border-amber-300"
+            }`}
+          >
+            Waiting in Clinic <span className="ms-1 rounded-full bg-amber-200 text-amber-900 px-1.5 py-0.2 text-[10px]">{appointments.filter((a) => a.appointmentStatus === "waiting").length}</span>
+          </button>
+          <div className="ms-auto flex items-center gap-2 text-xs text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] })}
+              disabled={appointmentsQuery.isFetching}
+              className="inline-flex items-center gap-1 rounded border px-2.5 py-1 hover:bg-muted text-xs font-medium"
+              style={{ borderColor: "var(--border)" }}
+              title="Refresh worklist"
+            >
+              <span className={appointmentsQuery.isFetching ? "animate-spin" : ""}>↻</span>
+              {appointmentsQuery.isFetching ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+        </div>
         <div className="flex items-end gap-2 md:col-span-3">
           <button type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(todayIso()); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Today</button>
           <button type="button" onClick={() => { const tomorrow = addDays(todayIso(), 1); setDateFrom(tomorrow); setDateTo(tomorrow); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Tomorrow</button>
@@ -1791,8 +1894,23 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           No appointments need protocol assignment.
         </div>
       ) : (
-        <SettingsTable emptyText="No appointments need protocol assignment." headers={["Date/time", "Patient", "Age/sex", "Modality", "Exam", "Category", "Notes", "Appointment status", "Protocol status", "Assigned protocol", "Actions"]}>
-          {appointments.map((appointment) => (
+        <SettingsTable
+          emptyText="No appointments need protocol assignment."
+          headers={[
+            <button key="h-datetime" type="button" onClick={() => toggleSort("dateTime")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Date/time{sortField === "dateTime" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-patient" type="button" onClick={() => toggleSort("patient")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Patient{sortField === "patient" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            "Age/sex",
+            <button key="h-modality" type="button" onClick={() => toggleSort("modality")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Modality{sortField === "modality" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-exam" type="button" onClick={() => toggleSort("exam")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Exam{sortField === "exam" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            "Category",
+            "Notes",
+            "Appointment status",
+            "Protocol status",
+            "Assigned protocol",
+            "Actions",
+          ]}
+        >
+          {displayedAppointments.map((appointment) => (
             <tr key={appointment.appointmentId} onClick={() => openAssignmentModal(appointment.appointmentId)} className="cursor-pointer hover:bg-slate-50">
               <Cell>{appointment.appointmentDate} {appointment.appointmentTime ?? ""}</Cell>
               <Cell>{protocolingPatientName(appointment)}</Cell>
@@ -1801,7 +1919,16 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
               <Cell>{appointment.examTypeName ?? "-"}</Cell>
               <Cell>{appointment.caseCategory ?? "-"}</Cell>
               <Cell><span className="block max-w-[16rem] truncate" title={appointment.clinicalNotes ?? undefined}>{appointment.clinicalNotes ?? "-"}</span></Cell>
-              <Cell><AppointmentStatusBadge status={appointment.appointmentStatus} /></Cell>
+              <Cell>
+                <div className="flex items-center gap-1.5">
+                  <AppointmentStatusBadge status={appointment.appointmentStatus} />
+                  {appointment.appointmentStatus === "waiting" ? (
+                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500 animate-pulse" title="Patient waiting in clinic" />
+                  ) : appointment.appointmentStatus === "arrived" ? (
+                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Patient arrived" />
+                  ) : null}
+                </div>
+              </Cell>
               <Cell><div className="flex flex-wrap items-center gap-1"><ProtocolStatusBadge assigned={appointment.assignment !== null} />{appointment.latestComplementaryRecall ? <Badge variant={appointment.latestComplementaryRecall.status === "completed" ? "success" : appointment.latestComplementaryRecall.status === "cancelled" ? "neutral" : appointment.latestComplementaryRecall.status === "pending_scheduling" ? "warning" : "info"} size="sm" className={appointment.latestComplementaryRecall.status === "pending_scheduling" ? "border-amber-300 bg-amber-50 text-amber-800" : ""}>{appointment.latestComplementaryRecall.status === "pending_scheduling" ? "Additional imaging pending · Needs booking" : appointment.latestComplementaryRecall.status === "scheduled" ? "Additional imaging pending · Scheduled" : appointment.latestComplementaryRecall.status === "completed" ? "Additional imaging completed" : "Additional imaging withdrawn"}</Badge> : null}{appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreeningResult} /> : null}</div></Cell>
               <Cell>{appointment.assignment ? (appointment.assignment.freeTextProtocol ? "Free-text protocol" : `${appointment.assignment.protocolName ?? "Saved protocol"} v${appointment.assignment.versionNumber ?? "-"}`) + (appointment.assignment.scannerName ? ` · Protocol scanner: ${appointment.assignment.scannerName}` : "") : "-"}</Cell>
               <Cell>{appointment.acquisitionSummary?.equipmentName ? <p data-testid="protocoling-performed-acquisition" className="mb-1 max-w-[13rem] truncate text-[11px] text-muted-foreground" title={appointment.acquisitionSummary.equipmentName}>{`Performed on: ${appointment.acquisitionSummary.equipmentName}${appointment.acquisitionSummary.durationSeconds != null ? ` · ${Math.floor(appointment.acquisitionSummary.durationSeconds / 60)} min` : ""}`}</p> : null}<button type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
@@ -1859,6 +1986,8 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
     </section>
   );
 }
+
+const PROTOCOL_SUGGESTION_STOP_WORDS = new Set(["with", "without", "contrast", "left", "right", "bilateral", "and", "or", "the", "a", "an", "ct", "mri", "scan", "exam", "routine", "non", "con"]);
 
 function ProtocolAssignmentModal({
   appointment,
@@ -2042,16 +2171,99 @@ function ProtocolAssignmentModal({
   });
   const formDirty = modeTouched || protocolId !== String(existing?.protocolId ?? "") || scannerId !== String(existing?.scannerId ?? "") || protocolNotes !== (existing?.protocolNotes ?? "") || contrastNotes !== (existing?.contrastNotes ?? "") || freeTextProtocol !== (existing?.freeTextProtocol ?? "");
   const hasUnsavedChanges = formDirty || annotationDirty;
+  const canSaveAssignment = !saving && !annotationDirty && (protocolMode === "saved" ? Boolean(protocolId) : Boolean(freeTextProtocol.trim()));
   const requestClose = useCallback(() => { if (hasUnsavedChanges && !window.confirm("You have unsaved changes. Leave this appointment without saving?")) return; onClose(); }, [hasUnsavedChanges, onClose]);
   const requestNavigate = useCallback((direction: -1 | 1) => {
     if (hasUnsavedChanges && !window.confirm("You have unsaved changes. Leave this appointment without saving?")) return;
     onNavigate(direction);
   }, [hasUnsavedChanges, onNavigate]);
 
+  const examTokens = (appointment.examTypeName ?? "")
+    .toLowerCase()
+    .split(/[\s,/&+-]+/)
+    .filter((token) => token.length > 2 && !PROTOCOL_SUGGESTION_STOP_WORDS.has(token));
+
+  const recommendedProtocols = examTokens.length > 0 && activeProtocols.length > 0
+    ? activeProtocols
+        .map((protocol) => {
+          let score = 0;
+          const nameLower = protocol.name.toLowerCase();
+          const anatomyLower = (protocol.anatomyRegionName ?? "").toLowerCase();
+          const indicationLower = (protocol.indication ?? "").toLowerCase();
+
+          for (const token of examTokens) {
+            if (anatomyLower && anatomyLower.includes(token)) score += 3;
+            if (nameLower.includes(token)) score += 2;
+            if (indicationLower && indicationLower.includes(token)) score += 1;
+          }
+          return { protocol, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.protocol)
+        .slice(0, 4)
+    : [];
+
+  const handleCustomizeAsFreeText = () => {
+    const versionDetail = selectedVersionQuery.data;
+    let text = `Protocol: ${selectedProtocol?.name ?? "Saved protocol"}`;
+    if (versionDetail?.ctPhases && versionDetail.ctPhases.length > 0) {
+      text += "\n\nPhases:\n" + versionDetail.ctPhases.map((ph, idx) => 
+        `${idx + 1}. ${ph.customPhaseName ?? ph.ctPhasePresetName ?? "Phase"}${ph.delaySeconds != null ? ` · Delay: ${ph.delaySeconds}s` : ""}${ph.instructionsOverride ? ` · ${ph.instructionsOverride}` : ""}`
+      ).join("\n");
+    } else if (versionDetail?.mriSequences && versionDetail.mriSequences.length > 0) {
+      text += "\n\nSequences:\n" + versionDetail.mriSequences.map((seq, idx) => 
+        `${idx + 1}. ${seq.mriSequencePresetName ?? "Sequence"}${seq.planeOverride ?? seq.presetDefaultPlane ? ` (${seq.planeOverride ?? seq.presetDefaultPlane})` : ""}`
+      ).join("\n");
+    }
+    if (versionDetail?.version?.protocolNotes?.trim()) {
+      text += `\n\nProtocol Notes:\n${versionDetail.version.protocolNotes.trim()}`;
+    }
+    if (protocolNotes.trim()) text += `\n\nPatient Instructions:\n${protocolNotes.trim()}`;
+    if (contrastNotes.trim()) text += `\n\nContrast/Prep:\n${contrastNotes.trim()}`;
+
+    setFreeTextProtocol(text.trim());
+    setProtocolModeOverride("free-text");
+    setModeTouched(true);
+  };
+
+  const payload = useCallback((): ProtocolAssignmentPayload => ({
+    protocolId: protocolId ? Number(protocolId) : null,
+    scannerId: scannerId ? Number(scannerId) : null,
+    protocolNotes: nullableText(protocolNotes),
+    contrastNotes: nullableText(contrastNotes),
+    freeTextProtocol: protocolMode === "free-text" ? nullableText(freeTextProtocol) : null,
+    status: "ASSIGNED",
+  }), [protocolId, scannerId, protocolNotes, contrastNotes, protocolMode, freeTextProtocol]);
+
+  const isSubmittingRef = useRef(false);
+  useEffect(() => {
+    if (!saving) isSubmittingRef.current = false;
+  }, [saving]);
+
+  const executeSave = useCallback((assignNext: boolean) => {
+    if (!canSaveAssignment || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    onSave(payload(), assignNext);
+  }, [canSaveAssignment, onSave, payload]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && actionMenuOpen) { event.preventDefault(); setActionMenuOpen(false); return; }
       if (event.key === "Escape" && !saving) requestClose();
+
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        executeSave(!embedded && worklistPosition > 0 && worklistPosition < worklistTotal);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S")) {
+        event.preventDefault();
+        executeSave(false);
+        return;
+      }
+
       if (embedded) return;
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName) && !(event.target as HTMLElement).isContentEditable) {
         if (event.key === "ArrowLeft" && worklistPosition > 1) { event.preventDefault(); requestNavigate(-1); }
@@ -2060,7 +2272,7 @@ function ProtocolAssignmentModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionMenuOpen, embedded, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+  }, [actionMenuOpen, embedded, executeSave, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
 
   useEffect(() => {
     if (!actionMenuOpen) return;
@@ -2071,15 +2283,6 @@ function ProtocolAssignmentModal({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [actionMenuOpen]);
-
-  const payload = (): ProtocolAssignmentPayload => ({
-    protocolId: protocolMode === "saved" && protocolId ? Number(protocolId) : null,
-    scannerId: scannerId ? Number(scannerId) : null,
-    protocolNotes: nullableText(protocolNotes),
-    contrastNotes: nullableText(contrastNotes),
-    freeTextProtocol: protocolMode === "free-text" ? nullableText(freeTextProtocol) : null,
-    status: "ASSIGNED",
-  });
   const hasMoreProtocolActions = Boolean(printableSheet || existing);
   const displayedRequiresReport = reportOverride?.appointmentId === appointment.appointmentId ? reportOverride.value : appointment.requiresReport;
   const toggleActionMenu = () => {
@@ -2146,7 +2349,7 @@ function ProtocolAssignmentModal({
                 {worklistPosition > 0 ? <span className="whitespace-nowrap px-1 text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
                 <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next appointment" title="Next appointment"><ChevronRight size={15} aria-hidden="true" /></button>
               </div> : null}
-              <button type="button" onClick={() => setHistoryOpen((current) => { const next = !current; if (next) { setSelectedHistoryModalities([]); setHistoryLimit(5); } return next; })} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
+              <button type="button" onClick={() => setHistoryOpen((current) => { const next = !current; if (next) { setSelectedHistoryModalities([]); setHistoryLimit(5); } return next; })} disabled={saving} className={`rounded border px-2 py-1.5 font-semibold transition-colors ${historyOpen ? "bg-accent/15 border-accent text-accent" : ""}`}>Patient history</button>
               <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
             </div>
@@ -2159,79 +2362,180 @@ function ProtocolAssignmentModal({
           </div>
         ) : (
           <>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1 sm:p-2">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden p-1 sm:p-2">
             {error && (
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </div>
             )}
-            <div className="mt-1 grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-              <div className={`min-h-0 min-w-0 overflow-hidden ${documentExpanded ? "lg:col-span-2" : ""}`}>
+            <div className={`mt-1 grid min-h-0 flex-1 gap-2 overflow-y-auto lg:overflow-hidden ${historyOpen && !documentExpanded ? "lg:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)_minmax(320px,1fr)]" : "lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]"}`}>
+              <div className={`min-h-[360px] lg:min-h-0 min-w-0 overflow-hidden ${documentExpanded ? "lg:col-span-full" : ""}`}>
                 <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" layout="workspace" expanded={documentExpanded} onExpandedChange={setDocumentExpanded} enableAnnotations onAnnotationDirtyChange={setAnnotationDirty} />
               </div>
-               {!documentExpanded ? (historyOpen ? <aside className="min-h-0 overflow-y-auto rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
-                <div className="flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">Patient history</h4><button type="button" className="text-xs font-semibold text-accent" onClick={() => setHistoryOpen(false)}>Back to protocol</button></div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
-                  <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
-                </div>
-                 {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load patient history.</p> : <>
-                  {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
-                  {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
-                  <div className="mt-3 flex flex-wrap gap-1" aria-label="History modality filters"><button type="button" onClick={() => setSelectedHistoryModalities([])} aria-pressed={selectedHistoryModalities.length === 0} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.length === 0 ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>All</button>{historyModalities.map((modality) => <button key={modality} type="button" onClick={() => setSelectedHistoryModalities((current) => current.includes(modality) ? current.filter((entry) => entry !== modality) : [...current, modality])} aria-pressed={selectedHistoryModalities.includes(modality)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.includes(modality) ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>{modality}</button>)}</div>
-                  <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => {
-                    const firstModality = history.modalities[0];
-                    const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200";
-                    const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700";
-                    const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only";
-                    const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only";
-                    const hasPacsStudy = history.source === "rispro_pacs" || history.source === "pacs_only";
-                    const reconciliationUi = patientIdentityReconciliationUiState(history.reconciliation);
-                    const canReconcile = Boolean(historyQuery.data?.canReconcilePatientIdentity && hasPacsStudy && history.studyInstanceUid?.trim() && history.historicalPatientId?.trim() && historyQuery.data.currentPatient?.patientId?.trim() && history.historicalPatientId.trim() !== historyQuery.data.currentPatient.patientId.trim() && reconciliationUi.action);
-                    return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-border border-l-2 p-2 text-xs ${accent}`}><p className="text-sm font-semibold">{history.date ? formatDateLy(history.date) : "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}{history.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 font-semibold text-amber-700">Study UID matches, but the PACS Patient ID differs from this RISpro patient.</p> : null}{reconciliationUi.status ? <p className={`mt-1 font-semibold ${reconciliationUi.statusClassName}`}>{reconciliationUi.status}</p> : null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-xs ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-xs ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{hasPacsStudy && history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">SonicDICOM</a> : null}{hasPacsStudy && history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">Open report</a> : null}{canReconcile ? <Button size="sm" variant="secondary" onClick={() => setReconciliationStudy({ studyInstanceUid: history.studyInstanceUid!.trim(), accessionNumber: history.accessionNumber, date: history.date, description: history.description, historicalPatientId: history.historicalPatientId ?? null, historicalPatientName: history.historicalPatientName ?? null, historicalPatientBirthDate: history.historicalPatientBirthDate ?? null, source: "history" })}>{reconciliationUi.action}</Button> : null}</div></div>;
-                  })}</div>
-                </>}
-                 {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
-                  {!hideAutomaticHistoricalCandidatesSection ? <section className="mt-4 border-t border-border pt-3" aria-label="Possible older PACS studies">
-                    <div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-semibold">Possible older PACS studies</h5>{historicalCandidatesQuery.isFetching && historicalCandidatesQuery.data ? <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status"><span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Refreshing old PACS records…</span> : null}</div>
-                    <p className="mt-1 text-xs text-muted-foreground">Possible studies for this patient under an older Patient ID. Verify the patient before use.</p>
-                   {historicalPacsIndexStatus === "stale" || historicalPacsIndexStatus === "unavailable" ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">The local PACS index is not current. Existing candidates are shown, but absence is not proof that a study is missing from PACS.</p> : null}
-                    {historicalCandidatesQuery.isLoading && !historicalCandidatesQuery.data ? <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950" role="status" aria-live="polite"><div className="flex items-center gap-2 font-semibold"><span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Searching old PACS records…</div><p className="mt-1 text-xs font-medium">Patient history above is already available.</p></div> : null}
-                    {historicalCandidatesQuery.isError ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Old PACS search unavailable.</p><p className="mt-1">Patient history above is still available.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historicalCandidatesQuery.refetch()}>Retry historical search</Button></div> : null}
-                   {automaticHistoricalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={automaticHistoricalCandidates} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="automatic_candidate" onReconcile={setReconciliationStudy} /></div> : null}
-                    {historicalCandidatesQuery.data && historicalCandidatesQuery.data.historicalCandidates.length === 0 && !historicalCandidatesQuery.isError ? <p className="mt-3 text-xs text-muted-foreground">No possible older PACS studies found.</p> : null}
-                  <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(oldPacsPatientId.trim()); }}>
-                    <label className="min-w-0 flex-1 text-xs font-semibold">Search old PACS Patient ID<Input aria-label="Old PACS Patient ID" className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
-                    <Button type="submit" variant="outline" size="sm" disabled={!oldPacsPatientId.trim() || oldPacsPatientIdMutation.isPending}>{oldPacsPatientIdMutation.isPending ? "Searching..." : "Search"}</Button>
-                  </form>
-                  {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search Authoritative Orthanc for that Patient ID.</p> : null}
-                  {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="manual_candidate" manualSearchPatientId={oldPacsPatientIdMutation.variables} onReconcile={setReconciliationStudy} /></div> : null}
-                </section> : null}
-               </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
-                 <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="protocol-entry-pane">
-                <MriPrimarySafetyPanel appointment={appointment} />
-                {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}
-                <div className="mb-3 flex rounded-lg border p-1" role="radiogroup" aria-label="Protocol entry mode" style={{ borderColor: "var(--border)" }}>
-                  <button type="button" role="radio" aria-checked={protocolMode === "saved"} onClick={() => { setModeTouched(true); setProtocolModeOverride("saved"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "saved" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Saved protocol</button>
-                  <button type="button" role="radio" aria-checked={protocolMode === "free-text"} onClick={() => { setModeTouched(true); setProtocolModeOverride("free-text"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "free-text" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Free-text protocol</button>
-                </div>
-                {protocolMode === "saved" ? <>
-                  <label className="block text-xs font-semibold">Saved protocol<input aria-label="Saved protocol" list="saved-protocol-options" value={selectedProtocolLabel} onChange={(event) => { const value = event.target.value; setProtocolSearch(value); const match = activeProtocols.find((protocol) => protocolOptionLabel(protocol).toLowerCase() === value.trim().toLowerCase()); setProtocolId(match ? String(match.id) : ""); }} className={`${inputClass()} mt-1`} placeholder="Search by protocol name" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} disabled={protocolsLoading && activeProtocols.length === 0} /><datalist id="saved-protocol-options">{activeProtocols.map((protocol) => <option key={protocol.id} value={protocolOptionLabel(protocol)} />)}</datalist></label>
-                  <div className="mt-3"><ProtocolVersionPreview modality={appointment.modalityCode} selectedProtocol={selectedProtocol} detail={selectedVersionQuery.data ?? null} loading={selectedVersionQuery.isLoading} error={selectedVersionQuery.error} /></div>
-                  {activeProtocols.length === 0 ? <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{noActiveProtocolsMessage}</p> : null}
-                </> : <Field label="Free-text protocol"><textarea aria-label="Free-text protocol" placeholder="Enter sequences or phases, coverage, contrast instructions, preparation, and any special instructions." value={freeTextProtocol} onChange={(event) => { setModeTouched(true); setFreeTextProtocol(event.target.value); }} className={`${inputClass()} min-h-48`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>}
-                <div className="mt-3 rounded-lg border" style={{ borderColor: "var(--border)" }}>
-                  <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-start text-sm font-semibold" aria-expanded={additionalInstructionsOpen} onClick={() => setAdditionalInstructionsOpen((current) => !current)}>Additional instructions<span aria-hidden="true">{additionalInstructionsOpen ? "−" : "+"}</span></button>
-                  {additionalInstructionsOpen ? <div className="space-y-3 border-t p-3" style={{ borderColor: "var(--border)" }}>
-                    <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>Optional scanner selection.</span></Field>
-                    <Field label="Patient-specific instructions"><textarea aria-label="Protocol instructions" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
-                    <Field label="Contrast/preparation instructions"><textarea aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
-                  </div> : null}
-                </div>
-                 {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
-                 </div>
-                 <div className="sticky bottom-0 z-20 mt-auto flex shrink-0 items-center justify-end gap-1.5 border-t bg-background p-2" style={{ borderColor: "var(--border)" }}>
-                   <div className="me-auto flex items-center gap-2">{appointment.appointmentStatus === "completed" && appointment.activeComplementaryRecall == null ? <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => setRecallDialogOpen(true)}>Request additional imaging</Button> : null}{appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <Button type="button" variant="destructive" size="sm" disabled={saving || withdrawRecallMutation.isPending} onClick={() => setWithdrawRecallDialogOpen(true)}>Withdraw request</Button> : null}{annotationDirty ? <span className="text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}</div>
+              {!documentExpanded && historyOpen ? (
+                <aside className="flex min-h-[360px] lg:min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+                  <div className="flex items-center justify-between gap-2 shrink-0"><h4 className="text-sm font-semibold">Patient history</h4><button type="button" className="text-xs font-semibold text-accent" onClick={() => setHistoryOpen(false)}>Back to protocol</button></div>
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
+                      <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
+                    </div>
+                    {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load patient history.</p> : <>
+                      {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
+                      {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
+                      <div className="mt-3 flex flex-wrap gap-1" aria-label="History modality filters"><button type="button" onClick={() => setSelectedHistoryModalities([])} aria-pressed={selectedHistoryModalities.length === 0} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.length === 0 ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>All</button>{historyModalities.map((modality) => <button key={modality} type="button" onClick={() => setSelectedHistoryModalities((current) => current.includes(modality) ? current.filter((entry) => entry !== modality) : [...current, modality])} aria-pressed={selectedHistoryModalities.includes(modality)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${selectedHistoryModalities.includes(modality) ? "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}>{modality}</button>)}</div>
+                      <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => {
+                        const firstModality = history.modalities[0];
+                        const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200";
+                        const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700";
+                        const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only";
+                        const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only";
+                        const hasPacsStudy = history.source === "rispro_pacs" || history.source === "pacs_only";
+                        const reconciliationUi = patientIdentityReconciliationUiState(history.reconciliation);
+                        const canReconcile = Boolean(historyQuery.data?.canReconcilePatientIdentity && hasPacsStudy && history.studyInstanceUid?.trim() && history.historicalPatientId?.trim() && historyQuery.data.currentPatient?.patientId?.trim() && history.historicalPatientId.trim() !== historyQuery.data.currentPatient.patientId.trim() && reconciliationUi.action);
+                        return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-border border-l-2 p-2 text-xs ${accent}`}><p className="text-sm font-semibold">{history.date ? formatDateLy(history.date) : "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}{history.identityDiscrepancy === "patient_id_mismatch" ? <p className="mt-1 font-semibold text-amber-700">Study UID matches, but the PACS Patient ID differs from this RISpro patient.</p> : null}{reconciliationUi.status ? <p className={`mt-1 font-semibold ${reconciliationUi.statusClassName}`}>{reconciliationUi.status}</p> : null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-xs ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-xs ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{hasPacsStudy && history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">SonicDICOM</a> : null}{hasPacsStudy && history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 text-xs font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 text-xs font-semibold">Open report</a> : null}{canReconcile ? <Button size="sm" variant="secondary" onClick={() => setReconciliationStudy({ studyInstanceUid: history.studyInstanceUid!.trim(), accessionNumber: history.accessionNumber, date: history.date, description: history.description, historicalPatientId: history.historicalPatientId ?? null, historicalPatientName: history.historicalPatientName ?? null, historicalPatientBirthDate: history.historicalPatientBirthDate ?? null, source: "history" })}>{reconciliationUi.action}</Button> : null}</div></div>;
+                      })}</div>
+                    </>}
+                    {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
+                    {!hideAutomaticHistoricalCandidatesSection ? <section className="mt-4 border-t border-border pt-3" aria-label="Possible older PACS studies">
+                      <div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-semibold">Possible older PACS studies</h5>{historicalCandidatesQuery.isFetching && historicalCandidatesQuery.data ? <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status"><span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Refreshing old PACS records…</span> : null}</div>
+                      <p className="mt-1 text-xs text-muted-foreground">Possible studies for this patient under an older Patient ID. Verify the patient before use.</p>
+                      {historicalPacsIndexStatus === "stale" || historicalPacsIndexStatus === "unavailable" ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">The local PACS index is not current. Existing candidates are shown, but absence is not proof that a study is missing from PACS.</p> : null}
+                      {historicalCandidatesQuery.isLoading && !historicalCandidatesQuery.data ? <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950" role="status" aria-live="polite"><div className="flex items-center gap-2 font-semibold"><span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Searching old PACS records…</div><p className="mt-1 text-xs font-medium">Patient history above is already available.</p></div> : null}
+                      {historicalCandidatesQuery.isError ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Old PACS search unavailable.</p><p className="mt-1">Patient history above is still available.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historicalCandidatesQuery.refetch()}>Retry historical search</Button></div> : null}
+                      {automaticHistoricalCandidates.length ? <div className="mt-3"><HistoricalPacsCandidates candidates={automaticHistoricalCandidates} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="automatic_candidate" onReconcile={setReconciliationStudy} /></div> : null}
+                      {historicalCandidatesQuery.data && historicalCandidatesQuery.data.historicalCandidates.length === 0 && !historicalCandidatesQuery.isError ? <p className="mt-3 text-xs text-muted-foreground">No possible older PACS studies found.</p> : null}
+                      <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(oldPacsPatientId.trim()); }}>
+                        <label className="min-w-0 flex-1 text-xs font-semibold">Search old PACS Patient ID<Input aria-label="Old PACS Patient ID" className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
+                        <Button type="submit" variant="outline" size="sm" disabled={!oldPacsPatientId.trim() || oldPacsPatientIdMutation.isPending}>{oldPacsPatientIdMutation.isPending ? "Searching..." : "Search"}</Button>
+                      </form>
+                      {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search Authoritative Orthanc for that Patient ID.</p> : null}
+                      {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} canReconcilePatientIdentity={Boolean(historyQuery.data?.canReconcilePatientIdentity)} currentPatientId={historyQuery.data?.currentPatient?.patientId ?? null} source="manual_candidate" manualSearchPatientId={oldPacsPatientIdMutation.variables} onReconcile={setReconciliationStudy} /></div> : null}
+                    </section> : null}
+                  </div>
+                </aside>
+              ) : null}
+              {!documentExpanded ? (
+                <aside className="flex min-h-[360px] lg:min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="protocol-entry-pane">
+                    <MriPrimarySafetyPanel appointment={appointment} />
+                    {appointment.clinicalNotes ? (
+                      <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50/70 p-2 text-xs text-sky-950" data-testid="protocol-clinical-indication">
+                        <span className="font-bold uppercase tracking-wider text-[10px] text-sky-800">Clinical Indication: </span>
+                        <span className="font-medium">{appointment.clinicalNotes}</span>
+                      </div>
+                    ) : null}
+                    {existing && (
+                      <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
+                        <p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p>
+                        <p className="mt-1 text-sm font-semibold">
+                          {existing.freeTextProtocol
+                            ? existing.protocolName
+                              ? `Free-text protocol (derived from ${existing.protocolName} v${existing.versionNumber ?? "-"})`
+                              : "Free-text protocol"
+                            : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}
+                          {existing.scannerName ? ` · ${existing.scannerName}` : ""}
+                        </p>
+                      </div>
+                    )}
+                    <div className="mb-3 flex rounded-lg border p-1" role="radiogroup" aria-label="Protocol entry mode" style={{ borderColor: "var(--border)" }}>
+                      <button type="button" role="radio" aria-checked={protocolMode === "saved"} onClick={() => { setModeTouched(true); setProtocolModeOverride("saved"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "saved" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Saved protocol</button>
+                      <button type="button" role="radio" aria-checked={protocolMode === "free-text"} onClick={() => { setModeTouched(true); setProtocolModeOverride("free-text"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "free-text" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Free-text protocol</button>
+                    </div>
+                    {protocolMode === "saved" ? <>
+                      {recommendedProtocols.length > 0 ? (
+                        <div className="mb-2.5 rounded-lg border border-slate-200 bg-slate-50/70 p-2" data-testid="smart-protocol-suggestions">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <p className="text-[11px] font-semibold text-muted-foreground">Suggested for {appointment.examTypeName}:</p>
+                            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Advisory · Clinical review required</span>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {recommendedProtocols.map((p) => {
+                              const isSelected = String(p.id) === protocolId;
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setProtocolId(String(p.id));
+                                    setProtocolSearch(protocolOptionLabel(p));
+                                    setProtocolModeOverride("saved");
+                                  }}
+                                  title={`Suggested protocol: ${p.name}${p.anatomyRegionName ? ` (${p.anatomyRegionName})` : ""} (Advisory · verify clinical indication)`}
+                                  className={`rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${
+                                    isSelected
+                                      ? "border-teal-600 bg-teal-50 text-teal-800 shadow-sm"
+                                      : "border-slate-300 bg-white hover:bg-slate-100 text-slate-800"
+                                  }`}
+                                >
+                                  {p.name}
+                                  {p.anatomyRegionName ? <span className="ms-1 text-[10px] text-muted-foreground">({p.anatomyRegionName})</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      <label className="block text-xs font-semibold">Saved protocol<input aria-label="Saved protocol" list="saved-protocol-options" value={selectedProtocolLabel} onChange={(event) => { const value = event.target.value; setProtocolSearch(value); const match = activeProtocols.find((protocol) => protocolOptionLabel(protocol).toLowerCase() === value.trim().toLowerCase()); setProtocolId(match ? String(match.id) : ""); }} className={`${inputClass()} mt-1`} placeholder="Search by protocol name" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} disabled={protocolsLoading && activeProtocols.length === 0} /><datalist id="saved-protocol-options">{activeProtocols.map((protocol) => <option key={protocol.id} value={protocolOptionLabel(protocol)} />)}</datalist></label>
+                      <div className="mt-3">
+                        <ProtocolVersionPreview modality={appointment.modalityCode} selectedProtocol={selectedProtocol} detail={selectedVersionQuery.data ?? null} loading={selectedVersionQuery.isLoading} error={selectedVersionQuery.error} />
+                        {selectedProtocol ? (
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleCustomizeAsFreeText}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                              aria-label="Customize as free-text"
+                            >
+                              <Pencil size={12} aria-hidden="true" />
+                              Customize as free-text
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                      {activeProtocols.length === 0 ? <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{noActiveProtocolsMessage}</p> : null}
+                    </> : (
+                      <div className="space-y-2">
+                        {protocolId ? (
+                          <div className="flex items-center justify-between rounded-md border border-teal-200 bg-teal-50/60 px-2.5 py-1.5 text-xs text-teal-950">
+                            <span>
+                              <span className="font-semibold text-teal-800">Linked protocol:</span> {selectedProtocol?.name ?? existing?.protocolName ?? `Protocol #${protocolId}`}
+                              {selectedProtocol?.activeVersionNumber || existing?.versionNumber ? ` v${selectedProtocol?.activeVersionNumber ?? existing?.versionNumber}` : ""}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => { setProtocolId(""); setModeTouched(true); }}
+                              className="text-[11px] font-semibold text-teal-700 hover:underline"
+                              aria-label="Unlink protocol from free text"
+                            >
+                              Unlink
+                            </button>
+                          </div>
+                        ) : null}
+                        <Field label="Free-text protocol">
+                          <textarea
+                            aria-label="Free-text protocol"
+                            placeholder="Enter sequences or phases, coverage, contrast instructions, preparation, and any special instructions."
+                            value={freeTextProtocol}
+                            onChange={(event) => { setModeTouched(true); setFreeTextProtocol(event.target.value); }}
+                            className={`${inputClass()} min-h-48`}
+                            style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}
+                          />
+                        </Field>
+                      </div>
+                    )}
+                    <div className="mt-3 rounded-lg border" style={{ borderColor: "var(--border)" }}>
+                      <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-start text-sm font-semibold" aria-expanded={additionalInstructionsOpen} onClick={() => setAdditionalInstructionsOpen((current) => !current)}>Additional instructions<span aria-hidden="true">{additionalInstructionsOpen ? "−" : "+"}</span></button>
+                      {additionalInstructionsOpen ? <div className="space-y-3 border-t p-3" style={{ borderColor: "var(--border)" }}>
+                        <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>Optional scanner selection.</span></Field>
+                        <Field label="Patient-specific instructions"><textarea aria-label="Protocol instructions" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
+                        <Field label="Contrast/preparation instructions"><textarea aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
+                      </div> : null}
+                    </div>
+                    {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
+                  </div>
+                  <div className="sticky bottom-0 z-20 mt-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5 border-t bg-background p-2" style={{ borderColor: "var(--border)" }}>
+                    <div className="me-auto flex items-center gap-2">{appointment.appointmentStatus === "completed" && appointment.activeComplementaryRecall == null ? <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => setRecallDialogOpen(true)}>Request additional imaging</Button> : null}{appointment.activeComplementaryRecall?.status === "pending_scheduling" ? <Button type="button" variant="destructive" size="sm" disabled={saving || withdrawRecallMutation.isPending} onClick={() => setWithdrawRecallDialogOpen(true)}>Withdraw request</Button> : null}{annotationDirty ? <span className="text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}</div>
                     {hasMoreProtocolActions ? <div ref={actionMenuAnchorRef} className="relative">
                       <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
                       {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
@@ -2239,11 +2543,33 @@ function ProtocolAssignmentModal({
                         {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}
-                   <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{saving ? "Saving..." : "Save"}</button>
-                   {!embedded ? <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button> : null}
-                 </div>
-               </aside>) : null}
-             </div>
+                    <button
+                      type="button"
+                      aria-label="Save"
+                      disabled={!canSaveAssignment}
+                      onClick={() => executeSave(false)}
+                      className="rounded-lg border px-3 py-2 text-sm font-semibold"
+                      style={{ borderColor: "var(--border)" }}
+                      title="Save assignment (Ctrl+S)"
+                    >
+                      {saving ? "Saving..." : <>Save <kbd className="ms-1 rounded bg-muted px-1 text-[10px] text-muted-foreground font-mono">Ctrl+S</kbd></>}
+                    </button>
+                    {!embedded ? (
+                      <button
+                        type="button"
+                        aria-label="Assign and next"
+                        disabled={!canSaveAssignment}
+                        onClick={() => executeSave(true)}
+                        className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+                        title="Assign protocol and navigate to next appointment (Ctrl+Enter)"
+                      >
+                        Assign and next <kbd className="ms-1 rounded bg-teal-800/60 px-1 text-[10px] text-teal-100 font-mono">Ctrl+↵</kbd>
+                      </button>
+                    ) : null}
+                  </div>
+                </aside>
+              ) : null}
+            </div>
              </div>
           </>
         )}
