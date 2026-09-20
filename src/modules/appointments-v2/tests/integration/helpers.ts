@@ -253,6 +253,29 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
   );
   const bookingIds = bookingRows.rows.map((r) => Number(r.id));
 
+  const recallRequestRows = await pool.query<{ id: string }>(
+    `
+      select id::text as id
+      from appointments_v2.complementary_recall_requests
+      where original_appointment_id = any($1::bigint[])
+         or recall_appointment_id = any($1::bigint[])
+         or requested_by_user_id = any($2::bigint[])
+         or reception_seen_by_user_id = any($2::bigint[])
+         or cancelled_by_user_id = any($2::bigint[])
+    `,
+    [bookingIds, userIds]
+  );
+  const recallRequestIds = recallRequestRows.rows.map((r) => Number(r.id));
+
+  await pool.query(
+    `delete from appointments_v2.complementary_recall_contact_attempts where recall_request_id = any($1::bigint[])`,
+    [recallRequestIds]
+  );
+  await pool.query(
+    `delete from appointments_v2.complementary_recall_requests where id = any($1::bigint[])`,
+    [recallRequestIds]
+  );
+
   await pool.query(
     `
       delete from appointments_v2.scheduling_override_requests
@@ -405,6 +428,7 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
     `,
     [userIds]
   );
+  await pool.query(`delete from doctor_portal.doctor_profiles where user_id = any($1::bigint[])`, [userIds]);
   await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]);
   await pool.query(`delete from exam_types where id = any($1::bigint[])`, [examTypeIds]);
   await pool.query(`delete from modalities where id = any($1::bigint[])`, [modalityIds]);

@@ -142,16 +142,19 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   }
 
   async function createPatientForStatusTest(label: string): Promise<number> {
+    const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
     const uniqueNationalId = `2${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const arabicName = `${TEST_PREFIX}${label}_${suffix} مريض اختبار`;
+    const englishName = `${TEST_PREFIX}${label}_${suffix} Test Patient`;
     const patientResult = await pool.query(
       `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
        values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
        returning id`,
       [
-        `${TEST_PREFIX}${label} مريض اختبار`,
-        `${TEST_PREFIX}${label} Test Patient`,
+        arabicName,
+        englishName,
         uniqueNationalId,
-        `${TEST_PREFIX}${label} مريض اختبار`,
+        arabicName,
         uniqueNationalId,
       ]
     );
@@ -160,9 +163,11 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
 
   async function createSimilarPatientsForIdentityTest(): Promise<{ firstPatientId: number; secondPatientId: number; firstIdentifier: string; searchTerm: string }> {
     const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
-    const searchTerm = `BOOKING_ Similar Patient ${suffix}`;
+    const searchTerm = `BOOKING_${suffix} Similar Patient`;
     const firstIdentifier = `3${randomUUID().replace(/-/g, "").slice(0, 11)}`;
     const secondIdentifier = `4${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const firstArabicName = `BOOKING_${suffix} مريض تشابه واحد`;
+    const secondArabicName = `BOOKING_${suffix} مريض تشابه اثنان`;
     const result = await pool.query<{ id: number }>(
       `insert into patients (
         arabic_full_name, english_full_name, national_id, normalized_arabic_name,
@@ -173,8 +178,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         ($5, $6, $7::varchar, $8, 'F', 31, '1994-01-02', false, '0912345679', 'national_id', $7::text)
       returning id`,
       [
-        `مريض تشابه ${suffix} واحد`, `${searchTerm} One`, firstIdentifier, `مريض تشابه ${suffix} واحد`,
-        `مريض تشابه ${suffix} اثنان`, `${searchTerm} Two`, secondIdentifier, `مريض تشابه ${suffix} اثنان`,
+        firstArabicName, `${searchTerm} One`, firstIdentifier, firstArabicName,
+        secondArabicName, `${searchTerm} Two`, secondIdentifier, secondArabicName,
       ]
     );
     return { firstPatientId: Number(result.rows[0].id), secondPatientId: Number(result.rows[1].id), firstIdentifier, searchTerm };
@@ -683,7 +688,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
           auto_completed_by, pacs_auto_completion_disabled_at, pacs_last_activity_at, reopened_for_scanning_at
         from appointments_v2.bookings where id = $1
       `, [bookingId]);
-      assert.equal(reopened.rows[0]?.id, bookingId);
+      assert.equal(Number(reopened.rows[0]?.id), bookingId);
       assert.equal(reopened.rows[0]?.status, "waiting");
       assert.ok(reopened.rows[0]?.arrived_at);
       assert.ok(reopened.rows[0]?.waiting_started_at);
