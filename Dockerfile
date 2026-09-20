@@ -108,6 +108,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# Keep the repository-provided Arabic fonts at the path used by the SOP print renderer.
+COPY frontend/src/assets/fonts/ ./frontend/src/assets/fonts/
+
 # Runtime bootstrap template used by the public QZ workstation endpoints.
 # Keep it in the shared runtime base so both production targets contain it.
 COPY scripts/qz/windows/ ./scripts/qz/windows/

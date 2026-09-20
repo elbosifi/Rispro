@@ -57,6 +57,16 @@ describe("SOP print renderer", () => {
     assert.match(html, /<th dir="rtl">/);
     assert.match(html, /text-align:center/);
     assert.match(html, /data:image\/png;base64,/);
+    const fontFaces = html.match(/@font-face\{[^}]*\}/g) ?? [];
+    assert.equal(fontFaces.length, 2);
+    assert.deepEqual(
+      fontFaces.map((fontFace) => fontFace.match(/font-weight:(\d+)/)?.[1]).sort(),
+      ["400", "700"],
+    );
+    for (const fontFace of fontFaces) {
+      assert.match(fontFace, /font-family:"Noto Naskh Arabic"/);
+      assert.match(fontFace, /src:url\(data:font\/ttf;base64,[A-Za-z0-9+/=]+\)/);
+    }
     assert.doesNotMatch(html, /status-watermark[^<]*CURRENT/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/i);
     assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
