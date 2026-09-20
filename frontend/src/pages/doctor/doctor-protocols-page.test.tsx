@@ -1503,7 +1503,7 @@ describe("Doctor protocoling usability enhancements", () => {
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
     vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
-    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(null);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(libraryDetail());
     vi.mocked(apiHooks.fetchProtocolLibraryScanners).mockResolvedValue([]);
   });
 
@@ -1628,6 +1628,10 @@ describe("Doctor protocoling usability enhancements", () => {
     });
 
     mockCreateAssignment.mockClear();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Free-text protocol" }), "Stat CT Chest with IV contrast");
 
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
     await waitFor(() => {
