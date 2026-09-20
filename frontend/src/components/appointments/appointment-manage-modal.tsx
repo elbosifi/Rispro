@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Pause, Printer, Tags, Upload, UserRound, X } from "lucide-react";
+import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Pause, Printer, RotateCcw, Tags, Upload, UserRound, X } from "lucide-react";
 import {
   cancelAppointment,
   deleteAppointment,
@@ -46,6 +46,7 @@ import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/
 import { inferSupportedOverrideTypesFromExamRuleMetadata as inferSupportedOverrideTypesFromExamRuleMetadataRaw, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
 import { useAuth } from "@/providers/auth-provider";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
+import { reopenAppointmentForScanning } from "@/lib/api/appointments-queue";
 
 function inferSupportedOverrideTypesFromExamRuleMetadata(params: Parameters<typeof inferSupportedOverrideTypesFromExamRuleMetadataRaw>[0]) {
   return inferSupportedOverrideTypesFromExamRuleMetadataRaw({ ...params, capacityResolutionMode: "standard" });
@@ -238,6 +239,9 @@ export function AppointmentManageModal({
   const [manualStatusReason, setManualStatusReason] = useState("");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [statusDialogError, setStatusDialogError] = useState<string | null>(null);
+  const [reopenForScanningDialogOpen, setReopenForScanningDialogOpen] = useState(false);
+  const [reopenForScanningReason, setReopenForScanningReason] = useState("");
+  const [reopenForScanningError, setReopenForScanningError] = useState<string | null>(null);
   const legacyStatusKeyRef = useRef<string | null>(null);
   const protocolPanelContextKeyRef = useRef<string | null>(null);
   const onTabChangeRef = useRef(onTabChange);
@@ -304,6 +308,10 @@ export function AppointmentManageModal({
   const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes(open && normalizedAppointmentId !== null);
   const isSuperAdmin = user?.role === "super_admin";
   const canManageManualStatus = Boolean(appointment && (appointment.status !== "discontinued" || isSuperAdmin));
+  const canReopenForScanning = Boolean(
+    appointment?.status === "discontinued" &&
+    ["modality_staff", "supervisor", "super_admin"].includes(user?.role ?? "")
+  );
   const canAttachDocuments = user?.role === "receptionist" || user?.role === "supervisor" || user?.role === "super_admin";
   const canUseNonStandardCapacityModes = user?.role === "supervisor" || user?.role === "super_admin";
   const selectedCanReschedule = Boolean(appointment && RESCHEDULABLE_STATUSES.includes(appointment.status as BookingStatus));
@@ -368,6 +376,9 @@ export function AppointmentManageModal({
     setCancelConfirmOpen(false);
     setStatusDialogOpen(false);
     setStatusDialogError(null);
+    setReopenForScanningDialogOpen(false);
+    setReopenForScanningReason("");
+    setReopenForScanningError(null);
     setVoidDialogOpen(false);
     setVoidReason("");
     onClose();
@@ -481,6 +492,31 @@ export function AppointmentManageModal({
     onError: (err: unknown) => {
       setStatusDialogError(getErrorMessage(err, chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed")));
       pushToast({ type: "error", title: chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed"), message: getErrorMessage(err, chooseLocalized(language, "حاول مرة أخرى.", "Please try again.")) });
+    },
+  });
+
+  const reopenForScanningMutation = useMutation({
+    mutationFn: async (payload: { appointmentId: number; reason: string }) => {
+      await reopenAppointmentForScanning(payload.appointmentId, payload.reason);
+      return getAppointmentById(payload.appointmentId);
+    },
+    meta: { suppressGlobalToast: true },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["appointment-manage-modal", updated.id] });
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
+      updateDisplayedAppointment(updated);
+      setReopenForScanningDialogOpen(false);
+      setReopenForScanningReason("");
+      setReopenForScanningError(null);
+      pushToast({ type: "success", title: chooseLocalized(language, "أعيد فتح الفحص للتصوير", "Reopened for scanning"), message: chooseLocalized(language, "عاد الموعد إلى قائمة انتظار جهاز التصوير.", "The appointment has returned to the modality waiting list.") });
+    },
+    onError: (err: unknown) => {
+      const message = getErrorMessage(err, chooseLocalized(language, "تعذر إعادة فتح الفحص للتصوير", "Could not reopen for scanning"));
+      setReopenForScanningError(message);
+      pushToast({ type: "error", title: chooseLocalized(language, "تعذر إعادة فتح الفحص للتصوير", "Could not reopen for scanning"), message });
     },
   });
 
@@ -763,6 +799,7 @@ export function AppointmentManageModal({
   const moreMenuItems = appointment ? <>
     {selectedCanReschedule ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("reschedule"); }}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button> : null}
     {canManageManualStatus ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); selectTab("status"); }}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button> : null}
+    {canReopenForScanning ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { setActionMenuOpen(false); setReopenForScanningReason(""); setReopenForScanningError(null); setReopenForScanningDialogOpen(true); }}><RotateCcw size={15} aria-hidden="true" />{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</button> : null}
     {selectedCanCancel ? <><div role="separator" className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => { setActionMenuOpen(false); selectTab("cancel"); }}><X size={15} aria-hidden="true" />{t("registrations.cancelAppointment")}</button></> : null}
     {canVoidAppointment ? <><div role="separator" className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => { setActionMenuOpen(false); setVoidReason(""); setVoidDialogOpen(true); }}><X size={15} aria-hidden="true" />{t("appointmentEditor.void")}</button></> : null}
   </> : null;
@@ -931,6 +968,21 @@ export function AppointmentManageModal({
           </DialogHeader>
           {appointment ? <div className="space-y-4"><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span><Badge variant="neutral" size="sm">{statusLabel(language, appointment.status)}</Badge></div><div><label htmlFor="appointment-status-select" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "الحالة الجديدة", "New status")}</label><select id="appointment-status-select" value={manualStatus} onChange={(event) => { setManualStatus(event.target.value as (typeof MANUAL_STATUS_OPTIONS)[number]); setStatusDialogError(null); }} className="input-premium w-full" aria-describedby={statusReasonRequired ? "appointment-status-reason-help" : undefined}>{MANUAL_STATUS_OPTIONS.map((status) => <option key={status} value={status} disabled={status === appointment.status}>{statusLabel(language, status)}</option>)}</select></div>{reactivatingDiscontinued ? <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{chooseLocalized(language, "إعادة تفعيل موعد موقوف إجراء مدقق يقتصر على مدير النظام.", "Reactivating a discontinued appointment is an audited super-admin action.")}</p> : null}{statusReasonRequired ? <div><label htmlFor="appointment-status-reason" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "السبب", "Reason")}</label><textarea id="appointment-status-reason" value={manualStatusReason} onChange={(event) => { setManualStatusReason(event.target.value); setStatusDialogError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")} required /><p id="appointment-status-reason-help" className="mt-1 text-xs text-muted-foreground">{reactivatingDiscontinued ? chooseLocalized(language, "يتطلب هذا الإجراء سبباً مدققاً.", "A reason is required for this audited action.") : chooseLocalized(language, "هذا التغيير يتطلب سبباً.", "A reason is required for this change.")}</p></div> : null}{statusDialogError ? <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">{statusDialogError}</p> : null}</div> : null}
           <DialogFooter className="mt-5"><Button type="button" variant="secondary" onClick={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>{t("common.cancel")}</Button><Button type="button" disabled={!appointment || statusMutation.isPending || manualStatus === appointment.status || (statusReasonRequired && !manualStatusReason.trim())} onClick={() => { if (!appointment) return; statusMutation.mutate({ appointmentId: appointment.id, status: manualStatus, reason: manualStatusReason.trim() || null }); }}>{statusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{chooseLocalized(language, "جار الحفظ", "Saving")}</span> : chooseLocalized(language, "حفظ الحالة", "Save status")}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reopenForScanningDialogOpen && canReopenForScanning} onClose={() => { setReopenForScanningDialogOpen(false); setReopenForScanningReason(""); setReopenForScanningError(null); }}>
+        <DialogContent maxWidth="min(94vw, 460px)">
+          <DialogHeader>
+            <DialogTitle>{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</DialogTitle>
+            <DialogDescription>{chooseLocalized(language, "أعد هذا الموعد الموقوف إلى الانتظار لمحاولة تصوير جديدة. سيبقى نفس الموعد ورقم الوصول، وسيعاد نشره في قائمة عمل الجهاز.", "Return this discontinued appointment to Waiting for a new scan attempt. The same appointment and accession number will be kept and republished to the modality worklist.")}</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <label htmlFor="appointment-reopen-for-scanning-reason" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "السبب", "Reason")}</label>
+            <textarea id="appointment-reopen-for-scanning-reason" value={reopenForScanningReason} onChange={(event) => { setReopenForScanningReason(event.target.value); setReopenForScanningError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "لماذا يعاد فتح هذا الفحص للتصوير؟", "Why is this examination being reopened for scanning?")} required />
+            {reopenForScanningError ? <p className="mt-2 text-xs text-red-700" role="alert">{reopenForScanningError}</p> : null}
+          </div>
+          <DialogFooter className="mt-5"><Button type="button" variant="secondary" disabled={reopenForScanningMutation.isPending} onClick={() => { setReopenForScanningDialogOpen(false); setReopenForScanningReason(""); setReopenForScanningError(null); }}>{t("common.cancel")}</Button><Button type="button" disabled={!reopenForScanningReason.trim() || reopenForScanningMutation.isPending} onClick={() => { if (!appointment) return; reopenForScanningMutation.mutate({ appointmentId: appointment.id, reason: reopenForScanningReason.trim() }); }}>{reopenForScanningMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : null}{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

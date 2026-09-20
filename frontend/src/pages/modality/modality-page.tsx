@@ -49,6 +49,8 @@ import { buildModalitySearch, parseModalityNavigation, type ModalityView } from 
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, AppointmentStatus, HistoricalPacsCandidate, HistoricalPacsStudy, ModalityProtocolAssignment, ProtocolingPatientHistoryResponse } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
+import { useAuth } from "@/providers/auth-provider";
+import { reopenAppointmentForScanning } from "@/lib/api/appointments-queue";
 import { buildRadiantPacsTagUrl } from "../doctor/doctor-reporting-board-page.helpers";
 
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
@@ -519,6 +521,7 @@ function waitingWarningClass(level: WaitingWarningInfo["level"] | null): string 
 
 export default function ModalityPage() {
   const { language: rawLanguage, isArabic } = useLanguage();
+  const { user } = useAuth();
   const language = rawLanguage as Language;
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -539,6 +542,9 @@ export default function ModalityPage() {
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
+  const [reopenForScanningAppointment, setReopenForScanningAppointment] = useState<AppointmentWithDetails | null>(null);
+  const [reopenForScanningReason, setReopenForScanningReason] = useState("");
+  const [reopenForScanningError, setReopenForScanningError] = useState<string | null>(null);
   const [openMoreMenu, setOpenMoreMenu] = useState<MoreMenuState | null>(null);
   const [cdDialog, setCdDialog] = useState<CdDialogState | null>(null);
   const [cdDestinationKey, setCdDestinationKey] = useState("");
@@ -678,6 +684,22 @@ export default function ModalityPage() {
       setStatusReason("");
       setOpenMoreMenu(null);
     },
+  });
+  const reopenForScanningMutation = useMutation({
+    mutationFn: ({ appointmentId, reason }: { appointmentId: number; reason: string }) => reopenAppointmentForScanning(appointmentId, reason),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
+      await queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
+      await queryClient.invalidateQueries({ queryKey: ["queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      await queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      setReopenForScanningAppointment(null);
+      setReopenForScanningReason("");
+      setReopenForScanningError(null);
+      setOpenMoreMenu(null);
+      pushToast({ type: "success", title: chooseLocalized(language, "أعيد فتح الفحص للتصوير", "Reopened for scanning"), message: chooseLocalized(language, "عاد الموعد إلى قائمة انتظار جهاز التصوير.", "The appointment has returned to the modality waiting list.") });
+    },
+    onError: (error: unknown) => setReopenForScanningError(error instanceof Error ? error.message : chooseLocalized(language, "تعذر إعادة فتح الفحص للتصوير", "Could not reopen for scanning")),
   });
   const cdCreateMutation = useMutation({
     mutationFn: ({ bookingId, destinationKey, resendReasonCode, resendReasonText }: { bookingId:number; destinationKey:string; resendReasonCode?:string; resendReasonText?:string }) => createCdRobotDelivery(bookingId, { destinationKey, resendReasonCode, resendReasonText }),
@@ -865,6 +887,7 @@ export default function ModalityPage() {
   };
 
   const headerTitle = t(language, "modality.title");
+  const canReopenForScanning = ["modality_staff", "supervisor", "super_admin"].includes(user?.role ?? "");
   const isIrModality = currentModality?.code?.trim().toUpperCase() === "IR" || currentModality?.nameEn?.trim().toLowerCase() === "interventional radiology";
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
@@ -1503,6 +1526,23 @@ export default function ModalityPage() {
               <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
             </button>
           ) : null}
+          {moreMenuAppointment.status === "discontinued" && canReopenForScanning ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`}
+              disabled={reopenForScanningMutation.isPending}
+              onClick={() => {
+                setReopenForScanningAppointment(moreMenuAppointment);
+                setReopenForScanningReason("");
+                setReopenForScanningError(null);
+                setOpenMoreMenu(null);
+              }}
+            >
+              <RotateCcw size={14} />
+              <span>{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</span>
+            </button>
+          ) : null}
           <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => { handlePrint(moreMenuAppointment.id); setOpenMoreMenu(null); }}>
             <Printer size={14} />
             <span>{t(language, "common.print")}</span>
@@ -1749,6 +1789,21 @@ export default function ModalityPage() {
                     <span>{chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}</span>
                   </Button>
                 ) : null}
+                {selectedAppointment.status === "discontinued" && canReopenForScanning ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={reopenForScanningMutation.isPending}
+                    onClick={() => {
+                      setReopenForScanningAppointment(selectedAppointment);
+                      setReopenForScanningReason("");
+                      setReopenForScanningError(null);
+                    }}
+                  >
+                    <RotateCcw size={16} />
+                    <span>{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</span>
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="primary"
@@ -1828,6 +1883,35 @@ export default function ModalityPage() {
                   {statusMutation.isPending ? <RefreshCw size={18} className="animate-spin" /> : null}
                   <span>{statusActionLabel(language, statusAction)}</span>
                 </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(reopenForScanningAppointment)}
+        onClose={() => {
+          setReopenForScanningAppointment(null);
+          setReopenForScanningReason("");
+          setReopenForScanningError(null);
+        }}
+      >
+        <DialogContent maxWidth="560px">
+          {reopenForScanningAppointment ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</DialogTitle>
+                <DialogDescription>{chooseLocalized(language, "أعد هذا الموعد الموقوف إلى الانتظار لمحاولة تصوير جديدة. سيبقى نفس الموعد ورقم الوصول، وسيعاد نشره في قائمة عمل الجهاز.", "Return this discontinued appointment to Waiting for a new scan attempt. The same appointment and accession number will be kept and republished to the modality worklist.")}</DialogDescription>
+              </DialogHeader>
+              <div className="mt-4 space-y-2">
+                <label htmlFor="modality-reopen-for-scanning-reason" className="text-sm font-medium">{chooseLocalized(language, "السبب", "Reason")}</label>
+                <textarea id="modality-reopen-for-scanning-reason" value={reopenForScanningReason} onChange={(event) => { setReopenForScanningReason(event.target.value); setReopenForScanningError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "لماذا يعاد فتح هذا الفحص للتصوير؟", "Why is this examination being reopened for scanning?")} />
+                {reopenForScanningError ? <p className="text-xs text-red-700" role="alert">{reopenForScanningError}</p> : null}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="secondary" disabled={reopenForScanningMutation.isPending} onClick={() => { setReopenForScanningAppointment(null); setReopenForScanningReason(""); setReopenForScanningError(null); }}>{chooseLocalized(language, "إغلاق", "Close")}</Button>
+                <Button type="button" variant="primary" disabled={!reopenForScanningReason.trim() || reopenForScanningMutation.isPending} onClick={() => reopenForScanningMutation.mutate({ appointmentId: reopenForScanningAppointment.id, reason: reopenForScanningReason.trim() })}>{reopenForScanningMutation.isPending ? <RefreshCw size={18} className="animate-spin" /> : null}<span>{chooseLocalized(language, "إعادة فتح للتصوير", "Reopen for scanning")}</span></Button>
               </DialogFooter>
             </>
           ) : null}

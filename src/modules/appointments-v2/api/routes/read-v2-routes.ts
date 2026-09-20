@@ -17,6 +17,7 @@ import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public
 import {
   arriveSameDayQueueBookings,
   cleanupActiveQueuePatientRequirementViolations,
+  reopenDiscontinuedBookingForScanning,
   updateBookingStatusManual,
 } from "../../booking/services/status-booking.service.js";
 import {
@@ -1209,6 +1210,26 @@ router.post(
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     res.json(await confirmManualNoShow(bookingId, String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
+  })
+);
+
+router.post(
+  "/appointments/:id/reopen-for-scanning",
+  asyncRoute(async (req: Request, res: Response) => {
+    const bookingId = Number(req.params.id);
+    if (!Number.isInteger(bookingId) || bookingId <= 0) {
+      res.status(400).json({ error: "Invalid booking ID" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await reopenDiscontinuedBookingForScanning(
+      bookingId,
+      body.reason == null ? null : String(body.reason),
+      Number((req as AuthedRequest).user?.sub ?? 0),
+      (req as AuthedRequest).user?.role
+    );
+    res.json({ ok: true, ...result });
   })
 );
 

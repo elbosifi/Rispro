@@ -153,6 +153,30 @@ describe("appointments-v2 PACS acquisition activity worker", () => {
     }
   });
 
+  it("requires PACS activity newer than reopen-for-scanning before starting a fresh attempt", async () => {
+    await configureStandardAutoCompletion();
+    const bookingId = await createBooking("waiting");
+    await pool.query(`update appointments_v2.bookings set reopened_for_scanning_at = '2026-09-11T08:59:30Z'::timestamptz where id = $1`, [bookingId]);
+    observation = { series: 1, instances: 10, lastUpdate: "20260911T085900" };
+
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const oldStudy = await pool.query<{ status: string; reopened_for_scanning_at: Date | null }>(
+      `select status, reopened_for_scanning_at from appointments_v2.bookings where id = $1`, [bookingId]
+    );
+    assert.equal(oldStudy.rows[0]?.status, "waiting");
+    assert.ok(oldStudy.rows[0]?.reopened_for_scanning_at);
+
+    await clearThrottle(bookingId);
+    observation = { series: 1, instances: 11, lastUpdate: "20260911T090000" };
+    await runAppointmentsV2PacsAutoCompletionTick();
+    const freshStudy = await pool.query<{ status: string; source: string | null; reopened_for_scanning_at: Date | null }>(
+      `select status, acquisition_status_source as source, reopened_for_scanning_at from appointments_v2.bookings where id = $1`, [bookingId]
+    );
+    assert.equal(freshStudy.rows[0]?.status, "in-progress");
+    assert.equal(freshStudy.rows[0]?.source, "pacs");
+    assert.equal(freshStudy.rows[0]?.reopened_for_scanning_at, null);
+  });
+
   it("uses a date-safe start lookback, keeps old PACS acquisitions monitored, and records a first-seen fallback", async () => {
     await configureStandardAutoCompletion();
     observation = { series: 1, instances: 10, lastUpdate: "20260911T085400" };

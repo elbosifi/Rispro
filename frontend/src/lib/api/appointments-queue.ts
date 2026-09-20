@@ -68,6 +68,13 @@ export async function updateAppointmentStatus(
   });
 }
 
+export async function reopenAppointmentForScanning(appointmentId: number, reason: string) {
+  return api<RawRecord>(`/v2/read/appointments/${appointmentId}/reopen-for-scanning`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
+}
+
 export async function fetchNoShowSummary(): Promise<import("@/types/api").NoShowSummary> {
   const raw = await api<RawRecord>("/v2/read/queue/no-show-summary");
   return { mode: String(raw.mode || "disabled") as import("@/types/api").NoShowSummary["mode"], reviewTime: String(raw.reviewTime || "17:00"), reviewActive: Boolean(raw.reviewActive), pendingCount: Number(raw.pendingCount || 0), oldCleanupCount: Number(raw.oldCleanupCount || 0), autoNoShowEnabled: Boolean(raw.autoNoShowEnabled), manualConfirmationRequired: Boolean(raw.manualConfirmationRequired), lastAutomaticRunAt: typeof raw.lastAutomaticRunAt === "string" ? raw.lastAutomaticRunAt : null, lastAutomaticProcessedCount: Number(raw.lastAutomaticProcessedCount || 0) };

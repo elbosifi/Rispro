@@ -75,6 +75,7 @@ interface EligibleBookingRow extends OrthancBookingVerificationContext {
   pacs_last_observed_instance_count: number | null;
   pacs_last_observed_series_count: number | null;
   pacs_last_observed_orthanc_update_at: string | null;
+  reopened_for_scanning_at: string | null;
   modality_code: string;
   national_id: string | null;
   mrn: string | null;
@@ -620,6 +621,14 @@ function isSafePacsStartObservation(result: OrthancVerificationResult): boolean 
     (result.status === "matched" || isBelowMinimumSeriesResult(result));
 }
 
+function hasFreshPacsActivityAfterReopen(reopenedForScanningAt: string | null, result: OrthancVerificationResult): boolean {
+  if (!reopenedForScanningAt) return true;
+  if (!result.orthancLastUpdateAt) return false;
+  const reopenedAt = Date.parse(reopenedForScanningAt);
+  const activityAt = Date.parse(result.orthancLastUpdateAt);
+  return Number.isFinite(reopenedAt) && Number.isFinite(activityAt) && activityAt > reopenedAt;
+}
+
 function isTrackablePacsObservation(result: OrthancVerificationResult): boolean {
   return !remoteSeriesQueryFailed(result) && (
     result.status === "matched" || isBelowMinimumSeriesResult(result) ||
@@ -792,7 +801,7 @@ async function processPacsObservation({
     const { rows } = await client.query<Pick<EligibleBookingRow,
       "id" | "status" | "acquisition_status_source" | "pacs_auto_completion_disabled_at" | "pacs_auto_completion_disabled_by_user_id" | "pacs_first_seen_at" |
       "pacs_last_activity_at" | "pacs_last_observed_instance_count" | "pacs_last_observed_series_count" |
-      "pacs_last_observed_orthanc_update_at"
+      "pacs_last_observed_orthanc_update_at" | "reopened_for_scanning_at"
     > & { pacs_inactivity_elapsed: boolean }>(
       `
         select
@@ -806,6 +815,7 @@ async function processPacsObservation({
           pacs_last_observed_instance_count,
           pacs_last_observed_series_count,
           pacs_last_observed_orthanc_update_at,
+          reopened_for_scanning_at,
           (
             pacs_last_activity_at is not null
             and current_timestamp >= pacs_last_activity_at + make_interval(mins => $2::int)
@@ -833,6 +843,10 @@ async function processPacsObservation({
         await client.query("commit");
         return false;
       }
+      if (!hasFreshPacsActivityAfterReopen(current.reopened_for_scanning_at, result)) {
+        await client.query("commit");
+        return false;
+      }
       await client.query(
         `
           update appointments_v2.bookings
@@ -848,6 +862,7 @@ async function processPacsObservation({
             pacs_timing_source = $7,
             pacs_timing_confidence = $8,
             pacs_timing_checked_at = now(),
+            reopened_for_scanning_at = null,
             updated_at = now(),
             updated_by_user_id = null
           where id = $1
@@ -1207,6 +1222,7 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
         b.pacs_last_observed_instance_count,
         b.pacs_last_observed_series_count,
         b.pacs_last_observed_orthanc_update_at,
+        b.reopened_for_scanning_at,
         m.code as modality_code,
         p.national_id,
         p.mrn,

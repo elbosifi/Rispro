@@ -26,6 +26,10 @@ const workflowTimestampMigration = readFileSync(
   new URL("../../../../db/migrations/098_v2_booking_workflow_timestamps.sql", import.meta.url),
   "utf8"
 );
+const reopenForScanningMigration = readFileSync(
+  new URL("../../../../db/migrations/213_appointments_v2_reopen_for_scanning.sql", import.meta.url),
+  "utf8"
+);
 
 describe("status booking service source guards", () => {
   it("allows manual status targets but rejects voided", () => {
@@ -51,12 +55,31 @@ describe("status booking service source guards", () => {
   });
 
   it("rejects discontinued reactivation when terminal side effects cannot be safely reversed", () => {
-    assert.match(source, /reactivatingDiscontinued && booking\.uses_special_quota/);
+    assert.match(source, /assertDiscontinuedReactivationSafety/);
+    assert.match(source, /booking\.uses_special_quota/);
     assert.match(source, /discontinued_reactivation_special_quota_rejected/);
     assert.match(source, /complementary_recall_reopened_after_uncompleted_booking/);
     assert.match(source, /discontinued_reactivation_recall_reversal_unavailable/);
     assert.match(source, /cancelled_reason in \('status_discontinued', 'booking_status_discontinued'\)/);
     assert.match(source, /discontinued_reactivation_reporting_intent_reversal_unavailable/);
+  });
+
+  it("uses a dedicated, role-limited reopen-for-scanning transaction", () => {
+    assert.match(source, /export async function reopenDiscontinuedBookingForScanning/);
+    assert.match(source, /for update/);
+    assert.match(source, /booking_reopen_for_scanning_requires_discontinued/);
+    assert.match(source, /booking_reopen_for_scanning_reason_required/);
+    assert.match(source, /booking_reopen_for_scanning_forbidden/);
+    assert.match(source, /"modality_staff", "supervisor", "super_admin"/);
+    assert.match(source, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), userRole\)/);
+    assert.match(source, /actionType: "reopen_for_scanning"/);
+    assert.match(source, /status = 'waiting'/);
+    assert.match(source, /study_instance_uid = null/);
+    assert.match(source, /reopened_for_scanning_at = now\(\)/);
+    assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
+    assert.match(readV2RoutesSource, /"\/appointments\/:id\/reopen-for-scanning"/);
+    assert.match(readV2RoutesSource, /reopenDiscontinuedBookingForScanning/);
+    assert.match(reopenForScanningMigration, /add column if not exists reopened_for_scanning_at timestamptz/);
   });
 
   it("locks and releases active special quota consumption when discontinuing", () => {
@@ -198,8 +221,6 @@ describe("status booking service source guards", () => {
     assert.match(source, /arrived_at = case[\s\S]*when \$2 in \('arrived', 'waiting'\) then coalesce\(arrived_at, now\(\)\)/);
     assert.match(source, /waiting_started_at = case[\s\S]*when \$2 = 'waiting' then coalesce\(waiting_started_at, now\(\)\)/);
     assert.match(source, /completed_at = case[\s\S]*when \$2 = 'completed' then coalesce\(completed_at, now\(\)\)/);
-    assert.doesNotMatch(source, /set[\s\S]{0,500}arrived_at = null/);
-    assert.doesNotMatch(source, /set[\s\S]{0,500}completed_at = null/);
   });
 
   it("same-day queue scan stores arrived_at for updated bookings", () => {
@@ -253,8 +274,6 @@ describe("status booking service source guards", () => {
     assert.match(source, /MANUAL_STATUS_TARGETS/);
     assert.match(source, /"no-show"/);
     assert.match(source, /"discontinued"/);
-    assert.doesNotMatch(source, /targetStatus === "no-show"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
-    assert.doesNotMatch(source, /targetStatus === "discontinued"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
   });
 
   it("V2 queue scan cannot set arrived without patient queue requirements", () => {

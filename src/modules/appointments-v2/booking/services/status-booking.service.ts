@@ -41,6 +41,10 @@ interface BookingStatusRow {
   status: BookingStatus;
   booking_date?: string;
   uses_special_quota?: boolean;
+  study_instance_uid?: string | null;
+  arrived_at?: string | null;
+  waiting_started_at?: string | null;
+  completed_at?: string | null;
   auto_completed_by?: string | null;
   auto_completed_at?: string | null;
   acquisition_status_source?: "pacs" | "mpps" | null;
@@ -256,6 +260,56 @@ async function auditStatusChange(
   );
 }
 
+async function assertDiscontinuedReactivationSafety(
+  client: PoolClient,
+  booking: BookingStatusRow
+): Promise<void> {
+  const bookingId = Number(booking.id);
+  if (booking.uses_special_quota) {
+    throw new SchedulingError(409, "Discontinued bookings that used special quota cannot be reactivated through manual status management.", ["discontinued_reactivation_special_quota_rejected"]);
+  }
+
+  const reopenedRecall = await client.query<{ id: number }>(
+    `
+      select recall.id
+      from appointments_v2.complementary_recall_requests recall
+      where recall.status = 'pending_scheduling'
+        and recall.recall_appointment_id is null
+        and exists (
+          select 1
+          from audit_log audit
+          where audit.entity_type = 'complementary_recall_request'
+            and audit.entity_id = recall.id
+            and audit.action_type = 'complementary_recall_reopened_after_uncompleted_booking'
+            and audit.new_values ->> 'previousRecallAppointmentId' = $1::text
+            and audit.new_values ->> 'reason' = 'discontinued'
+        )
+      limit 1
+      for update
+    `,
+    [bookingId]
+  );
+  if (reopenedRecall.rows[0]) {
+    throw new SchedulingError(409, "Discontinued bookings with a reopened complementary recall cannot be reactivated through manual status management.", ["discontinued_reactivation_recall_reversal_unavailable"]);
+  }
+
+  const cancelledReportingIntent = await client.query<{ id: number }>(
+    `
+      select id
+      from doctor_portal.reporting_assignment_intents
+      where appointment_id = $1
+        and status = 'cancelled'
+        and cancelled_reason in ('status_discontinued', 'booking_status_discontinued')
+      limit 1
+      for update
+    `,
+    [bookingId]
+  );
+  if (cancelledReportingIntent.rows[0]) {
+    throw new SchedulingError(409, "Discontinued bookings with a cancelled reporting assignment intent cannot be reactivated through manual status management.", ["discontinued_reactivation_reporting_intent_reversal_unavailable"]);
+  }
+}
+
 async function getPatientRequirementSettings(client: PoolClient): Promise<{
   phoneRequired: boolean;
   identifierRequired: boolean;
@@ -429,49 +483,8 @@ export async function updateBookingStatusManual(
     if (reactivatingDiscontinued && !cleanReason) {
       throw new SchedulingError(400, "A reason is required to reactivate a discontinued booking.", ["discontinued_reactivation_reason_required"]);
     }
-    if (reactivatingDiscontinued && booking.uses_special_quota) {
-      throw new SchedulingError(409, "Discontinued bookings that used special quota cannot be reactivated through manual status management.", ["discontinued_reactivation_special_quota_rejected"]);
-    }
     if (reactivatingDiscontinued) {
-      const reopenedRecall = await client.query<{ id: number }>(
-        `
-          select recall.id
-          from appointments_v2.complementary_recall_requests recall
-          where recall.status = 'pending_scheduling'
-            and recall.recall_appointment_id is null
-            and exists (
-              select 1
-              from audit_log audit
-              where audit.entity_type = 'complementary_recall_request'
-                and audit.entity_id = recall.id
-                and audit.action_type = 'complementary_recall_reopened_after_uncompleted_booking'
-                and audit.new_values ->> 'previousRecallAppointmentId' = $1::text
-                and audit.new_values ->> 'reason' = 'discontinued'
-            )
-          limit 1
-          for update
-        `,
-        [bookingId]
-      );
-      if (reopenedRecall.rows[0]) {
-        throw new SchedulingError(409, "Discontinued bookings with a reopened complementary recall cannot be reactivated through manual status management.", ["discontinued_reactivation_recall_reversal_unavailable"]);
-      }
-
-      const cancelledReportingIntent = await client.query<{ id: number }>(
-        `
-          select id
-          from doctor_portal.reporting_assignment_intents
-          where appointment_id = $1
-            and status = 'cancelled'
-            and cancelled_reason in ('status_discontinued', 'booking_status_discontinued')
-          limit 1
-          for update
-        `,
-        [bookingId]
-      );
-      if (cancelledReportingIntent.rows[0]) {
-        throw new SchedulingError(409, "Discontinued bookings with a cancelled reporting assignment intent cannot be reactivated through manual status management.", ["discontinued_reactivation_reporting_intent_reversal_unavailable"]);
-      }
+      await assertDiscontinuedReactivationSafety(client, booking);
     }
     if (booking.status === "completed" && targetStatus === "arrived" && !cleanReason) {
       throw new SchedulingError(400, "A reason is required to reopen a completed booking.", ["completed_reopen_reason_required"]);
@@ -600,6 +613,125 @@ export async function updateBookingStatusManual(
       autoCompletionDisabled,
       autoCompletionDisabledMessage,
     };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function reopenDiscontinuedBookingForScanning(
+  bookingId: number,
+  reason: string | null | undefined,
+  userId: number,
+  userRole?: Role
+): Promise<{ id: number; previousStatus: BookingStatus; status: "waiting"; reopenedForScanningAt: string }> {
+  const cleanReason = String(reason || "").trim();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<BookingStatusRow>(
+      `
+        select
+          id,
+          patient_id,
+          status,
+          booking_date::text,
+          uses_special_quota,
+          study_instance_uid,
+          arrived_at,
+          waiting_started_at,
+          completed_at,
+          acquisition_status_source
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [bookingId]
+    );
+    const booking = rows[0];
+    if (!booking) {
+      throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
+    }
+    if (booking.status !== "discontinued") {
+      throw new SchedulingError(409, "Only discontinued bookings can be reopened for scanning.", ["booking_reopen_for_scanning_requires_discontinued"]);
+    }
+    if (!cleanReason) {
+      throw new SchedulingError(400, "A reason is required to reopen a discontinued booking for scanning.", ["booking_reopen_for_scanning_reason_required"]);
+    }
+    if (!new Set<Role>(["modality_staff", "supervisor", "super_admin"]).has(userRole as Role)) {
+      throw new SchedulingError(403, "You are not authorized to reopen a discontinued booking for scanning.", ["booking_reopen_for_scanning_forbidden"]);
+    }
+
+    await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
+    await assertDiscontinuedReactivationSafety(client, booking);
+
+    const reopened = await client.query<{ reopened_for_scanning_at: string }>(
+      `
+        update appointments_v2.bookings
+        set
+          status = 'waiting',
+          arrived_at = now(),
+          waiting_started_at = now(),
+          completed_at = null,
+          study_instance_uid = null,
+          acquisition_status_source = null,
+          auto_completed_by = null,
+          auto_completed_at = null,
+          auto_completion_check_id = null,
+          pacs_auto_completion_disabled_at = null,
+          pacs_auto_completion_disabled_by_user_id = null,
+          pacs_auto_completion_disabled_reason = null,
+          pacs_first_seen_at = null,
+          pacs_last_activity_at = null,
+          pacs_last_observed_instance_count = null,
+          pacs_last_observed_series_count = null,
+          pacs_last_observed_orthanc_update_at = null,
+          pacs_study_started_at = null,
+          pacs_timing_source = null,
+          pacs_timing_confidence = null,
+          pacs_timing_checked_at = null,
+          reopened_for_scanning_at = now(),
+          updated_at = now(),
+          updated_by_user_id = $2
+        where id = $1
+        returning reopened_for_scanning_at::text
+      `,
+      [bookingId, userId]
+    );
+    const reopenedForScanningAt = reopened.rows[0]?.reopened_for_scanning_at;
+    if (!reopenedForScanningAt) {
+      throw new Error(`Booking ${bookingId} reopen timestamp was not recorded.`);
+    }
+
+    await logAuditEntry(
+      {
+        entityType: "appointment_v2_booking",
+        entityId: bookingId,
+        actionType: "reopen_for_scanning",
+        oldValues: {
+          status: booking.status,
+          studyInstanceUid: booking.study_instance_uid ?? null,
+          acquisitionStatusSource: booking.acquisition_status_source ?? null,
+          completedAt: booking.completed_at ?? null,
+          arrivedAt: booking.arrived_at ?? null,
+          waitingStartedAt: booking.waiting_started_at ?? null,
+        },
+        newValues: {
+          status: "waiting",
+          reason: cleanReason,
+          reopenedForScanningAt,
+          studyInstanceUid: null,
+        },
+        changedByUserId: userId,
+      },
+      client
+    );
+
+    await client.query("commit");
+    scheduleBookingWorklistSync(bookingId);
+    return { id: bookingId, previousStatus: booking.status, status: "waiting", reopenedForScanningAt };
   } catch (error) {
     await client.query("rollback");
     throw error;

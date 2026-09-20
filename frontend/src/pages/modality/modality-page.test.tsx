@@ -35,10 +35,12 @@ const fetchCdRobotDeliveriesMock = vi.fn();
 const createCdRobotDeliveryMock = vi.fn();
 const retryCdRobotDeliveryMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
+const reopenAppointmentForScanningMock = vi.hoisted(() => vi.fn());
 const printAppointmentSlipByIdMock = vi.fn();
 const printIrSpecimenLabelByIdMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
+const authState = vi.hoisted(() => ({ role: "modality_staff" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
 const mriPrimaryScreeningBadgesSource = readFileSync(join(process.cwd(), "src/components/appointments/mri-primary-screening-badges.tsx"), "utf8");
 function LocationProbe() {
@@ -71,6 +73,14 @@ vi.mock("@/lib/api-hooks", () => ({
   createCdRobotDelivery: (...args: unknown[]) => createCdRobotDeliveryMock(...args),
   retryCdRobotDelivery: (...args: unknown[]) => retryCdRobotDeliveryMock(...args),
   updateAppointmentStatus: (...args: unknown[]) => updateAppointmentStatusMock(...args),
+}));
+
+vi.mock("@/lib/api/appointments-queue", () => ({
+  reopenAppointmentForScanning: (...args: unknown[]) => reopenAppointmentForScanningMock(...args),
+}));
+
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { id: 1, role: authState.role } }),
 }));
 
 vi.mock("@/lib/appointment-printing", () => ({
@@ -1482,6 +1492,34 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => {
       expect(updateAppointmentStatusMock).toHaveBeenCalledWith(9, "arrived", "Scanner workflow correction");
     });
+  });
+
+  it("reopens discontinued rows for scanning only after a required reason", async () => {
+    authState.role = "modality_staff";
+    reopenAppointmentForScanningMock.mockResolvedValue({ ok: true });
+    const user = await openBoard([
+      appointment({ id: 90, accessionNumber: "ACC-DISCONTINUED", status: "discontinued", englishFullName: "Discontinued Patient" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Problem" }));
+    const row = screen.getByTestId("modality-board-row-90");
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Reopen for scanning/i }));
+    expect(await screen.findByRole("heading", { name: /Reopen for scanning/i })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Reopen for scanning/i }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(screen.getByLabelText("Reason"), "Patient returned for a fresh scan");
+    await user.click(screen.getByRole("button", { name: /Reopen for scanning/i }));
+    await waitFor(() => expect(reopenAppointmentForScanningMock).toHaveBeenCalledWith(90, "Patient returned for a fresh scan"));
+
+    authState.role = "receptionist";
+    cleanup();
+    await openBoard([appointment({ id: 91, status: "discontinued" })]);
+    await user.click(screen.getByRole("button", { name: "Problem" }));
+    const receptionistRow = screen.getByTestId("modality-board-row-91");
+    await user.click(within(receptionistRow).getByRole("button", { name: /More actions/i }));
+    expect(screen.queryByRole("menuitem", { name: /Reopen for scanning/i })).toBeNull();
+    authState.role = "modality_staff";
   });
 
   it("uses the CD button on completed rows and keeps Print in More", async () => {

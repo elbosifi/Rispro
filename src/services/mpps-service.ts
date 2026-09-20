@@ -86,6 +86,7 @@ interface BookingCandidateRow {
   pacs_auto_completion_disabled_at: string | null;
   pacs_auto_completion_disabled_by_user_id: number | null;
   pacs_auto_completion_disabled_reason: string | null;
+  reopened_for_scanning_at: string | null;
 }
 
 interface AcceptedMppsStateRow {
@@ -707,7 +708,8 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
           acquisition_status_source,
           pacs_auto_completion_disabled_at,
           pacs_auto_completion_disabled_by_user_id,
-          pacs_auto_completion_disabled_reason
+          pacs_auto_completion_disabled_reason,
+          reopened_for_scanning_at
         from appointments_v2.bookings
         where id = $1
         limit 1
@@ -796,6 +798,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
             pacs_auto_completion_disabled_at = case when pacs_auto_completion_disabled_at is null then now() else pacs_auto_completion_disabled_at end,
             pacs_auto_completion_disabled_by_user_id = case when pacs_auto_completion_disabled_at is null then null else pacs_auto_completion_disabled_by_user_id end,
             pacs_auto_completion_disabled_reason = case when pacs_auto_completion_disabled_at is null then $3 else pacs_auto_completion_disabled_reason end,
+            reopened_for_scanning_at = null,
             updated_at = now(),
             updated_by_user_id = null
           where id = $1

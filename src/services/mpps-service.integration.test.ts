@@ -7,7 +7,7 @@ import { createApp } from "../app.js";
 import { env } from "../config/env.js";
 import { ingestMppsEvent } from "./mpps-service.js";
 import { loadAppointmentAcquisitionSummaries } from "./appointment-acquisition-summary.js";
-import { updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
+import { reopenDiscontinuedBookingForScanning, updateBookingStatusManual } from "../modules/appointments-v2/booking/services/status-booking.service.js";
 import { createPendingReportingAssignmentIntent } from "../modules/doctor-portal/reporting-assignment-intents-service.js";
 import { createComplementaryRecall, linkComplementaryRecallBooking } from "../modules/appointments-v2/recall/complementary-recall.service.js";
 import {
@@ -350,6 +350,32 @@ describe("mpps-service integration", () => {
       assert.equal(result.updatedStatus, "in-progress");
       assert.equal(await getBookingStatus(bookingId), "in-progress");
     }
+  });
+
+  it("allows a new MPPS instance to claim a reopened booking without altering its discontinued MPPS history", async () => {
+    const bookingId = await createBooking("discontinued");
+    const oldMppsUid = `1.2.826.${bookingId}.discontinued`;
+    await pool.query(
+      `insert into mpps_event_log (dedupe_key, event_type, source_ae_title, mpps_instance_uid, performed_step_status, payload_json, correlated_appointment_id, correlation_status, processing_status)
+       values ($1, 'n-set', 'CT_AE', $2, 'DISCONTINUED', '{}'::jsonb, $3, 'matched', 'processed')`,
+      [`reopened-old-${bookingId}`, oldMppsUid, bookingId]
+    );
+
+    await reopenDiscontinuedBookingForScanning(bookingId, "Patient returned for a fresh acquisition", testData.userId, "modality_staff");
+    const newMppsUid = `1.2.826.${bookingId}.fresh`;
+    const result = await ingestMppsEvent(createPayload(bookingId, newMppsUid));
+
+    assert.equal(result.dicomStatus, 0x0000);
+    assert.equal(result.updatedStatus, "in-progress");
+    const booking = await pool.query<{ status: string; reopened_for_scanning_at: Date | null }>(
+      `select status, reopened_for_scanning_at from appointments_v2.bookings where id = $1`, [bookingId]
+    );
+    assert.equal(booking.rows[0]?.status, "in-progress");
+    assert.equal(booking.rows[0]?.reopened_for_scanning_at, null);
+    const oldEvent = await pool.query<{ performed_step_status: string; mpps_instance_uid: string }>(
+      `select performed_step_status, mpps_instance_uid from mpps_event_log where mpps_instance_uid = $1`, [oldMppsUid]
+    );
+    assert.deepEqual(oldEvent.rows[0], { performed_step_status: "DISCONTINUED", mpps_instance_uid: oldMppsUid });
   });
 
   it("claims acquisition authority for MPPS starts and PACS-started bookings without overwriting manual protection", async () => {

@@ -628,6 +628,91 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(voided.status, 409);
     });
 
+    it("reopens a discontinued booking for a fresh scan attempt with dedicated authorization and audit", async () => {
+      guard();
+      const createDiscontinuedBooking = async () => {
+        const bookingId = await createBookingForStatusTest("2039-08-19", await createPatientForStatusTest(`ReopenScan${Math.random()}`));
+        await pool.query(
+          `
+            update appointments_v2.bookings
+            set status = 'discontinued', study_instance_uid = '1.2.840.previous', acquisition_status_source = 'pacs',
+              arrived_at = now() - interval '2 hours', waiting_started_at = now() - interval '90 minutes', completed_at = now() - interval '1 hour',
+              auto_completed_by = 'orthanc_pacs_auto_completion', auto_completed_at = now() - interval '1 hour',
+              pacs_auto_completion_disabled_at = now(), pacs_auto_completion_disabled_by_user_id = $2,
+              pacs_auto_completion_disabled_reason = 'Previous attempt', pacs_first_seen_at = now() - interval '2 hours',
+              pacs_last_activity_at = now() - interval '90 minutes', pacs_last_observed_instance_count = 5,
+              pacs_last_observed_series_count = 1, pacs_last_observed_orthanc_update_at = now() - interval '90 minutes',
+              pacs_study_started_at = now() - interval '2 hours', pacs_timing_source = 'orthanc', pacs_timing_confidence = 'high', pacs_timing_checked_at = now() - interval '90 minutes'
+            where id = $1
+          `,
+          [bookingId, testData.userId]
+        );
+        return bookingId;
+      };
+      const reopen = (bookingId: number, role: string, reason = "Patient returned for a fresh acquisition") =>
+        fetch(`/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, {
+          method: "POST",
+          cookie: createTestAuthCookie(testData.userId, role),
+          body: { reason },
+        });
+
+      for (const role of ["modality_staff", "supervisor", "super_admin"]) {
+        const bookingId = await createDiscontinuedBooking();
+        assert.equal((await reopen(bookingId, role)).status, 200);
+      }
+      for (const role of ["receptionist", "doctor", "administrative"]) {
+        const bookingId = await createDiscontinuedBooking();
+        assert.equal((await reopen(bookingId, role)).status, 403);
+        assert.equal((await readWorkflowTimestamps(bookingId)).status, "discontinued");
+      }
+
+      const bookingId = await createDiscontinuedBooking();
+      assert.equal((await reopen(bookingId, "modality_staff", " ")).status, 400);
+      assert.equal((await readWorkflowTimestamps(bookingId)).status, "discontinued");
+      const nonDiscontinuedId = await createBookingForStatusTest("2039-08-20", await createPatientForStatusTest("ReopenScanNotDiscontinued"));
+      assert.equal((await reopen(nonDiscontinuedId, "modality_staff")).status, 409);
+
+      const response = await reopen(bookingId, "modality_staff");
+      assert.equal(response.status, 200);
+      const reopened = await pool.query<{
+        id: number; status: string; arrived_at: Date | null; waiting_started_at: Date | null; completed_at: Date | null;
+        study_instance_uid: string | null; acquisition_status_source: string | null; auto_completed_by: string | null;
+        pacs_auto_completion_disabled_at: Date | null; pacs_last_activity_at: Date | null; reopened_for_scanning_at: Date | null;
+      }>(`
+        select id, status, arrived_at, waiting_started_at, completed_at, study_instance_uid, acquisition_status_source,
+          auto_completed_by, pacs_auto_completion_disabled_at, pacs_last_activity_at, reopened_for_scanning_at
+        from appointments_v2.bookings where id = $1
+      `, [bookingId]);
+      assert.equal(reopened.rows[0]?.id, bookingId);
+      assert.equal(reopened.rows[0]?.status, "waiting");
+      assert.ok(reopened.rows[0]?.arrived_at);
+      assert.ok(reopened.rows[0]?.waiting_started_at);
+      assert.equal(reopened.rows[0]?.completed_at, null);
+      assert.equal(reopened.rows[0]?.study_instance_uid, null);
+      assert.equal(reopened.rows[0]?.acquisition_status_source, null);
+      assert.equal(reopened.rows[0]?.auto_completed_by, null);
+      assert.equal(reopened.rows[0]?.pacs_auto_completion_disabled_at, null);
+      assert.equal(reopened.rows[0]?.pacs_last_activity_at, null);
+      assert.ok(reopened.rows[0]?.reopened_for_scanning_at);
+      const audit = await pool.query<{ old_values: { status: string; studyInstanceUid: string }; new_values: { status: string; reason: string; reopenedForScanningAt: string }; changed_by_user_id: number }>(
+        `select old_values, new_values, changed_by_user_id from audit_log where entity_type = 'appointment_v2_booking' and entity_id = $1 and action_type = 'reopen_for_scanning' order by id desc limit 1`,
+        [bookingId]
+      );
+      assert.equal(audit.rows[0]?.old_values.status, "discontinued");
+      assert.equal(audit.rows[0]?.old_values.studyInstanceUid, "1.2.840.previous");
+      assert.equal(audit.rows[0]?.new_values.status, "waiting");
+      assert.equal(audit.rows[0]?.new_values.reason, "Patient returned for a fresh acquisition");
+      assert.ok(audit.rows[0]?.new_values.reopenedForScanningAt);
+      assert.equal(Number(audit.rows[0]?.changed_by_user_id), testData.userId);
+
+      const quotaBookingId = await createDiscontinuedBooking();
+      await pool.query("update appointments_v2.bookings set uses_special_quota = true where id = $1", [quotaBookingId]);
+      assert.equal((await reopen(quotaBookingId, "super_admin")).status, 409);
+      const quotaState = await pool.query<{ status: string; reopened_for_scanning_at: Date | null }>("select status, reopened_for_scanning_at from appointments_v2.bookings where id = $1", [quotaBookingId]);
+      assert.equal(quotaState.rows[0]?.status, "discontinued");
+      assert.equal(quotaState.rows[0]?.reopened_for_scanning_at, null);
+    });
+
     it("rejects reactivation when discontinuation left recall or reporting state without a canonical reversal", async () => {
       guard();
       const superAdminCookie = createTestAuthCookie(testData.userId, "super_admin");
@@ -652,6 +737,12 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         body: { status: "scheduled", reason: "Correcting status" },
       });
       assert.equal(recallReactivation.status, 409);
+      const recallReopenForScanning = await fetch(`/api/v2/read/appointments/${recallBookingId}/reopen-for-scanning`, {
+        method: "POST",
+        cookie: createTestAuthCookie(testData.userId, "modality_staff"),
+        body: { reason: "Patient returned for a fresh scan" },
+      });
+      assert.equal(recallReopenForScanning.status, 409);
       const recallState = await pool.query<{ status: string; recall_appointment_id: number | null }>(
         "select status, recall_appointment_id from appointments_v2.complementary_recall_requests where id = $1",
         [recall.rows[0]?.id]
@@ -697,6 +788,12 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         body: { status: "scheduled", reason: "Correcting status" },
       });
       assert.equal(reportingReactivation.status, 409);
+      const reportingReopenForScanning = await fetch(`/api/v2/read/appointments/${reportingBookingId}/reopen-for-scanning`, {
+        method: "POST",
+        cookie: createTestAuthCookie(testData.userId, "modality_staff"),
+        body: { reason: "Patient returned for a fresh scan" },
+      });
+      assert.equal(reportingReopenForScanning.status, 409);
       assert.equal((await readWorkflowTimestamps(reportingBookingId)).status, "discontinued");
     });
   });

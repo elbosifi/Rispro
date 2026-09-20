@@ -7,6 +7,7 @@ import {
   fetchNoShowReviewSnapshot,
   fetchQueueSnapshot,
   scanIntoQueue,
+  reopenAppointmentForScanning,
   updateAppointmentStatus,
 } from "./appointments-queue";
 
@@ -27,15 +28,17 @@ describe("appointments and queue API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(5, "/v2/read/queue/no-shows");
   });
 
-  it("preserves scan, walk-in, no-show, and status payloads", async () => {
+  it("preserves scan, walk-in, no-show, status, and dedicated reopen payloads", async () => {
     await scanIntoQueue("RIS-123");
     await addWalkIn({ patientId: 4 });
     await confirmNoShow(7, "did not attend");
     await updateAppointmentStatus(7, "arrived", null);
+    await reopenAppointmentForScanning(7, "Patient returned for another attempt");
 
     expect(api).toHaveBeenNthCalledWith(1, "/v2/read/queue/scan", { method: "POST", body: JSON.stringify({ scanValue: "RIS-123" }) });
     expect(api).toHaveBeenNthCalledWith(2, "/v2/read/queue/walk-in", { method: "POST", body: JSON.stringify({ patientId: 4 }) });
     expect(api).toHaveBeenNthCalledWith(3, "/v2/read/appointments/7/no-show", { method: "POST", body: JSON.stringify({ reason: "did not attend" }) });
     expect(api).toHaveBeenNthCalledWith(4, "/v2/read/appointments/7/status", { method: "POST", body: JSON.stringify({ status: "arrived", reason: null }) });
+    expect(api).toHaveBeenNthCalledWith(5, "/v2/read/appointments/7/reopen-for-scanning", { method: "POST", body: JSON.stringify({ reason: "Patient returned for another attempt" }) });
   });
 });

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   deleteAppointment: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
+  reopenAppointmentForScanning: vi.fn(),
   supervisorReauthShouldFail: false,
   userRole: "super_admin" as "super_admin" | "supervisor" | "receptionist" | "doctor",
   availabilityRows: [] as AvailabilityRowViewModel[],
@@ -37,6 +38,10 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({ user: { id: 1, role: mocks.userRole } }),
+}));
+
+vi.mock("@/lib/api/appointments-queue", () => ({
+  reopenAppointmentForScanning: (...args: unknown[]) => mocks.reopenAppointmentForScanning(...args),
 }));
 
 vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
@@ -175,6 +180,8 @@ beforeEach(() => {
   }));
   mocks.updateAppointmentStatus.mockReset();
   mocks.updateAppointmentStatus.mockResolvedValue(undefined);
+  mocks.reopenAppointmentForScanning.mockReset();
+  mocks.reopenAppointmentForScanning.mockResolvedValue(undefined);
   mocks.createSchedulingOverrideRequest.mockReset();
   mocks.createSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
   mocks.deleteAppointment.mockReset();
@@ -195,6 +202,29 @@ afterEach(() => {
 });
 
 describe("AppointmentManageModal", () => {
+  it("offers the dedicated reopen-for-scanning action only to authorized discontinued-case roles and requires a reason", async () => {
+    mocks.userRole = "supervisor";
+    mocks.getAppointmentById.mockResolvedValue({ ...appointment, status: "discontinued" });
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findAllByText("ACC-42");
+    await user.click(screen.getByRole("button", { name: /more actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /reopen for scanning/i }));
+    expect(await screen.findByRole("heading", { name: /reopen for scanning/i })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /reopen for scanning/i }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(screen.getByLabelText("Reason"), "Patient returned for another attempt");
+    await user.click(screen.getByRole("button", { name: /reopen for scanning/i }));
+    await waitFor(() => expect(mocks.reopenAppointmentForScanning).toHaveBeenCalledWith(42, "Patient returned for another attempt"));
+
+    cleanup();
+    mocks.userRole = "receptionist";
+    renderModal();
+    await screen.findAllByText("ACC-42");
+    await user.click(screen.getByRole("button", { name: /more actions/i }));
+    expect(screen.queryByRole("menuitem", { name: /reopen for scanning/i })).toBeNull();
+  });
   it("loads using an appointment ID and shows a loading state", async () => {
     let resolveAppointment!: (value: AppointmentWithDetails) => void;
     mocks.getAppointmentById.mockReturnValue(new Promise((resolve) => { resolveAppointment = resolve; }));
