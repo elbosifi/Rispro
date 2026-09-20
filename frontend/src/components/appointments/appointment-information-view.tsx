@@ -153,7 +153,7 @@ function CopyValueButton({ value, label }: { value: string | null | undefined; l
 }
 
 function CopyableValue({ value, label }: { value: string | number | null | undefined; label: string }) {
-  return <span dir="ltr" className="inline-flex max-w-full items-center [unicode-bidi:isolate]"><span className="break-all">{valueOrDash(value)}</span><CopyValueButton value={present(value) ? String(value) : null} label={label} /></span>;
+  return <span dir="ltr" className="inline-flex max-w-full items-center [unicode-bidi:isolate]"><span className="break-words">{valueOrDash(value)}</span><CopyValueButton value={present(value) ? String(value) : null} label={label} /></span>;
 }
 
 function DefinitionGrid({ rows }: { rows: DefinitionRow[] }) {
@@ -280,18 +280,23 @@ type DetailsContentProps = {
   onOpenReport?: () => void;
   onOpenAppointment?: (appointmentId: number) => void;
   readOnly?: boolean;
+  layout?: "default" | "drawer";
 };
 
-function AppointmentDetailsContent({ appointment, reportStatus, recallContext, onOpenReport, onOpenAppointment, readOnly = false }: DetailsContentProps) {
+function AppointmentDetailsContent({ appointment, reportStatus, recallContext, onOpenReport, onOpenAppointment, readOnly = false, layout = "default" }: DetailsContentProps) {
   const { language } = useLanguage();
   const reportState = reportStatus?.state ?? appointment.reportStatus;
   const waitingSince = ["arrived", "waiting"].includes(appointment.status) ? appointment.waitingStartedAt ?? appointment.arrivedAt : null;
   const capacity = capacityRows(language, appointment);
   const protocol = protocolRows(language, appointment);
   const acquisition = appointment.acquisitionSummary;
+  const isDrawer = layout === "drawer";
+  const primaryGridClass = isDrawer
+    ? "grid gap-3 grid-cols-1"
+    : `grid gap-3 md:grid-cols-2 ${appointment.requiresReport ? "xl:grid-cols-3" : "xl:grid-cols-2"}`;
 
   return <div className="space-y-4">
-    <div data-testid="appointment-details-primary-grid" className={`grid gap-3 md:grid-cols-2 ${appointment.requiresReport ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
+    <div data-testid="appointment-details-primary-grid" className={primaryGridClass}>
       <CompactCard title={text(language, "الفحص", "Examination")} testId="appointment-examination-card"><DefinitionGrid rows={[
         { label: text(language, "الوسيلة", "Modality"), value: `${chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || dash} · ${appointment.modalityCode || dash}`, emphasis: true },
         { label: text(language, "نوع الفحص", "Examination type"), value: chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || dash, emphasis: true },
@@ -335,8 +340,8 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
   </div>;
 }
 
-export function AppointmentDetailsReadOnly({ appointment, reportStatus, onOpenAppointment, readOnly = true }: { appointment: AppointmentWithDetails; reportStatus?: ReportStatus | null; onOpenAppointment?: (id: number) => void; readOnly?: boolean }) {
-  return <AppointmentDetailsContent appointment={appointment} reportStatus={reportStatus} onOpenAppointment={onOpenAppointment} readOnly={readOnly} />;
+export function AppointmentDetailsReadOnly({ appointment, reportStatus, onOpenAppointment, readOnly = true, layout = "default" }: { appointment: AppointmentWithDetails; reportStatus?: ReportStatus | null; onOpenAppointment?: (id: number) => void; readOnly?: boolean; layout?: "default" | "drawer" }) {
+  return <AppointmentDetailsContent appointment={appointment} reportStatus={reportStatus} onOpenAppointment={onOpenAppointment} readOnly={readOnly} layout={layout} />;
 }
 
 function AppointmentDetailsSection({ appointment, lookups, reportStatus, recallContext, onOpenReschedule, onOpenStatus, onOpenReport, onOpenAppointment, onAppointmentUpdated }: Omit<AppointmentInformationViewProps, "onBack" | "onOpenPatientProfile">) {

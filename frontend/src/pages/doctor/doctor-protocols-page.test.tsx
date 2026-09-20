@@ -1638,5 +1638,25 @@ describe("Doctor protocoling usability enhancements", () => {
       expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: "Stat CT Chest with IV contrast" }));
     });
   });
+
+  it("formats appointment header without dangling time separator and isolates patient name", async () => {
+    const aptWithNullTime = { ...appointment, appointmentTime: null, patientArabicName: "وريدة سليمان امحمد عبدالله" };
+    mockFetchAppointments.mockResolvedValue([aptWithNullTime]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: aptWithNullTime, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Assign protocol" });
+    const arabicHeading = within(dialog).getByRole("heading", { name: "وريدة سليمان امحمد عبدالله" });
+    expect(arabicHeading.getAttribute("dir")).toBe("auto");
+
+    const appointmentLabel = within(dialog).getByText("Appointment", { selector: "span" });
+    const appointmentContainer = appointmentLabel.parentElement;
+    expect(appointmentContainer?.textContent).not.toMatch(/[·-]\s*$/);
+    expect(appointmentContainer?.textContent).not.toContain("—");
+  });
 });
+
 

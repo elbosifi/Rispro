@@ -58,7 +58,7 @@ export function DoctorReadOnlyDetailsDrawer({
         {hasAppointment && activeTab === "appointment" ? <>
           {appointmentQuery.isLoading ? <p className="text-sm text-muted-foreground" role="status">Loading appointment details...</p> : null}
           {appointmentQuery.isError ? <DrawerUnavailable message="Appointment details are unavailable right now." onRetry={() => void appointmentQuery.refetch()} /> : null}
-          {fullAppointment ? <AppointmentDetailsReadOnly appointment={fullAppointment} readOnly /> : null}
+          {fullAppointment ? <AppointmentDetailsReadOnly appointment={fullAppointment} readOnly layout="drawer" /> : null}
           {!appointmentQuery.isLoading && !appointmentQuery.isError && !fullAppointment ? <p className="text-sm text-muted-foreground">Appointment details are unavailable.</p> : null}
         </> : <>
           {patientQuery.isLoading ? <p className="text-sm text-muted-foreground" role="status">Loading patient details...</p> : null}

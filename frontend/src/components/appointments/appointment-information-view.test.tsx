@@ -278,4 +278,16 @@ describe("AppointmentInformationView", () => {
     expect(screen.queryByRole("button", { name: "Reschedule" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Change status" })).toBeNull();
   });
+
+  it("renders in single-column primary grid and uses break-words when layout='drawer'", () => {
+    render(
+      <LanguageProvider>
+        <AppointmentDetailsReadOnly appointment={appointment} layout="drawer" />
+      </LanguageProvider>,
+    );
+    const primaryGrid = screen.getByTestId("appointment-details-primary-grid");
+    expect(primaryGrid.className).toContain("grid-cols-1");
+    expect(primaryGrid.className).not.toContain("xl:grid-cols-3");
+    expect(screen.getByText("ACC-42").className).toContain("break-words");
+  });
 });

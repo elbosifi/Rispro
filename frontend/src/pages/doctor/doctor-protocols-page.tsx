@@ -2340,11 +2340,11 @@ function ProtocolAssignmentModal({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="sticky top-0 z-20 shrink-0 border-b bg-background px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
-          <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(220px,1.05fr)_minmax(0,1.65fr)_minmax(300px,1.45fr)] lg:items-center">
+          <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(260px,1.2fr)_minmax(0,1.8fr)_auto] lg:items-center">
             <div className="min-w-0">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <h3 className="truncate text-lg font-bold leading-tight text-foreground">{appointment.patientArabicName || appointment.patientEnglishName || `Patient ${appointment.patientId}`}</h3>
-                {appointment.patientEnglishName && appointment.patientEnglishName !== appointment.patientArabicName ? <p className="truncate text-sm text-muted-foreground">{appointment.patientEnglishName}</p> : null}
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <h3 dir="auto" className="text-lg font-bold leading-tight text-foreground [unicode-bidi:isolate]">{appointment.patientArabicName || appointment.patientEnglishName || `Patient ${appointment.patientId}`}</h3>
+                {appointment.patientEnglishName && appointment.patientEnglishName !== appointment.patientArabicName ? <p dir="ltr" className="text-sm text-muted-foreground [unicode-bidi:isolate]">{appointment.patientEnglishName}</p> : null}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
                 <span><span className="font-semibold text-muted-foreground">Age / sex</span> <span className="font-semibold text-foreground">{appointment.ageYears ?? "—"} / {appointment.sex ?? "—"}</span></span>
@@ -2353,7 +2353,7 @@ function ProtocolAssignmentModal({
               </div>
               </div>
               <div className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)} · {appointment.appointmentTime?.slice(0, 5) || "—"}</span></span>
+                <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)}{appointment.appointmentTime?.trim() ? ` · ${appointment.appointmentTime.trim().slice(0, 5)}` : ""}</span></span>
                 <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
                 <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
               <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
@@ -2405,7 +2405,7 @@ function ProtocolAssignmentModal({
             )}
             <div className={`mt-1 grid min-h-0 flex-1 gap-2 overflow-y-auto lg:overflow-hidden ${historyOpen && !documentExpanded ? "lg:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)_minmax(320px,1fr)]" : "lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]"}`}>
               <div className={`min-h-[360px] lg:min-h-0 min-w-0 overflow-hidden ${documentExpanded ? "lg:col-span-full" : ""}`}>
-                <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" layout="workspace" expanded={documentExpanded} onExpandedChange={setDocumentExpanded} enableAnnotations onAnnotationDirtyChange={setAnnotationDirty} />
+                <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" layout="workspace" expanded={documentExpanded} onExpandedChange={setDocumentExpanded} enableAnnotations onAnnotationDirtyChange={setAnnotationDirty} pdfInitialSizingMode="fit-width" />
               </div>
               {!documentExpanded && historyOpen ? (
                 <aside
@@ -2820,6 +2820,9 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
   const assignmentDetail = detail.assignmentDetail;
   if (!assignmentDetail) return null;
   const assignment = assignmentDetail.assignment;
+  const hasCtPhases = detail.appointment.modalityCode === "CT" && assignmentDetail.ctPhases.length > 0;
+  const hasMriSequences = detail.appointment.modalityCode !== "CT" && assignmentDetail.mriSequences.length > 0;
+
   return (
     <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
       <h4 className="font-semibold">Assigned protocol summary</h4>
@@ -2827,15 +2830,16 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
       {assignment.freeTextProtocol && <p className="mt-2 whitespace-pre-wrap text-sm">{assignment.freeTextProtocol}</p>}
       {assignment.protocolNotes && <p className="mt-2 text-sm">Protocol instructions: {assignment.protocolNotes}</p>}
       {assignment.contrastNotes && <p className="mt-1 text-sm">Contrast instructions: {assignment.contrastNotes}</p>}
-      {detail.appointment.modalityCode === "CT" ? (
+      {hasCtPhases ? (
         <SettingsTable emptyText="No CT phases found for this protocol." headers={["Order", "Phase", "Timing", "Coverage", "Required"]}>
           {assignmentDetail.ctPhases.map((phase) => <tr key={phase.id}><Cell>{phase.orderIndex}</Cell><Cell>{phase.customPhaseName ?? phase.ctPhasePresetName ?? "-"}</Cell><Cell>{formatCtPhaseTiming(phase)}</Cell><Cell>{effectiveCtPhaseCoverage(phase) ?? "-"}</Cell><Cell>{phase.isRequired ? "Yes" : "No"}</Cell></tr>)}
         </SettingsTable>
-      ) : (
+      ) : null}
+      {hasMriSequences ? (
         <SettingsTable emptyText="No MRI sequences found for this protocol." headers={["Order", "Scanner", "Sequence", "Plane", "Coverage", "b-values/timing", "Required"]}>
           {assignmentDetail.mriSequences.map((sequence) => <tr key={sequence.id}><Cell>{sequence.orderIndex}</Cell><Cell>{sequence.scannerName ?? "-"}</Cell><Cell>{sequence.mriSequencePresetName ?? "-"}</Cell><Cell>{sequence.planeOverride ?? "-"}</Cell><Cell>{sequence.coverageOverride ?? "-"}</Cell><Cell>{sequence.bValuesOverride ?? sequence.timingOverride ?? "-"}</Cell><Cell>{sequence.isRequired ? "Yes" : "No"}</Cell></tr>)}
         </SettingsTable>
-      )}
+      ) : null}
     </div>
   );
 }
