@@ -259,7 +259,6 @@ export async function updateProtocol(
     protocolId: updated.id,
     appointmentId,
     doctorId: input.doctorId,
-    eventType: input.eventType ?? (nextStatus === "assigned" ? "protocol_assigned" : "protocol_updated"),
     eventType: input.eventType ?? (
       nextStatus === "assigned"
         ? "protocol_assigned"

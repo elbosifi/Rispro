@@ -77,12 +77,10 @@ describe("printProtocolSheet", () => {
     expect(printWindow.print).not.toHaveBeenCalled();
   });
 
-  it("warns when the print window is blocked", () => {
   it("warns and triggers a toast when the print window is blocked", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.spyOn(window, "open").mockReturnValue(null);
 
-    printProtocolSheet(sheet);
     const result = printProtocolSheet(sheet);
 
     expect(result).toBe(false);

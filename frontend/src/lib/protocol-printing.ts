@@ -143,7 +143,6 @@ function mriTable(sequences: ProtocolPrintMriSequence[]): string {
 }
 
 function html(sheet: ProtocolPrintSheet): string {
-  const printedAt = new Date().toLocaleString();
   const printedAt = new Date().toLocaleString("en-GB");
   const detailTable = sheet.modality === "CT"
     ? ctTable(sheet.ctPhases ?? [])
@@ -247,10 +246,8 @@ export function writeProtocolPrintSheet(printWindow: Window, sheet: ProtocolPrin
   }
 }
 
-export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
 export function printProtocolSheet(sheet: ProtocolPrintSheet): boolean {
   const printWindow = openProtocolPrintWindow();
-  if (printWindow) writeProtocolPrintSheet(printWindow, sheet);
   if (printWindow) {
     writeProtocolPrintSheet(printWindow, sheet);
     return true;
