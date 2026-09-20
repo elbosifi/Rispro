@@ -1,5 +1,4 @@
 import { pool } from "../../db/pool.js";
-import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
 import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
@@ -493,81 +492,76 @@ export async function saveProtocolAssignment(
   assignedBy: number | null
 ): Promise<DoctorProtocolingAppointmentDetail> {
   const { protocolVersionId } = await validateAssignment(appointmentId, input);
+  const existing = await pool.query<{ id: number }>(
+    `
+      select id
+      from appointment_protocol_assignments
+      where appointment_id = $1
+        and status <> 'CANCELLED'
+      order by updated_at desc, id desc
+      limit 1
+    `,
+    [appointmentId]
+  );
 
-  await withTransaction(async (client) => {
-    await client.query(`select id from appointments_v2.bookings where id = $1 for update`, [appointmentId]);
-    const existing = await client.query<{ id: number }>(
+  if (existing.rows[0]) {
+    await pool.query(
       `
-        select id
-        from appointment_protocol_assignments
-        where appointment_id = $1
-          and status <> 'CANCELLED'
-        order by updated_at desc, id desc
-        limit 1
-        for update
+        update appointment_protocol_assignments
+        set protocol_id = $2,
+            protocol_version_id = $3,
+            scanner_id = $4,
+            assigned_by = $5,
+            assigned_at = now(),
+            protocol_notes = $6,
+            contrast_notes = $7,
+            free_text_protocol = $8,
+            status = $9,
+            updated_at = now()
+        where id = $1
       `,
-      [appointmentId]
+      [
+        existing.rows[0].id,
+        input.protocolId,
+        protocolVersionId,
+        input.scannerId,
+        assignedBy,
+        input.protocolNotes,
+        input.contrastNotes,
+        input.freeTextProtocol,
+        input.status,
+      ]
     );
-
-    if (existing.rows[0]) {
-      await client.query(
-        `
-          update appointment_protocol_assignments
-          set protocol_id = $2,
-              protocol_version_id = $3,
-              scanner_id = $4,
-              assigned_by = $5,
-              assigned_at = now(),
-              protocol_notes = $6,
-              contrast_notes = $7,
-              free_text_protocol = $8,
-              status = $9,
-              updated_at = now()
-          where id = $1
-        `,
-        [
-          existing.rows[0].id,
-          input.protocolId,
-          protocolVersionId,
-          input.scannerId,
-          assignedBy,
-          input.protocolNotes,
-          input.contrastNotes,
-          input.freeTextProtocol,
-          input.status,
-        ]
-      );
-    } else {
-      await client.query(
-        `
-          insert into appointment_protocol_assignments (
-            appointment_id,
-            protocol_id,
-            protocol_version_id,
-            scanner_id,
-            assigned_by,
-            assigned_at,
-            protocol_notes,
-            contrast_notes,
-            free_text_protocol,
-            status
-          )
-          values ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)
-        `,
-        [
-          appointmentId,
-          input.protocolId,
-          protocolVersionId,
-          input.scannerId,
-          assignedBy,
-          input.protocolNotes,
-          input.contrastNotes,
-          input.freeTextProtocol,
-          input.status,
-        ]
-      );
-    }
-  });
+  } else {
+    await pool.query(
+      `
+        insert into appointment_protocol_assignments (
+          appointment_id,
+          protocol_id,
+          protocol_version_id,
+          scanner_id,
+          assigned_by,
+          assigned_at,
+          protocol_notes,
+          contrast_notes,
+          free_text_protocol,
+          status
+        )
+        values ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)
+      `,
+      [
+        appointmentId,
+        input.protocolId,
+        protocolVersionId,
+        input.scannerId,
+        assignedBy,
+        input.protocolNotes,
+        input.contrastNotes,
+        input.freeTextProtocol,
+        input.status,
+      ]
+    );
+  }
 
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");
@@ -576,19 +570,16 @@ export async function saveProtocolAssignment(
 }
 
 export async function cancelProtocolAssignment(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
-  await withTransaction(async (client) => {
-    await client.query(`select id from appointments_v2.bookings where id = $1 for update`, [appointmentId]);
-    await client.query(
-      `
-        update appointment_protocol_assignments
-        set status = 'CANCELLED',
-            updated_at = now()
-        where appointment_id = $1
-          and status <> 'CANCELLED'
-      `,
-      [appointmentId]
-    );
-  });
+  await pool.query(
+    `
+      update appointment_protocol_assignments
+      set status = 'CANCELLED',
+          updated_at = now()
+      where appointment_id = $1
+        and status <> 'CANCELLED'
+    `,
+    [appointmentId]
+  );
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");
   scheduleBookingWorklistSync(appointmentId);

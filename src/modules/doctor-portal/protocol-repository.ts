@@ -1,5 +1,4 @@
 import { pool } from "../../db/pool.js";
-import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
 import { HttpError } from "../../utils/http-error.js";
 import { scheduleBookingWorklistDetailReplacement } from "../../services/dicom-service.js";
 import type { PoolClient } from "pg";
@@ -154,153 +153,130 @@ export async function findProtocolByAppointmentId(db: Db, appointmentId: number)
 export async function createProtocol(
   input: ProtocolInput & { appointmentId: number; doctorId: number; status: ProtocolStatus; reason?: string | null }
 ): Promise<AppointmentProtocolRow> {
-  return withTransaction(async (client) => {
-    await client.query(`select id from appointments_v2.bookings where id = $1 for update`, [input.appointmentId]);
-    const existing = await findProtocolByAppointmentId(client, input.appointmentId);
-    if (existing) {
-      throw new HttpError(409, "A protocol already exists for this appointment.");
-    }
-    const result = await client.query<AppointmentProtocolRow>(
-      `
-        insert into doctor_portal.appointment_protocols (
-          appointment_id,
-          protocol_text,
-          contrast_required,
-          contrast_phase_or_protocol,
-          special_preparation,
-          technologist_notes,
-          protocol_status,
-          assigned_by_doctor_id,
-          assigned_at,
-          updated_by_doctor_id,
-          version
-        )
-        values ($1, $2, $3, $4, $5, $6, $7::text, case when $7::text = 'assigned' then $8::bigint else null::bigint end, case when $7::text = 'assigned' then now() else null end, $8::bigint, 1)
-        returning
-          id, appointment_id as "appointmentId", protocol_text as "protocolText", contrast_required as "contrastRequired",
-          contrast_phase_or_protocol as "contrastPhaseOrProtocol", special_preparation as "specialPreparation",
-          technologist_notes as "technologistNotes", protocol_status as "protocolStatus",
-          assigned_by_doctor_id as "assignedByDoctorId", null::text as "assignedByDoctorName", assigned_at as "assignedAt",
-          updated_by_doctor_id as "updatedByDoctorId", null::text as "updatedByDoctorName", updated_at as "updatedAt",
-          version, created_at as "createdAt"
-      `,
-      [
-        input.appointmentId,
-        input.protocolText,
-        input.contrastRequired,
-        input.contrastPhaseOrProtocol,
-        input.specialPreparation,
-        input.technologistNotes,
-        input.status,
-        input.doctorId,
-      ]
-    );
-    const protocol = result.rows[0];
-    const eventType: ProtocolAuditEventType =
-      protocol.protocolStatus === "assigned"
-        ? "protocol_assigned"
-        : protocol.protocolStatus === "clarification_needed"
-          ? "clarification_requested"
-          : protocol.protocolStatus === "cancelled"
-            ? "protocol_cancelled"
-            : "protocol_created";
-    await insertProtocolAudit(client, {
-      protocolId: protocol.id,
-      appointmentId: protocol.appointmentId,
-      doctorId: input.doctorId,
-      eventType,
-      oldValue: null,
-      newValue: protocol,
-      reason: input.reason ?? null,
-    });
-    if (protocol.protocolStatus === "assigned") {
-      scheduleBookingWorklistDetailReplacement(protocol.appointmentId);
-    }
-    return protocol;
+  const result = await pool.query<AppointmentProtocolRow>(
+    `
+      insert into doctor_portal.appointment_protocols (
+        appointment_id,
+        protocol_text,
+        contrast_required,
+        contrast_phase_or_protocol,
+        special_preparation,
+        technologist_notes,
+        protocol_status,
+        assigned_by_doctor_id,
+        assigned_at,
+        updated_by_doctor_id,
+        version
+      )
+      values ($1, $2, $3, $4, $5, $6, $7::text, case when $7::text = 'assigned' then $8::bigint else null::bigint end, case when $7::text = 'assigned' then now() else null end, $8::bigint, 1)
+      returning
+        id, appointment_id as "appointmentId", protocol_text as "protocolText", contrast_required as "contrastRequired",
+        contrast_phase_or_protocol as "contrastPhaseOrProtocol", special_preparation as "specialPreparation",
+        technologist_notes as "technologistNotes", protocol_status as "protocolStatus",
+        assigned_by_doctor_id as "assignedByDoctorId", null::text as "assignedByDoctorName", assigned_at as "assignedAt",
+        updated_by_doctor_id as "updatedByDoctorId", null::text as "updatedByDoctorName", updated_at as "updatedAt",
+        version, created_at as "createdAt"
+    `,
+    [
+      input.appointmentId,
+      input.protocolText,
+      input.contrastRequired,
+      input.contrastPhaseOrProtocol,
+      input.specialPreparation,
+      input.technologistNotes,
+      input.status,
+      input.doctorId,
+    ]
+  );
+  const protocol = result.rows[0];
+  const eventType: ProtocolAuditEventType =
+    protocol.protocolStatus === "assigned"
+      ? "protocol_assigned"
+      : protocol.protocolStatus === "clarification_needed"
+        ? "clarification_requested"
+        : protocol.protocolStatus === "cancelled"
+          ? "protocol_cancelled"
+          : "protocol_created";
+  await insertProtocolAudit(pool, {
+    protocolId: protocol.id,
+    appointmentId: protocol.appointmentId,
+    doctorId: input.doctorId,
+    eventType,
+    oldValue: null,
+    newValue: protocol,
+    reason: input.reason ?? null,
   });
+  if (protocol.protocolStatus === "assigned") {
+    scheduleBookingWorklistDetailReplacement(protocol.appointmentId);
+  }
+  return protocol;
 }
 
 export async function updateProtocol(
   appointmentId: number,
-  input: ProtocolInput & {
-    doctorId: number;
-    status?: ProtocolStatus;
-    reason?: string | null;
-    eventType?: ProtocolAuditEventType;
-    expectedVersion?: number;
-  }
+  input: ProtocolInput & { doctorId: number; status?: ProtocolStatus; reason?: string | null; eventType?: ProtocolAuditEventType }
 ): Promise<AppointmentProtocolRow | null> {
-  return withTransaction(async (client) => {
-    await client.query(
-      `select id from doctor_portal.appointment_protocols where appointment_id = $1 for update`,
-      [appointmentId]
-    );
-    const existing = await findProtocolByAppointmentId(client, appointmentId);
-    if (!existing) return null;
-
-    if (input.expectedVersion !== undefined && input.expectedVersion !== null && existing.version !== input.expectedVersion) {
-      throw new HttpError(409, `Protocol has been modified concurrently (expected version ${input.expectedVersion}, found version ${existing.version}).`);
-    }
-
-    const nextStatus = input.status ?? input.protocolStatus ?? existing.protocolStatus;
-    const result = await client.query<AppointmentProtocolRow>(
-      `
-        update doctor_portal.appointment_protocols
-        set protocol_text = $2,
-            contrast_required = $3,
-            contrast_phase_or_protocol = $4,
-            special_preparation = $5,
-            technologist_notes = $6,
-            protocol_status = $7::text,
-            assigned_by_doctor_id = case when $7::text = 'assigned' and assigned_by_doctor_id is null then $8::bigint else assigned_by_doctor_id end,
-            assigned_at = case when $7::text = 'assigned' and assigned_at is null then now() else assigned_at end,
-            updated_by_doctor_id = $8::bigint,
-            updated_at = now(),
-            version = version + 1
-        where appointment_id = $1
-        returning
-          id, appointment_id as "appointmentId", protocol_text as "protocolText", contrast_required as "contrastRequired",
-          contrast_phase_or_protocol as "contrastPhaseOrProtocol", special_preparation as "specialPreparation",
-          technologist_notes as "technologistNotes", protocol_status as "protocolStatus",
-          assigned_by_doctor_id as "assignedByDoctorId", null::text as "assignedByDoctorName", assigned_at as "assignedAt",
-          updated_by_doctor_id as "updatedByDoctorId", null::text as "updatedByDoctorName", updated_at as "updatedAt",
-          version, created_at as "createdAt"
-      `,
-      [
-        appointmentId,
-        input.protocolText,
-        input.contrastRequired,
-        input.contrastPhaseOrProtocol,
-        input.specialPreparation,
-        input.technologistNotes,
-        nextStatus,
-        input.doctorId,
-      ]
-    );
-    const updated = result.rows[0];
-    if (!updated) throw new HttpError(409, "Protocol record no longer exists; it may have been deleted concurrently.");
-    await insertProtocolAudit(client, {
-      protocolId: updated.id,
+  const existing = await findProtocolByAppointmentId(pool, appointmentId);
+  if (!existing) return null;
+  const nextStatus = input.status ?? input.protocolStatus ?? existing.protocolStatus;
+  const result = await pool.query<AppointmentProtocolRow>(
+    `
+      update doctor_portal.appointment_protocols
+      set protocol_text = $2,
+          contrast_required = $3,
+          contrast_phase_or_protocol = $4,
+          special_preparation = $5,
+          technologist_notes = $6,
+          protocol_status = $7::text,
+          assigned_by_doctor_id = case when $7::text = 'assigned' and assigned_by_doctor_id is null then $8::bigint else assigned_by_doctor_id end,
+          assigned_at = case when $7::text = 'assigned' and assigned_at is null then now() else assigned_at end,
+          updated_by_doctor_id = $8::bigint,
+          updated_at = now(),
+          version = version + 1
+      where appointment_id = $1
+      returning
+        id, appointment_id as "appointmentId", protocol_text as "protocolText", contrast_required as "contrastRequired",
+        contrast_phase_or_protocol as "contrastPhaseOrProtocol", special_preparation as "specialPreparation",
+        technologist_notes as "technologistNotes", protocol_status as "protocolStatus",
+        assigned_by_doctor_id as "assignedByDoctorId", null::text as "assignedByDoctorName", assigned_at as "assignedAt",
+        updated_by_doctor_id as "updatedByDoctorId", null::text as "updatedByDoctorName", updated_at as "updatedAt",
+        version, created_at as "createdAt"
+    `,
+    [
       appointmentId,
-      doctorId: input.doctorId,
-      eventType: input.eventType ?? (
-        nextStatus === "assigned"
-          ? "protocol_assigned"
-          : nextStatus === "clarification_needed"
-            ? "clarification_requested"
-            : nextStatus === "cancelled"
-              ? "protocol_cancelled"
-              : "protocol_updated"
-      ),
-      oldValue: existing,
-      newValue: updated,
-      reason: input.reason ?? null,
-    });
-    if (existing.protocolStatus === "assigned" || updated.protocolStatus === "assigned") {
-      scheduleBookingWorklistDetailReplacement(appointmentId);
-    }
-    return updated;
+      input.protocolText,
+      input.contrastRequired,
+      input.contrastPhaseOrProtocol,
+      input.specialPreparation,
+      input.technologistNotes,
+      nextStatus,
+      input.doctorId,
+    ]
+  );
+  const updated = result.rows[0];
+  if (!updated) throw new HttpError(409, "Protocol record no longer exists; it may have been deleted concurrently.");
+  await insertProtocolAudit(pool, {
+    protocolId: updated.id,
+    appointmentId,
+    doctorId: input.doctorId,
+    eventType: input.eventType ?? (nextStatus === "assigned" ? "protocol_assigned" : "protocol_updated"),
+    eventType: input.eventType ?? (
+      nextStatus === "assigned"
+        ? "protocol_assigned"
+        : nextStatus === "clarification_needed"
+          ? "clarification_requested"
+          : nextStatus === "cancelled"
+            ? "protocol_cancelled"
+            : "protocol_updated"
+    ),
+    oldValue: existing,
+    newValue: updated,
+    reason: input.reason ?? null,
   });
+  if (existing.protocolStatus === "assigned" || updated.protocolStatus === "assigned") {
+    scheduleBookingWorklistDetailReplacement(appointmentId);
+  }
+  return updated;
 }
 
 export async function insertProtocolAudit(

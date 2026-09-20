@@ -898,14 +898,7 @@ function SettingsTable({ headers, emptyText, tableClassName = "", children }: { 
 function ImportPreviewList({ title, rows }: { title: string; rows: Array<{ key: string; label: string; errors: string[] }> }) {
   return (
     <div>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{title}</p>
-        {rows.length > 20 ? (
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Showing first 20 of {rows.length} rows
-          </span>
-        ) : null}
-      </div>
+      <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{title}</p>
       <div className="mt-1 max-h-40 overflow-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
         {rows.length ? rows.slice(0, 20).map((row) => (
           <div key={row.key} className="border-b px-2 py-1 last:border-b-0" style={{ borderColor: "var(--border)" }}>
@@ -1919,7 +1912,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
       </section> : null}
 
       {!canAssign ? null : appointmentsQuery.isLoading ? (
-        <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
+        <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
           Loading protocoling appointments...
         </div>
       ) : appointmentsQuery.isError ? (
@@ -1931,14 +1924,8 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           No appointments need protocol assignment.
         </div>
       ) : (
-        <div className="space-y-3">
-          {appointments.length >= 500 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800" role="status">
-              Showing first 500 appointments. Please narrow the date range or filters to view more specific results.
-            </div>
-          ) : null}
-          <SettingsTable
-            emptyText="No appointments need protocol assignment."
+        <SettingsTable
+          emptyText="No appointments need protocol assignment."
           headers={[
             <button key="h-datetime" type="button" onClick={() => toggleSort("dateTime")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Date/time{sortField === "dateTime" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
             <button key="h-patient" type="button" onClick={() => toggleSort("patient")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Patient{sortField === "patient" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
@@ -1978,7 +1965,6 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             </tr>
           ))}
         </SettingsTable>
-        </div>
       )}
 
       </> : null}
@@ -2446,7 +2432,7 @@ function ProtocolAssignmentModal({
         </header>
 
         {loading ? (
-          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
+          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
             Loading appointment protocol details...
           </div>
         ) : (
@@ -2474,6 +2460,7 @@ function ProtocolAssignmentModal({
                       <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
                       <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 text-xs font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
                     </div>
+                    {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load patient history.</p> : <>
                     {historyQuery.isLoading ? <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground" role="status"><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />Loading RISpro and PACS history…</div> : historyQuery.error ? <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800"><p className="font-semibold">Unable to load patient history.</p><Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => historyQuery.refetch()}>Retry patient history</Button></div> : <>
                       {historyQuery.data?.pacsStatus === "unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS availability could not be checked. RISpro history is still shown.</p> : null}
                       {historyQuery.data?.pacsStatus === "patient_id_unavailable" ? <p className="mt-3 text-xs text-muted-foreground">PACS history could not be checked because Patient ID is unavailable.</p> : null}
@@ -2820,7 +2807,7 @@ function ProtocolVersionPreview({
   }
   if (loading) {
     return (
-      <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }} role="status" aria-live="polite">
+      <section className="rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
         Loading protocol preview...
       </section>
     );

@@ -10,7 +10,6 @@ import {
   listProtocolTasks,
   updateProtocol,
 } from "./protocol-repository.js";
-import type { ProtocolInput, ProtocolStatus } from "./protocol-types.js";
 import type { ProtocolAuditEventType, ProtocolInput, ProtocolStatus } from "./protocol-types.js";
 
 interface Actor {
@@ -110,7 +109,6 @@ export async function saveProtocolForAppointment(
     ...input,
     doctorId: me.profile!.id,
     status,
-    eventType: status === "assigned" ? "protocol_assigned" : "protocol_updated",
     eventType,
   });
 }
