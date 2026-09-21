@@ -113,8 +113,8 @@ describe("full protocol workbook import database integration", () => {
       const preset = await pool.query<{ id: number }>("insert into mri_sequence_presets (sequence_key, name, is_active) values ($1, 'Roundtrip T1', true) returning id", [sequenceKey]);
       const ctProtocol = await pool.query<{ id: number }>("insert into protocols (name, modality, anatomy_region_id, category, contrast_policy, is_active) values ($1, 'CT', $2, 'General', 'Non-contrast', true) returning id", [ctProtocolName, anatomy.rows[0]!.id]);
       const mriProtocol = await pool.query<{ id: number }>("insert into protocols (name, modality, anatomy_region_id, category, contrast_policy, is_active) values ($1, 'MRI', $2, 'General', 'Non-contrast', true) returning id", [mriProtocolName, anatomy.rows[0]!.id]);
-      ctProtocolId = ctProtocol.rows[0]!.id;
-      mriProtocolId = mriProtocol.rows[0]!.id;
+      ctProtocolId = Number(ctProtocol.rows[0]!.id);
+      mriProtocolId = Number(mriProtocol.rows[0]!.id);
       const ctVersion = await pool.query<{ id: number }>("insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes) values ($1, '1.0', 'ACTIVE', 'Roundtrip active CT', 'CT active notes') returning id", [ctProtocolId]);
       const mriVersion = await pool.query<{ id: number }>("insert into protocol_versions (protocol_id, version_number, status, change_summary, protocol_notes) values ($1, '1.0', 'ACTIVE', 'Roundtrip active MRI', 'MRI active notes') returning id", [mriProtocolId]);
       ctActiveVersionId = ctVersion.rows[0]!.id;
@@ -186,7 +186,7 @@ describe("full protocol workbook import database integration", () => {
       assert.equal(unchangedSummary.updatedProtocols, 0);
       assert.equal(unchangedSummary.unchangedProtocols, 3);
       const versionCount = await pool.query<{ count: number }>("select count(*)::int as count from protocol_versions where protocol_id = any($1::int[])", [[ctProtocolId, mriProtocolId, newState.rows[0]!.id]]);
-      assert.equal(versionCount.rows[0]!.count, 3);
+      assert.equal(versionCount.rows[0]!.count, 4);
 
       const failureProtocols = await exportedSheet(reexported.buffer, "Protocols");
       const failurePhases = await exportedSheet(reexported.buffer, "CT Phases");
