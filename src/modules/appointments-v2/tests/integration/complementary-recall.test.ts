@@ -578,7 +578,7 @@ describe("Complementary recall — integration", { skip: skipEnv }, () => {
     const sameDay = await transaction((client) => createComplementaryRecall(client, { originalAppointmentId: sameDayOriginal, receptionInstruction: null, technologistInstruction: "Same day target", urgency: "same_day", dueAt: null, requestedByUserId: testData.userId }));
     await pool.query("update appointments_v2.complementary_recall_requests set requested_at = now() - interval '25 hours' where id = $1", [within24.id]);
     await pool.query("update appointments_v2.complementary_recall_requests set due_at = now() - interval '2 hours' where id = $1", [overdue.id]);
-    await pool.query("update appointments_v2.complementary_recall_requests set due_at = now() + interval '2 hours' where id = $1", [dueToday.id]);
+    await pool.query("update appointments_v2.complementary_recall_requests set due_at = ((date_trunc('day', now() at time zone 'Africa/Tripoli') + interval '1 day' - interval '1 microsecond') at time zone 'Africa/Tripoli') where id = $1", [dueToday.id]);
 
     await transaction((client) => recordComplementaryRecallContactAttempt(client, overdue.id, { contactMethod: "phone", contactValue: "0912345678", outcome: "no_answer", note: null, followUpAt: new Date(Date.now() - 60_000).toISOString(), actorUserId: testData.userId }));
     const beforeSuppression = (await listComplementaryRecalls()).find((row) => row.id === overdue.id)!;
