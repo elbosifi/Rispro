@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { todayIsoDateLy } from "@/lib/date-format";
 import {
   MODULE_LAST_LOCATIONS_STORAGE_KEY,
   canonicalizeModuleLocation,
@@ -8,6 +9,16 @@ import {
   resolveModuleNavigationTarget,
   saveModuleLastLocation,
 } from "./module-last-location";
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 
 describe("module last-location navigation", () => {
   beforeEach(() => {
@@ -83,10 +94,19 @@ describe("module last-location navigation", () => {
   });
 
   it("serializes only validated Doctor locations and strips private values", () => {
+    const today = todayIso();
+    const defaultEnd = addDays(today, 7);
+    const historicalDate = addDays(today, -30);
+    const customEnd = addDays(today, -2);
+
     expect(canonicalizeModuleLocation(
       "/doctor/today-cases",
-      "?dateFrom=2026-09-18&dateTo=2026-09-25&requiresReport=true&view=team&q=private&unknown=x",
+      `?dateFrom=${today}&dateTo=${defaultEnd}&requiresReport=true&view=team&q=private&unknown=x`,
     )).toBe("/doctor/today-cases?requiresReport=true&view=team");
+    expect(canonicalizeModuleLocation(
+      "/doctor/today-cases",
+      `?dateFrom=${historicalDate}&dateTo=${customEnd}&requiresReport=true&view=team`,
+    )).toBe(`/doctor/today-cases?dateFrom=${historicalDate}&dateTo=${customEnd}&requiresReport=true&view=team`);
     expect(canonicalizeModuleLocation(
       "/doctor/reporting-board/saved/token_123",
       "?modalityId=2&assignmentStatus=unassigned&q=private&unknown=x",
@@ -99,13 +119,15 @@ describe("module last-location navigation", () => {
       "/queue",
       "?view=entered&modalityId=002&patientId=55&q=private&query=MRN&unknown=x",
     )).toBe("/queue?view=entered&modalityId=2&patientId=55");
+    const worklistToday = todayIsoDateLy();
+    const worklistCustomEnd = addDays(worklistToday, 7);
     expect(canonicalizeModuleLocation(
       "/worklist-monitor",
-      "?tab=sante&dateFrom=2026-09-18&dateTo=2026-09-25&modalityId=002&status=failed&q=private&unknown=x",
-    )).toBe("/worklist-monitor?tab=sante&dateTo=2026-09-25&modalityId=2&status=failed");
+      `?tab=sante&dateFrom=${worklistToday}&dateTo=${worklistCustomEnd}&modalityId=002&status=failed&q=private&unknown=x`,
+    )).toBe(`/worklist-monitor?tab=sante&dateTo=${worklistCustomEnd}&modalityId=2&status=failed`);
     expect(canonicalizeModuleLocation(
       "/statistics",
-      "?date=2026-09-18&q=private&query=MRN&modalityId=002&unknown=x",
+      `?date=${worklistToday}&q=private&query=MRN&modalityId=002&unknown=x`,
     )).toBe("/statistics?modalityId=2");
     expect(canonicalizeModuleLocation(
       "/comparisons",
@@ -113,7 +135,7 @@ describe("module last-location navigation", () => {
     )).toBe("/comparisons?kind=ir&comparisonStatus=assigned&irStatus=ready_for_review");
     expect(canonicalizeModuleLocation(
       "/doctor/protocols",
-      "?area=protocoling&dateFrom=2026-09-18&dateTo=2026-09-25&protocolStatus=ALL&appointmentId=42&q=private&unknown=x",
+      `?area=protocoling&dateFrom=${worklistToday}&dateTo=${worklistCustomEnd}&protocolStatus=ALL&appointmentId=42&q=private&unknown=x`,
     )).toBe("/doctor/protocols?protocolStatus=ALL&appointmentId=42");
     expect(canonicalizeModuleLocation(
       "/doctor/advanced-setup",
@@ -182,11 +204,14 @@ describe("module last-location navigation", () => {
   });
 
   it("saves independent canonical locations and clear removes the complete record", () => {
+    const worklistToday = todayIsoDateLy();
+    const worklistCustomEnd = addDays(worklistToday, 7);
+
     saveModuleLastLocation("/patients", "?q=private&category=oncology&page=3");
     saveModuleLastLocation("/calendar", "?month=2026-09&date=2026-09-18&modalityId=2");
     saveModuleLastLocation("/doctor/team-workload", "?startDate=2026-09-19&modalityId=2");
     saveModuleLastLocation("/queue", "?view=entered&modalityId=2&patientId=55&q=private");
-    saveModuleLastLocation("/worklist-monitor", "?tab=sante&dateFrom=2026-09-18&dateTo=2026-09-25&status=failed");
+    saveModuleLastLocation("/worklist-monitor", `?tab=sante&dateFrom=${worklistToday}&dateTo=${worklistCustomEnd}&status=failed`);
     saveModuleLastLocation("/statistics", "?dateFrom=2026-09-10&dateTo=2026-09-20&modalityId=2");
     saveModuleLastLocation("/comparisons", "?kind=ir&irStatus=ready_for_review&q=private");
 
@@ -196,7 +221,7 @@ describe("module last-location navigation", () => {
         calendar: "/calendar?month=2026-09&date=2026-09-18&modalityId=2",
         doctorTeamWorkload: "/doctor/team-workload?startDate=2026-09-19&modalityId=2",
         queue: "/queue?view=entered&modalityId=2&patientId=55",
-        worklistMonitor: "/worklist-monitor?tab=sante&dateTo=2026-09-25&status=failed",
+        worklistMonitor: `/worklist-monitor?tab=sante&dateTo=${worklistCustomEnd}&status=failed`,
         statistics: "/statistics?dateFrom=2026-09-10&dateTo=2026-09-20&modalityId=2",
         comparisons: "/comparisons?kind=ir&irStatus=ready_for_review",
       });

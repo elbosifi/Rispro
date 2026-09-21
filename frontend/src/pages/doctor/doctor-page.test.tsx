@@ -146,6 +146,16 @@ const fetchPatientDirectorySummaryMock = vi.fn();
 const appointmentDetailsReadOnlyMock = vi.fn();
 const fetchMyIrReferralWorklistMock = vi.fn();
 
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 vi.mock("@/lib/api-hooks", () => ({
   fetchCurrentSession: async () => ({ id: 1, username: "e2e_doctor", fullName: "E2E Doctor", role: "doctor" }),
   fetchIntegrationStatus: async () => ({}),
@@ -1125,8 +1135,10 @@ describe("Doctor Portal shell", () => {
   });
 
   it("restores a safe Doctor location through Doctor Portal navigation", async () => {
+    const today = todayIso();
+    const defaultEnd = addDays(today, 7);
     window.sessionStorage.setItem(MODULE_LAST_LOCATIONS_STORAGE_KEY, JSON.stringify({
-      doctorTodayCases: "/doctor/today-cases?dateFrom=2026-09-18&dateTo=2026-09-25&view=team",
+      doctorTodayCases: `/doctor/today-cases?dateFrom=${today}&dateTo=${defaultEnd}&view=team`,
     }));
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,
