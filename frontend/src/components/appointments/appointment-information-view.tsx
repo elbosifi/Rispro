@@ -289,7 +289,6 @@ function AppointmentDetailsContent({ appointment, reportStatus, recallContext, o
   const waitingSince = ["arrived", "waiting"].includes(appointment.status) ? appointment.waitingStartedAt ?? appointment.arrivedAt : null;
   const capacity = capacityRows(language, appointment);
   const protocol = protocolRows(language, appointment);
-  const acquisition = appointment.acquisitionSummary;
   const isDrawer = layout === "drawer";
   const primaryGridClass = isDrawer
     ? "grid gap-3 grid-cols-1"
