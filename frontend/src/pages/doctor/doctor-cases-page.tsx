@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
@@ -279,6 +279,10 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const canManage = isManager(me);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const latestSearchParamsRef = useRef(searchParams);
+  useLayoutEffect(() => {
+    latestSearchParamsRef.current = searchParams;
+  }, [searchParams]);
   const navigationState = useMemo(
     () => parseDoctorCasesNavigation(searchParams, { canManage }),
     [canManage, searchParams],
@@ -290,8 +294,10 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const rosterWeekStart = useMemo(() => weekStartIso(navigationState.dateFrom), [navigationState.dateFrom]);
 
   useEffect(() => {
+    if (latestSearchParamsRef.current.toString() !== searchParams.toString()) return;
     const sanitized = sanitizeDoctorCasesSearch(searchParams, { canManage });
     if (sanitized.toString() !== searchParams.toString()) {
+      latestSearchParamsRef.current = sanitized;
       setSearchParams(sanitized, { replace: true });
     }
   }, [canManage, searchParams, setSearchParams]);
@@ -300,10 +306,9 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
     patch: Parameters<typeof buildDoctorCasesSearch>[1],
     options: { replace?: boolean } = { replace: true },
   ) => {
-    setSearchParams(
-      buildDoctorCasesSearch(searchParams, patch, { canManage }),
-      options,
-    );
+    const nextSearchParams = buildDoctorCasesSearch(latestSearchParamsRef.current, patch, { canManage });
+    latestSearchParamsRef.current = nextSearchParams;
+    setSearchParams(nextSearchParams, options);
   };
 
   const filters = useMemo(() => ({

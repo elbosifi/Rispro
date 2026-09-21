@@ -89,6 +89,17 @@ describe("Doctor Cases navigation", () => {
     expect(search.toString()).not.toMatch(/(?:^|&)(?:q|query|search)=|patient-name|mrn|secret/);
   });
 
+  it("preserves earlier filters across successive navigation patches", () => {
+    let search = new URLSearchParams();
+    search = buildDoctorCasesSearch(search, { dateFrom: "2026-09-22" }, manager);
+    search = buildDoctorCasesSearch(search, { dateTo: "2026-09-30" }, manager);
+    search = buildDoctorCasesSearch(search, { modalityId: "2" }, manager);
+    search = buildDoctorCasesSearch(search, { category: "non_oncology" }, manager);
+    search = buildDoctorCasesSearch(search, { view: "team" }, manager);
+
+    expect(search.toString()).toBe("dateFrom=2026-09-22&dateTo=2026-09-30&modalityId=2&requiresReport=true&category=non_oncology&view=team");
+  });
+
   it("sanitizes malformed state to the manager defaults", () => {
     const search = sanitizeDoctorCasesSearch(
       new URLSearchParams("dateFrom=bad&dateTo=2026-02-31&modalityId=-4&status=random&category=unknown&view=banana&q=private"),
