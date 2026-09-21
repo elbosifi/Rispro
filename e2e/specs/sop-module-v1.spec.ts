@@ -138,7 +138,7 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   await expect(page.getByText("Published SOP", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create New Revision", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Archive SOP", exact: true })).toHaveCount(0);
-  await expect(page.getByText("\u0625\u062c\u0631\u0627\u0621\u0627\u062a \u0633\u0644\u0627\u0645\u0629 MRI", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("sop-read-only-document")).toContainText("\u0625\u062c\u0631\u0627\u0621\u0627\u062a \u0633\u0644\u0627\u0645\u0629 MRI");
   await page.setViewportSize({ width: 390, height: 844 });
   await noOverflow();
   await dismissToast();
@@ -201,7 +201,7 @@ test("SOP V1 hardening protects unsaved publish state, draft isolation, and dirt
   expect((await patchResponse).status()).toBe(200);
   expect((await publishResponse).status()).toBe(200);
   await expect(page.getByText("Published SOP", { exact: true })).toBeVisible();
-  await expect(page.getByText("Latest edit confirmed without manual save.", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("sop-read-only-document")).toContainText("Latest edit confirmed without manual save.");
 
   await page.getByRole("button", { name: "Create New Revision", exact: true }).click();
   const revisionDialog = page.getByRole("dialog");
@@ -245,5 +245,5 @@ test("SOP V1 hardening protects unsaved publish state, draft isolation, and dirt
   await signInWithSession(page, "e2e_supervisor");
   await page.goto(`${sopPath}?version=1.1`);
   await expect(page.getByRole("heading", { name: /Edit draft/ })).toBeVisible();
-  await expect(page.getByText("Unsaved revision edit preserved by guard.", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("sop-structured-editor")).toContainText("Unsaved revision edit preserved by guard.");
 });

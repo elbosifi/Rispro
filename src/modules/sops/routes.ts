@@ -5,6 +5,7 @@ import { asyncRoute } from "../../utils/async-route.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { confirmSopXlsxImport, exportSopVersionXlsx, inspectSopXlsxImport, previewSopXlsxImport } from "./sop-import-export-service.js";
+import { confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopVersionJson, inspectDraftSopJsonImport, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport } from "./sop-json-import-export-service.js";
 import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopPrintDocumentForUser, getSopVersionForUser, listSops, publishSopVersionForUser, SOP_META, updateSopDraftForUser, validateSopFilters } from "./sop-service.js";
 import { ChromiumPdfRenderError, renderChromiumPdf } from "../../services/chromium-pdf-service.js";
 import { buildSopPdfFooterTemplate, buildSopPrintHtml } from "./sop-print-service.js";
@@ -18,6 +19,12 @@ sopsRouter.get("/", asyncRoute(async (req: Request, res: Response) => { res.json
 sopsRouter.get("/:id/versions/:version/export.xlsx", asyncRoute(async (req: Request, res: Response) => {
   const payload = await exportSopVersionXlsx(req.params.id, req.params.version, req.user?.role);
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+  res.send(payload.buffer);
+}));
+sopsRouter.get("/:id/versions/:version/export.json", asyncRoute(async (req: Request, res: Response) => {
+  const payload = await exportSopVersionJson(req.params.id, req.params.version, req.user?.role);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
   res.send(payload.buffer);
 }));
@@ -57,6 +64,9 @@ sopsRouter.get("/:id/versions/:version/pdf", chromiumRenderConcurrencyLimiter, a
 sopsRouter.get("/:id/versions/:version", asyncRoute(async (req: Request, res: Response) => { res.json({ version: await getSopVersionForUser(req.params.id, req.params.version, req.user?.role) }); }));
 sopsRouter.get("/:id", asyncRoute(async (req: Request, res: Response) => { res.json(await getSopDetailForUser(req.params.id, req.user?.role)); }));
 sopsRouter.post("/", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.status(201).json(await createSop(asUnknownRecord(req.body), req.user!.sub, req.user?.role)); }));
+sopsRouter.post("/import/json/inspect", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await inspectNewSopJsonImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user?.role)); }));
+sopsRouter.post("/import/json/preview", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await previewNewSopJsonImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user?.role)); }));
+sopsRouter.post("/import/json/confirm", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.status(201).json(await confirmNewSopJsonImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user!.sub, req.user?.role)); }));
 sopsRouter.patch("/:id/versions/:version", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await updateSopDraftForUser(req.params.id, req.params.version, asUnknownRecord(req.body), req.user!.sub, req.user?.role)); }));
 sopsRouter.post("/:id/versions/:version/import/inspect", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
   res.json(await inspectSopXlsxImport(req.params.id, req.params.version, asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user?.role));
@@ -67,6 +77,9 @@ sopsRouter.post("/:id/versions/:version/import/preview", requireAnyRole([...MANA
 sopsRouter.post("/:id/versions/:version/import/confirm", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
   res.json(await confirmSopXlsxImport(req.params.id, req.params.version, asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null; expectedDraftUpdatedAt?: string | null }, req.user!.sub, req.user?.role));
 }));
+sopsRouter.post("/:id/versions/:version/import/json/inspect", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await inspectDraftSopJsonImport(req.params.id, req.params.version, asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user?.role)); }));
+sopsRouter.post("/:id/versions/:version/import/json/preview", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await previewDraftSopJsonImport(req.params.id, req.params.version, asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }, req.user?.role)); }));
+sopsRouter.post("/:id/versions/:version/import/json/confirm", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await confirmDraftSopJsonImport(req.params.id, req.params.version, asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null; expectedDraftUpdatedAt?: string | null }, req.user!.sub, req.user?.role)); }));
 sopsRouter.post("/:id/revisions", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.status(201).json({ version: await createSopRevisionForUser(req.params.id, asUnknownRecord(req.body), req.user!.sub, req.user?.role) }); }));
 sopsRouter.post("/:id/versions/:version/publish", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await publishSopVersionForUser(req.params.id, req.params.version, req.user!.sub, req.user?.role)); }));
 sopsRouter.post("/:id/archive", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json({ sop: await archiveSopForUser(req.params.id, req.user!.sub, req.user?.role) }); }));

@@ -39,6 +39,7 @@ import {
   archiveSop,
   createSop,
   createSopRevision,
+  downloadSopJson,
   downloadSopPdf,
   downloadSopXlsx,
   fetchSop,
@@ -53,10 +54,12 @@ import {
   type SopSummary,
   type SopVersion,
   type SopXlsxConfirmResult,
+  type SopJsonConfirmResult,
 } from "@/lib/api/sops";
 import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
 import { SopXlsxImportDialog } from "./sop-xlsx-import-dialog";
+import { SopJsonImportDialog } from "./sop-json-import-dialog";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import {
@@ -183,6 +186,7 @@ function LibraryPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("published");
+  const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const meta = useQuery({
     queryKey: ["sops", "meta"],
     queryFn: fetchSopMeta,
@@ -211,12 +215,7 @@ function LibraryPage() {
             operational standards.
           </p>
         </div>
-        {management ? (
-          <Button type="button" onClick={() => navigate("/sops/new")}>
-            <CirclePlus className="h-4 w-4" />
-            New SOP
-          </Button>
-        ) : null}
+        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
       </header>
       <section
         className="rounded-2xl border border-border bg-card p-4 shadow-sm"
@@ -343,6 +342,7 @@ function LibraryPage() {
           </div>
         )}
       </section>
+      {management ? <SopJsonImportDialog open={jsonImportOpen} mode="create" onClose={() => setJsonImportOpen(false)} onConfirmed={(result) => { setJsonImportOpen(false); navigate(`/sops/${result.sop.id}?version=${encodeURIComponent(result.version.version)}`); }} /> : null}
     </PageShell>
   );
 }
@@ -561,6 +561,7 @@ function EditorForm({
   const [printBusy, setPrintBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const { t } = useLanguage();
   const publishInFlight = useRef(false);
@@ -676,6 +677,13 @@ function EditorForm({
       setExportBusy(false);
     }
   };
+  const exportCurrentJson = async () => {
+    if (!isExisting || exportBusy || save.isPending || publishBusy || publishing) return;
+    setExportBusy(true); setError(null); setSuccess(null);
+    try { const saved = dirty ? await save.mutateAsync() : null; await downloadSopJson(saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version); }
+    catch (value) { setError(value instanceof Error ? value.message : "Unable to export the SOP JSON."); }
+    finally { setExportBusy(false); }
+  };
   const printCurrentDraft = async () => {
     if (!isExisting || printBusy || pdfBusy || save.isPending || publishBusy || publishing) return;
     const printWindow = openSopPrintWindow();
@@ -711,7 +719,7 @@ function EditorForm({
       setPdfBusy(false);
     }
   };
-  const handleImported = async (result: SopXlsxConfirmResult) => {
+  const handleImported = async (result: SopXlsxConfirmResult | SopJsonConfirmResult) => {
     setTitle(result.sop.title);
     setCode(result.sop.code);
     setCategory(result.sop.category);
@@ -728,8 +736,10 @@ function EditorForm({
       document: result.version.contentJson,
     }));
     setImportOpen(false);
+    setJsonImportOpen(false);
     setError(null);
-    setSuccess(`Excel changes imported into draft v${result.version.version}. ${result.summary.changedSectionKeys.length} section${result.summary.changedSectionKeys.length === 1 ? "" : "s"} changed.`);
+    const importLabel = "importType" in result.summary ? "JSON changes" : "Excel changes";
+    setSuccess(`${importLabel} imported into draft v${result.version.version}. ${result.summary.changedSectionKeys.length} section${result.summary.changedSectionKeys.length === 1 ? "" : "s"} changed.`);
     await queryClient.invalidateQueries({ queryKey: ["sops", "detail", result.sop.id] });
     await queryClient.invalidateQueries({ queryKey: ["sops"] });
   };
@@ -833,6 +843,7 @@ function EditorForm({
               <Download className="h-4 w-4" />
               {exportBusy ? "Exporting…" : "Export Excel"}
             </Button>
+            <Button type="button" variant="secondary" onClick={() => void exportCurrentJson()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}><Download className="h-4 w-4" />{exportBusy ? "Exporting…" : "Export JSON"}</Button>
             <Button type="button" variant="secondary" onClick={() => void printCurrentDraft()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}>
               <Printer className="h-4 w-4" />
               {printBusy ? t("sops.preparingPrint") : t("sops.print")}
@@ -851,6 +862,7 @@ function EditorForm({
               <FileSpreadsheet className="h-4 w-4" />
               Import Excel
             </Button>
+            <Button type="button" variant="secondary" onClick={() => { setError(null); setSuccess(null); setJsonImportOpen(true); }} disabled={dirty || save.isPending || exportBusy || publishBusy || publishing} title={dirty ? "Save the current RISpro draft before importing JSON." : undefined}><Download className="h-4 w-4" />Import JSON</Button>
           </>
         ) : null}
         {isExisting ? (
@@ -869,6 +881,7 @@ function EditorForm({
       {isExisting && dirty ? <p className="text-end text-xs text-amber-700">Save the current RISpro draft before importing Excel.</p> : null}
       {success ? <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p> : null}
       {isExisting ? <SopXlsxImportDialog open={importOpen} sopId={existingSop!.id} version={version} sopCode={existingSop!.code} onClose={() => setImportOpen(false)} onConfirmed={(result) => void handleImported(result)} /> : null}
+      {isExisting ? <SopJsonImportDialog open={jsonImportOpen} mode="draft_update" sopId={existingSop!.id} version={version} onClose={() => setJsonImportOpen(false)} onConfirmed={(result) => void handleImported(result)} /> : null}
       <Dialog
         open={publishOpen}
         onClose={() => {
@@ -1136,6 +1149,18 @@ function DetailPage({ id }: { id: number }) {
       setExportBusy(false);
     }
   };
+  const exportSelectedVersionJson = async () => {
+    if (!selectedVersion || exportBusy) return;
+    setExportBusy(true);
+    setActionError(null);
+    try {
+      await downloadSopJson(id, selectedVersion.version);
+    } catch (value) {
+      setActionError(value instanceof Error ? value.message : "Unable to export the SOP JSON.");
+    } finally {
+      setExportBusy(false);
+    }
+  };
   const printSelectedVersion = () => {
     if (!selectedVersion || printBusy || pdfBusy) return;
     const printWindow = openSopPrintWindow();
@@ -1248,6 +1273,10 @@ function DetailPage({ id }: { id: number }) {
           <Button type="button" variant="secondary" onClick={() => void exportSelectedVersion()} disabled={exportBusy}>
             <Download className="h-4 w-4" />
             {exportBusy ? "Exporting…" : "Export Excel"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void exportSelectedVersionJson()} disabled={exportBusy}>
+            <Download className="h-4 w-4" />
+            {exportBusy ? "Exporting…" : "Export JSON"}
           </Button>
           {management && data.sop.status === "published" ? (
             <>

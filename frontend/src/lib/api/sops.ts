@@ -98,6 +98,11 @@ export interface SopXlsxConfirmResult {
     targetVersion: string;
   };
 }
+export interface SopJsonInterchangeV1 { format: "rispro-sop"; formatVersion: 1; sop: { code: string; title: string; category: string; version: string; effectiveDate: string | null; changeSummary: string; document: SopDocument; }; }
+export interface SopJsonSectionPreview { sectionKey: string; sectionTitle: string; action: "changed" | "unchanged" | "invalid"; errors: string[]; currentText: string | null; importedText: string | null; }
+export interface SopJsonInspect { format: "json"; formatVersion: number | null; metadata: { sopCode: string | null; title: string | null; category: string | null; sourceVersion: string | null; effectiveDate: string | null; changeSummary: string | null; }; sectionCount: number; structuralErrors: string[]; }
+export interface SopJsonPreview { format: "json"; formatVersion: number | null; mode: "create" | "draft_update"; metadata: SopJsonInspect["metadata"]; targetVersion: string | null; targetUpdatedAt: string | null; sections: SopJsonSectionPreview[]; effectiveDate: { current: string | null; imported: string | null; changed: boolean }; changeSummary: { current: string | null; imported: string | null; changed: boolean }; errors: string[]; canConfirm: boolean; }
+export interface SopJsonConfirmResult { sop: SopSummary; version: SopVersion; summary: { importType: "create" | "draft_update"; changedSectionKeys: string[]; sourceVersion: string; targetVersion: string; }; }
 
 export const fetchSopMeta = () => api<SopMeta>("/sops/meta");
 export const fetchSops = (filters: { search?: string; category?: string; status?: string } = {}) => {
@@ -147,6 +152,15 @@ export async function downloadSopXlsx(id: number, version: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+export async function downloadSopJson(id: number, version: string): Promise<void> {
+  const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/export.json`, { credentials: "include" });
+  if (!response.ok) { let message = "JSON download failed."; try { const body = await response.json() as { error?: { message?: string } }; message = body.error?.message || message; } catch { /* Safe fallback. */ } throw new Error(message); }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `sop-v${version}.json`;
+  const url = URL.createObjectURL(await response.blob());
+  try { const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); } finally { URL.revokeObjectURL(url); }
+}
+
 export async function downloadSopPdf(id: number, version: string): Promise<void> {
   const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/pdf`, { credentials: "include", cache: "no-store" });
   if (!response.ok) {
@@ -177,3 +191,10 @@ export const previewSopXlsxImport = (id: number, version: string, payload: { fil
   api<SopXlsxPreview>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/preview`, { method: "POST", body: JSON.stringify(payload) });
 export const confirmSopXlsxImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null; expectedDraftUpdatedAt: string }) =>
   api<SopXlsxConfirmResult>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/confirm`, { method: "POST", body: JSON.stringify(payload) });
+const jsonImportPayload = (payload: { fileContentBase64: string; fileName?: string | null }) => ({ method: "POST", body: JSON.stringify(payload) });
+export const inspectNewSopJsonImport = (payload: { fileContentBase64: string; fileName?: string | null }) => api<SopJsonInspect>("/sops/import/json/inspect", jsonImportPayload(payload));
+export const previewNewSopJsonImport = (payload: { fileContentBase64: string; fileName?: string | null }) => api<SopJsonPreview>("/sops/import/json/preview", jsonImportPayload(payload));
+export const confirmNewSopJsonImport = (payload: { fileContentBase64: string; fileName?: string | null }) => api<SopJsonConfirmResult>("/sops/import/json/confirm", jsonImportPayload(payload));
+export const inspectDraftSopJsonImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null }) => api<SopJsonInspect>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/json/inspect`, jsonImportPayload(payload));
+export const previewDraftSopJsonImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null }) => api<SopJsonPreview>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/json/preview`, jsonImportPayload(payload));
+export const confirmDraftSopJsonImport = (id: number, version: string, payload: { fileContentBase64: string; fileName?: string | null; expectedDraftUpdatedAt: string }) => api<SopJsonConfirmResult>(`/sops/${id}/versions/${encodeURIComponent(version)}/import/json/confirm`, jsonImportPayload(payload));
