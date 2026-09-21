@@ -158,7 +158,6 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
     const appointments = await listProtocolingAppointments(filters(req));
-    res.json({ appointments });
     res.json({ appointments, hasMore: appointments.length >= 500 });
   })
 );

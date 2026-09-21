@@ -209,8 +209,22 @@ async function createDoctorPortalTestApp() {
   const { authRouter } = await import("../../routes/auth.js");
   const { authoritativeOrthancRouter } = await import("../../routes/authoritative-orthanc.js");
   const app = express();
+  const responseStats = { jsonCalls: 0, jsonErrors: [] as unknown[] };
   app.use(express.json({ limit: "10mb" }));
   app.use(cookieParser());
+  app.use((_req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      responseStats.jsonCalls += 1;
+      try {
+        return originalJson(body);
+      } catch (error) {
+        responseStats.jsonErrors.push(error);
+        throw error;
+      }
+    }) as typeof res.json;
+    next();
+  });
   app.use("/api/auth", authRouter);
   app.use("/api/doctor", createDoctorPortalRouter());
   app.use("/api/authoritative-orthanc", authoritativeOrthancRouter);
@@ -219,11 +233,11 @@ async function createDoctorPortalTestApp() {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
   });
   const server = http.createServer(app);
-  return new Promise<{ baseUrl: string; close: () => Promise<void> }>((resolve) => {
+  return new Promise<{ baseUrl: string; responseStats: typeof responseStats; close: () => Promise<void> }>((resolve) => {
     server.listen(0, () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 3000;
-      resolve({ baseUrl: `http://localhost:${port}`, close: async () => { server.close(); } });
+      resolve({ baseUrl: `http://localhost:${port}`, responseStats, close: async () => { server.close(); } });
     });
   });
 }
@@ -339,6 +353,29 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
   const api = (cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
     fetchJson(app.baseUrl, path, { cookie, ...options });
+
+  it("returns one protocoling appointments response with hasMore and preserves authorization", async () => {
+    guard();
+    const path = `/api/doctor/protocoling/appointments?dateFrom=${today}&dateTo=${today}`;
+    const unauthorized = await api(nonDoctorCookie, path);
+    assert.equal(unauthorized.status, 403);
+
+    const jsonCallsBefore = app.responseStats.jsonCalls;
+    const errorsBefore = app.responseStats.jsonErrors.length;
+    const authorized = await api(normal.cookie, path);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(authorized.status, 200, JSON.stringify(authorized.data));
+    const data = authorized.data as { appointments?: unknown[]; hasMore?: boolean };
+    assert.ok(Array.isArray(data.appointments));
+    assert.equal(typeof data.hasMore, "boolean");
+    assert.equal(data.hasMore, (data.appointments?.length ?? 0) >= 500);
+    assert.equal(app.responseStats.jsonCalls - jsonCallsBefore, 1);
+    assert.equal(
+      app.responseStats.jsonErrors.slice(errorsBefore).some((error) => (error as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT"),
+      false
+    );
+  });
 
   async function authRequest(path: string, body: unknown, cookie = "") {
     const response = await fetch(`${app.baseUrl}${path}`, {
