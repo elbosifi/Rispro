@@ -10,6 +10,7 @@ import type { JsonRecord, SopDocument, SopSummary, SopVersion } from "./types.js
 
 export const SOP_JSON_FORMAT = "rispro-sop" as const;
 export const SOP_JSON_FORMAT_VERSION = 1 as const;
+export const SOP_JSON_EXAMPLE_FILENAME = "RISpro-SOP-JSON-V1-Example.json";
 const MAX_SOP_JSON_BYTES = 2 * 1024 * 1024;
 
 export interface SopJsonInterchangeV1 {
@@ -130,7 +131,53 @@ async function loadDraft(sopIdValue: unknown, versionValue: unknown, executor: D
 
 export function serializeSopJson(sop: SopSummary, version: SopVersion): Buffer {
   const payload: SopJsonInterchangeV1 = { format: SOP_JSON_FORMAT, formatVersion: SOP_JSON_FORMAT_VERSION, sop: { code: sop.code, title: sop.title, category: sop.category, version: version.version, effectiveDate: version.effectiveDate, changeSummary: version.changeSummary, document: validateSopDocument(version.contentJson) } };
+  return serializeSopJsonPayload(payload);
+}
+
+function serializeSopJsonPayload(payload: SopJsonInterchangeV1): Buffer {
   return Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function exampleParagraph(value: string, dir: "auto" | "ltr" | "rtl" = "auto"): JsonRecord {
+  return { type: "paragraph", attrs: { dir }, content: [{ type: "text", text: value }] };
+}
+
+function exampleSectionContent(key: SopSectionKey): JsonRecord {
+  switch (key) {
+    case "purpose": return { type: "doc", content: [exampleParagraph("Verify patient identity and complete MRI safety screening before scanning.", "ltr"), exampleParagraph("يجب التحقق من هوية المريض وإكمال فحص السلامة قبل التصوير بالرنين المغناطيسي.", "rtl")] };
+    case "scope": return { type: "doc", content: [exampleParagraph("Applies to all staff involved in MRI patient preparation and scanning.")] };
+    case "responsibilities": return { type: "doc", content: [{ type: "bulletList", attrs: { dir: "ltr" }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Confirm two patient identifiers.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Escalate any safety concern before the scan.")] }] }] };
+    case "definitions": return { type: "doc", content: [exampleParagraph("MRI: magnetic resonance imaging.")] };
+    case "safety": return { type: "doc", content: [exampleParagraph("Do not proceed until the MRI screening form is complete and reviewed.")] };
+    case "procedure": return { type: "doc", content: [{ type: "orderedList", attrs: { dir: "ltr", start: 1 }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Verify the patient using two identifiers.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Review the MRI safety screening responses.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Document clearance before the examination begins.")] }] }] };
+    case "documentation": return { type: "doc", content: [exampleParagraph("Record patient identity verification and completed MRI safety screening in the RIS workflow.")] };
+    case "references": return { type: "doc", content: [exampleParagraph("Local MRI safety policy and current MRI screening form.")] };
+  }
+}
+
+export function buildSopJsonExample(): SopJsonInterchangeV1 {
+  const document = validateSopDocument({
+    type: "sop",
+    version: 1,
+    sections: SOP_SECTION_DEFINITIONS.map((section) => ({ ...section, content: exampleSectionContent(section.key) })),
+  }, true);
+  return {
+    format: SOP_JSON_FORMAT,
+    formatVersion: SOP_JSON_FORMAT_VERSION,
+    sop: {
+      code: "RAD-MRI-001",
+      title: "MRI Patient Identification and Safety Screening",
+      category: "MRI",
+      version: "1.0",
+      effectiveDate: "2026-10-01",
+      changeSummary: "Initial issue",
+      document,
+    },
+  };
+}
+
+export function exportSopJsonExample(): { buffer: Buffer; filename: string } {
+  return { buffer: serializeSopJsonPayload(buildSopJsonExample()), filename: SOP_JSON_EXAMPLE_FILENAME };
 }
 
 export async function exportSopVersionJson(sopIdValue: unknown, versionValue: unknown, role: string | undefined): Promise<{ buffer: Buffer; filename: string }> {

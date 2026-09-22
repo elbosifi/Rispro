@@ -4,7 +4,7 @@ import test from "node:test";
 import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
-import { confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopVersionJson, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport } from "./sop-json-import-export-service.js";
+import { buildSopJsonExample, confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopJsonExample, exportSopVersionJson, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport, SOP_JSON_EXAMPLE_FILENAME } from "./sop-json-import-export-service.js";
 import { archiveSopForUser, createSopRevisionForUser, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
 import type { SopDocument } from "./types.js";
 
@@ -12,6 +12,20 @@ function documentWithRichContent(): SopDocument {
   return { type: "sop", version: 1, sections: SOP_SECTION_DEFINITIONS.map((section) => ({ ...section, content: section.key === "purpose" ? { type: "doc", content: [{ type: "heading", attrs: { level: 2, dir: "rtl" }, content: [{ type: "text", text: "سلامة MRI", marks: [{ type: "bold" }] }] }, { type: "paragraph", attrs: { dir: "rtl" }, content: [{ type: "text", text: "يجب التأكد من هوية المريض." }] }] } : section.key === "procedure" ? { type: "doc", content: [{ type: "orderedList", attrs: { dir: "ltr", start: 1 }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [{ type: "paragraph", attrs: { dir: "auto" }, content: [{ type: "text", text: "Verify identity" }] }] }] }, { type: "table", attrs: { dir: "auto" }, content: [{ type: "tableRow", content: [{ type: "tableHeader", attrs: { colspan: 1, rowspan: 1, colwidth: null, dir: "auto" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Step" }] }] }] }] }] } : { type: "doc", content: [{ type: "paragraph", attrs: { dir: "auto" }, content: section.required ? [{ type: "text", text: `${section.title} content` }] : [] }] } })) };
 }
 function payload(code: string, document = documentWithRichContent()) { return { fileName: `${code}-v1.0.json`, fileContentBase64: Buffer.from(JSON.stringify({ format: "rispro-sop", formatVersion: 1, sop: { code, title: "MRI JSON Safety", category: "MRI", version: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial JSON issue", document } })).toString("base64") }; }
+
+test("SOP JSON example is canonical, validates through the import parser, and contains no internal metadata", async () => {
+  const example = buildSopJsonExample();
+  const exported = exportSopJsonExample();
+  const body = JSON.parse(exported.buffer.toString("utf8"));
+  assert.equal(exported.filename, SOP_JSON_EXAMPLE_FILENAME);
+  assert.deepEqual(body, example);
+  assert.deepEqual(body.sop.document.sections.map((section: { key: string }) => section.key), SOP_SECTION_DEFINITIONS.map((section) => section.key));
+  const inspected = await inspectNewSopJsonImport({ fileName: exported.filename, fileContentBase64: exported.buffer.toString("base64") }, "supervisor");
+  assert.deepEqual(inspected.structuralErrors, []);
+  assert.equal(JSON.stringify(body).includes("createdAt"), false);
+  assert.equal(JSON.stringify(body).includes("userId"), false);
+  assert.equal(JSON.stringify(body).includes("audit"), false);
+});
 
 test("SOP JSON import creates a draft, preserves rich content, exports canonically, and safely updates a revision draft", async () => {
   const marker = crypto.randomUUID().slice(0, 8).toUpperCase(); const code = `RAD-JSON-${marker}`;

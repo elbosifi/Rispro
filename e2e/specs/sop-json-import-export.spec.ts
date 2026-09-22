@@ -20,6 +20,11 @@ test("SOP JSON import/export creates and updates a rich draft without publishing
   const initial = Buffer.from(JSON.stringify(sopJson(code), null, 2));
   const pageErrors: string[] = []; page.on("pageerror", (error) => pageErrors.push(error.message));
   await signInWithSession(page, "e2e_supervisor"); await page.goto("/sops");
+  const exampleResponse = page.waitForResponse((response) => response.url().endsWith("/api/sops/import/json/example"));
+  const exampleDownload = page.waitForEvent("download"); await page.getByRole("button", { name: "Download JSON Example", exact: true }).click();
+  const [example, exampleResponseValue] = await Promise.all([exampleDownload, exampleResponse]);
+  expect(example.suggestedFilename()).toBe("RISpro-SOP-JSON-V1-Example.json"); expect(exampleResponseValue.status()).toBe(200); expect(exampleResponseValue.headers()["content-type"]).toContain("application/json"); expect(exampleResponseValue.headers()["content-disposition"]).toBe('attachment; filename="RISpro-SOP-JSON-V1-Example.json"'); expect(exampleResponseValue.headers()["cache-control"]).toBe("no-store, private");
+  const examplePath = testInfo.outputPath("sop-json-example.json"); await example.saveAs(examplePath); const exampleBody = JSON.parse(await fs.readFile(examplePath, "utf8")); expect(exampleBody).toMatchObject({ format: "rispro-sop", formatVersion: 1, sop: { code: "RAD-MRI-001", version: "1.0" } }); expect(exampleBody.sop.document.sections).toHaveLength(8);
   await page.getByRole("button", { name: "Import SOP", exact: true }).click();
   await page.getByLabel("SOP JSON file").setInputFiles({ name: `${code}.json`, mimeType: "application/json", buffer: initial });
   await expect(page.getByText("JSON structure is valid")).toBeVisible(); await page.getByRole("button", { name: "Preview import", exact: true }).click();
@@ -30,5 +35,5 @@ test("SOP JSON import/export creates and updates a rich draft without publishing
   body.sop.document.sections[0].content.content[1].content[0].text = "تحديث JSON بعد التصدير"; const revised = Buffer.from(JSON.stringify(body, null, 2));
   await page.getByRole("button", { name: "Import JSON", exact: true }).click(); await page.getByLabel("SOP JSON file").setInputFiles({ name: `${code}-edited.json`, mimeType: "application/json", buffer: revised }); await page.getByRole("button", { name: "Preview import", exact: true }).click(); await expect(page.getByText("Current", { exact: true })).toBeVisible(); await expect(page.getByText("Imported", { exact: true })).toBeVisible(); await page.getByRole("button", { name: "Confirm import", exact: true }).click(); await expect(page.locator(".ProseMirror").first()).toContainText("تحديث JSON بعد التصدير");
   await page.getByRole("button", { name: "Import JSON", exact: true }).click(); await page.getByLabel("SOP JSON file").setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{") }); await expect(page.getByRole("alert")).toContainText("SOP JSON file is not valid JSON.");
-  await signInWithSession(page, "e2e_reception"); await page.goto("/sops"); await expect(page.getByRole("button", { name: "Import SOP", exact: true })).toHaveCount(0); expect(pageErrors).toEqual([]);
+  await signInWithSession(page, "e2e_reception"); await page.goto("/sops"); await expect(page.getByRole("button", { name: "Import SOP", exact: true })).toHaveCount(0); await expect(page.getByRole("button", { name: "Download JSON Example", exact: true })).toHaveCount(0); expect(pageErrors).toEqual([]);
 });

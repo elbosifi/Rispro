@@ -7,7 +7,7 @@ import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import SopsPage from "./sops-page";
 
-const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), downloadSopJson: vi.fn(), downloadSopPdf: vi.fn(), openSopPrintWindow: vi.fn(), navigateSopPrintWindow: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn(), inspectNewSopJsonImport: vi.fn(), previewNewSopJsonImport: vi.fn(), confirmNewSopJsonImport: vi.fn(), inspectDraftSopJsonImport: vi.fn(), previewDraftSopJsonImport: vi.fn(), confirmDraftSopJsonImport: vi.fn() } }));
+const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), downloadSopJson: vi.fn(), downloadSopJsonExample: vi.fn(), downloadSopPdf: vi.fn(), openSopPrintWindow: vi.fn(), navigateSopPrintWindow: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn(), inspectNewSopJsonImport: vi.fn(), previewNewSopJsonImport: vi.fn(), confirmNewSopJsonImport: vi.fn(), inspectDraftSopJsonImport: vi.fn(), previewDraftSopJsonImport: vi.fn(), confirmDraftSopJsonImport: vi.fn() } }));
 vi.mock("@/lib/api/sops", () => api);
 vi.mock("./sop-editor", () => ({
   createEmptySopDocument: (definitions: Array<{ key: string; title: string; required: boolean }>) => ({ type: "sop", version: 1, sections: definitions.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph" }] } })) }),
@@ -52,6 +52,7 @@ describe("SopsPage", () => {
     api.archiveSop.mockResolvedValue({ sop: { ...publishedSop, status: "archived" } });
     api.downloadSopXlsx.mockResolvedValue(undefined);
     api.downloadSopJson.mockResolvedValue(undefined);
+    api.downloadSopJsonExample.mockResolvedValue(undefined);
     api.downloadSopPdf.mockResolvedValue(undefined);
     api.openSopPrintWindow.mockReturnValue({ focus: vi.fn(), print: vi.fn(), close: vi.fn() });
     api.navigateSopPrintWindow.mockImplementation((_window: Window, _id: number, _version: string, onLoad?: () => void) => onLoad?.());
@@ -76,6 +77,7 @@ describe("SopsPage", () => {
     expect(await screen.findByRole("heading", { name: "SOP Library" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New SOP" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Import SOP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download JSON Example" })).toBeNull();
     expect(screen.getByLabelText("Status")).toHaveProperty("disabled", true);
     expect(api.fetchSops).toHaveBeenLastCalledWith({ search: "", category: "", status: "published" });
   });
@@ -84,6 +86,8 @@ describe("SopsPage", () => {
     const user = userEvent.setup();
     renderPage();
     expect(await screen.findByRole("button", { name: "Import SOP" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Download JSON Example" }));
+    await waitFor(() => expect(api.downloadSopJsonExample).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("button", { name: "Import SOP" }));
     expect(await screen.findByRole("heading", { name: "Import SOP" })).toBeTruthy();
     const input = new File([JSON.stringify({ format: "rispro-sop" })], "invalid.json", { type: "application/json" });

@@ -40,6 +40,7 @@ import {
   createSop,
   createSopRevision,
   downloadSopJson,
+  downloadSopJsonExample,
   downloadSopPdf,
   downloadSopXlsx,
   fetchSop,
@@ -187,6 +188,8 @@ function LibraryPage() {
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("published");
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
+  const [jsonExampleBusy, setJsonExampleBusy] = useState(false);
+  const [jsonExampleError, setJsonExampleError] = useState<string | null>(null);
   const meta = useQuery({
     queryKey: ["sops", "meta"],
     queryFn: fetchSopMeta,
@@ -202,6 +205,13 @@ function LibraryPage() {
       }),
   });
   const categories = meta.data?.categories ?? FALLBACK_CATEGORIES;
+  const downloadJsonExample = async () => {
+    setJsonExampleBusy(true);
+    setJsonExampleError(null);
+    try { await downloadSopJsonExample(); }
+    catch (value) { setJsonExampleError(value instanceof Error ? value.message : "Unable to download the SOP JSON example."); }
+    finally { setJsonExampleBusy(false); }
+  };
   return (
     <PageShell>
       <header className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -215,8 +225,9 @@ function LibraryPage() {
             operational standards.
           </p>
         </div>
-        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
+        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" variant="secondary" onClick={() => void downloadJsonExample()} disabled={jsonExampleBusy}><Download className="h-4 w-4" />{jsonExampleBusy ? "Downloading…" : "Download JSON Example"}</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
       </header>
+      {jsonExampleError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{jsonExampleError}</div> : null}
       <section
         className="rounded-2xl border border-border bg-card p-4 shadow-sm"
         aria-labelledby="sop-filter-heading"

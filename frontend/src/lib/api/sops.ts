@@ -161,6 +161,15 @@ export async function downloadSopJson(id: number, version: string): Promise<void
   try { const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); } finally { URL.revokeObjectURL(url); }
 }
 
+export async function downloadSopJsonExample(): Promise<void> {
+  const response = await fetch("/api/sops/import/json/example", { credentials: "include", cache: "no-store" });
+  if (!response.ok) { let message = "JSON example download failed."; try { const body = await response.json() as { error?: { message?: string } }; message = body.error?.message || message; } catch { /* Safe fallback. */ } throw new Error(message); }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || "RISpro-SOP-JSON-V1-Example.json";
+  const url = URL.createObjectURL(await response.blob());
+  try { const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); } finally { URL.revokeObjectURL(url); }
+}
+
 export async function downloadSopPdf(id: number, version: string): Promise<void> {
   const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/pdf`, { credentials: "include", cache: "no-store" });
   if (!response.ok) {
