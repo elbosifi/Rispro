@@ -130,7 +130,8 @@ export async function createBookingInternal(
   userRole: Role | undefined,
   policySetKey: string,
   approvedOverrideContext?: AuthorizedOverrideContext,
-  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
+  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {},
+  directedDoctorOverbookingApprovalAuthorized = false
 ): Promise<CreateBookingResult> {
   if (payload.complementaryRecallRequestId != null && payload.irReferralScheduleRequestId != null) {
     throw new HttpError(400, "A booking cannot be linked to both an additional-imaging and IR request.");
@@ -161,7 +162,7 @@ export async function createBookingInternal(
     payload = { ...payload, modalityId: modalityId ?? payload.modalityId, examTypeId: examTypeId ?? payload.examTypeId, requiresReport: separate };
   }
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
-  validateCapacityModeAuthority(userRole, capacityResolutionMode);
+  validateCapacityModeAuthority(userRole, capacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
   let identityVerificationAssertion: PatientIdentityVerificationAssertion | null = null;
   if (identityVerificationOptions.requirePatientIdentityVerification) {
@@ -444,7 +445,7 @@ export async function createBookingInternal(
     reasonCodes: decision.reasons.map((r) => r.code),
   }));
 
-  validateDecisionAuthority(decision, userRole, capacityResolutionMode);
+  validateDecisionAuthority(decision, userRole, capacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
 
   // 8. Check if booking is allowed or requires override
   let wasOverride = false;
@@ -466,7 +467,7 @@ export async function createBookingInternal(
     );
   }
 
-  validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole);
+  validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole, directedDoctorOverbookingApprovalAuthorized);
 
   if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
     // Override required — validate supervisor credentials or an authorized backend context.
@@ -474,7 +475,7 @@ export async function createBookingInternal(
       if (!approvedOverrideContext.reason.trim()) {
         throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
       }
-      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole);
+      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole, directedDoctorOverbookingApprovalAuthorized);
       supervisorUserId = approvedOverrideContext.approverUserId;
       wasOverride = true;
     } else if (!payload.override || payload.override.authorizationMode === "current_user_reauth") {

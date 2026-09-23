@@ -105,6 +105,81 @@ export async function findDoctorProfileByUserId(userId: UserId): Promise<DoctorP
   return result.rows[0] ?? null;
 }
 
+export async function canDoctorProtocolModality(userId: UserId, modalityId: number): Promise<boolean> {
+  const result = await pool.query<{ allowed: boolean }>(
+    `
+      select exists (
+        select 1
+        from users u
+        join doctor_portal.doctor_profiles dp on dp.user_id = u.id
+        join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
+        where u.id = $1
+          and u.is_active = true
+          and dp.active = true
+          and dp.can_assign_protocols = true
+          and dmp.modality_id = $2
+          and dmp.active = true
+          and dmp.can_protocol = true
+      ) as allowed
+    `,
+    [userId, modalityId]
+  );
+  return result.rows[0]?.allowed === true;
+}
+
+export async function canDoctorSuperviseModality(userId: UserId, modalityId: number): Promise<boolean> {
+  const result = await pool.query<{ allowed: boolean }>(
+    `
+      select exists (
+        select 1
+        from users u
+        join doctor_portal.doctor_profiles dp on dp.user_id = u.id
+        join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
+        where u.id = $1
+          and u.is_active = true
+          and dp.active = true
+          and dp.can_supervise = true
+          and dmp.modality_id = $2
+          and dmp.active = true
+          and dmp.can_supervise = true
+      ) as allowed
+    `,
+    [userId, modalityId]
+  );
+  return result.rows[0]?.allowed === true;
+}
+
+export interface EligibleDoctorSupervisor {
+  userId: number;
+  doctorId: number;
+  displayName: string;
+  modalityId: number;
+}
+
+export async function listEligibleDoctorSupervisorsForModality(modalityId: number): Promise<EligibleDoctorSupervisor[]> {
+  const result = await pool.query<EligibleDoctorSupervisor>(
+    `
+      select
+        u.id as "userId",
+        dp.id as "doctorId",
+        dp.display_name as "displayName",
+        dmp.modality_id as "modalityId"
+      from users u
+      join doctor_portal.doctor_profiles dp on dp.user_id = u.id
+      join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
+      where u.is_active = true
+        and dp.active = true
+        and dp.can_supervise = true
+        and dmp.modality_id = $1
+        and dmp.active = true
+        and dmp.can_supervise = true
+      order by dp.display_name asc, u.id asc
+    `,
+    [modalityId]
+  );
+  return result.rows;
+}
+
 export async function listDoctorProfiles(includeEmail = false): Promise<DoctorProfileRow[]> {
   const result = await pool.query<DoctorProfileRow>(`
     ${profileSelect(includeEmail)}

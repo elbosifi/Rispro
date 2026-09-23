@@ -1279,6 +1279,16 @@ export async function updateDoctorProtocolReportRequirement(
   });
 }
 
+export async function updateDoctorProtocolExamType(
+  appointmentId: number,
+  examTypeId: number
+): Promise<{ booking: { examTypeId: number | null } }> {
+  return api<{ booking: { examTypeId: number | null } }>(`/doctor/protocoling/appointments/${appointmentId}/exam-type`, {
+    method: "PATCH",
+    body: JSON.stringify({ examTypeId }),
+  });
+}
+
 export async function cancelDoctorProtocolAssignment(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
   const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
     method: "DELETE",

@@ -56,6 +56,7 @@ import {
   updateProtocolLibraryVersion,
   upsertProtocolLibraryCtTechnique,
   updateDoctorProtocolAssignment,
+  updateDoctorProtocolExamType,
   updateDoctorProtocolReportRequirement,
   type CtPhasePresetPayload,
   type MriSequencePresetPayload,
@@ -78,7 +79,7 @@ import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { AnchoredMenu, Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, SearchInput, Textarea } from "@/components/shared";
 import { DateInput } from "@/components/common/date-input";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
-import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
+import { useV2ExamTypes } from "@/v2/appointments/api";
 
 const PROTOCOLING_WORKLIST_REFRESH_MS = 10_000;
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
@@ -2130,11 +2131,7 @@ function ProtocolAssignmentModal({
   const displayedExamTypeId = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.id : appointment.examTypeId;
   const displayedExamTypeName = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.name : appointment.examTypeName;
   const examTypeUpdateMutation = useMutation({
-    mutationFn: () => rescheduleV2Booking(appointment.appointmentId, {
-      bookingDate: appointment.appointmentDate,
-      bookingTime: appointment.appointmentTime,
-      examTypeId: Number(examTypeDraftId),
-    }),
+    mutationFn: () => updateDoctorProtocolExamType(appointment.appointmentId, Number(examTypeDraftId)),
     onSuccess: async () => {
       const updatedExamType = selectedExamType;
       if (!updatedExamType) return;

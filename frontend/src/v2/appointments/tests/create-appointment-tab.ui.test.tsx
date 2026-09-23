@@ -80,6 +80,9 @@ const mockIntendedReportingDoctors = {
     { id: 42, displayName: "Dr Target", canFinalizeReports: true },
   ],
 };
+const mockEligibleOverbookingDoctors = {
+  current: [{ userId: 91, doctorId: 19, displayName: "Dr Capacity", modalityId: 1 }],
+};
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
@@ -137,6 +140,14 @@ vi.mock("@tanstack/react-query", () => ({
 	    if (key.includes("intended-reporting-doctors")) {
 	      return {
 	        data: mockIntendedReportingDoctors.current,
+	        isLoading: false,
+	        isError: false,
+	        error: null,
+	      };
+	    }
+	    if (key.includes("eligible-doctor-approvers")) {
+	      return {
+	        data: mockEligibleOverbookingDoctors.current,
 	        isLoading: false,
 	        isError: false,
 	        error: null,
@@ -630,6 +641,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockIntendedReportingDoctors.current = [
       { id: 42, displayName: "Dr Target", canFinalizeReports: true },
     ];
+    mockEligibleOverbookingDoctors.current = [{ userId: 91, doctorId: 19, displayName: "Dr Capacity", modalityId: 1 }];
     mockRowsRef.current = availabilityRows;
     mockRawItemsRef.current = [
       {
@@ -1312,6 +1324,40 @@ describe("CreateAppointmentTab UI interactions", () => {
           bookingDate: "2027-01-06",
         },
       });
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("requires reception to select one eligible doctor for a total-capacity request", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = supervisorTotalCapacityRows;
+    const { onCreateAppointment } = setup(false, [], undefined, "receptionist");
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-06 full/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+
+      expect(screen.getByRole("option", { name: "Select one doctor" })).toBeTruthy();
+      expect(screen.getByRole("option", { name: "Dr Capacity" })).toBeTruthy();
+      expect(screen.queryByText(/Any authorized doctor/i)).toBeNull();
+      expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(true);
+
+      await userEvent.selectOptions(screen.getByLabelText("Supervising doctor"), "91");
+      fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+        target: { value: "Urgent capacity request" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+      await waitFor(() => expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalledTimes(1));
+      expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+        requesterReason: "Urgent capacity request",
+        requestedApproverUserId: 91,
+      });
+      expect(onCreateAppointment).not.toHaveBeenCalled();
     } finally {
       mockRowsRef.current = previousRows;
     }

@@ -36,7 +36,9 @@ describe("user web push service", () => {
   it("uses existing approval RBAC, supports multiple devices, and disables dead subscriptions", async () => {
     const source = await readFile("src/services/user-web-push-service.ts", "utf-8");
 
-    assert.match(source, /request\.overrideType === "total_capacity_override"\s*\?\s*\["super_admin"\]/);
+    assert.match(source, /request\.requestedApproverUserId != null\) return \[Number\(request\.requestedApproverUserId\)\]/);
+    assert.match(source, /request\.overrideTypes\.includes\("total_capacity_override"\) \|\| request\.overrideTypes\.includes\("exam_mix_override"\)/);
+    assert.match(source, /\? \["super_admin"\]/);
     assert.match(source, /\["supervisor", "super_admin"\]/);
     assert.match(source, /id <> \$2/);
     assert.match(source, /where user_id = \$1 and enabled = true/);

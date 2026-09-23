@@ -54,6 +54,8 @@ import type {
   SchedulingOverrideStoredPayload,
 } from "../models/scheduling-override-request.js";
 import { canRoleApproveSchedulingOverrideTypes, normalizeSchedulingOverrideTypes } from "../../booking/services/override-authority.js";
+import { isDirectedDoctorOverbookingTypes } from "../../booking/services/override-authority.js";
+import { canDoctorSuperviseModality } from "../../../doctor-portal/profile-repository.js";
 
 const DEFAULT_EXPIRY_HOURS = 72;
 const HIGH_RISK_APPROVAL_NOTE_TYPES = new Set<SchedulingOverrideType>([
@@ -76,7 +78,7 @@ async function hydrateRequestDisplayNames(
   const patientIds = [...new Set(requests.map((request) => Number(request.patientId)).filter((id) => id > 0))];
   const modalityIds = [...new Set(requests.map((request) => Number(request.modalityId)).filter((id) => id > 0))];
   const examTypeIds = [...new Set(requests.map((request) => Number(request.examTypeId)).filter((id) => id > 0))];
-  const userIds = [...new Set(requests.flatMap((request) => [request.requesterUserId, request.approverUserId]).map(Number).filter((id) => id > 0))];
+  const userIds = [...new Set(requests.flatMap((request) => [request.requesterUserId, request.requestedApproverUserId, request.approverUserId]).map(Number).filter((id) => id > 0))];
 
   const [patients, modalities, examTypes, users] = await Promise.all([
     patientIds.length
@@ -139,6 +141,7 @@ async function hydrateRequestDisplayNames(
     const modality = modalityById.get(Number(request.modalityId));
     const examType = request.examTypeId == null ? null : examTypeById.get(Number(request.examTypeId));
     const requester = userById.get(Number(request.requesterUserId));
+    const requestedApprover = request.requestedApproverUserId == null ? null : userById.get(Number(request.requestedApproverUserId));
     const approver = request.approverUserId == null ? null : userById.get(Number(request.approverUserId));
     return {
       ...request,
@@ -153,6 +156,7 @@ async function hydrateRequestDisplayNames(
       approverDisplayName: approver?.displayName ?? null,
       approverUsername: approver?.username ?? null,
       requesterRole: requester?.role ?? null,
+      requestedApproverDisplayName: requestedApprover?.displayName ?? null,
     };
   });
 }
@@ -455,13 +459,33 @@ async function canReceptionistCreateOverrideRequest(client: PoolClient, userId: 
 }
 
 function canSeeAll(role: Role | undefined): boolean {
-  return role === "supervisor" || role === "super_admin";
+  return role === "super_admin";
 }
 
-function assertVisible(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): void {
-  if (canSeeAll(role)) return;
-  if (Number(request.requesterUserId) === userId) return;
+async function canSeeRequest(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<boolean> {
+  if (canSeeAll(role)) return true;
+  if (request.requestedApproverUserId != null) {
+    return Number(request.requestedApproverUserId) === userId && await canDoctorSuperviseModality(userId, Number(request.modalityId));
+  }
+  return role === "supervisor" || Number(request.requesterUserId) === userId;
+}
+
+async function assertVisible(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<void> {
+  if (await canSeeRequest(request, userId, role)) return;
   throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
+}
+
+async function hasDirectedDoctorApprovalAuthority(request: SchedulingOverrideRequestRow, userId: number): Promise<boolean> {
+  return request.requestedApproverUserId != null &&
+    Number(request.requestedApproverUserId) === userId &&
+    isDirectedDoctorOverbookingTypes(request.overrideTypes) &&
+    await canDoctorSuperviseModality(userId, Number(request.modalityId));
+}
+
+async function canApproveRequest(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<boolean> {
+  if (role === "super_admin") return true;
+  if (request.requestedApproverUserId != null) return hasDirectedDoctorApprovalAuthority(request, userId);
+  return canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes);
 }
 
 function getString(value: unknown): string {
@@ -768,12 +792,24 @@ export async function createSchedulingOverrideRequest(
       throw new SchedulingError(409, "No supported scheduling override is required for this request.", ["override_not_required"], { decision });
     }
 
+    let requestedApproverUserId: number | null = null;
+    if (role === "receptionist" && isDirectedDoctorOverbookingTypes(overrideTypes)) {
+      requestedApproverUserId = getNumber(input.requestedApproverUserId);
+      if (!requestedApproverUserId) {
+        throw new SchedulingError(400, "Select an eligible supervising doctor for this overbooking request.", ["requested_approver_required"]);
+      }
+      if (!(await canDoctorSuperviseModality(requestedApproverUserId, modalityId))) {
+        throw new SchedulingError(400, "The selected doctor cannot supervise this modality.", ["requested_approver_ineligible"]);
+      }
+    }
+
     const expiresAt = new Date(Date.now() + DEFAULT_EXPIRY_HOURS * 60 * 60 * 1000);
     const request = await insertSchedulingOverrideRequest(client, {
       requestType,
       overrideType: overrideTypes[0],
       overrideTypes,
       requesterUserId: userId,
+      requestedApproverUserId,
       patientId,
       modalityId,
       examTypeId,
@@ -817,10 +853,9 @@ export async function listSchedulingOverrideRequestsForUser(
 ): Promise<SchedulingOverrideRequestRow[]> {
   const client = await pool.connect();
   try {
-    const requests = await listSchedulingOverrideRequests(client, filters, {
-      requesterUserId: canSeeAll(role) ? null : userId,
-    });
-    return hydrateRequestDecisionContexts(client, await hydrateRequestDisplayNames(client, requests));
+    const requests = await listSchedulingOverrideRequests(client, filters, {});
+    const visible = (await Promise.all(requests.map(async (request) => (await canSeeRequest(request, userId, role)) ? request : null))).filter((request): request is SchedulingOverrideRequestRow => request !== null);
+    return hydrateRequestDecisionContexts(client, await hydrateRequestDisplayNames(client, visible));
   } finally {
     client.release();
   }
@@ -835,7 +870,7 @@ export async function getSchedulingOverrideRequestForUser(
   try {
     const request = await findSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
-    assertVisible(request, userId, role);
+    await assertVisible(request, userId, role);
     return (await hydrateRequestDecisionContexts(client, [await hydrateRequestDisplayName(client, request)]))[0];
   } finally {
     client.release();
@@ -876,7 +911,8 @@ export async function approveSchedulingOverrideRequest(
       const expired = await hydrateRequestDisplayName(client, await markSchedulingOverrideRequestExpired(client, id));
       return { request: expired };
     }
-    if (!canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes)) {
+    const directedDoctorApprovalAuthorized = await hasDirectedDoctorApprovalAuthority(request, approverUserId);
+    if (!(await canApproveRequest(request, approverUserId, role))) {
       throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
     }
     if (approvalNoteRequiredForApprover(role, approvalMode, request.overrideTypes) && !approverReason?.trim()) {
@@ -907,7 +943,7 @@ export async function approveSchedulingOverrideRequest(
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideTypes = inferred.requiredOverrideTypes;
-      if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
+      if (!isDirectedDoctorOverbookingTypes(requiredOverrideTypes) && !canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes) && role !== "super_admin") {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
       if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
@@ -939,7 +975,8 @@ export async function approveSchedulingOverrideRequest(
         requiredOverrideTypes.length
           ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideTypes: requiredOverrideTypes, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined,
-        { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null, expectedIdentityFingerprint: request.patientIdentityVerificationFingerprint }
+        { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null, expectedIdentityFingerprint: request.patientIdentityVerificationFingerprint },
+        directedDoctorApprovalAuthorized
       );
       booking = bookingResult.booking;
       createdOrUpdatedBookingId = bookingResult.booking.id;
@@ -958,7 +995,7 @@ export async function approveSchedulingOverrideRequest(
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideTypes = inferred.requiredOverrideTypes;
-      if (!canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes)) {
+      if (!isDirectedDoctorOverbookingTypes(requiredOverrideTypes) && !canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes) && role !== "super_admin") {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
       if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
@@ -996,7 +1033,10 @@ export async function approveSchedulingOverrideRequest(
         payload.policySetKey,
         requiredOverrideTypes.length
           ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideTypes: requiredOverrideTypes, reason: approvalReason, source: "deferred_approval", requestId: request.id }
-          : undefined
+          : undefined,
+        false,
+        false,
+        directedDoctorApprovalAuthorized
       );
       booking = rescheduleResult.booking;
       createdOrUpdatedBookingId = rescheduleResult.booking.id;
@@ -1106,7 +1146,7 @@ export async function rejectSchedulingOverrideRequest(
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
-    if (!canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes)) {
+    if (!(await canApproveRequest(request, approverUserId, role))) {
       throw new SchedulingError(403, "You do not have permission to reject this override type.", ["override_rejection_forbidden"]);
     }
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim()));
@@ -1124,7 +1164,7 @@ export async function cancelSchedulingOverrideRequest(
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
-    const canCancel = Number(request.requesterUserId) === userId || canSeeAll(role);
+    const canCancel = Number(request.requesterUserId) === userId || role === "supervisor" || canSeeAll(role);
     if (!canCancel) throw new SchedulingError(403, "You do not have permission to cancel this request.", ["override_cancel_forbidden"]);
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestCancelled(client, id, canSeeAll(role) ? userId : null));
   }, { isolationLevel: "serializable", operationName: "cancel_scheduling_override_request" });

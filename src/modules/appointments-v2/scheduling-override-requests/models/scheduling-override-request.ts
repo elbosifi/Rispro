@@ -11,6 +11,7 @@ export interface SchedulingOverrideRequestRow {
   overrideTypes: SchedulingOverrideType[];
   status: SchedulingOverrideRequestStatus;
   requesterUserId: number;
+  requestedApproverUserId: number | null;
   approverUserId: number | null;
   patientId: number;
   modalityId: number;
@@ -25,6 +26,7 @@ export interface SchedulingOverrideRequestRow {
   originalDecisionSnapshotJson: unknown;
   approvalDecisionSnapshotJson: unknown | null;
   requesterReason: string;
+  requestedApproverDisplayName?: string | null;
   approverReason: string | null;
   failureCode: string | null;
   failureMessage: string | null;
@@ -122,6 +124,7 @@ export interface CreateSchedulingOverrideRequestInput {
   bookingId?: number | null;
   requestPayload: Record<string, unknown>;
   requesterReason: string;
+  requestedApproverUserId?: number | null;
   createdFromContext?: string | null;
 }
 

@@ -24,6 +24,7 @@ import type {
   PatientIdentityVerificationMethod,
   CreateSchedulingOverrideRequestInput,
   ApproveSchedulingOverrideRequestInput,
+  EligibleDoctorOverbookingApprover,
   PolicyStatusDto,
   PolicySnapshotDto,
   PolicyPreviewDto,
@@ -292,6 +293,11 @@ export async function sendUserTestPush(): Promise<{ attempted: number; sent: num
 export async function fetchV2PolicyStatus(policySetKey: string = "default"): Promise<PolicyStatusDto> {
   const searchParams = new URLSearchParams({ policySetKey });
   return api<PolicyStatusDto>(`/v2/scheduling/admin/policy?${searchParams.toString()}`);
+}
+
+export async function listEligibleDoctorOverbookingApprovers(modalityId: number): Promise<EligibleDoctorOverbookingApprover[]> {
+  const response = await api<{ doctors: EligibleDoctorOverbookingApprover[] }>(`/v2/scheduling-override-requests/eligible-doctor-approvers?modalityId=${modalityId}`);
+  return response.doctors;
 }
 
 export async function fetchV2DayManagementContext(params: {

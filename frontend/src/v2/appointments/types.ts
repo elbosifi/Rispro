@@ -338,6 +338,7 @@ export interface SchedulingOverrideRequestDto {
   overrideTypes: SchedulingOverrideType[];
   status: SchedulingOverrideRequestStatus;
   requesterUserId: number | string;
+  requestedApproverUserId?: number | string | null;
   approverUserId: number | string | null;
   patientId: number | string;
   modalityId: number | string;
@@ -351,6 +352,7 @@ export interface SchedulingOverrideRequestDto {
   originalDecisionSnapshotJson: SchedulingDecisionDto | Record<string, unknown>;
   approvalDecisionSnapshotJson: SchedulingDecisionDto | Record<string, unknown> | null;
   requesterReason: string;
+  requestedApproverDisplayName?: string | null;
   approverReason: string | null;
   failureCode: string | null;
   failureMessage: string | null;
@@ -440,7 +442,15 @@ export interface CreateSchedulingOverrideRequestInput {
   bookingId?: number | null;
   requestPayload: Record<string, unknown>;
   requesterReason: string;
+  requestedApproverUserId?: number | null;
   createdFromContext?: string | null;
+}
+
+export interface EligibleDoctorOverbookingApprover {
+  userId: number;
+  doctorId: number;
+  displayName: string;
+  modalityId: number;
 }
 
 export interface SchedulingOverrideRequestFilters {

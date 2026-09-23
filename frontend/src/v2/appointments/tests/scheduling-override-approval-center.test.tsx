@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulingOverrideApprovalCenter, SchedulingOverrideRequestsWorkspace } from "../components/SchedulingOverrideApprovalCenter";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import type { SchedulingOverrideRequestDto } from "../types";
-import type { User } from "@/types/api";
+import type { DoctorMe, User } from "@/types/api";
 
 const mockApprove = vi.fn();
 const mockReject = vi.fn();
@@ -265,6 +265,60 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText("Approval note for request 12"), { target: { value: "Total capacity approved" } });
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows a directed total-capacity request only as actionable for its selected doctor", async () => {
+    mockRequests = [request({
+      id: 31,
+      overrideType: "total_capacity_override",
+      overrideTypes: ["total_capacity_override"],
+      requestedApproverUserId: 77,
+      requestedApproverDisplayName: "Dr Selected",
+      decisionContext: {
+        violatedRuleLabel: "Total MRI capacity exceeded",
+        violatedRuleType: "total_capacity_override",
+        currentCapacity: 10,
+        totalCapacity: 10,
+        remainingCapacity: 0,
+        afterApprovalCapacity: 11,
+        overbookAmount: 1,
+        modalityCapacityBreakdown: null,
+        categoryBreakdown: [],
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: 10,
+        sameDayAppointmentSummary: [],
+        patientPreviousNoShowCount: 0,
+        patientPreviousCancelledCount: 0,
+        patientFutureAppointmentCount: 0,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: 1,
+        approvalNoteRequired: true,
+        approvalConsequenceText: null,
+      },
+    })];
+    const doctorMe = {
+      hasActiveDoctorProfile: true,
+      canSupervise: true,
+      allowedModalities: [{ modalityId: 2, active: true, canSupervise: true }],
+    } as DoctorMe;
+
+    const { rerender } = renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("doctor", 77)} doctorMe={doctorMe} />);
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+    fireEvent.change(screen.getByLabelText("Approval note for request 31"), { target: { value: "Clinically appropriate" } });
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(mockApprove).toHaveBeenCalledWith({
+      id: 31,
+      approverReason: "Clinically appropriate",
+      approvalMode: "as_requested",
+      changedBookingDate: null,
+      changedBookingTime: null,
+    }));
+
+    rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("doctor", 78)} doctorMe={doctorMe} /></LanguageProvider>);
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   });
 
   it("lets superadmin approve a high-risk request without a note and resume through passkey re-auth", async () => {

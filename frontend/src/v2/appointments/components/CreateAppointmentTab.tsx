@@ -789,13 +789,14 @@ export function CreateAppointmentTab({
     }
   }
 
-  async function submitCreateOverrideRequest(requesterReason: string) {
+  async function submitCreateOverrideRequest(requesterReason: string, requestedApproverUserId?: number) {
     if (!safetyComplete || safetyConfigurationError || !form.patientId || !form.modalityId || !form.appointmentDate) return;
     setRequestOverrideError(null);
     try {
       await createOverrideRequestMutation.mutateAsync({
         requestType: "create_booking",
         requesterReason,
+        requestedApproverUserId,
         createdFromContext: "appointments_create",
         requestPayload: {
           complementaryRecallRequestId: complementaryRecallContext?.id ?? null,
@@ -1450,6 +1451,8 @@ export function CreateAppointmentTab({
         examTypeLabel={selectedExamTypeLabel}
         requestedDate={form.appointmentDate}
         requestedTime={null}
+        modalityId={form.modalityId}
+        requiresDirectedApprover={isReceptionist && requestOverrideTypes.every((type) => type === "total_capacity_override" || type === "exam_mix_override") && requestOverrideTypes.length > 0}
         decision={pendingRequestDecision}
         loading={createOverrideRequestMutation.isPending}
         error={requestOverrideError}

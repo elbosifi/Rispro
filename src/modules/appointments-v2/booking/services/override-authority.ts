@@ -86,15 +86,22 @@ export function validateFinalOverrideTypeConsistency(
 
 export function validateFinalOverrideRoleAuthority(
   requiredOverrideTypes: readonly SchedulingOverrideType[],
-  role: Role | undefined
+  role: Role | undefined,
+  directedDoctorOverbookingApprovalAuthorized = false
 ): void {
   const types = normalizeSchedulingOverrideTypes(requiredOverrideTypes);
+  if (directedDoctorOverbookingApprovalAuthorized && isDirectedDoctorOverbookingTypes(types)) return;
   if (types.includes("total_capacity_override") && role !== "super_admin") {
     throw new SchedulingError(403, "Total capacity override requires Super Admin approval.", ["total_capacity_override_forbidden"]);
   }
   if (types.includes("exam_mix_override") && role !== "super_admin") {
     throw new SchedulingError(403, "Exam mix overbooking requires Super Admin approval.", ["exam_mix_override_forbidden"]);
   }
+}
+
+export function isDirectedDoctorOverbookingTypes(types: readonly SchedulingOverrideType[]): boolean {
+  const normalized = normalizeSchedulingOverrideTypes(types);
+  return normalized.length > 0 && normalized.every((type) => type === "total_capacity_override" || type === "exam_mix_override");
 }
 
 export function canRoleApproveSchedulingOverrideTypes(
@@ -110,7 +117,8 @@ export function canRoleApproveSchedulingOverrideTypes(
 
 export function validateCapacityModeAuthority(
   role: Role | undefined,
-  capacityResolutionMode: CapacityResolutionMode
+  capacityResolutionMode: CapacityResolutionMode,
+  directedDoctorOverbookingApprovalAuthorized = false
 ): void {
   if (capacityResolutionMode === "category_override") {
     if (role !== "supervisor" && role !== "super_admin") {
@@ -119,7 +127,7 @@ export function validateCapacityModeAuthority(
   }
 
   if (capacityResolutionMode === "total_capacity_override") {
-    if (role !== "super_admin") {
+    if (role !== "super_admin" && !directedDoctorOverbookingApprovalAuthorized) {
       throw new SchedulingError(403, "Total capacity override is forbidden for this role.", ["total_capacity_override_forbidden"]);
     }
   }
@@ -128,7 +136,8 @@ export function validateCapacityModeAuthority(
 export function validateDecisionAuthority(
   decision: BookingDecision,
   role: Role | undefined,
-  capacityResolutionMode: CapacityResolutionMode
+  capacityResolutionMode: CapacityResolutionMode,
+  directedDoctorOverbookingApprovalAuthorized = false
 ): void {
   const reasonCodes = new Set(decision.reasons.map((reason) => reason.code));
 
@@ -161,9 +170,9 @@ export function validateDecisionAuthority(
 
   if (reasonCodes.has("modality_daily_capacity_exhausted")) {
     if (capacityResolutionMode !== "total_capacity_override") {
-      const code = role === "super_admin" ? "total_capacity_override_required" : "total_capacity_override_forbidden";
+      const code = role === "super_admin" || directedDoctorOverbookingApprovalAuthorized ? "total_capacity_override_required" : "total_capacity_override_forbidden";
       throw new SchedulingError(
-        role === "super_admin" ? 409 : 403,
+        role === "super_admin" || directedDoctorOverbookingApprovalAuthorized ? 409 : 403,
         "Modality daily capacity is exhausted.",
         [code]
       );

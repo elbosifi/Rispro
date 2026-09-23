@@ -53,7 +53,7 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockCancelAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCancelAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockCancelAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateProtocolExamType, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCancelAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateProtocolExamType: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: mockCancelAssignment, createDoctorProtocolAssignment: mockCreateAssignment,
@@ -83,6 +83,7 @@ vi.mock("@/lib/api-hooks", () => ({
   updateProtocolLibraryProtocol: vi.fn(), updateProtocolLibraryScanner: vi.fn(), updateProtocolLibraryVersion: vi.fn(),
   upsertProtocolLibraryCtTechnique: vi.fn(),
   updateDoctorProtocolReportRequirement: mockUpdateReportRequirement,
+  updateDoctorProtocolExamType: mockUpdateProtocolExamType,
 }));
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
@@ -149,6 +150,8 @@ describe("Doctor protocoling request documents", () => {
     mockWithdrawComplementaryRecall.mockResolvedValue({ id: 1, status: "cancelled", recallAppointmentId: null });
     mockRescheduleBooking.mockReset();
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
+    mockUpdateProtocolExamType.mockReset();
+    mockUpdateProtocolExamType.mockResolvedValue({ booking: { examTypeId: 11 } });
     mockUpdateReportRequirement.mockReset();
     mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
     mockCancelAssignment.mockReset();
@@ -988,12 +991,13 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
     await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
 
-    await waitFor(() => expect(mockRescheduleBooking).toHaveBeenCalledWith(42, { bookingDate: "2026-07-22", bookingTime: "09:00:00", examTypeId: 11 }));
+    await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledWith(42, 11));
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
     expect(await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByText("CT Chest Abdomen")).toBeTruthy();
   });
 
   it("preserves entered protocol text when an examination update fails", async () => {
-    mockRescheduleBooking.mockRejectedValue(new Error("Exam update denied"));
+    mockUpdateProtocolExamType.mockRejectedValue(new Error("Exam update denied"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 

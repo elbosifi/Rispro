@@ -1,11 +1,14 @@
 import { Router, type Request, type Response } from "express";
+import { pool } from "../../db/pool.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { asOptionalString, asString } from "../../utils/request-coercion.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { getDoctorMe } from "./profile-service.js";
+import { canDoctorProtocolModality } from "./profile-repository.js";
 import { rescheduleBooking } from "../appointments-v2/booking/services/reschedule-booking.service.js";
+import { logAuditEntry } from "../../services/audit-service.js";
 import {
   cancelProtocolAssignment,
   getProtocolingAppointmentDetail,
@@ -292,6 +295,58 @@ router.patch(
       undefined,
       true
     );
+    res.json({ booking: result.booking });
+  })
+);
+
+router.patch(
+  "/appointments/:appointmentId/exam-type",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const userId = await requireProtocolingAccess(req);
+    if (userId == null || !req.user) throw new HttpError(401, "Authentication required.");
+    const appointmentId = positiveInteger(req.params.appointmentId, "appointmentId");
+    const detail = await getProtocolingAppointmentDetail(appointmentId);
+    if (!detail) throw new HttpError(404, "Appointment not found.");
+    if (!(await canDoctorProtocolModality(userId, Number(detail.appointment.modalityId)))) {
+      throw new HttpError(403, "Doctor is not permitted to protocol this appointment modality.");
+    }
+    const body = asUnknownRecord(req.body);
+    const examTypeId = positiveInteger(body.examTypeId ?? body.exam_type_id, "examTypeId");
+    const nextExamType = await pool.query<{ name: string | null }>(
+      `select coalesce(nullif(name_en, ''), nullif(name_ar, '')) as name from exam_types where id = $1`,
+      [examTypeId]
+    );
+    if (!nextExamType.rows[0]) throw new HttpError(400, "Exam type not found.");
+    const result = await rescheduleBooking(
+      appointmentId,
+      null,
+      undefined,
+      examTypeId,
+      null,
+      null,
+      userId,
+      req.user.role,
+      undefined,
+      undefined,
+      null,
+      null,
+      null,
+      null,
+      undefined,
+      undefined,
+      "default",
+      undefined,
+      false,
+      true
+    );
+    await logAuditEntry({
+      entityType: "appointment",
+      entityId: appointmentId,
+      actionType: "doctor_protocoling_exam_type_changed",
+      oldValues: { examTypeId: detail.appointment.examTypeId, examTypeName: detail.appointment.examTypeName },
+      newValues: { examTypeId, examTypeName: nextExamType.rows[0].name, source: "Doctor Protocoling Board" },
+      changedByUserId: userId,
+    });
     res.json({ booking: result.booking });
   })
 );

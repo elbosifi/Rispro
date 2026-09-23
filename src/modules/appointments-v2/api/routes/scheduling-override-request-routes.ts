@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import type { NextFunction } from "express";
 import { requireAuth, requireRecentSupervisorReauth } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
@@ -11,6 +12,7 @@ import {
   parseSchedulingOverrideRequestFilters,
   rejectSchedulingOverrideRequest,
 } from "../../scheduling-override-requests/services/scheduling-override-request.service.js";
+import { listEligibleDoctorSupervisorsForModality } from "../../../doctor-portal/profile-repository.js";
 import type { SchedulingOverrideApprovalMode } from "../../scheduling-override-requests/models/scheduling-override-request.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 
@@ -28,6 +30,14 @@ function requestId(req: Request): number {
     throw new SchedulingError(400, "Invalid scheduling override request ID.", ["invalid_override_request_id"]);
   }
   return id;
+}
+
+function requireDirectedDoctorApprovalOrRecentReauth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  void (async () => {
+    const request = await getSchedulingOverrideRequestForUser(requestId(req), userId(req), req.user?.role);
+    if (Number(request.requestedApproverUserId) === userId(req)) return next();
+    return requireRecentSupervisorReauth(req, res, next);
+  })().catch(next);
 }
 
 function presentRequest<T extends { patientIdentityVerificationFingerprint?: string | null }>(request: T): Omit<T, "patientIdentityVerificationFingerprint"> {
@@ -48,12 +58,23 @@ schedulingOverrideRequestRouter.post(
         bookingId: body.bookingId == null ? null : Number(body.bookingId),
         requestPayload: (body.requestPayload ?? body.request_payload ?? {}) as Record<string, unknown>,
         requesterReason: String(body.requesterReason ?? body.requester_reason ?? ""),
+        requestedApproverUserId: body.requestedApproverUserId == null ? null : Number(body.requestedApproverUserId),
         createdFromContext: body.createdFromContext == null ? null : String(body.createdFromContext),
       },
       userId(req),
       req.user?.role
     );
     res.status(201).json({ request: presentRequest(request) });
+  })
+);
+
+schedulingOverrideRequestRouter.get(
+  "/eligible-doctor-approvers",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    if (req.user?.role !== "receptionist") throw new SchedulingError(403, "Only reception may select a directed overbooking approver.", ["eligible_approver_lookup_forbidden"]);
+    const modalityId = Number(req.query.modalityId ?? req.query.modality_id);
+    if (!Number.isInteger(modalityId) || modalityId <= 0) throw new SchedulingError(400, "A valid modality ID is required.", ["invalid_modality_id"]);
+    res.json({ doctors: await listEligibleDoctorSupervisorsForModality(modalityId) });
   })
 );
 
@@ -77,7 +98,7 @@ schedulingOverrideRequestRouter.get(
 
 schedulingOverrideRequestRouter.post(
   "/:id/approve",
-  requireRecentSupervisorReauth,
+  requireDirectedDoctorApprovalOrRecentReauth,
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -98,7 +119,7 @@ schedulingOverrideRequestRouter.post(
 
 schedulingOverrideRequestRouter.post(
   "/:id/reject",
-  requireRecentSupervisorReauth,
+  requireDirectedDoctorApprovalOrRecentReauth,
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const body = (req.body ?? {}) as Record<string, unknown>;

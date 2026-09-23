@@ -150,7 +150,9 @@ export async function rescheduleBooking(
   studyInstanceUid?: string | null,
   policySetKey: string = "default",
   approvedOverrideContext?: AuthorizedOverrideContext,
-  doctorProtocolReportUpdateAuthorized: boolean = false
+  doctorProtocolReportUpdateAuthorized: boolean = false,
+  doctorProtocolExamTypeUpdateAuthorized: boolean = false,
+  directedDoctorOverbookingApprovalAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
     return rescheduleBookingInternal(
@@ -173,7 +175,9 @@ export async function rescheduleBooking(
       studyInstanceUid,
       policySetKey,
       approvedOverrideContext,
-      doctorProtocolReportUpdateAuthorized
+      doctorProtocolReportUpdateAuthorized,
+      doctorProtocolExamTypeUpdateAuthorized,
+      directedDoctorOverbookingApprovalAuthorized
     );
   }, {
     isolationLevel: "serializable",
@@ -217,7 +221,9 @@ export async function rescheduleBookingInternal(
   studyInstanceUid: string | null | undefined,
   policySetKey: string,
   approvedOverrideContext?: AuthorizedOverrideContext,
-  doctorProtocolReportUpdateAuthorized: boolean = false
+  doctorProtocolReportUpdateAuthorized: boolean = false,
+  doctorProtocolExamTypeUpdateAuthorized: boolean = false,
+  directedDoctorOverbookingApprovalAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
   const booking = await findBookingByIdForUpdate(client, bookingId);
@@ -302,12 +308,15 @@ export async function rescheduleBookingInternal(
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
   const capacityModeUnchanged = effectiveCapacityResolutionMode === booking.capacityResolutionMode;
   const examTypeChangePolicy = await getExamTypeChangePolicy(client);
-  validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode);
+  validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
 
   if (effectiveExamTypeId != null) {
     const examType = await findExamTypeById(client, effectiveExamTypeId);
     if (!examType) {
       throw new SchedulingError(400, `Exam type ${effectiveExamTypeId} not found.`, ["exam_type_not_found"]);
+    }
+    if (!examType.isActive) {
+      throw new SchedulingError(400, `Exam type ${effectiveExamTypeId} is inactive.`, ["exam_type_inactive"]);
     }
     if (Number(examType.modalityId) !== bookingModalityId) {
       throw new SchedulingError(
@@ -325,13 +334,14 @@ export async function rescheduleBookingInternal(
   const hasPrivilegedOrigin = examTypeChanged ? await bookingHasPrivilegedOrigin(client, booking) : false;
   const examTypeChangeBypassesSupervisorAuth =
     examTypeChanged &&
+    !doctorProtocolExamTypeUpdateAuthorized &&
     examTypeChangePolicy === "supervisor_required" &&
     hasPrivilegedOrigin;
   const examTypeChangeRequiresSupervisorAuth =
-    examTypeChanged && examTypeChangePolicy === "supervisor_required" && !examTypeChangeBypassesSupervisorAuth;
+    examTypeChanged && !doctorProtocolExamTypeUpdateAuthorized && examTypeChangePolicy === "supervisor_required" && !examTypeChangeBypassesSupervisorAuth;
   const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged && capacityModeUnchanged;
 
-  if (examTypeChanged && examTypeChangePolicy === "disabled") {
+  if (examTypeChanged && !doctorProtocolExamTypeUpdateAuthorized && examTypeChangePolicy === "disabled") {
     throw new SchedulingError(
       403,
       "Changing the exam type is disabled.",
@@ -594,7 +604,7 @@ export async function rescheduleBookingInternal(
       }
     : decision;
 
-  validateDecisionAuthority(authorityDecision, userRole, effectiveCapacityResolutionMode);
+  validateDecisionAuthority(authorityDecision, userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
 
   // 7. Check if reschedule is allowed or requires override
   let wasOverride = false;
@@ -624,14 +634,14 @@ export async function rescheduleBookingInternal(
     );
   }
 
-  validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole);
+  validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole, directedDoctorOverbookingApprovalAuthorized);
 
   if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
     if (approvedOverrideContext) {
       if (!approvedOverrideContext.reason.trim()) {
         throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
       }
-      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole);
+      validateFinalOverrideRoleAuthority(requiredOverrideTypes, approvedOverrideContext.approverRole, directedDoctorOverbookingApprovalAuthorized);
       supervisorUserId = approvedOverrideContext.approverUserId;
       wasOverride = true;
     } else if (!override || override.authorizationMode === "current_user_reauth") {

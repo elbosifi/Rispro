@@ -543,7 +543,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         extraActions={(
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
-            <SchedulingOverrideApprovalCenter user={user} />
+            <SchedulingOverrideApprovalCenter user={user} doctorMe={me} />
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
           </>
         )}

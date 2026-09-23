@@ -14,6 +14,7 @@ const SELECT_COLUMNS = `
   override_types as "overrideTypes",
   status,
   requester_user_id as "requesterUserId",
+  requested_approver_user_id as "requestedApproverUserId",
   approver_user_id as "approverUserId",
   patient_id as "patientId",
   modality_id as "modalityId",
@@ -50,6 +51,7 @@ export async function insertSchedulingOverrideRequest(
     overrideType: SchedulingOverrideType;
     overrideTypes: SchedulingOverrideType[];
     requesterUserId: number;
+    requestedApproverUserId: number | null;
     patientId: number;
     modalityId: number;
     examTypeId: number | null;
@@ -68,15 +70,15 @@ export async function insertSchedulingOverrideRequest(
   const result = await client.query<SchedulingOverrideRequestRow>(
     `
       insert into appointments_v2.scheduling_override_requests (
-        request_type, override_type, override_types, requester_user_id, patient_id, modality_id, exam_type_id,
+        request_type, override_type, override_types, requester_user_id, requested_approver_user_id, patient_id, modality_id, exam_type_id,
         requested_booking_date, requested_booking_time, booking_id, requested_policy_version_id, patient_identity_verification_fingerprint,
         request_payload_json, original_decision_snapshot_json, requester_reason, expires_at,
         created_from_context
       ) values (
-        $1, $2, $3::text[], $4, $5, $6, $7,
-        $8, $9, $10, $11, $12,
-        $13::jsonb, $14::jsonb, $15, $16,
-        $17
+        $1, $2, $3::text[], $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13,
+        $14::jsonb, $15::jsonb, $16, $17,
+        $18
       )
       returning ${SELECT_COLUMNS}
     `,
@@ -85,6 +87,7 @@ export async function insertSchedulingOverrideRequest(
       input.overrideType,
       input.overrideTypes,
       input.requesterUserId,
+      input.requestedApproverUserId,
       input.patientId,
       input.modalityId,
       input.examTypeId,

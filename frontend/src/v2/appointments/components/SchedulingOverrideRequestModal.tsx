@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SchedulingDecisionDto, SchedulingOverrideRequestType, SchedulingOverrideType } from "../types";
 import { formatOverrideType, formatRequestType } from "../utils/scheduling-override-requests";
+import { listEligibleDoctorOverbookingApprovers } from "../api";
 
 interface Props {
   open: boolean;
@@ -15,11 +17,13 @@ interface Props {
   examTypeLabel: string;
   requestedDate: string;
   requestedTime?: string | null;
+  modalityId?: number | null;
+  requiresDirectedApprover?: boolean;
   decision?: SchedulingDecisionDto | null;
   loading?: boolean;
   error?: string | null;
   onClose: () => void;
-  onSubmit: (requesterReason: string) => Promise<void> | void;
+  onSubmit: (requesterReason: string, requestedApproverUserId?: number) => Promise<void> | void;
 }
 
 export function SchedulingOverrideRequestModal({
@@ -32,6 +36,8 @@ export function SchedulingOverrideRequestModal({
   examTypeLabel,
   requestedDate,
   requestedTime,
+  modalityId,
+  requiresDirectedApprover = false,
   decision,
   loading = false,
   error,
@@ -41,6 +47,13 @@ export function SchedulingOverrideRequestModal({
   const { language } = useLanguage();
   const [reason, setReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
+  const approversQuery = useQuery({
+    queryKey: ["v2-scheduling-override-eligible-doctor-approvers", modalityId] as const,
+    queryFn: () => listEligibleDoctorOverbookingApprovers(Number(modalityId)),
+    enabled: open && requiresDirectedApprover && Number.isInteger(modalityId) && Number(modalityId) > 0,
+    staleTime: 60_000,
+  });
   const reasons = decision?.reasons ?? [];
   const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
 
@@ -49,8 +62,12 @@ export function SchedulingOverrideRequestModal({
       setLocalError(t(language, "overrideRequests.requesterReasonRequired"));
       return;
     }
+    if (requiresDirectedApprover && !Number.isInteger(Number(requestedApproverUserId))) {
+      setLocalError("Select the supervising doctor who will review this overbooking request.");
+      return;
+    }
     setLocalError(null);
-    await onSubmit(reason.trim());
+    await onSubmit(reason.trim(), requiresDirectedApprover ? Number(requestedApproverUserId) : undefined);
   }
 
   return (
@@ -63,6 +80,25 @@ export function SchedulingOverrideRequestModal({
               {t(language, "overrideRequests.notBookedUntilApproval")}
             </DialogDescription>
           </div>
+
+          {requiresDirectedApprover ? (
+            <div>
+              <label htmlFor="override-request-approver" className="mb-1 block text-sm font-semibold text-foreground">
+                Supervising doctor
+              </label>
+              <select
+                id="override-request-approver"
+                className="input-premium w-full"
+                value={requestedApproverUserId}
+                onChange={(event) => setRequestedApproverUserId(event.target.value)}
+                disabled={approversQuery.isLoading}
+              >
+                <option value="">{approversQuery.isLoading ? "Loading eligible doctors…" : "Select one doctor"}</option>
+                {(approversQuery.data ?? []).map((doctor) => <option key={doctor.userId} value={doctor.userId}>{doctor.displayName}</option>)}
+              </select>
+              {approversQuery.isError ? <p className="mt-1 text-xs text-red-700">Eligible doctors could not be loaded.</p> : null}
+            </div>
+          ) : null}
         </DialogHeader>
 
         <div className="space-y-4">
@@ -118,7 +154,7 @@ export function SchedulingOverrideRequestModal({
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
             {t(language, "common.cancel")}
           </Button>
-          <Button type="button" onClick={submit} disabled={loading || overrideTypes.length === 0}>
+          <Button type="button" onClick={submit} disabled={loading || overrideTypes.length === 0 || (requiresDirectedApprover && (approversQuery.isLoading || !requestedApproverUserId))}>
             {loading ? t(language, "overrideRequests.submitting") : t(language, "overrideRequests.submitRequest")}
           </Button>
         </DialogFooter>

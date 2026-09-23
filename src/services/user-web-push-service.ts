@@ -188,6 +188,7 @@ export async function sendUserWebPush(userId: number, payload: UserPushPayload):
 }
 
 async function approverUserIds(request: SchedulingOverrideRequestRow): Promise<number[]> {
+  if (request.requestedApproverUserId != null) return [Number(request.requestedApproverUserId)];
   const roles = request.overrideTypes.includes("total_capacity_override") || request.overrideTypes.includes("exam_mix_override")
     ? ["super_admin"]
     : ["supervisor", "super_admin"];

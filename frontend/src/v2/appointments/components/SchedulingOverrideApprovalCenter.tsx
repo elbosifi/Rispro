@@ -6,7 +6,7 @@ import { Button, Badge, Input } from "@/components/shared";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
-import type { User } from "@/types/api";
+import type { DoctorMe, User } from "@/types/api";
 import {
   useApproveSchedulingOverrideRequest,
   useCancelSchedulingOverrideRequest,
@@ -43,6 +43,12 @@ function canRoleApproveOverrideTypes(role: User["role"] | undefined, overrideTyp
   return overrideTypes.every((overrideType) => canRoleApproveSchedulingOverride(role, overrideType));
 }
 
+function canDoctorApproveDirectedRequest(user: User | null, doctorMe: DoctorMe | null | undefined, request: SchedulingOverrideRequestDto): boolean {
+  return Number(request.requestedApproverUserId) === Number(user?.id) &&
+    Boolean(doctorMe?.hasActiveDoctorProfile && doctorMe.canSupervise) &&
+    Boolean(doctorMe?.allowedModalities.some((permission) => permission.active && permission.canSupervise && Number(permission.modalityId) === Number(request.modalityId)));
+}
+
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
@@ -60,9 +66,11 @@ type SchedulingOverrideApprovalCenterTrigger = "default" | "desktop-only" | "mob
 
 export function SchedulingOverrideApprovalCenter({
   user,
+  doctorMe,
   trigger = "default",
 }: {
   user: User | null;
+  doctorMe?: DoctorMe | null;
   trigger?: SchedulingOverrideApprovalCenterTrigger;
 }) {
   const { language } = useLanguage();
@@ -72,6 +80,7 @@ export function SchedulingOverrideApprovalCenter({
   const actionableCount = badgeQuery.data?.requests.filter((request) => {
     const overrideTypes = effectiveOverrideTypes(request);
     if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
+    if (canDoctorApproveDirectedRequest(user, doctorMe, request)) return true;
     if (user?.role === "supervisor") return canRoleApproveOverrideTypes(user.role, overrideTypes);
     return user?.role === "super_admin";
   }).length ?? 0;
@@ -128,7 +137,7 @@ export function SchedulingOverrideApprovalCenter({
             </div>
 
             <OverridePushControls enabled={open} userId={Number(user.id)} />
-            <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
+            <SchedulingOverrideRequestsWorkspace user={user} doctorMe={doctorMe} variant="drawer" />
           </aside>
         </div>
       ) : null}
@@ -274,14 +283,16 @@ function OverridePushControls({ enabled, userId }: { enabled: boolean; userId: n
 
 export function SchedulingOverrideRequestsWorkspace({
   user,
+  doctorMe,
   variant = "page",
 }: {
   user: User | null;
+  doctorMe?: DoctorMe | null;
   variant?: "page" | "drawer";
 }) {
   const { language } = useLanguage();
   const defaultStatus: SchedulingOverrideRequestStatus | undefined =
-    user?.role === "supervisor" || user?.role === "super_admin" ? "pending" : undefined;
+    user?.role === "supervisor" || user?.role === "super_admin" || Boolean(doctorMe?.canSupervise) ? "pending" : undefined;
   const [status, setStatus] = useState<SchedulingOverrideRequestStatus | "">(defaultStatus ?? "");
   const [requestType, setRequestType] = useState<(typeof REQUEST_TYPE_OPTIONS)[number]>("");
   const [overrideType, setOverrideType] = useState<SchedulingOverrideType | "">("");
@@ -351,6 +362,10 @@ export function SchedulingOverrideRequestsWorkspace({
       setActionError("Approval note is required for this override type.");
       return;
     }
+    if (canDoctorApproveDirectedRequest(user, doctorMe, request)) {
+      void approveAfterReauth(request);
+      return;
+    }
     setPendingReauthAction({ action: () => void approveAfterReauth(request), allowPasskey: true });
   }
 
@@ -371,6 +386,10 @@ export function SchedulingOverrideRequestsWorkspace({
   function reject(request: SchedulingOverrideRequestDto) {
     if (!rejectReason.trim()) {
       setActionError(t(language, "overrideRequests.rejectionReasonRequired"));
+      return;
+    }
+    if (canDoctorApproveDirectedRequest(user, doctorMe, request)) {
+      void rejectAfterReauth(request);
       return;
     }
     setPendingReauthAction({ action: () => void rejectAfterReauth(request), allowPasskey: false });
@@ -421,6 +440,7 @@ export function SchedulingOverrideRequestsWorkspace({
                 key={String(request.id)}
                 request={request}
                 user={user}
+                doctorMe={doctorMe}
                 approveReason={approveReasonById[String(request.id)] ?? ""}
                 approvalDraft={approvalDraftById[String(request.id)] ?? { approvalMode: "as_requested", changedBookingDate: "", changedBookingTime: "" }}
                 onChangeApproveReason={(value) => setApproveReasonById((current) => ({ ...current, [String(request.id)]: value }))}
@@ -464,6 +484,7 @@ export function SchedulingOverrideRequestsWorkspace({
 function RequestCard({
   request,
   user,
+  doctorMe,
   approveReason,
   approvalDraft,
   onChangeApproveReason,
@@ -480,6 +501,7 @@ function RequestCard({
 }: {
   request: SchedulingOverrideRequestDto;
   user: User;
+  doctorMe?: DoctorMe | null;
   approveReason: string;
   approvalDraft: {
     approvalMode: SchedulingOverrideApprovalMode;
@@ -505,7 +527,7 @@ function RequestCard({
   const { language } = useLanguage();
   const overrideTypes = effectiveOverrideTypes(request);
   const isPending = request.status === "pending";
-  const canApprove = isPending && canRoleApproveOverrideTypes(user.role, overrideTypes);
+  const canApprove = isPending && (canDoctorApproveDirectedRequest(user, doctorMe, request) || canRoleApproveOverrideTypes(user.role, overrideTypes));
   const isOwn = Number(request.requesterUserId) === Number(user.id);
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
   const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && overrideTypes.includes("total_capacity_override");
