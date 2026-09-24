@@ -463,11 +463,12 @@ function canSeeAll(role: Role | undefined): boolean {
 }
 
 async function canSeeRequest(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<boolean> {
+  if (Number(request.requesterUserId) === userId) return true;
   if (canSeeAll(role)) return true;
   if (request.requestedApproverUserId != null) {
     return Number(request.requestedApproverUserId) === userId && await canDoctorSuperviseModality(userId, Number(request.modalityId));
   }
-  return role === "supervisor" || Number(request.requesterUserId) === userId;
+  return role === "supervisor";
 }
 
 async function assertVisible(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<void> {
@@ -853,9 +854,16 @@ export async function listSchedulingOverrideRequestsForUser(
 ): Promise<SchedulingOverrideRequestRow[]> {
   const client = await pool.connect();
   try {
-    const requests = await listSchedulingOverrideRequests(client, filters, {});
-    const visible = (await Promise.all(requests.map(async (request) => (await canSeeRequest(request, userId, role)) ? request : null))).filter((request): request is SchedulingOverrideRequestRow => request !== null);
-    return hydrateRequestDecisionContexts(client, await hydrateRequestDisplayNames(client, visible));
+    const visibility = canSeeAll(role)
+      ? { kind: "all" as const }
+      : {
+          kind: "scoped" as const,
+          requesterUserId: userId,
+          directedApproverUserId: userId,
+          includeLegacyUntargeted: role === "supervisor",
+        };
+    const requests = await listSchedulingOverrideRequests(client, filters, visibility);
+    return hydrateRequestDecisionContexts(client, await hydrateRequestDisplayNames(client, requests));
   } finally {
     client.release();
   }

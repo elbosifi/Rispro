@@ -64,6 +64,7 @@ export interface RescheduleBookingResult {
   booking: Booking;
   decisionSnapshot: unknown;
   wasOverride: boolean;
+  previousExamTypeId: number | null;
   previousDate: string;
   previousTime: string | null;
   dateTimeChanged: boolean;
@@ -152,10 +153,11 @@ export async function rescheduleBooking(
   approvedOverrideContext?: AuthorizedOverrideContext,
   doctorProtocolReportUpdateAuthorized: boolean = false,
   doctorProtocolExamTypeUpdateAuthorized: boolean = false,
-  directedDoctorOverbookingApprovalAuthorized: boolean = false
+  directedDoctorOverbookingApprovalAuthorized: boolean = false,
+  transactionalAfterReschedule?: (client: PoolClient, result: RescheduleBookingResult) => Promise<void>
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
-    return rescheduleBookingInternal(
+    const rescheduled = await rescheduleBookingInternal(
       client,
       bookingId,
       newDate,
@@ -179,6 +181,8 @@ export async function rescheduleBooking(
       doctorProtocolExamTypeUpdateAuthorized,
       directedDoctorOverbookingApprovalAuthorized
     );
+    await transactionalAfterReschedule?.(client, rescheduled);
+    return rescheduled;
   }, {
     isolationLevel: "serializable",
     operationName: "reschedule_booking",
@@ -282,7 +286,7 @@ export async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
-  const previousExamTypeId = booking.examTypeId;
+  const previousExamTypeId = booking.examTypeId == null ? null : Number(booking.examTypeId);
   const previousRequiresReport = booking.requiresReport;
   const bookingModalityId = Number(booking.modalityId);
   const effectiveDate = newDate ?? previousDate;
@@ -376,6 +380,7 @@ export async function rescheduleBookingInternal(
       userId,
       previousDate,
       previousTime,
+      previousExamTypeId,
       effectiveReportingPriorityId,
       effectiveNotes,
       effectiveRequiresReport,
@@ -790,6 +795,7 @@ export async function rescheduleBookingInternal(
     booking: updatedBooking,
     decisionSnapshot: decision,
     wasOverride,
+    previousExamTypeId,
     previousDate,
     previousTime,
     dateTimeChanged: previousDate !== updatedBooking.bookingDate || String(previousTime ?? "") !== String(updatedBooking.bookingTime ?? ""),
@@ -810,6 +816,7 @@ async function rescheduleTimeOnly(
   userId: number,
   previousDate: string,
   previousTime: string | null,
+  previousExamTypeId: number | null,
   reportingPriorityId: number | null,
   notes: string | null,
   requiresReport: boolean,
@@ -847,6 +854,7 @@ async function rescheduleTimeOnly(
     booking: updatedBooking,
     decisionSnapshot: null,
     wasOverride: false,
+    previousExamTypeId,
     previousDate,
     previousTime,
     dateTimeChanged: String(previousTime ?? "") !== String(updatedBooking.bookingTime ?? ""),

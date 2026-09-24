@@ -105,8 +105,8 @@ export async function findDoctorProfileByUserId(userId: UserId): Promise<DoctorP
   return result.rows[0] ?? null;
 }
 
-export async function canDoctorProtocolModality(userId: UserId, modalityId: number): Promise<boolean> {
-  const result = await pool.query<{ allowed: boolean }>(
+export async function canDoctorProtocolModality(userId: UserId, modalityId: number, db: Db = pool): Promise<boolean> {
+  const result = await db.query<{ allowed: boolean }>(
     `
       select exists (
         select 1

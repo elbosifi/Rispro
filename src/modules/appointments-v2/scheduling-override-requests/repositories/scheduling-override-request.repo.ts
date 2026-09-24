@@ -109,14 +109,50 @@ export async function insertSchedulingOverrideRequest(
 export async function listSchedulingOverrideRequests(
   client: PoolClient,
   filters: SchedulingOverrideRequestFilters,
-  visibility: { requesterUserId?: number | null }
+  visibility:
+    | { kind: "all" }
+    | {
+        kind: "scoped";
+        requesterUserId: number;
+        directedApproverUserId?: number;
+        includeLegacyUntargeted: boolean;
+      }
 ): Promise<SchedulingOverrideRequestRow[]> {
   const values: unknown[] = [];
   const where: string[] = [];
 
-  if (visibility.requesterUserId != null) {
+  if (visibility.kind === "scoped") {
     values.push(visibility.requesterUserId);
-    where.push(`requester_user_id = $${values.length}`);
+    const visibleToUser = [`sor.requester_user_id = $${values.length}`];
+
+    if (visibility.directedApproverUserId != null) {
+      values.push(visibility.directedApproverUserId);
+      const approverUserParam = `$${values.length}`;
+      visibleToUser.push(`(
+        sor.requested_approver_user_id = ${approverUserParam}
+        and exists (
+          select 1
+          from users visibility_user
+          join doctor_portal.doctor_profiles visibility_profile
+            on visibility_profile.user_id = visibility_user.id
+          join doctor_portal.doctor_modality_permissions visibility_permission
+            on visibility_permission.doctor_id = visibility_profile.id
+          where visibility_user.id = ${approverUserParam}
+            and visibility_user.is_active = true
+            and visibility_profile.active = true
+            and visibility_profile.can_supervise = true
+            and visibility_permission.modality_id = sor.modality_id
+            and visibility_permission.active = true
+            and visibility_permission.can_supervise = true
+        )
+      )`);
+    }
+
+    if (visibility.includeLegacyUntargeted) {
+      visibleToUser.push("sor.requested_approver_user_id is null");
+    }
+
+    where.push(`(${visibleToUser.join(" or ")})`);
   }
   if (filters.status) {
     values.push(filters.status);
@@ -142,7 +178,7 @@ export async function listSchedulingOverrideRequests(
   const result = await client.query<SchedulingOverrideRequestRow>(
     `
       select ${SELECT_COLUMNS}
-      from appointments_v2.scheduling_override_requests
+      from appointments_v2.scheduling_override_requests sor
       ${where.length ? `where ${where.join(" and ")}` : ""}
       order by created_at desc, id desc
       limit 200

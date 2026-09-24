@@ -300,6 +300,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createDoctorPortalTestApp>>;
+  let cleanupTemporaryDefaultPolicy: (() => Promise<void>) | undefined;
   let normal: TestUser;
   let supervisor: TestUser;
   let admin: TestUser;
@@ -323,6 +324,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     }
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedDoctorPortalTestData();
+    cleanupTemporaryDefaultPolicy = await ensureDefaultPolicyForProtocolingTest();
     app = await createDoctorPortalTestApp();
     today = getTripoliToday();
     normal = await createDoctorUser("normal", "doctor", { canAssignProtocols: true, canSupervise: false });
@@ -344,6 +346,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     if (!testData) return;
     await app.close();
     await cleanupDoctorPortalTestData([testData.userId]);
+    await cleanupTemporaryDefaultPolicy?.();
     await testDb.cleanup();
   });
 
@@ -353,6 +356,94 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
   const api = (cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
     fetchJson(app.baseUrl, path, { cookie, ...options });
+
+  async function withExamTypeChangePolicy<T>(value: "allowed_without_supervisor" | "supervisor_required" | "disabled", run: () => Promise<T>): Promise<T> {
+    const existing = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+      `select setting_value, updated_by_user_id from system_settings
+       where category = 'scheduling_and_capacity' and setting_key = 'exam_type_change_policy'`
+    );
+    await pool.query(
+      `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+       values ('scheduling_and_capacity', 'exam_type_change_policy', $1::jsonb, $2)
+       on conflict (category, setting_key) do update set
+         setting_value = excluded.setting_value,
+         updated_by_user_id = excluded.updated_by_user_id,
+         updated_at = now()`,
+      [JSON.stringify({ value }), testData.userId]
+    );
+    try {
+      return await run();
+    } finally {
+      if (existing.rows.length > 0) {
+        await pool.query(
+          `update system_settings set setting_value = $1::jsonb, updated_by_user_id = $2, updated_at = now()
+           where category = 'scheduling_and_capacity' and setting_key = 'exam_type_change_policy'`,
+          [JSON.stringify(existing.rows[0].setting_value), existing.rows[0].updated_by_user_id]
+        );
+      } else {
+        await pool.query(`delete from system_settings where category = 'scheduling_and_capacity' and setting_key = 'exam_type_change_policy'`);
+      }
+    }
+  }
+
+  async function insertExamType(modalityId: number, label: string, active = true): Promise<{ id: number; name: string }> {
+    const name = `${TEST_PREFIX}${label}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const result = await pool.query<{ id: number }>(
+      `insert into exam_types (modality_id, name_ar, name_en, code, duration_minutes, is_active)
+       values ($1, $2, $3, $4, 20, $5) returning id`,
+      [modalityId, name, name, `${name}_CODE`, active]
+    );
+    return { id: Number(result.rows[0].id), name };
+  }
+
+  async function appointmentExamTypeId(id: number): Promise<number | null> {
+    const result = await pool.query<{ exam_type_id: number | null }>(
+      `select exam_type_id from appointments_v2.bookings where id = $1`,
+      [id]
+    );
+    return result.rows[0]?.exam_type_id == null ? null : Number(result.rows[0].exam_type_id);
+  }
+
+  async function ensureDefaultPolicyForProtocolingTest(): Promise<() => Promise<void>> {
+    const existingPublished = await pool.query<{ id: number }>(
+      `select pv.id
+       from appointments_v2.policy_versions pv
+       join appointments_v2.policy_sets ps on ps.id = pv.policy_set_id
+       where ps.key = 'default' and pv.status = 'published'
+       order by pv.version_no desc limit 1`
+    );
+    if (existingPublished.rows[0]) return async () => undefined;
+
+    const insertedPolicySet = await pool.query<{ id: number }>(
+      `insert into appointments_v2.policy_sets (key, name, created_by_user_id)
+       values ('default', 'Doctor Portal integration default', $1)
+       on conflict (key) do nothing returning id`,
+      [testData.userId]
+    );
+    const policySet = insertedPolicySet.rows[0] ?? (await pool.query<{ id: number }>(
+      `select id from appointments_v2.policy_sets where key = 'default'`
+    )).rows[0];
+    const version = await pool.query<{ id: number }>(
+      `insert into appointments_v2.policy_versions (
+         policy_set_id, version_no, status, config_hash, created_by_user_id, published_at, published_by_user_id
+       )
+       select $1, coalesce(max(version_no), 0) + 1, 'published', $2, $3, now(), $3
+       from appointments_v2.policy_versions where policy_set_id = $1
+       returning id`,
+      [policySet?.id, `doctor-portal-default-${randomUUID()}`, testData.userId]
+    );
+    const versionId = Number(version.rows[0].id);
+    await pool.query(
+      `insert into appointments_v2.category_daily_limits (policy_version_id, modality_id, case_category, daily_limit, is_active)
+       values ($1, $2, 'oncology', 10, true), ($1, $2, 'non_oncology', 10, true)`,
+      [versionId, testData.modalityId]
+    );
+    const createdPolicySetId = insertedPolicySet.rows[0] ? Number(insertedPolicySet.rows[0].id) : null;
+    return async () => {
+      await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [versionId]);
+      if (createdPolicySetId != null) await pool.query(`delete from appointments_v2.policy_sets where id = $1`, [createdPolicySetId]);
+    };
+  }
 
   it("returns one protocoling appointments response with hasMore and preserves authorization", async () => {
     guard();
@@ -375,6 +466,199 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       app.responseStats.jsonErrors.slice(errorsBefore).some((error) => (error as NodeJS.ErrnoException).code === "ERR_HTTP_HEADERS_SENT"),
       false
     );
+  });
+
+  it("authorizes protocoling exam changes, bypasses only the dedicated policy gate, and audits atomically", async () => {
+    guard();
+    const originalExamTypeId = await appointmentExamTypeId(appointmentId);
+    assert.equal(originalExamTypeId, testData.examTypeId);
+    const oldNameRow = await pool.query<{ name: string | null }>(
+      `select coalesce(nullif(name_en, ''), nullif(name_ar, '')) as name from exam_types where id = $1`,
+      [originalExamTypeId]
+    );
+    const sameModalityExamA = await insertExamType(testData.modalityId, "Protocol Exam A");
+    const sameModalityExamB = await insertExamType(testData.modalityId, "Protocol Exam B");
+    const inactiveExam = await insertExamType(testData.modalityId, "Inactive Protocol Exam", false);
+    const otherModalityId = await (async () => {
+      const result = await pool.query<{ id: number }>(
+        `insert into modalities (name_ar, name_en, code, daily_capacity, is_active, safety_warning_enabled, safety_workflow_type)
+         values ($1, $2, $3, 10, true, false, 'standard_acknowledgement') returning id`,
+        [`${TEST_PREFIX}Other Modality`, `${TEST_PREFIX}Other Modality`, `${TEST_PREFIX}OTHER_${randomUUID().replace(/-/g, "").slice(0, 8)}`]
+      );
+      return Number(result.rows[0].id);
+    })();
+    const otherModalityExam = await insertExamType(otherModalityId, "Other Modality Exam");
+    const path = `/api/doctor/protocoling/appointments/${appointmentId}/exam-type`;
+
+    async function attemptExamChange(examTypeId: number, status: number, expectedExamTypeId: number | null = originalExamTypeId) {
+      const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId } });
+      assert.equal(response.status, status, JSON.stringify(response.data));
+      assert.equal(await appointmentExamTypeId(appointmentId), expectedExamTypeId);
+      return response;
+    }
+
+    try {
+      await withExamTypeChangePolicy("supervisor_required", async () => {
+        const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamA.id } });
+        assert.equal(response.status, 200, JSON.stringify(response.data));
+        assert.equal(Number((response.data as any).booking.examTypeId), sameModalityExamA.id);
+      });
+      await withExamTypeChangePolicy("disabled", async () => {
+        const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id } });
+        assert.equal(response.status, 200, JSON.stringify(response.data));
+        assert.equal(Number((response.data as any).booking.examTypeId), sameModalityExamB.id);
+      });
+
+      const validAudits = await pool.query<{
+        action_type: string;
+        entity_id: number;
+        changed_by_user_id: number;
+        old_values: Record<string, unknown>;
+        new_values: Record<string, unknown>;
+        created_at: Date;
+      }>(
+        `select action_type, entity_id, changed_by_user_id, old_values, new_values, created_at
+         from audit_log where entity_type = 'appointment' and entity_id = $1
+           and action_type = 'doctor_protocoling_exam_type_changed'
+         order by id`,
+        [appointmentId]
+      );
+      assert.equal(validAudits.rowCount, 2);
+      assert.deepEqual(validAudits.rows.map((row) => ({
+        action: row.action_type,
+        appointmentId: Number(row.entity_id),
+        actor: Number(row.changed_by_user_id),
+        old: row.old_values,
+        next: row.new_values,
+        timestamped: row.created_at instanceof Date,
+      })), [
+        {
+          action: "doctor_protocoling_exam_type_changed",
+          appointmentId,
+          actor: normal.id,
+          old: { examTypeId: originalExamTypeId, examTypeName: oldNameRow.rows[0]?.name },
+          next: { examTypeId: sameModalityExamA.id, examTypeName: sameModalityExamA.name, source: "Doctor Protocoling Board" },
+          timestamped: true,
+        },
+        {
+          action: "doctor_protocoling_exam_type_changed",
+          appointmentId,
+          actor: normal.id,
+          old: { examTypeId: sameModalityExamA.id, examTypeName: sameModalityExamA.name },
+          next: { examTypeId: sameModalityExamB.id, examTypeName: sameModalityExamB.name, source: "Doctor Protocoling Board" },
+          timestamped: true,
+        },
+      ]);
+
+      await pool.query(`update doctor_portal.doctor_profiles set can_assign_protocols = false where id = $1`, [normal.doctorId]);
+      await attemptExamChange(sameModalityExamA.id, 403, sameModalityExamB.id);
+      await pool.query(`update doctor_portal.doctor_profiles set can_assign_protocols = true, active = false where id = $1`, [normal.doctorId]);
+      await attemptExamChange(sameModalityExamA.id, 403, sameModalityExamB.id);
+      await pool.query(`update doctor_portal.doctor_profiles set active = true where id = $1`, [normal.doctorId]);
+
+      await pool.query(
+        `update doctor_portal.doctor_modality_permissions set can_protocol = false, active = true
+         where doctor_id = $1 and modality_id = $2`,
+        [normal.doctorId, testData.modalityId]
+      );
+      await attemptExamChange(sameModalityExamA.id, 403, sameModalityExamB.id);
+      await pool.query(
+        `update doctor_portal.doctor_modality_permissions set can_protocol = true, active = false
+         where doctor_id = $1 and modality_id = $2`,
+        [normal.doctorId, testData.modalityId]
+      );
+      await attemptExamChange(sameModalityExamA.id, 403, sameModalityExamB.id);
+
+      await pool.query(
+        `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+         values ($1, $2, true, false, false, true)`,
+        [normal.doctorId, otherModalityId]
+      );
+      await attemptExamChange(sameModalityExamA.id, 403, sameModalityExamB.id);
+      await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = $1 and modality_id = $2`, [normal.doctorId, otherModalityId]);
+
+      await pool.query(
+        `update doctor_portal.doctor_modality_permissions set can_protocol = true, active = true
+         where doctor_id = $1 and modality_id = $2`,
+        [normal.doctorId, testData.modalityId]
+      );
+      await attemptExamChange(999999999, 400, sameModalityExamB.id);
+      await attemptExamChange(inactiveExam.id, 400, sameModalityExamB.id);
+      await attemptExamChange(otherModalityExam.id, 400, sameModalityExamB.id);
+
+      const auditTrigger = `${TEST_PREFIX.toLowerCase()}_fail_protocoling_audit_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+      const auditFunction = `${auditTrigger}_fn`;
+      await pool.query(
+        `create function public.${auditFunction}() returns trigger language plpgsql as $body$
+         begin
+           if new.action_type = 'doctor_protocoling_exam_type_changed' and new.entity_id = ${appointmentId} then
+             raise exception 'forced protocoling audit failure';
+           end if;
+           return new;
+         end;
+         $body$`
+      );
+      await pool.query(
+        `create trigger ${auditTrigger} before insert on audit_log
+         for each row execute function public.${auditFunction}()`
+      );
+      try {
+        const failedAudit = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamA.id } });
+        assert.equal(failedAudit.status, 500, JSON.stringify(failedAudit.data));
+        assert.equal(await appointmentExamTypeId(appointmentId), sameModalityExamB.id);
+        const auditCount = await pool.query<{ count: number }>(
+          `select count(*)::int as count from audit_log
+           where entity_type = 'appointment' and entity_id = $1
+             and action_type = 'doctor_protocoling_exam_type_changed'`,
+          [appointmentId]
+        );
+        assert.equal(auditCount.rows[0]?.count, 2);
+      } finally {
+        await pool.query(`drop trigger if exists ${auditTrigger} on audit_log`);
+        await pool.query(`drop function if exists public.${auditFunction}()`);
+      }
+    } finally {
+      await pool.query(
+        `update appointments_v2.bookings set exam_type_id = $2, policy_version_id = $3 where id = $1`,
+        [appointmentId, originalExamTypeId, testData.policyVersionId]
+      );
+      await pool.query(`update doctor_portal.doctor_profiles set active = true, can_assign_protocols = true where id = $1`, [normal.doctorId]);
+      await pool.query(
+        `update doctor_portal.doctor_modality_permissions set active = true, can_protocol = true
+         where doctor_id = $1 and modality_id = $2`,
+        [normal.doctorId, testData.modalityId]
+      );
+      await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = $1 and modality_id = $2`, [normal.doctorId, otherModalityId]);
+    }
+  });
+
+  it("keeps generic appointment rescheduling subject to exam type change policy", async () => {
+    guard();
+    const originalExamTypeId = await appointmentExamTypeId(appointmentId);
+    const nextExamType = await insertExamType(testData.modalityId, "Generic Policy Exam");
+    await pool.query(`update appointments_v2.bookings set created_by_user_id = $2 where id = $1`, [appointmentId, normal.id]);
+    try {
+      await withExamTypeChangePolicy("supervisor_required", async () => {
+        const response = await api(normal.cookie, `/api/v2/appointments/${appointmentId}`, {
+          method: "PUT",
+          body: { examTypeId: nextExamType.id, policySetKey: testData.policySetKey },
+        });
+        assert.equal(response.status, 403, JSON.stringify(response.data));
+        assert.match(String((response.data as any).error), /supervisor override is required to change the exam type/i);
+        assert.equal(await appointmentExamTypeId(appointmentId), originalExamTypeId);
+      });
+      await withExamTypeChangePolicy("disabled", async () => {
+        const response = await api(normal.cookie, `/api/v2/appointments/${appointmentId}`, {
+          method: "PUT",
+          body: { examTypeId: nextExamType.id, policySetKey: testData.policySetKey },
+        });
+        assert.equal(response.status, 403, JSON.stringify(response.data));
+        assert.match(String((response.data as any).error), /exam type .*disabled/i);
+        assert.equal(await appointmentExamTypeId(appointmentId), originalExamTypeId);
+      });
+    } finally {
+      await pool.query(`update appointments_v2.bookings set exam_type_id = $2, created_by_user_id = $3 where id = $1`, [appointmentId, originalExamTypeId, testData.userId]);
+    }
   });
 
   async function authRequest(path: string, body: unknown, cookie = "") {

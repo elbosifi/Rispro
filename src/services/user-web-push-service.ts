@@ -269,3 +269,5 @@ export function safeNotifySchedulingOverrideCancelled(request: SchedulingOverrid
     console.warn(JSON.stringify({ type: "override_cancelled_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }
+
+export const __userWebPushTestables = { approverUserIds };

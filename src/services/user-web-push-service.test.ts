@@ -46,6 +46,19 @@ describe("user web push service", () => {
     assert.match(source, /enabled = case when \$2 then false else enabled end/);
   });
 
+  it("routes a directed pending notification only to the originally requested doctor", async () => {
+    const { __userWebPushTestables } = await import("./user-web-push-service.js");
+    const recipients = await __userWebPushTestables.approverUserIds({
+      requesterUserId: 12,
+      requestedApproverUserId: 34,
+      approverUserId: 56,
+      overrideTypes: ["total_capacity_override"],
+    } as any);
+
+    assert.deepEqual(recipients, [34]);
+    assert.ok(!recipients.includes(56));
+  });
+
   it("wires create approve and reject lifecycle hooks without awaiting delivery", async () => {
     const source = await readFile("src/modules/appointments-v2/scheduling-override-requests/services/scheduling-override-request.service.ts", "utf-8");
 
