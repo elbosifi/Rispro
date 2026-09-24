@@ -11,6 +11,7 @@ const users = [
   ["e2e_supervisor", "E2E Supervisor", "supervisor"],
   ["e2e_super_admin", "E2E Super Admin", "super_admin"],
   ["e2e_doctor", "E2E Doctor", "doctor"],
+  ["e2e_doctor_other", "E2E Other Doctor", "doctor"],
 ] as const;
 
 try {
@@ -113,6 +114,11 @@ try {
      values ($1, 'رأس E2E', 'E2E CT Head', 'E2E_CT_HEAD', true)`,
     [modalityId],
   );
+  await pool.query(
+    `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+     values ($1, 'صدر E2E', 'E2E CT Chest', 'E2E_CT_CHEST', true)`,
+    [modalityId],
+  );
   const policySet = await pool.query<{ id: number }>(
     `insert into appointments_v2.policy_sets (key, name, created_by_user_id)
      values ('default', 'E2E default policy', $1)
@@ -153,14 +159,32 @@ try {
   const doctorUserId = Number((await pool.query<{ id: number }>("select id from users where username = 'e2e_doctor'")).rows[0].id);
   const doctorProfileId = Number((await pool.query<{ id: number }>(
     `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)
-     values ($1, 'Dr E2E', 'consultant', true, true, true, false) returning id`, [doctorUserId],
+     values ($1, 'Dr E2E', 'consultant', true, true, true, true) returning id`, [doctorUserId],
   )).rows[0].id);
-  await pool.query(`insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_report, active) values ($1, $2, true, true)`, [doctorProfileId, modalityId]);
+  await pool.query(
+    `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+     values ($1, $2, true, true, true, true)`,
+    [doctorProfileId, modalityId],
+  );
+  const otherDoctorUserId = Number((await pool.query<{ id: number }>("select id from users where username = 'e2e_doctor_other'")).rows[0].id);
+  const otherDoctorProfileId = Number((await pool.query<{ id: number }>(
+    `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)
+     values ($1, 'Dr E2E Other', 'consultant', true, true, true, true) returning id`, [otherDoctorUserId],
+  )).rows[0].id);
+  await pool.query(
+    `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+     values ($1, $2, true, true, true, true)`,
+    [otherDoctorProfileId, modalityId],
+  );
   const supervisorProfileId = Number((await pool.query<{ id: number }>(
     `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)
      values ($1, 'Dr E2E Supervisor', 'consultant', true, true, true, true) returning id`, [supervisorId],
   )).rows[0].id);
-  await pool.query(`insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_report, active) values ($1, $2, true, true)`, [supervisorProfileId, modalityId]);
+  await pool.query(
+    `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+     values ($1, $2, true, true, true, true)`,
+    [supervisorProfileId, modalityId],
+  );
   const performedDevice = await pool.query<{ id: number }>(
     `insert into dicom_devices (modality_id, device_name, modality_ae_title, scheduled_station_ae_title, is_active)
      values ($1, 'E2E Performed CT device', 'E2E_MPPS_CT', 'E2E_MPPS_STATION', true) returning id`,
@@ -215,6 +239,15 @@ try {
     `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, case_category, requires_report, status, policy_version_id, created_by_user_id, updated_by_user_id)
      values ($1, $2, $3, $4::date, 'non_oncology', true, 'completed', $5, $6, $6)`,
     [Number(reportingPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), e2eTodayInTripoli(), Number(policyVersion.rows[0].id), supervisorId],
+  );
+  const protocolingPatient = await pool.query<{ id: number }>(
+    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+     values ('E2E Protocoling Exam Patient', 'E2E Protocoling Exam Patient', '100000000096', 'E2E Protocoling Exam Patient', 'F', 46, '0910000096', 'national_id', '100000000096') returning id`,
+  );
+  await pool.query(
+    `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, case_category, status, policy_version_id, created_by_user_id, updated_by_user_id)
+     values ($1, $2, $3, $4::date, 'non_oncology', 'scheduled', $5, $6, $6)`,
+    [Number(protocolingPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), fullFixtureDate, Number(policyVersion.rows[0].id), supervisorId],
   );
   await pool.query(`update system_settings set setting_value = '{"value":{"enabledModalityCodes":["E2E_CT"],"daysBack":30,"defaultRequiresReport":true,"defaultReportStatusFilter":"required_not_final"}}'::jsonb where category = 'doctor_portal_reporting_board' and setting_key = 'config'`);
   await pool.query(

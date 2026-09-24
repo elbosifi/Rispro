@@ -306,6 +306,8 @@ describe("SchedulingOverrideApprovalCenter", () => {
 
     const { rerender } = renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("doctor", 77)} doctorMe={doctorMe} />);
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+    expect(screen.getByText("Requested doctor")).toBeTruthy();
+    expect(screen.getByText("Dr Selected")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 31"), { target: { value: "Clinically appropriate" } });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(mockApprove).toHaveBeenCalledWith({

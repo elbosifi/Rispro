@@ -582,6 +582,13 @@ function RequestCard({
           value={request.requesterDisplayName || request.requesterUsername || t(language, "overrideRequests.userFallback", { id: request.requesterUserId })}
           meta={requesterMeta}
         />
+        {request.requestedApproverUserId ? (
+          <Info
+            label="Requested doctor"
+            value={request.requestedApproverDisplayName || t(language, "overrideRequests.userFallback", { id: request.requestedApproverUserId })}
+            meta={t(language, "overrideRequests.idMeta", { id: request.requestedApproverUserId })}
+          />
+        ) : null}
         {request.approverUserId ? (
           <Info
             label={t(language, "overrideRequests.approver")}
