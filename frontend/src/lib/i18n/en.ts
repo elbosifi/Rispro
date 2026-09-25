@@ -89,6 +89,7 @@ export const en = {
   "workspace.switcher": "Switch workspace",
   "workspace.core": "RISpro Core",
   "workspace.doctor": "Doctor Workspace",
+  "workspace.teaching": "Teaching",
   "role.receptionist": "Receptionist",
   "role.supervisor": "Supervisor",
   "role.superAdministrator": "Super administrator",

@@ -15,6 +15,7 @@ const testState = vi.hoisted(() => ({
   fetchDoctorMe: vi.fn(),
   fetchPageVisibilityMatrix: vi.fn(),
   fetchAppointments: vi.fn(),
+  teachingIdentity: null as { permissions: string[] } | null,
   searchPatients: vi.fn(),
   logout: vi.fn(),
   language: "en" as "en" | "ar",
@@ -158,6 +159,14 @@ vi.mock("@/pages/worklist-monitor/worklist-monitor-page", () => ({
 vi.mock("@/pages/settings/settings-page", () => ({
   default: () => <TestPage testId="settings-page" label="Settings Page" />,
 }));
+
+vi.mock("@/teaching/api/use-teaching-identity", () => ({
+  useTeachingIdentity: () => ({ data: testState.teachingIdentity }),
+}));
+
+vi.mock("@/teaching/teaching-application", () => ({
+  TeachingApplication: () => <div data-testid="teaching-application">Teaching application</div>,
+}));
 vi.mock("@/pages/workstation/workstation-printing-page", () => ({
   default: () => <TestPage testId="workstation-printing-page" label="Workstation Printing Page" />,
 }));
@@ -196,6 +205,7 @@ describe("App route behavior", () => {
     testState.fetchPageVisibilityMatrix.mockReset();
     testState.fetchAppointments.mockReset();
     testState.fetchAppointments.mockResolvedValue([]);
+    testState.teachingIdentity = null;
     testState.searchPatients.mockReset();
     window.sessionStorage.clear();
     localStorage.setItem("rispro-language", "en");
@@ -227,6 +237,14 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/appointments"));
     expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
+  });
+
+  it("routes /teaching/* to its own application before the clinical catch-all", async () => {
+    renderAppAt("/teaching/login");
+
+    expect(await screen.findByTestId("teaching-application")).toBeTruthy();
+    expect(screen.queryByTestId("dashboard-page")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "RISpro navigation" })).toBeNull();
   });
 
   it("turns a global patient selection into a Patients deep link while retaining active Patients filters", async () => {

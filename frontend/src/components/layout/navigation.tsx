@@ -499,21 +499,25 @@ function AccountMenu({ user, language, accountActions, canAccessSettings, onSett
   );
 }
 
-export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessCoreWorkspace = true, onNavigate }: {
+export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessTeaching = false, canAccessCoreWorkspace = true, onNavigate }: {
   language: Language;
   currentWorkspace: "core" | "doctor";
   canAccessDoctorWorkspace: boolean;
+  canAccessTeaching?: boolean;
   canAccessCoreWorkspace?: boolean;
-  onNavigate: (path: "/dashboard" | "/doctor/my-work") => void;
+  onNavigate: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard") => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useCloseOnOutside(ref, () => setOpen(false), open);
 
-  if (!canAccessDoctorWorkspace) return null;
+  if (!canAccessDoctorWorkspace && !canAccessTeaching) return null;
 
   const currentLabel = t(language, currentWorkspace === "doctor" ? "workspace.doctor" : "workspace.core");
-  const workspaces: readonly ("core" | "doctor")[] = canAccessCoreWorkspace ? ["core", "doctor"] : ["doctor"];
+  const workspaces: Array<"core" | "doctor" | "teaching"> = [];
+  if (canAccessCoreWorkspace) workspaces.push("core");
+  if (canAccessDoctorWorkspace) workspaces.push("doctor");
+  if (canAccessTeaching) workspaces.push("teaching");
   return (
     <div ref={ref} className="relative">
       <button
@@ -532,7 +536,7 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
         <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-48 rounded-xl border bg-card p-2 shadow-xl" style={{ borderColor: "var(--border)" }}>
           <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "workspace.switcher")}</p>
           {workspaces.map((workspace) => {
-            const label = t(language, workspace === "doctor" ? "workspace.doctor" : "workspace.core");
+            const label = t(language, workspace === "doctor" ? "workspace.doctor" : workspace === "teaching" ? "workspace.teaching" : "workspace.core");
             return (
               <button
                 key={workspace}
@@ -541,7 +545,7 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
                 className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-start text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                 aria-current={currentWorkspace === workspace ? "true" : undefined}
                 onClick={() => {
-                  onNavigate(workspace === "doctor" ? "/doctor/my-work" : "/dashboard");
+                  onNavigate(workspace === "doctor" ? "/doctor/my-work" : workspace === "teaching" ? "/teaching/dashboard" : "/dashboard");
                   setOpen(false);
                 }}
               >
@@ -578,6 +582,7 @@ export function TopBar({
   onPatientSearchSelect = () => {},
   onRegistrationSearchSelect = () => {},
   canAccessDoctorWorkspace = false,
+  canAccessTeaching = false,
   canAccessCoreWorkspace = true,
   showLanguageControl = true,
   currentWorkspace = "core",
@@ -604,10 +609,11 @@ export function TopBar({
   onPatientSearchSelect?: (patientId: number) => void;
   onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
   canAccessDoctorWorkspace?: boolean;
+  canAccessTeaching?: boolean;
   canAccessCoreWorkspace?: boolean;
   showLanguageControl?: boolean;
   currentWorkspace?: "core" | "doctor";
-  onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work") => void;
+  onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard") => void;
 }) {
   return (
     <header className="sticky top-0 z-50 border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
@@ -631,7 +637,7 @@ export function TopBar({
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
           {showLanguageControl ? <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} /> : null}
-          <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} canAccessCoreWorkspace={canAccessCoreWorkspace} onNavigate={onWorkspaceNavigate} />
+          <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} canAccessTeaching={canAccessTeaching} canAccessCoreWorkspace={canAccessCoreWorkspace} onNavigate={onWorkspaceNavigate} />
           {user ? <AccountMenu user={user} language={language} accountActions={accountMenuActions} canAccessSettings={canAccessSettings} onSettings={onSettings} onLogout={onLogout} /> : null}
         </div>
       </div>

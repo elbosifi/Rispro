@@ -12,4 +12,6 @@ npm run e2e:db:down
 
 The reset command requires `RISPRO_E2E=1`, a loopback/test database URL, and rejects production-oriented database variables. The suite uses one Chromium worker and records traces on retry plus screenshots/videos on failure.
 
-Covered journeys: login and route access, patient identity/duplicate warnings, appointment creation, deferred total-capacity override approval, queue check-in, and the public mobile Reporting Board saved view.
+Covered journeys: login and route access, patient identity/duplicate warnings, appointment creation, deferred total-capacity override approval, queue check-in, the public mobile Reporting Board saved view, and Teaching import-to-publication editorial workflow with protected image preview, immutable revisions, Teaching access checks, and logout.
+
+Run the Teaching editorial browser journey with `npx playwright test e2e/specs/teaching-editorial.spec.ts`. It exercises the Teaching shell/editor at desktop and mobile widths and creates only synthetic educational content in the disposable E2E database.

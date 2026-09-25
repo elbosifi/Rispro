@@ -206,6 +206,49 @@ describe("Navigation governance", () => {
     expect(onWorkspaceNavigate).toHaveBeenCalledWith("/doctor/my-work");
   });
 
+  it("shows Teaching only for identities with Teaching access and navigates across the app boundary", async () => {
+    const onWorkspaceNavigate = vi.fn();
+    render(
+      <TopBar
+        user={{ id: 1, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        canAccessDoctorWorkspace
+        canAccessTeaching
+        onWorkspaceNavigate={onWorkspaceNavigate}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: RISpro Core" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Teaching" }));
+    expect(onWorkspaceNavigate).toHaveBeenCalledWith("/teaching/dashboard");
+  });
+
+  it("does not show a Teaching destination without its access capability", async () => {
+    render(
+      <TopBar
+        user={{ id: 1, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        canAccessDoctorWorkspace
+        canAccessTeaching={false}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: RISpro Core" }));
+    expect(screen.queryByRole("menuitem", { name: "Teaching" })).toBeNull();
+  });
+
   it("keeps only menu and global search as the normal mobile controls", () => {
     const onMobileNavToggle = vi.fn();
     render(

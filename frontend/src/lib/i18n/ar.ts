@@ -131,6 +131,7 @@ export const ar = {
   "workspace.switcher": "تبديل مساحة العمل",
   "workspace.core": "RISpro Core",
   "workspace.doctor": "مساحة عمل الطبيب",
+  "workspace.teaching": "التعليم",
   "role.receptionist": "موظف الاستقبال",
   "role.supervisor": "مشرف",
   "role.superAdministrator": "مدير النظام",

@@ -16,6 +16,7 @@ const requiredFiles = [
   "docs/domains/appointments/README.md",
   "docs/domains/qr-patient-portal/README.md",
   "docs/domains/comparison-requests/README.md",
+  "docs/domains/teaching/README.md",
   "docs/plans/active/README.md",
   "docs/plans/completed/README.md",
   "docs/plans/templates/EXECUTION_PLAN_TEMPLATE.md",

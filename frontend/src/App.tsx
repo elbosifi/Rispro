@@ -60,6 +60,8 @@ import { QueryProvider } from "@/providers/query-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { useTeachingIdentity } from "@/teaching/api/use-teaching-identity";
+import { TeachingApplication } from "@/teaching/teaching-application";
 import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
 import { requestNavigationWithUnsavedGuard } from "@/lib/unsaved-navigation-guard";
 import {
@@ -145,6 +147,8 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
+  const teachingIdentityQuery = useTeachingIdentity(user ? String(user.id) : null);
+  const canAccessTeaching = teachingIdentityQuery.data?.permissions?.includes("teaching.access") ?? false;
   const userRole = user?.role;
   const { language, toggleLanguage, t } = useLanguage();
   const isArabic = language === "ar";
@@ -304,6 +308,7 @@ function AppContent() {
         onPatientSearchSelect={handlePatientSearchSelect}
         onRegistrationSearchSelect={(appointment) => requestNavigationWithUnsavedGuard(() => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`))}
         canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctorMe)}
+        canAccessTeaching={canAccessTeaching}
         canAccessCoreWorkspace
         onWorkspaceNavigate={(path) => requestNavigationWithUnsavedGuard(() => navigate(path))}
       />
@@ -407,6 +412,7 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/teaching/*" element={<TeachingApplication />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />

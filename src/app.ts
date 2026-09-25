@@ -27,6 +27,7 @@ import { pacsRouter } from "./routes/pacs.js";
 import { legacyAccessViewerRouter } from "./routes/legacy-access-viewer.js";
 import { createAppointmentsV2Router } from "./modules/appointments-v2/index.js";
 import { createDoctorPortalRouter } from "./modules/doctor-portal/index.js";
+import { createTeachingRouter } from "./modules/teaching/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { reportingBoardPublicRouter } from "./modules/doctor-portal/reporting-board-public-routes.js";
 import { publicPrintingBootstrapRouter } from "./routes/public-printing-bootstrap-routes.js";
@@ -103,6 +104,7 @@ export function createApp(): Application {
   const PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/process-multipart";
   const PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/stage-multipart";
   const SCAN_SESSION_UPLOAD_PATH = "/api/scan-sessions/upload";
+  const TEACHING_IMPORT_INSPECT_PATH = "/api/teaching/qbank/import/inspect";
   const ADMIN_RESTORE_PREFIX = "/api/admin/restore";
   const QZ_SIGNING_PATH = "/api/printing/qz-sign";
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -114,6 +116,7 @@ export function createApp(): Application {
       req.path === PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH ||
       req.path === PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH ||
       req.path === SCAN_SESSION_UPLOAD_PATH ||
+      req.path === TEACHING_IMPORT_INSPECT_PATH ||
       req.path.startsWith(ADMIN_RESTORE_PREFIX)
       || req.path === QZ_SIGNING_PATH
     ) {
@@ -155,6 +158,7 @@ export function createApp(): Application {
   app.use("/api/settings/mobile-widget", blockForcedPasswordChange, mobileWidgetAdminRouter);
   app.use("/api", blockForcedPasswordChange);
   app.use("/api/action-pin", actionPinRouter);
+  app.use("/api/teaching", createTeachingRouter());
   app.use("/api/users", usersRouter);
   app.use("/api/patients", patientsRouter);
   app.use("/api/queue", queueRouter);

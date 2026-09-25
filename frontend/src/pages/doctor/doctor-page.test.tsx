@@ -145,6 +145,7 @@ const getAppointmentByIdMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
 const appointmentDetailsReadOnlyMock = vi.fn();
 const fetchMyIrReferralWorklistMock = vi.fn();
+const teachingIdentityState = vi.hoisted(() => ({ value: null as { permissions: string[] } | null }));
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -299,6 +300,10 @@ vi.mock("@/lib/api-hooks", () => ({
   deleteDoctorRosterAssignment: vi.fn(),
   addDoctorRosterMember: vi.fn(),
   deleteDoctorRosterMember: vi.fn(),
+}));
+
+vi.mock("@/teaching/api/use-teaching-identity", () => ({
+  useTeachingIdentity: () => ({ data: teachingIdentityState.value }),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -469,6 +474,7 @@ function renderDoctorPortal(initialPath = "/doctor") {
             <Route path="/" element={<CorePlaceholder />} />
             <Route path="/dashboard" element={<CorePlaceholder />} />
             <Route path="/doctor/*" element={<><DoctorPage user={doctorUser} onLogout={() => {}} /><LocationProbe /></>} />
+            <Route path="/teaching/*" element={<><div data-testid="teaching-app-route">Teaching app route</div><LocationProbe /></>} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -479,6 +485,7 @@ function renderDoctorPortal(initialPath = "/doctor") {
 describe("Doctor Portal shell", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    teachingIdentityState.value = null;
     fetchDoctorMeMock.mockReset();
     fetchPageVisibilityMatrixMock.mockReset();
     fetchNoShowSummaryMock.mockReset();
@@ -916,6 +923,27 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: "Open account menu" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Switch workspace: Doctor Workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
+  });
+
+  it("offers Teaching only when its capability is present and crosses to /teaching/dashboard", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    teachingIdentityState.value = { permissions: ["teaching.access", "teaching.learn"] };
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch workspace: Doctor Workspace" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Teaching" }));
+
+    expect(await screen.findByTestId("teaching-app-route")).toBeTruthy();
+    expect(screen.getByTestId("location-probe").textContent).toBe("/teaching/dashboard");
+  });
+
+  it("does not show the Teaching destination when access is absent", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    teachingIdentityState.value = null;
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch workspace: Doctor Workspace" }));
+    expect(screen.queryByRole("menuitem", { name: "Teaching" })).toBeNull();
   });
 
   it("opens IR consultations from the Doctor Workspace worklist", async () => {

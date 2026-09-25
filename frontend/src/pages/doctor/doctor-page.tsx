@@ -48,6 +48,7 @@ import {
   sanitizeDoctorAdvancedSetupSearch,
 } from "@/lib/navigation/doctor-advanced-setup-navigation";
 import { resolveModuleNavigationTarget, saveModuleLastLocation } from "@/lib/navigation/module-last-location";
+import { useTeachingIdentity } from "@/teaching/api/use-teaching-identity";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -483,6 +484,8 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
     staleTime: 1000 * 60,
     retry: false,
   });
+  const teachingIdentityQuery = useTeachingIdentity(String(user.id));
+  const canAccessTeaching = teachingIdentityQuery.data?.permissions?.includes("teaching.access") ?? false;
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
 
   useEffect(() => {
@@ -569,9 +572,10 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
           });
         }}
         canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(me)}
+        canAccessTeaching={canAccessTeaching}
         canAccessCoreWorkspace={me.canAccessCoreWorkspace}
         currentWorkspace="doctor"
-        onWorkspaceNavigate={navigate}
+        onWorkspaceNavigate={(path) => navigate(path)}
       />
 
       <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:grid-cols-[240px_1fr] lg:overflow-hidden">

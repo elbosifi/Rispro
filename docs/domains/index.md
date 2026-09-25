@@ -12,5 +12,6 @@ These files are lightweight maps for future agents. They should describe only be
 | QR Patient Portal | [qr-patient-portal/README.md](qr-patient-portal/README.md) |
 | Comparison Requests | [comparison-requests/README.md](comparison-requests/README.md) |
 | OHIF Viewer | [ohif-viewer/README.md](ohif-viewer/README.md) |
+| Teaching | [teaching/README.md](teaching/README.md) |
 
 Before editing any domain, inspect the current route, service, frontend page, and tests listed in the domain README. If a README is stale, update it in the same change.
