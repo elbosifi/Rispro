@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import { t } from "@/lib/i18n";
@@ -48,6 +48,23 @@ export function SchedulingOverrideRequestModal({
   const [reason, setReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
+  const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
+  const requestContextKey = JSON.stringify([
+    requestType,
+    modalityId ?? null,
+    requestedDate,
+    requestedTime ?? null,
+    requiresDirectedApprover,
+    [...new Set(overrideTypes)].sort(),
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+    setReason("");
+    setRequestedApproverUserId("");
+    setLocalError(null);
+  }, [open, requestContextKey]);
+
   const approversQuery = useQuery({
     queryKey: ["v2-scheduling-override-eligible-doctor-approvers", modalityId] as const,
     queryFn: () => listEligibleDoctorOverbookingApprovers(Number(modalityId)),
@@ -55,7 +72,6 @@ export function SchedulingOverrideRequestModal({
     staleTime: 60_000,
   });
   const reasons = decision?.reasons ?? [];
-  const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
   const selectedApprover = approversQuery.data?.find((doctor) => Number(doctor.userId) === Number(requestedApproverUserId));
   const hasEligibleApprovers = (approversQuery.data?.length ?? 0) > 0;
 

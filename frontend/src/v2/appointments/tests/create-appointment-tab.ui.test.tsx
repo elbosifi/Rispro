@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
+import { SchedulingOverrideRequestModal } from "../components/SchedulingOverrideRequestModal";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, CreateSchedulingOverrideRequestInput, SchedulingDecisionDto } from "../types";
@@ -601,6 +602,67 @@ function PrintPlaceholder() {
 }
 
 describe("CreateAppointmentTab UI interactions", () => {
+  it("clears directed request fields and local validation error when reopened", async () => {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn();
+    const modalProps = {
+      requestType: "create_booking" as const,
+      overrideTypes: ["total_capacity_override"] as ["total_capacity_override"],
+      patientLabel: "Test Patient",
+      modalityLabel: "CT",
+      examTypeLabel: "CT Abdomen",
+      requestedDate: "2027-01-06",
+      requestedTime: "09:00",
+      modalityId: 1,
+      requiresDirectedApprover: true,
+      onClose,
+      onSubmit,
+    };
+    const view = render(<LanguageProvider><SchedulingOverrideRequestModal {...modalProps} open /></LanguageProvider>);
+
+    await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByText("Requester reason is required.")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+      target: { value: "Need CT overbooking approval" },
+    });
+
+    view.rerender(<LanguageProvider><SchedulingOverrideRequestModal {...modalProps} open={false} /></LanguageProvider>);
+    view.rerender(<LanguageProvider><SchedulingOverrideRequestModal {...modalProps} open /></LanguageProvider>);
+
+    expect((screen.getByLabelText(/Request approval from/) as HTMLSelectElement).value).toBe("");
+    expect((screen.getByPlaceholderText("Explain why this appointment needs override approval") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.queryByText("Requester reason is required.")).toBeNull();
+    expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("clears directed request fields when the request context changes while open", async () => {
+    const modalProps = {
+      open: true,
+      requestType: "create_booking" as const,
+      overrideTypes: ["total_capacity_override"] as ["total_capacity_override"],
+      patientLabel: "Test Patient",
+      modalityLabel: "CT",
+      examTypeLabel: "CT Abdomen",
+      requestedDate: "2027-01-06",
+      requestedTime: "09:00",
+      modalityId: 1,
+      requiresDirectedApprover: true,
+      onClose: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+    const view = render(<LanguageProvider><SchedulingOverrideRequestModal {...modalProps} /></LanguageProvider>);
+    await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
+    fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+      target: { value: "Need CT overbooking approval" },
+    });
+
+    view.rerender(<LanguageProvider><SchedulingOverrideRequestModal {...modalProps} modalityId={2} modalityLabel="MRI" /></LanguageProvider>);
+
+    expect((screen.getByLabelText(/Request approval from/) as HTMLSelectElement).value).toBe("");
+    expect((screen.getByPlaceholderText("Explain why this appointment needs override approval") as HTMLTextAreaElement).value).toBe("");
+  });
+
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     localStorage.setItem("rispro:create-appointment:entity-display-mode", "en");
