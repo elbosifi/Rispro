@@ -794,7 +794,7 @@ export async function createSchedulingOverrideRequest(
     }
 
     let requestedApproverUserId: number | null = null;
-    if (role === "receptionist" && isDirectedDoctorOverbookingTypes(overrideTypes)) {
+    if (isDirectedDoctorOverbookingTypes(overrideTypes)) {
       requestedApproverUserId = getNumber(input.requestedApproverUserId);
       if (!requestedApproverUserId) {
         throw new SchedulingError(400, "Select an eligible supervising doctor for this overbooking request.", ["requested_approver_required"]);

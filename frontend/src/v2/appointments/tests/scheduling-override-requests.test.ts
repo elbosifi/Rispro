@@ -4,6 +4,7 @@ import {
   canRoleApproveSchedulingOverride,
   hasMultipleSupportedOverrideTypesFromDecision,
   inferSupportedOverrideTypeFromDecision,
+  isDirectedDoctorOverbookingTypes,
   shouldUseDeferredOverrideRequest,
 } from "../utils/scheduling-override-requests";
 
@@ -90,5 +91,15 @@ describe("exam restriction scheduling override", () => {
     expect(shouldUseDeferredOverrideRequest("supervisor", "exam_mix_override", false)).toBe(true);
     expect(shouldUseDeferredOverrideRequest("supervisor", "total_capacity_override", false)).toBe(true);
     expect(shouldUseDeferredOverrideRequest("supervisor", "category_override", false)).toBe(false);
+    expect(shouldUseDeferredOverrideRequest("super_admin", "total_capacity_override", false)).toBe(true);
+    expect(shouldUseDeferredOverrideRequest("super_admin", "category_override", false)).toBe(false);
+  });
+
+  it("identifies only total-capacity and exam-mix requests as doctor-directed", () => {
+    expect(isDirectedDoctorOverbookingTypes(["total_capacity_override"])).toBe(true);
+    expect(isDirectedDoctorOverbookingTypes(["total_capacity_override", "exam_mix_override"])).toBe(true);
+    expect(isDirectedDoctorOverbookingTypes(["category_override"])).toBe(false);
+    expect(isDirectedDoctorOverbookingTypes(["total_capacity_override", "category_override"])).toBe(true);
+    expect(isDirectedDoctorOverbookingTypes(["total_capacity_override", "closed_weekday_override"])).toBe(false);
   });
 });

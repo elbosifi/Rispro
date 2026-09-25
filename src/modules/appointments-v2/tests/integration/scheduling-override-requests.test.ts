@@ -397,8 +397,8 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     });
   }
 
-  async function requestTotalCapacityOverride(date: string, requestedApproverUserId?: number) {
-    return requestCategoryOverride(date, 0, receptionistCookie, null, requestedApproverUserId);
+  async function requestTotalCapacityOverride(date: string, requestedApproverUserId?: number, cookie = receptionistCookie) {
+    return requestCategoryOverride(date, 0, cookie, null, requestedApproverUserId);
   }
 
   async function insertLegacyUntargetedRequest(requesterUserId: number): Promise<number> {
@@ -1304,9 +1304,11 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal((await getRequestFromDb(Number((total.data as any).request.id))).approver_reason, null);
     await pool.query(`update doctor_portal.doctor_profiles set can_supervise = false where user_id = $1`, [assignedDoctor.userId]);
 
-    const supervisorRequestedTotal = await requestCategoryOverride(date, 0, supervisorCookie);
+    const supervisorDirectedDoctor = await createDoctorActor("supervisor_directed_total");
+    const supervisorRequestedTotal = await requestCategoryOverride(date, 0, supervisorCookie, null, supervisorDirectedDoctor.userId);
     assert.equal(supervisorRequestedTotal.status, 201);
     assert.equal((supervisorRequestedTotal.data as any).request.overrideType, "total_capacity_override");
+    assert.equal(Number((supervisorRequestedTotal.data as any).request.requestedApproverUserId), supervisorDirectedDoctor.userId);
     const supervisorRequestApproval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((supervisorRequestedTotal.data as any).request.id)}/approve`, {
       method: "POST",
       body: { approverReason: "supervisor still cannot approve total" },
@@ -1406,7 +1408,8 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const deferredDate = "2042-12-12";
     await arrange(deferredDate);
     const deferredPatient = await createPatient();
-    const requested = await fetchAs(supervisorCookie, "/api/v2/scheduling-override-requests", { method: "POST", body: { requestType: "create_booking", requesterReason: "Exact combined deferred", requestPayload: { patientId: deferredPatient, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: deferredDate, caseCategory: "non_oncology", policySetKey: testData.policySetKey } }});
+    const directedDoctor = await createDoctorActor("combined_directed");
+    const requested = await fetchAs(supervisorCookie, "/api/v2/scheduling-override-requests", { method: "POST", body: { requestType: "create_booking", requesterReason: "Exact combined deferred", requestedApproverUserId: directedDoctor.userId, requestPayload: { patientId: deferredPatient, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: deferredDate, caseCategory: "non_oncology", policySetKey: testData.policySetKey } }});
     assert.equal(requested.status, 201, JSON.stringify(requested.data));
     const requestId = Number((requested.data as any).request.id);
     assert.deepEqual((requested.data as any).request.overrideTypes, ["total_capacity_override", "exam_mix_override"]); assert.equal((requested.data as any).request.overrideType, "total_capacity_override"); assert.equal(await countBookings(deferredDate, deferredPatient), 0);
@@ -1644,7 +1647,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(rescheduleWithoutBooking.status, 400);
   });
 
-  it("lists only eligible supervising doctors and requires an eligible target for directed requests", async () => {
+  it("limits directed-doctor lookup to override request roles and requires an eligible target for every directed requester", async () => {
     if (!testData) return;
     const otherModalityId = await createTestModality("OTHER_MODALITY");
     const eligible = await createDoctorActor("eligible_supervisor");
@@ -1655,17 +1658,19 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const permissionCannotSupervise = await createDoctorActor("permission_cannot_supervise", { permissionCanSupervise: false });
     const otherModalityOnly = await createDoctorActor("other_modality_only", { permissionModalityId: otherModalityId });
 
-    const lookup = await fetchAs(receptionistCookie, `/api/v2/scheduling-override-requests/eligible-doctor-approvers?modalityId=${testData.modalityId}`);
-    assert.equal(lookup.status, 200, JSON.stringify(lookup.data));
-    assert.deepEqual(
-      (lookup.data as any).doctors.map((doctor: any) => Number(doctor.userId)),
-      [eligible.userId]
-    );
+    const path = `/api/v2/scheduling-override-requests/eligible-doctor-approvers?modalityId=${testData.modalityId}`;
+    const lookup = await fetchAs(receptionistCookie, path);
+    const supervisorLookup = await fetchAs(supervisorCookie, path);
+    const superAdminLookup = await fetchAs(superAdminCookie, path);
+    for (const response of [lookup, supervisorLookup, superAdminLookup]) {
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+      assert.ok((response.data as any).doctors.some((doctor: any) => Number(doctor.userId) === eligible.userId));
+    }
     for (const denied of [inactiveUser, inactiveProfile, profileCannotSupervise, inactivePermission, permissionCannotSupervise, otherModalityOnly]) {
       assert.ok(!(lookup.data as any).doctors.some((doctor: any) => Number(doctor.userId) === denied.userId));
     }
     assert.equal(
-      (await fetchAs(eligible.cookie, `/api/v2/scheduling-override-requests/eligible-doctor-approvers?modalityId=${testData.modalityId}`)).status,
+      (await fetchAs(eligible.cookie, path)).status,
       403
     );
 
@@ -1676,6 +1681,9 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal((await requestTotalCapacityOverride(totalCapacityDate, 999999999)).status, 400);
     assert.equal((await requestTotalCapacityOverride(totalCapacityDate, inactiveUser.userId)).status, 400);
     assert.equal((await requestTotalCapacityOverride(totalCapacityDate, inactiveProfile.userId)).status, 400);
+    assert.equal((await requestTotalCapacityOverride(totalCapacityDate, profileCannotSupervise.userId)).status, 400);
+    assert.equal((await requestTotalCapacityOverride(totalCapacityDate, inactivePermission.userId)).status, 400);
+    assert.equal((await requestTotalCapacityOverride(totalCapacityDate, permissionCannotSupervise.userId)).status, 400);
     assert.equal((await requestTotalCapacityOverride(totalCapacityDate, otherModalityOnly.userId)).status, 400);
 
     const validTotalCapacity = await requestTotalCapacityOverride(totalCapacityDate, eligible.userId);
@@ -1689,6 +1697,15 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(Number(pendingRow.rows[0]?.requested_approver_user_id), eligible.userId);
     assert.equal(pendingRow.rows[0]?.approver_user_id, null);
 
+    const supervisorTotalDate = "2043-02-03";
+    await fillTotalCapacityWithOncology(supervisorTotalDate, 5);
+    assert.equal((await requestTotalCapacityOverride(supervisorTotalDate, undefined, supervisorCookie)).status, 400);
+    const supervisorTotal = await requestTotalCapacityOverride(supervisorTotalDate, eligible.userId, supervisorCookie);
+    assert.equal(supervisorTotal.status, 201, JSON.stringify(supervisorTotal.data));
+    assert.equal(Number((supervisorTotal.data as any).request.requestedApproverUserId), eligible.userId);
+    assert.equal((supervisorTotal.data as any).request.approverUserId, null);
+    assert.equal((supervisorTotal.data as any).request.status, "pending");
+
     const examMixDate = "2043-02-02";
     await setCapacityLimits(20, 20);
     const mixRule = await pool.query<{ id: number }>(
@@ -1701,8 +1718,27 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       [mixRule.rows[0].id, testData.examTypeId]
     );
     await fillNonOncologyCategory(examMixDate, 5);
-    const examMixWithoutDoctor = await requestTotalCapacityOverride(examMixDate);
+    const examMixWithoutDoctor = await requestTotalCapacityOverride(examMixDate, undefined, supervisorCookie);
     assert.equal(examMixWithoutDoctor.status, 400, JSON.stringify(examMixWithoutDoctor.data));
+    const supervisorExamMix = await requestTotalCapacityOverride(examMixDate, eligible.userId, supervisorCookie);
+    assert.equal(supervisorExamMix.status, 201, JSON.stringify(supervisorExamMix.data));
+    assert.equal(Number((supervisorExamMix.data as any).request.requestedApproverUserId), eligible.userId);
+    assert.equal((supervisorExamMix.data as any).request.approverUserId, null);
+
+    const superAdminTotalDate = "2043-02-04";
+    await setCapacityLimits(5, 5);
+    await fillTotalCapacityWithOncology(superAdminTotalDate, 5);
+    assert.equal((await requestTotalCapacityOverride(superAdminTotalDate, undefined, superAdminCookie)).status, 400);
+    const superAdminTotal = await requestTotalCapacityOverride(superAdminTotalDate, eligible.userId, superAdminCookie);
+    assert.equal(superAdminTotal.status, 201, JSON.stringify(superAdminTotal.data));
+    const superAdminRequestId = Number((superAdminTotal.data as any).request.id);
+    const superAdminPendingRow = await pool.query<{ requested_approver_user_id: number | null; approver_user_id: number | null }>(
+      `select requested_approver_user_id, approver_user_id
+       from appointments_v2.scheduling_override_requests where id = $1`,
+      [superAdminRequestId]
+    );
+    assert.equal(Number(superAdminPendingRow.rows[0]?.requested_approver_user_id), eligible.userId);
+    assert.equal(superAdminPendingRow.rows[0]?.approver_user_id, null);
   });
 
   it("shows directed requests to the requester and assigned doctor before the 200-row limit", async () => {

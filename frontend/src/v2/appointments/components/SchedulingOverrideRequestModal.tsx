@@ -56,6 +56,8 @@ export function SchedulingOverrideRequestModal({
   });
   const reasons = decision?.reasons ?? [];
   const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
+  const selectedApprover = approversQuery.data?.find((doctor) => Number(doctor.userId) === Number(requestedApproverUserId));
+  const hasEligibleApprovers = (approversQuery.data?.length ?? 0) > 0;
 
   async function submit() {
     if (!reason.trim()) {
@@ -77,26 +79,32 @@ export function SchedulingOverrideRequestModal({
           <div>
             <DialogTitle>{t(language, "overrideRequests.requestApproval")}</DialogTitle>
             <DialogDescription>
-              {t(language, "overrideRequests.notBookedUntilApproval")}
+              {requiresDirectedApprover
+                ? selectedApprover
+                  ? t(language, "overrideRequests.directedNotBookedUntilApprovalFrom", { doctor: selectedApprover.displayName })
+                  : t(language, "overrideRequests.directedNotBookedUntilApproval")
+                : t(language, "overrideRequests.notBookedUntilApproval")}
             </DialogDescription>
           </div>
 
           {requiresDirectedApprover ? (
             <div>
               <label htmlFor="override-request-approver" className="mb-1 block text-sm font-semibold text-foreground">
-                Supervising doctor
+                {t(language, "overrideRequests.requestApprovalFrom")} <span aria-hidden="true">*</span>
               </label>
               <select
                 id="override-request-approver"
                 className="input-premium w-full"
                 value={requestedApproverUserId}
                 onChange={(event) => setRequestedApproverUserId(event.target.value)}
-                disabled={approversQuery.isLoading}
+                disabled={approversQuery.isLoading || approversQuery.isError || !hasEligibleApprovers}
+                required
               >
-                <option value="">{approversQuery.isLoading ? "Loading eligible doctors…" : "Select one doctor"}</option>
+                <option value="">{approversQuery.isLoading ? t(language, "overrideRequests.loadingEligibleDoctors") : t(language, "overrideRequests.selectSupervisingDoctor")}</option>
                 {(approversQuery.data ?? []).map((doctor) => <option key={doctor.userId} value={doctor.userId}>{doctor.displayName}</option>)}
               </select>
-              {approversQuery.isError ? <p className="mt-1 text-xs text-red-700">Eligible doctors could not be loaded.</p> : null}
+              {approversQuery.isError ? <p className="mt-1 text-xs text-red-700">{t(language, "overrideRequests.eligibleDoctorsLoadError")}</p> : null}
+              {!approversQuery.isLoading && !approversQuery.isError && !hasEligibleApprovers ? <p className="mt-1 text-xs text-muted-foreground">{t(language, "overrideRequests.noEligibleSupervisingDoctor")}</p> : null}
             </div>
           ) : null}
         </DialogHeader>
@@ -154,7 +162,7 @@ export function SchedulingOverrideRequestModal({
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
             {t(language, "common.cancel")}
           </Button>
-          <Button type="button" onClick={submit} disabled={loading || overrideTypes.length === 0 || (requiresDirectedApprover && (approversQuery.isLoading || !requestedApproverUserId))}>
+          <Button type="button" onClick={submit} disabled={loading || overrideTypes.length === 0 || (requiresDirectedApprover && (approversQuery.isLoading || approversQuery.isError || !hasEligibleApprovers || !requestedApproverUserId))}>
             {loading ? t(language, "overrideRequests.submitting") : t(language, "overrideRequests.submitRequest")}
           </Button>
         </DialogFooter>

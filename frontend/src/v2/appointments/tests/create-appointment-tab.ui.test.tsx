@@ -1294,7 +1294,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     });
   });
 
-  it("lets supervisor request total capacity override approval without immediate booking", async () => {
+  it("requires supervisor to select one eligible doctor for a total-capacity request", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = supervisorTotalCapacityRows;
     const { onCreateAppointment } = setup(true, [], undefined, "supervisor");
@@ -1308,8 +1308,12 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
       await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+      expect(await screen.findByLabelText(/Request approval from/)).toBeTruthy();
+      expect(screen.queryByText(/Any doctor/i)).toBeNull();
+      expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(true);
+      await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
       fireEvent.change(await screen.findByPlaceholderText("Explain why this appointment needs override approval"), {
-        target: { value: "Need superadmin total capacity approval" },
+        target: { value: "Need directed doctor total capacity approval" },
       });
       await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
 
@@ -1319,7 +1323,8 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(onCreateAppointment).not.toHaveBeenCalled();
       expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
         requestType: "create_booking",
-        requesterReason: "Need superadmin total capacity approval",
+        requesterReason: "Need directed doctor total capacity approval",
+        requestedApproverUserId: 91,
         requestPayload: {
           bookingDate: "2027-01-06",
         },
@@ -1341,12 +1346,12 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: /2027-01-06 full/i }));
       await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
 
-      expect(screen.getByRole("option", { name: "Select one doctor" })).toBeTruthy();
+      expect(screen.getByRole("option", { name: "Select supervising doctor" })).toBeTruthy();
       expect(screen.getByRole("option", { name: "Dr Capacity" })).toBeTruthy();
       expect(screen.queryByText(/Any authorized doctor/i)).toBeNull();
       expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(true);
 
-      await userEvent.selectOptions(screen.getByLabelText("Supervising doctor"), "91");
+      await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
       fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
         target: { value: "Urgent capacity request" },
       });
@@ -1355,6 +1360,39 @@ describe("CreateAppointmentTab UI interactions", () => {
       await waitFor(() => expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalledTimes(1));
       expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
         requesterReason: "Urgent capacity request",
+        requestedApproverUserId: 91,
+      });
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("lets Super Admin choose a directed approval request without removing the direct override action", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = supervisorTotalCapacityRows;
+    const { onCreateAppointment } = setup(true, [], undefined, "super_admin");
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-06 full/i }));
+
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(false);
+      await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+      expect(await screen.findByLabelText(/Request approval from/)).toBeTruthy();
+      expect(screen.queryByText(/Any doctor/i)).toBeNull();
+      expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(true);
+      await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
+      fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+        target: { value: "Super Admin requests doctor review" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+      await waitFor(() => expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalledTimes(1));
+      expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+        requesterReason: "Super Admin requests doctor review",
         requestedApproverUserId: 91,
       });
       expect(onCreateAppointment).not.toHaveBeenCalled();
@@ -1414,6 +1452,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
       await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
       expect(await screen.findByText(/Total modality capacity override, Exam mix override/)).toBeTruthy();
+      await userEvent.selectOptions(screen.getByLabelText(/Request approval from/), "91");
       fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
         target: { value: "Combined request" },
       });
@@ -1424,6 +1463,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
         requestType: "create_booking",
         requesterReason: "Combined request",
+        requestedApproverUserId: 91,
         requestPayload: { bookingDate: "2027-01-09" },
       });
     } finally {

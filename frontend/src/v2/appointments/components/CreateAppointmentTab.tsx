@@ -37,7 +37,7 @@ import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
-import { formatOverrideType, inferSupportedOverrideTypesFromDecision, inferSupportedOverrideTypesFromExamRuleMetadata, shouldUseDeferredOverrideRequest } from "../utils/scheduling-override-requests";
+import { formatOverrideType, inferSupportedOverrideTypesFromDecision, inferSupportedOverrideTypesFromExamRuleMetadata, isDirectedDoctorOverbookingTypes, shouldUseDeferredOverrideRequest } from "../utils/scheduling-override-requests";
 import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -496,7 +496,7 @@ export function CreateAppointmentTab({
     availabilitySelectedRow != null &&
     availabilitySelectedRow.status !== "available" &&
     !isReceptionist &&
-    !canRequestDeferredOverride(selectedRowSupportedOverrideTypes) &&
+    (!canRequestDeferredOverride(selectedRowSupportedOverrideTypes) || isSuperAdmin) &&
     selectedRowSupportedOverrideTypes.length > 0;
   const selectedRowCanBookNormally =
     availabilitySelectedRow == null
@@ -728,7 +728,7 @@ export function CreateAppointmentTab({
         effectiveCapacityResolutionMode === "category_override" ||
         effectiveCapacityResolutionMode === "total_capacity_override";
       if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || (decision.displayStatus === "blocked" && supportedOverrideTypes.length > 0) || selectedCapacityModeNeedsOverrideAuth) {
-        if (canRequestDeferredOverride(supportedOverrideTypes)) {
+        if (canRequestDeferredOverride(supportedOverrideTypes) && !isSuperAdmin) {
           setPendingRequestDecision(decision);
           setRequestOverrideTypes(supportedOverrideTypes);
           setRequestOverrideError(null);
@@ -1452,7 +1452,7 @@ export function CreateAppointmentTab({
         requestedDate={form.appointmentDate}
         requestedTime={null}
         modalityId={form.modalityId}
-        requiresDirectedApprover={isReceptionist && requestOverrideTypes.every((type) => type === "total_capacity_override" || type === "exam_mix_override") && requestOverrideTypes.length > 0}
+        requiresDirectedApprover={isDirectedDoctorOverbookingTypes(requestOverrideTypes)}
         decision={pendingRequestDecision}
         loading={createOverrideRequestMutation.isPending}
         error={requestOverrideError}

@@ -17,6 +17,11 @@ export function normalizeSchedulingOverrideTypes(types: readonly SchedulingOverr
   return OVERRIDE_TYPE_ORDER.filter((type) => values.has(type));
 }
 
+export function isDirectedDoctorOverbookingTypes(types: readonly SchedulingOverrideType[]): boolean {
+  const normalized = normalizeSchedulingOverrideTypes(types);
+  return normalized.length > 0 && normalized.every((type) => type === "total_capacity_override" || type === "exam_mix_override");
+}
+
 function collectSupportedOverrideTypes(reasonCodes: readonly string[] | undefined): SchedulingOverrideType[] {
   const codes = new Set(reasonCodes ?? []);
   const closed =
@@ -153,6 +158,7 @@ export function shouldUseDeferredOverrideRequest(
   if (!types.length) return false;
   if (role === "receptionist") return receptionistRequestsEnabled;
   if (role === "supervisor") return types.includes("total_capacity_override") || types.includes("exam_mix_override");
+  if (role === "super_admin") return isDirectedDoctorOverbookingTypes(types);
   return false;
 }
 

@@ -9,11 +9,11 @@ async function createDirectedCapacityRequest(page: Page, patientName: string, na
   await page.getByRole("button", { name: new RegExp(patientName, "i") }).click();
   await page.getByRole("textbox", { name: /enter complete national id/i }).fill(nationalId);
   await page.getByRole("button", { name: "Verify and select" }).click();
-  const modalitySelect = page.getByLabel(/modality/i);
+  const modalitySelect = page.getByTestId("appointment-form-region").getByLabel("Modality", { exact: true });
   const modalityValue = await modalitySelect.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value");
   await modalitySelect.selectOption(modalityValue ?? "");
   await page.getByRole("button", { name: "Acknowledge and continue" }).click();
-  const examTypeSelect = page.getByLabel(/exam type/i);
+  const examTypeSelect = page.getByTestId("appointment-form-region").getByLabel("Exam Type", { exact: true });
   const examTypeValue = await examTypeSelect.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value");
   await examTypeSelect.selectOption(examTypeValue ?? "");
   await page.getByLabel(/start date/i).fill(fullFixtureDate);
@@ -23,11 +23,11 @@ async function createDirectedCapacityRequest(page: Page, patientName: string, na
 
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Request override approval" })).toBeVisible();
-  const selector = dialog.getByLabel("Supervising doctor");
+  const selector = dialog.getByLabel(/Request approval from/);
   await expect(selector).toBeVisible();
   await expect(dialog.getByRole("button", { name: /submit request/i })).toBeDisabled();
   await screenshot("directed-overbooking-before-select.png");
-  await expect(selector.locator("option")).toContainText(["Select one doctor", "Dr E2E", "Dr E2E Other", "Dr E2E Supervisor"]);
+  await expect(selector.locator("option")).toContainText(["Select supervising doctor", "Dr E2E", "Dr E2E Other", "Dr E2E Supervisor"]);
   await expect(selector).not.toContainText(/any doctor/i);
   await screenshot("directed-overbooking-selector.png");
   await dialog.getByLabel("Requester reason").fill("Synthetic E2E directed capacity exception requiring clinical review.");
@@ -83,6 +83,75 @@ test("reception directs a capacity override to one doctor, and only that doctor 
   await selectedContext.close();
   await otherContext.close();
   await receptionContext.close();
+});
+
+test("supervisor must direct a capacity override request to one doctor", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await signInWithSession(page, "e2e_supervisor");
+  await createDirectedCapacityRequest(
+    page,
+    "E2E Similar Patient One",
+    "100000000001",
+    (name) => page.screenshot({ path: testInfo.outputPath(name), fullPage: true })
+  );
+});
+
+test("Super Admin retains direct override while also being able to request named-doctor approval", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await signInWithSession(page, "e2e_super_admin");
+  await page.goto("/appointments");
+  await page.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill("E2E Similar Patient Two");
+  await page.getByRole("button", { name: /E2E Similar Patient Two/i }).click();
+  await page.getByRole("textbox", { name: /enter complete national id/i }).fill("100000000002");
+  await page.getByRole("button", { name: "Verify and select" }).click();
+  const modalitySelect = page.getByTestId("appointment-form-region").getByLabel("Modality", { exact: true });
+  await modalitySelect.selectOption(await modalitySelect.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value") ?? "");
+  await page.getByRole("button", { name: "Acknowledge and continue" }).click();
+  const examTypeSelect = page.getByTestId("appointment-form-region").getByLabel("Exam Type", { exact: true });
+  await examTypeSelect.selectOption(await examTypeSelect.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value") ?? "");
+  const fullFixtureDate = e2eTomorrowInTripoli();
+  await page.getByLabel(/start date/i).fill(fullFixtureDate);
+  await page.getByRole("button", { name: "Show full days" }).click();
+  await page.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") }).click();
+
+  await page.getByLabel("Capacity Resolution Action").selectOption("total_capacity_override");
+  await expect(page.getByRole("button", { name: "Create Appointment" })).toBeEnabled();
+  await page.getByRole("button", { name: "Create Appointment" }).click();
+  await expect(page.getByText("Supervisor Override Required")).toBeVisible();
+  await page.getByPlaceholder("Override Reason").fill("Synthetic Super Admin direct capacity override.");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByText(/appointment created|appointment successful/i)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("super-admin-direct-overbooking.png"), fullPage: true });
+
+  await page.goto("/appointments");
+  await page.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill("E2E Similar Patient One");
+  await page.getByRole("button", { name: /E2E Similar Patient One/i }).click();
+  await page.getByRole("textbox", { name: /enter complete national id/i }).fill("100000000001");
+  await page.getByRole("button", { name: "Verify and select" }).click();
+  const deferredModality = page.getByTestId("appointment-form-region").getByLabel("Modality", { exact: true });
+  await deferredModality.selectOption(await deferredModality.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value") ?? "");
+  await page.getByRole("button", { name: "Acknowledge and continue" }).click();
+  const deferredExam = page.getByTestId("appointment-form-region").getByLabel("Exam Type", { exact: true });
+  await deferredExam.selectOption(await deferredExam.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value") ?? "");
+  await page.getByLabel(/start date/i).fill(fullFixtureDate);
+  await page.getByRole("button", { name: "Show full days" }).click();
+  await page.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") }).click();
+  await page.getByRole("button", { name: "Request override approval" }).click();
+  const dialog = page.getByRole("dialog");
+  const selector = dialog.getByLabel(/Request approval from/);
+  await expect(selector).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /submit request/i })).toBeDisabled();
+  await selector.selectOption({ label: "Dr E2E" });
+  await expect(dialog.getByText("Approval will be requested from Dr E2E.")).toBeVisible();
+  await dialog.getByLabel("Requester reason").fill("Synthetic Super Admin directed capacity exception.");
+  const createRequest = page.waitForRequest((request) => request.method() === "POST" && /\/v2\/scheduling-override-requests$/.test(new URL(request.url()).pathname));
+  await dialog.getByRole("button", { name: /submit request/i }).click();
+  const request = await createRequest;
+  expect(request.postDataJSON()).toMatchObject({ requestedApproverUserId: Number(await selector.inputValue()) });
+  await expect(page.getByText(/submitted|pending/i).first()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("super-admin-directed-overbooking.png"), fullPage: true });
 });
 
 test("Super Admin sees and decides a request that remains directed to its original doctor", async ({ browser }, testInfo) => {

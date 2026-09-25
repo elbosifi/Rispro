@@ -71,7 +71,9 @@ schedulingOverrideRequestRouter.post(
 schedulingOverrideRequestRouter.get(
   "/eligible-doctor-approvers",
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
-    if (req.user?.role !== "receptionist") throw new SchedulingError(403, "Only reception may select a directed overbooking approver.", ["eligible_approver_lookup_forbidden"]);
+    if (!["receptionist", "supervisor", "super_admin"].includes(req.user?.role ?? "")) {
+      throw new SchedulingError(403, "Only reception, supervisors, and Super Admins may select a directed overbooking approver.", ["eligible_approver_lookup_forbidden"]);
+    }
     const modalityId = Number(req.query.modalityId ?? req.query.modality_id);
     if (!Number.isInteger(modalityId) || modalityId <= 0) throw new SchedulingError(400, "A valid modality ID is required.", ["invalid_modality_id"]);
     res.json({ doctors: await listEligibleDoctorSupervisorsForModality(modalityId) });
