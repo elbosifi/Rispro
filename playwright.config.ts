@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:5173",
-    timezoneId: "UTC",
+    timezoneId: "Africa/Tripoli",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

@@ -1314,7 +1314,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(supervisorRequestApproval.status, 403);
   });
 
-  it("rejects supervisor approval when current scheduling state needs a stronger override than requested", async () => {
+  it("marks approval failed when current scheduling state needs a stronger override than requested", async () => {
     if (!testData) return;
     await setCapacityLimits();
     const date = "2042-04-07";
@@ -1331,13 +1331,25 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       body: { approverReason: "Now requires total capacity" },
     });
 
-    assertForbiddenResponse(approval);
+    assert.equal(approval.status, 409, JSON.stringify(approval.data));
+    assert.match((approval.data as any).error, /different or stronger override is now required/i);
+    assert.equal((approval.data as any).details.request.status, "failed");
+    assert.equal((approval.data as any).details.request.failureCode, "override_type_changed");
     assert.equal(await countBookings(date, targetPatientId), beforeCount);
     const stored = await getRequestFromDb(Number((requested.data as any).request.id));
-    assert.equal(stored.status, "pending");
-    assert.equal(stored.failure_code, null);
-    assert.equal(stored.failure_message, null);
-    assert.equal(stored.approval_decision_snapshot_json, null);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failure_code, "override_type_changed");
+    assert.match(stored.failure_message ?? "", /different or stronger override is now required/i);
+    assert.ok(stored.approval_decision_snapshot_json);
+
+    const repeatedApproval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
+      method: "POST",
+      body: { approverReason: "Attempt to reuse stale request" },
+    });
+    assert.equal(repeatedApproval.status, 409, JSON.stringify(repeatedApproval.data));
+    assert.match((repeatedApproval.data as any).error, /no longer pending/i);
+    assert.equal(await countBookings(date, targetPatientId), beforeCount);
+    assert.equal((await getRequestFromDb(Number((requested.data as any).request.id))).status, "failed");
   });
 
   it("fails closed when the override is no longer needed", async () => {
