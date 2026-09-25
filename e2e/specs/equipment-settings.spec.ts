@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { E2E_PASSWORD, signInWithSession } from "../helpers/auth.js";
 
 async function reauthenticate(page: Page) {
@@ -10,6 +11,16 @@ test("Equipment Registry manages its optional DICOM identity without a standalon
   const screenshot = (name: string) => page.screenshot({ path: testInfo.outputPath(name), fullPage: true });
   const pageErrors: string[] = []; page.on("pageerror", (error) => pageErrors.push(error.message));
   await signInWithSession(page, "e2e_super_admin"); await reauthenticate(page);
+  const equipmentResponse = await page.request.get("http://127.0.0.1:3100/api/settings/equipment");
+  expect(equipmentResponse.ok()).toBeTruthy();
+  const equipmentPayload = await equipmentResponse.json() as { equipment: Array<{ name: string; modalityId: number | null }> };
+  const plannedFixture = equipmentPayload.equipment.find((item) => item.name === "E2E Planned CT");
+  expect(plannedFixture?.modalityId).toBeTruthy();
+  const equipmentName = `E2E Retry Device ${testInfo.workerIndex}-${testInfo.retry}-${randomUUID()}`;
+  const fixtureResponse = await page.request.post("http://127.0.0.1:3100/api/settings/equipment", {
+    data: { name: equipmentName, equipmentType: "OTHER", modalityId: plannedFixture!.modalityId },
+  });
+  expect(fixtureResponse.ok(), await fixtureResponse.text()).toBeTruthy();
   await page.goto("/settings");
   await expect(page.getByRole("button", { name: "Equipment Registry" })).toBeVisible();
   await expect(page.getByRole("button", { name: "DICOM Devices" })).toHaveCount(0);
@@ -19,11 +30,12 @@ test("Equipment Registry manages its optional DICOM identity without a standalon
   await expect(page.getByRole("row", { name: /E2E Performed CT/ })).toContainText("DICOM configured");
   await expect(page.getByRole("row", { name: /E2E Performed CT/ })).toContainText("AE: E2E_MPPS_CT");
   await expect(page.getByRole("row", { name: /E2E Planned CT/ })).toContainText("DICOM not configured");
+  await expect(page.getByRole("row", { name: new RegExp(equipmentName) })).toContainText("DICOM not configured");
   await screenshot("equipment-settings-desktop.png");
 
-  const planned = page.getByRole("row", { name: /E2E Planned CT/ }); await planned.getByRole("button", { name: "Edit" }).click();
+  const planned = page.getByRole("row", { name: new RegExp(equipmentName) }); await planned.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("button", { name: "Configure DICOM" }).click();
-  await expect(page.getByLabel("Device name")).toHaveValue("E2E Planned CT");
+  await expect(page.getByLabel("Device name")).toHaveValue(equipmentName);
   await page.getByLabel("Modality AE Title").fill("E2E_SETTINGS_CT");
   await page.getByLabel("Scheduled Station AE Title").fill("E2E_SETTINGS_STATION");
   await page.getByLabel("Station name").fill("E2E Settings station");
@@ -32,11 +44,12 @@ test("Equipment Registry manages its optional DICOM identity without a standalon
   await page.getByRole("button", { name: "Save DICOM identity" }).click();
   await expect(page.getByText("DICOM configured")).toBeVisible();
   await screenshot("equipment-settings-edit-desktop.png");
-  await page.goto("/settings?section=equipment"); await expect(page.getByRole("row", { name: /E2E Planned CT/ })).toContainText("AE: E2E_SETTINGS_CT");
+  await page.goto("/settings?section=equipment"); await expect(page.getByRole("row", { name: new RegExp(equipmentName) })).toContainText("AE: E2E_SETTINGS_CT");
   await page.goto("/settings?section=dicom_gateway_devices"); await expect(page.getByRole("heading", { name: "Equipment Registry" })).toBeVisible();
   await page.getByRole("button", { name: /Back.*Settings/ }).click(); await expect(page.getByRole("button", { name: "Advanced / Legacy DICOM Gateway" })).toBeVisible();
   await page.goto("/settings?section=equipment"); await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy(); await screenshot("equipment-settings-mobile.png");
-  await page.getByRole("button", { name: "Switch language to Arabic" }).click(); await expect(page.locator("html")).toHaveAttribute("dir", "rtl"); await screenshot("equipment-settings-rtl.png");
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
+  await page.getByRole("button", { name: "العربية", exact: true }).click(); await expect(page.locator("html")).toHaveAttribute("dir", "rtl"); await screenshot("equipment-settings-rtl.png");
   expect(pageErrors, `Unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);
 });

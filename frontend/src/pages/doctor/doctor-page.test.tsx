@@ -2793,14 +2793,19 @@ describe("Doctor Portal shell", () => {
     const drawer = await screen.findByRole("dialog", { name: "Change assigned protocol" });
     expect(within(drawer).getByRole("heading")).toBeTruthy();
     expect(within(drawer).queryByText(/Edit master protocol|Change protocol definition|Assign protocol version/i)).toBeNull();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     cancelDoctorProtocolAssignmentMock.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
 
     fireEvent.click(await within(drawer).findByRole("button", { name: "More protocol actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear assignment" }));
 
-    await waitFor(() => expect(cancelDoctorProtocolAssignmentMock).toHaveBeenCalledWith(78));
-    confirmSpy.mockRestore();
+    const confirmationTitle = await screen.findByRole("heading", { name: "Clear protocol assignment?" });
+    const confirmation = confirmationTitle.closest('[role="dialog"]');
+    expect(confirmation).not.toBeNull();
+    expect(cancelDoctorProtocolAssignmentMock).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation as HTMLElement).getByRole("button", { name: "Clear assignment" }));
+
+    await waitFor(() => expect(cancelDoctorProtocolAssignmentMock).toHaveBeenCalledTimes(1));
+    expect(cancelDoctorProtocolAssignmentMock).toHaveBeenCalledWith(78);
   });
 
   it("shows save errors inside assignment drawer and preserves form values", async () => {

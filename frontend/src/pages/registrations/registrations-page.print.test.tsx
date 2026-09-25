@@ -731,7 +731,7 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const initialParams = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
-    expect(initialParams.has("tab")).toBe(false);
+    expect(initialParams.get("tab")).toBe("status");
     expect(initialParams.get("customFilter")).toBe("keep");
 
     await userEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);

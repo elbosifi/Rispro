@@ -2300,8 +2300,14 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
-  it("returns cached PACS notes only to authenticated mobile reporting-board readers", async () => {
+  it("returns cached PACS notes only to authenticated mobile reporting-board readers", async (t) => {
     guard();
+    let liveSonicDicomReads = 0;
+    sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
+      checkStatusesBatch: async () => { liveSonicDicomReads += 1; return new Map(); },
+      fetchDocumentHistoriesBatch: async () => { liveSonicDicomReads += 1; return new Map(); },
+    });
+    t.after(() => sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest(null));
     const notedBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "cached-note" });
     const linkedComparisonBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "linked-comparison-note" });
     const linkedComparisonId = await createComparisonRequestForBooking(linkedComparisonBookingId, `${addDays(-1)}T08:00:00.000Z`, "appointment scope regression");
@@ -2331,6 +2337,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(linkedComparison.data.cases.some((row) => row.caseType === "comparison" && row.appointmentId === linkedComparisonBookingId && row.comparisonRequestId === linkedComparisonId), true);
     assert.ok(linkedComparison.data.cases.every((row) => row.appointmentId === linkedComparisonBookingId));
     assert.equal(linkedComparison.data.cases.find((row) => row.caseType === "appointment")?.sonicDicomStudyNote, null);
+    assert.equal(liveSonicDicomReads, 0);
   });
 
   it("uses the requested non-first mobile case identity for detail, reassignment, and unassignment", async () => {

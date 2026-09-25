@@ -12,6 +12,7 @@ const users = [
   ["e2e_super_admin", "E2E Super Admin", "super_admin"],
   ["e2e_doctor", "E2E Doctor", "doctor"],
   ["e2e_doctor_other", "E2E Other Doctor", "doctor"],
+  ["e2e_doctor_non_supervisor", "E2E Non-Supervisory Doctor", "doctor"],
 ] as const;
 
 try {
@@ -175,6 +176,16 @@ try {
     `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
      values ($1, $2, true, true, true, true)`,
     [otherDoctorProfileId, modalityId],
+  );
+  const nonSupervisorUserId = Number((await pool.query<{ id: number }>("select id from users where username = 'e2e_doctor_non_supervisor'")).rows[0].id);
+  const nonSupervisorProfileId = Number((await pool.query<{ id: number }>(
+    `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)
+     values ($1, 'Dr E2E Non-Supervisor', 'consultant', true, true, true, false) returning id`, [nonSupervisorUserId],
+  )).rows[0].id);
+  await pool.query(
+    `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+     values ($1, $2, true, true, false, true)`,
+    [nonSupervisorProfileId, modalityId],
   );
   const supervisorProfileId = Number((await pool.query<{ id: number }>(
     `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active, can_finalize_reports, can_assign_protocols, can_supervise)

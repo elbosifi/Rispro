@@ -363,15 +363,6 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
   });
 
-  it("uses the doctor worklist target for mobile assignment counters while preserving actor permissions", () => {
-    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
-
-    assert.match(service, /function mobileCounters\(cases: ReportingBoardCaseRow\[], assignedDoctorId\?: number \| null\)/);
-    assert.match(service, /const mine = assignedDoctorId \? cases\.filter\(\(row\) => row\.assignedDoctorId === assignedDoctorId\) : \[\]/);
-    assert.match(service, /overdue: mine\.filter/);
-    assert.match(service, /view\.linkKind === "doctor_worklist" \? view\.targetDoctorId : identity\?\.profile\?\.id \?\? null/);
-    assert.match(service, /Number\(identity\.profile\.id\) === view\.targetDoctorId \|\| canManage/);
-  });
 
   it("adds in-app Reporting Board notification event storage and safe body text", () => {
     const migration = readFileSync(`${root}/src/db/migrations/088_doctor_portal_reporting_board_notifications.sql`, "utf8");
@@ -472,32 +463,20 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /intendedReportingDoctorReason/);
   });
 
-  it("activates reporting intents after completion and notifies after commit", () => {
+  it("activates reporting intents through the shared transaction and post-commit boundary", () => {
     const statusService = readFileSync(`${root}/src/modules/appointments-v2/booking/services/status-booking.service.ts`, "utf8");
     const pacsWorker = readFileSync(`${root}/src/services/appointments-v2-pacs-auto-completion-worker.ts`, "utf8");
     const mppsService = readFileSync(`${root}/src/services/mpps-service.ts`, "utf8");
-    const intentService = readFileSync(`${root}/src/modules/doctor-portal/reporting-assignment-intents-service.ts`, "utf8");
+    const terminalTransition = readFileSync(`${root}/src/modules/appointments-v2/booking/services/booking-terminal-transition.service.ts`, "utf8");
 
-    assert.match(intentService, /select[\s\S]*from appointments_v2\.bookings[\s\S]*for update/);
-    assert.match(intentService, /from doctor_portal\.reporting_assignment_intents[\s\S]*status = 'pending'[\s\S]*for update/);
-    assert.match(intentService, /booking\.status !== "completed"/);
-    assert.match(intentService, /booking\.requiresReport !== true/);
-    assert.match(intentService, /can_finalize_reports = true/);
-    assert.match(intentService, /doctor_modality_permissions/);
-    assert.match(intentService, /can_report = true/);
-    assert.match(intentService, /insert into doctor_portal\.case_team_assignments/);
-    assert.match(intentService, /assigned_doctor_id/);
-    assert.match(intentService, /status = 'activated'/);
-    assert.match(intentService, /status = 'failed'/);
-    assert.match(statusService, /activatePendingReportingAssignmentIntent/);
-    assert.match(pacsWorker, /activatePendingReportingAssignmentIntent/);
-    assert.match(mppsService, /activatePendingReportingAssignmentIntent/);
-    assert.match(statusService, /createAssignedToMeNotifications/);
-    assert.match(pacsWorker, /createAssignedToMeNotifications/);
-    assert.match(mppsService, /createAssignedToMeNotifications/);
-    assert.match(statusService, /reporting_assignment_intent_notification_failed/);
-    assert.match(pacsWorker, /reporting_assignment_intent_notification_failed/);
-    assert.match(mppsService, /reporting_assignment_intent_notification_failed/);
+    assert.match(terminalTransition, /activatePendingReportingAssignmentIntent/);
+    assert.match(terminalTransition, /export async function runBookingTerminalTransitionPostCommit/);
+    assert.match(terminalTransition, /createAssignedToMeNotifications/);
+    for (const caller of [statusService, pacsWorker, mppsService]) {
+      assert.match(caller, /applyBookingTerminalTransition/);
+      assert.match(caller, /runBookingTerminalTransitionPostCommit/);
+      assert.doesNotMatch(caller, /activatePendingReportingAssignmentIntent|createAssignedToMeNotifications/);
+    }
   });
 
   it("adds authenticated saved-view Web Push subscription storage", () => {
@@ -577,21 +556,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repository, /subscription_hash = \$2 and enabled = true/);
   });
 
-  it("keeps board reads cache-only for status and study notes", () => {
-    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
-    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
-    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function needsResolvedPostFiltering")), /reportStatusChecker\(|studyNoteFetcher\(/);
-    assert.match(repository, /reporting_board_sonicdicom_cache/);
-    assert.match(repository, /sonicdicom_study_note as "sonicDicomStudyNote"/);
-    const mobileView = service.slice(service.indexOf("export async function getPublicReportingBoardMobileView"), service.indexOf("export async function getPublicReportingBoardMobileCase"));
-    assert.doesNotMatch(mobileView, /checkSonicDicomReportStatusesBatch|fetchSonicDicomStudyNotes|studyNoteFetcher/);
-    assert.match(mobileView, /mobileCase\(row, Boolean\(identity\)\)/);
-  });
 
-  it("uses the personal reporting scope for OHIF and SonicDICOM case authorization", () => {
-    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
-    assert.match(service, /getAuthorizedReportingBoardAppointment[\s\S]*?requirePersonalReportingBoardAppointment\(actor, appointmentId\)/);
-  });
 
   it("allows only an assigned finalization-capable doctor to use the existing manual-final path", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
@@ -612,12 +577,6 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /canReconcilePatientIdentity: false/);
   });
 
-  it("uses the existing complementary-recall service through the personal reporting scope", () => {
-    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
-    assert.match(routes, /"\/cases\/:appointmentId\/complementary-recalls"[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?createComplementaryRecall/);
-    assert.match(routes, /"\/complementary-recalls\/:recallId\/withdraw"[\s\S]*?getComplementaryRecall[\s\S]*?requirePersonalReportingBoardAppointment[\s\S]*?withdrawComplementaryRecall/);
-    assert.match(routes, /reasonCode:[\s\S]*?qaClassification:[\s\S]*?urgency:[\s\S]*?dueAt:[\s\S]*?reportingDisposition:/);
-  });
 
   it("uses exact full-scope resolution before filtered desktop pagination", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");

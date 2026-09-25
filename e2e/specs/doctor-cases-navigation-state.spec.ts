@@ -19,15 +19,19 @@ async function configureCases(page: Parameters<typeof signInWithSession>[0]) {
   const dateTo = addDays(dateFrom, 8);
   await page.getByRole("textbox", { name: "From" }).fill(dateFrom);
   await page.getByRole("textbox", { name: "To" }).fill(dateTo);
-  await page.getByRole("combobox", { name: "Modality" }).selectOption({ label: "E2E CT" });
+  const modality = page.getByRole("combobox", { name: "Modality" });
+  await modality.selectOption({ label: "E2E CT" });
+  await expect(modality).toHaveValue(/^\d+$/);
+  const modalityId = await modality.inputValue();
   await page.getByRole("combobox", { name: "Category" }).selectOption("non_oncology");
-  return { dateFrom, dateTo };
+  return { dateFrom, dateTo, modalityId };
 }
 
 test("Doctor Cases direct deep link survives reload", async ({ page }) => {
   await openSupervisorCases(page);
-  const { dateFrom, dateTo } = await configureCases(page);
+  const { dateFrom, dateTo, modalityId } = await configureCases(page);
   await page.getByRole("button", { name: "Team cases" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("modalityId")).toBe(modalityId);
 
   const savedUrl = page.url();
   expect(savedUrl).toContain(`/doctor/today-cases?dateFrom=${dateFrom}`);
@@ -83,7 +87,7 @@ test("Doctor Cases normalizes unauthorized worklist views", async ({ page }) => 
   page.on("request", (request) => {
     if (request.url().includes("/api/doctor/cases/team")) teamRequests.push(request.url());
   });
-  await signInWithSession(page, "e2e_doctor");
+  await signInWithSession(page, "e2e_doctor_non_supervisor");
   await page.goto("/doctor/today-cases?view=team");
 
   await expect(page.getByRole("heading", { name: "Report Worklist" })).toBeVisible();

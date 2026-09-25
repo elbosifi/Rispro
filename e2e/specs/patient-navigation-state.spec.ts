@@ -85,8 +85,9 @@ test("Patients deep links retain filters, drawer state, edit return, and global 
     const filteredUrl = page.url();
     const globalSearch = page.getByRole("combobox", { name: "Search patients or registrations" });
     await globalSearch.fill("E2E Similar Patient One");
-    await expect(page.getByRole("option", { name: /E2E Similar Patient One/ })).toBeVisible();
-    await page.getByRole("option", { name: /E2E Similar Patient One/ }).click();
+    const patientResult = page.getByRole("option", { name: /E2E Similar Patient One.*100000000001/ });
+    await expect(patientResult).toBeVisible();
+    await patientResult.click();
     await expect(page).toHaveURL(/\/patients\?.*patientId=\d+/);
     expect(page.url()).not.toContain("q=");
     expect(page.url()).not.toContain("E2E Similar Patient One");
