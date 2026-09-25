@@ -3,6 +3,10 @@
 exports[`settings page composition > preserves the ordered settings menu and group assignment matrix 1`] = `
 [
   [
+    "mobile_widget",
+    "admin",
+  ],
+  [
     "patient_registration",
     "clinical",
   ],

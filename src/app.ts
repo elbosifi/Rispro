@@ -45,6 +45,7 @@ import { emailSettingsRouter } from "./routes/email-settings.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 import { incidentsRouter } from "./routes/incidents.js";
 import { sopsRouter } from "./modules/sops/routes.js";
+import { mobileWidgetRouter, mobileWidgetAdminRouter } from "./modules/mobile-widget/mobile-widget-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -148,6 +149,10 @@ export function createApp(): Application {
   // Token-scoped data for the in-container appointment-slip renderer. It must remain
   // outside the user-session middleware because Chromium never receives that session.
   app.use("/api/internal/appointment-slip-render", appointmentSlipRenderRouter);
+  app.use("/api/mobile", mobileWidgetRouter);
+  // The widget settings endpoints mount before the general guard so the established
+  // Action PIN route ordering remains intact; apply the password-change guard here.
+  app.use("/api/settings/mobile-widget", blockForcedPasswordChange, mobileWidgetAdminRouter);
   app.use("/api", blockForcedPasswordChange);
   app.use("/api/action-pin", actionPinRouter);
   app.use("/api/users", usersRouter);

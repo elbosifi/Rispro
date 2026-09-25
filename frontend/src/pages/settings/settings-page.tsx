@@ -30,6 +30,7 @@ import ExamTypesSection from "./exam-types-section";
 import UsersSection from "./users-section";
 import ModalitiesSection from "./modalities-section";
 import EquipmentSection from "./equipment-section";
+import MobileWidgetAccessSection from "./mobile-widget-access-section";
 import NameDictionarySection from "./name-dictionary-section";
 import NotAllowedNameWordsSection from "./not-allowed-name-words-section";
 import PatientImportSection from "./patient-import-section";
@@ -65,6 +66,7 @@ export default function SettingsPage() {
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[][]>([]);
   const [reauthVersion, setReauthVersion] = useState(0);
+  const [reauthCancelVersion, setReauthCancelVersion] = useState(0);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
@@ -230,6 +232,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "equipment" && <EquipmentSection onReAuthRequired={requestReAuth} />}
+            {section === "mobile_widget" && <MobileWidgetAccessSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} reauthCancelVersion={reauthCancelVersion} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "not_allowed_name_words" && <NotAllowedNameWordsSection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
@@ -257,7 +260,7 @@ export default function SettingsPage() {
             {section === "email_notifications" && user?.role === "super_admin" && <EmailNotificationsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "authoritative_orthanc" && (user?.role === "supervisor" || user?.role === "super_admin") && <AuthoritativeOrthancSection onReAuthRequired={requestReAuth} />}
 
-            {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
+            {showReAuthModal && <SupervisorReAuthModal onClose={() => { setShowReAuthModal(false); setReauthCancelVersion((prev) => prev + 1); }} onSuccess={handleReAuthSuccess} />}
           </Card>
         </div>
       )}

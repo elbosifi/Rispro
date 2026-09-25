@@ -12,8 +12,9 @@ import {
 describe("settings page composition", () => {
   it("preserves the ordered settings menu and group assignment matrix", () => {
     expect(SETTINGS_GROUPS).toEqual(["all", "clinical", "scheduling", "integrations", "admin", "system"]);
-    expect(SETTINGS_MENU_SECTIONS).toHaveLength(32);
+    expect(SETTINGS_MENU_SECTIONS).toHaveLength(33);
     expect(SETTINGS_MENU_SECTIONS).toEqual([
+      "mobile_widget",
       "patient_registration", "patient_import", "patient_duplicate_resolver",
       "scheduling_and_capacity", "queue_and_arrival", "scheduling_engine_config",
       "pacs_connection", "dicom_gateway_config",
@@ -45,6 +46,8 @@ describe("settings page composition", () => {
   });
 
   it("resolves only authorized sections and preserves unrelated query state when changing section", () => {
+    expect(settingsSectionFromSearch("?section=mobile_widget", "receptionist")).toBe("menu");
+    expect(settingsSectionFromSearch("?section=mobile_widget", "supervisor")).toBe("mobile_widget");
     expect(settingsSectionFromSearch("?section=sonicdicom_reports", "supervisor")).toBe("sonicdicom_reports");
     expect(settingsSectionFromSearch("?section=system_diagnostics", "supervisor")).toBe("menu");
     expect(settingsSectionFromSearch("?section=not_real", "super_admin")).toBe("menu");
