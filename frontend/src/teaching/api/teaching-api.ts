@@ -155,7 +155,8 @@ export interface TeachingQuestionListItem {
   id: number;
   externalId: string;
   questionBank: { code: string; name: string };
-  revision: { revisionNumber: number; status: TeachingQuestionStatus; type: TeachingQuestionType; stem: string; importBatchId: string | null };
+  revision: { id: number; version: number; revisionNumber: number; status: TeachingQuestionStatus; type: TeachingQuestionType; stem: string; importBatchId: string | null };
+  validation: { classification: TeachingValidationClassification; errorCount: number; warningCount: number } | null;
   classification: {
     specialty: { code: string; label: string };
     domain: { code: string; label: string };
@@ -417,6 +418,345 @@ export async function fetchTeachingImportBatch(id: string): Promise<Record<strin
   return api(`/teaching/qbank/import/batches/${encodeURIComponent(id)}`);
 }
 
+export type TeachingValidationClassification = "valid" | "valid_with_warnings" | "invalid";
+export interface TeachingValidationIssue {
+  code: string;
+  message: string;
+}
+
+export interface TeachingBulkQuestionResult {
+  questionId: number;
+  externalId: string;
+  stemPreview: string;
+  revisionId: number;
+  revisionVersion: number;
+  revisionStatus: string;
+  validationStatus: TeachingValidationClassification | null;
+  eligibleForPublish: boolean;
+  errors: TeachingValidationIssue[];
+  warnings: TeachingValidationIssue[];
+  publishStatus?: "published" | "already_published" | "invalid" | "conflict" | "requires_review" | "retired" | "failed";
+}
+
+export interface TeachingBulkValidationResult {
+  total: number;
+  draft: number;
+  inReview: number;
+  published: number;
+  retired: number;
+  valid: number;
+  validWithWarnings: number;
+  invalid: number;
+  conflicts: number;
+  questions: TeachingBulkQuestionResult[];
+}
+
+export interface TeachingBulkPublishResult {
+  requested: number;
+  published: number;
+  alreadyPublished: number;
+  invalid: number;
+  conflicts: number;
+  requiresReview: number;
+  retired: number;
+  failed: number;
+  warnings: number;
+  results: TeachingBulkQuestionResult[];
+}
+
+export async function validateTeachingImportBatch(batchId: string): Promise<TeachingBulkValidationResult> {
+  return api(`/teaching/qbank/import/batches/${encodeURIComponent(batchId)}/validate`, { method: "POST", body: "{}" });
+}
+
+export async function publishTeachingImportBatch(batchId: string): Promise<TeachingBulkPublishResult> {
+  return api(`/teaching/qbank/import/batches/${encodeURIComponent(batchId)}/publish`, { method: "POST", body: "{}" });
+}
+
+export async function validateTeachingQuestionSelection(questionIds: number[]): Promise<TeachingBulkValidationResult> {
+  return api("/teaching/admin/questions/bulk/validate", { method: "POST", body: JSON.stringify({ questionIds }) });
+}
+
 export function teachingAssetUrl(id: number): string {
   return `/api/teaching/assets/${id}`;
+}
+
+export type TeachingSessionMode = "study" | "exam" | "review";
+export type TeachingSessionStatus = "active" | "submitted" | "abandoned";
+export type TeachingQuestionStateFilter = "all" | "unseen" | "correct" | "incorrect" | "answered" | "marked";
+
+export interface TeachingLearnerFilters {
+  questionBank?: string;
+  specialty?: string;
+  domain?: string;
+  topics?: string[];
+  subtopics?: string[];
+  modalities?: string[];
+  competencies?: string[];
+  trainingLevels?: string[];
+  difficulty?: number[];
+  tags?: string[];
+  questionState?: TeachingQuestionStateFilter;
+}
+
+export interface TeachingSessionProgress {
+  total: number;
+  answered: number;
+  correct: number | null;
+  incorrect: number | null;
+  unanswered: number;
+  scorePercent: number | null;
+  answeredAccuracy: number | null;
+  timeUsedSeconds?: number;
+}
+
+export interface TeachingSessionPosition {
+  position: number;
+  answered: boolean;
+}
+
+export interface TeachingLearnerSession {
+  id: number;
+  mode: TeachingSessionMode;
+  status: TeachingSessionStatus;
+  questionCount: number;
+  timed: boolean;
+  timeLimitSeconds: number | null;
+  remainingSeconds: number | null;
+  currentPosition: number;
+  startedAt: string;
+  lastActivityAt: string;
+  submittedAt: string | null;
+  filters: TeachingLearnerFilters;
+  questions: TeachingSessionPosition[];
+  progress: TeachingSessionProgress;
+}
+
+export interface TeachingLearnerDashboard {
+  publishedQuestionCount: number;
+  progress: {
+    attemptedQuestions: number;
+    unseenQuestions: number;
+    correctQuestions: number;
+    incorrectQuestions: number;
+    markedQuestions: number;
+    completionPercent?: number;
+    currentCycleAccuracyPercent?: number | null;
+    firstPassAccuracyPercent?: number | null;
+    lifetimeUniqueAttempted?: number;
+    lifetimeAttempts?: number;
+    averageAnswerTimeMs?: number | null;
+  };
+  recentSessions: Array<{
+    id: number;
+    mode: TeachingSessionMode;
+    status: TeachingSessionStatus;
+    questionCount: number;
+    timed: boolean;
+    currentPosition: number;
+    startedAt: string;
+    submittedAt: string | null;
+    progress: TeachingSessionProgress;
+  }>;
+  continueSession: TeachingLearnerDashboard["recentSessions"][number] | null;
+}
+
+export interface TeachingLearnerQuestion {
+  session: Pick<TeachingLearnerSession, "id" | "mode" | "status" | "timed" | "timeLimitSeconds" | "remainingSeconds">;
+  position: number;
+  totalQuestions: number;
+  questionId: number;
+  externalId: string;
+  type: TeachingQuestionType;
+  stem: string;
+  case: { title: string | null; clinicalHistory: string | null } | null;
+  images: Array<{ id: number; mimeType: string; altText: string; url: string }>;
+  options: Array<{ key: string; text: string; explanation?: string }>;
+  selectedOptionKey: string | null;
+  answered: boolean;
+  bookmarked: boolean;
+  note: string;
+  feedback?: {
+    isCorrect: boolean | null;
+    selectedOptionKey: string | null;
+    correctOption: { key: string; text: string } | null;
+    explanation: { summary: string; teachingPoint: string; furtherDiscussion: string | null };
+    optionExplanations: Array<{ key: string; explanation: string }>;
+    references: Array<{
+      title: string;
+      organization: string | null;
+      authors: string[];
+      year: number | null;
+      edition: string | null;
+      url: string | null;
+      doi: string | null;
+      citationText: string | null;
+    }>;
+  };
+}
+
+export async function fetchTeachingLearnerDashboard(): Promise<TeachingLearnerDashboard> {
+  return api("/teaching/qbank/dashboard");
+}
+
+export async function fetchTeachingQuestionAvailability(filters: TeachingLearnerFilters): Promise<{ available: number; questionState: TeachingQuestionStateFilter }> {
+  return api("/teaching/qbank/availability", { method: "POST", body: JSON.stringify({ filters }) });
+}
+
+export async function createTeachingLearnerSession(input: {
+  mode: TeachingSessionMode;
+  questionCount: number;
+  timed: boolean;
+  timeLimitSeconds?: number;
+  filters: TeachingLearnerFilters;
+}): Promise<{ sessionId: number; questionCount: number; mode: TeachingSessionMode; status: "active"; timed: boolean; timeLimitSeconds: number | null; startedAt: string; firstPosition: number }> {
+  return api("/teaching/sessions", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function fetchTeachingLearnerSession(sessionId: number): Promise<TeachingLearnerSession> {
+  return api(`/teaching/sessions/${sessionId}`);
+}
+
+export async function fetchTeachingLearnerQuestion(sessionId: number, position: number): Promise<TeachingLearnerQuestion> {
+  return api(`/teaching/sessions/${sessionId}/questions/${position}`);
+}
+
+export async function submitTeachingLearnerAnswer(sessionId: number, position: number, selectedOptionKey: string): Promise<TeachingLearnerQuestion> {
+  return api(`/teaching/sessions/${sessionId}/questions/${position}/answer`, {
+    method: "POST", body: JSON.stringify({ selectedOptionKey }),
+  });
+}
+
+export async function saveTeachingLearnerExamResponse(sessionId: number, position: number, selectedOptionKey: string): Promise<{ saved: boolean; submitted: boolean; session: TeachingLearnerSession }> {
+  return api(`/teaching/sessions/${sessionId}/questions/${position}/response`, {
+    method: "PUT", body: JSON.stringify({ selectedOptionKey }),
+  });
+}
+
+export async function submitTeachingLearnerSession(sessionId: number): Promise<TeachingLearnerSession> {
+  return api(`/teaching/sessions/${sessionId}/submit`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export async function setTeachingQuestionBookmark(questionId: number, marked: boolean): Promise<{ questionId: number; marked: boolean }> {
+  return api(`/teaching/bookmarks/${questionId}`, { method: marked ? "PUT" : "DELETE" });
+}
+
+export async function saveTeachingQuestionNote(questionId: number, note: string): Promise<{ questionId: number; note: string }> {
+  return api(`/teaching/notes/${questionId}`, { method: "PUT", body: JSON.stringify({ note }) });
+}
+
+export async function clearTeachingQuestionNote(questionId: number): Promise<{ questionId: number; cleared: boolean }> {
+  return api(`/teaching/notes/${questionId}`, { method: "DELETE" });
+}
+
+export type TeachingProgressDimension = "domain" | "topic" | "modality" | "competency" | "difficulty" | "tag";
+export type TeachingResetScope = { type: "bank" } | { type: "domain" | "topic"; code: string; domain?: string };
+
+export interface TeachingProgressSummary {
+  questionBank: { code: string; publishedQuestions: number };
+  currentCycle: {
+    attempted: number;
+    eligible: number;
+    correct: number;
+    incorrect: number;
+    unseen: number;
+    completionPercent: number;
+    accuracyPercent: number | null;
+    marked: number;
+  };
+  lifetime: {
+    uniqueAttempted: number;
+    totalAttempts: number;
+    firstPassCorrect: number;
+    firstPassAttempted: number;
+    firstPassAccuracyPercent: number | null;
+    averageAnswerTimeMs: number | null;
+  };
+}
+
+export interface TeachingProgressBreakdownItem {
+  code: string;
+  label: string;
+  eligible: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  unseen: number;
+  completionPercent: number;
+  accuracyPercent: number | null;
+  firstPassAttempted: number;
+  firstPassCorrect: number;
+  firstPassAccuracyPercent: number | null;
+  averageAnswerTimeMs: number | null;
+  timedAttemptCount: number;
+}
+
+export interface TeachingProgressCycle {
+  id: string;
+  cycleNumber: number;
+  startedAt: string;
+  endedAt: string | null;
+  eligible: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  completionPercent: number;
+  accuracyPercent: number | null;
+  current: boolean;
+}
+
+const progressQuery = (questionBank: string, scope?: TeachingResetScope) => {
+  const params = new URLSearchParams({ questionBank });
+  if (scope) {
+    params.set("scopeType", scope.type);
+    if (scope.type !== "bank") params.set("scopeCode", scope.code);
+    if (scope.type === "topic" && scope.domain) params.set("domain", scope.domain);
+  }
+  return params.toString();
+};
+
+export async function fetchTeachingProgress(questionBank = "radiology-main"): Promise<TeachingProgressSummary> {
+  return api(`/teaching/progress?${new URLSearchParams({ questionBank })}`);
+}
+
+export async function fetchTeachingProgressBreakdown(
+  dimension: TeachingProgressDimension,
+  options: { questionBank?: string; domain?: string; search?: string } = {},
+): Promise<{ questionBank: string; dimension: TeachingProgressDimension; items: TeachingProgressBreakdownItem[] }> {
+  const params = new URLSearchParams({ questionBank: options.questionBank ?? "radiology-main", dimension });
+  if (options.domain) params.set("domain", options.domain);
+  if (options.search) params.set("search", options.search);
+  return api(`/teaching/progress/breakdown?${params}`);
+}
+
+export async function fetchTeachingProgressPreview(questionBank: string, scope: TeachingResetScope): Promise<{
+  questionBank: string; scope: { type: string; code: string; label: string };
+  eligibleQuestionCount: number; attempted: number; correct: number; incorrect: number; unseen: number;
+  completionPercent: number; accuracyPercent: number | null; marked: number;
+  activeSessionCount: number; activeSessionQuestionCount: number;
+}> {
+  return api(`/teaching/progress/preview?${progressQuery(questionBank, scope)}`);
+}
+
+export async function fetchTeachingProgressCycles(questionBank: string, scope: TeachingResetScope): Promise<{
+  questionBank: string; scope: { type: string; code: string; label: string }; items: TeachingProgressCycle[];
+}> {
+  return api(`/teaching/progress/cycles?${progressQuery(questionBank, scope)}`);
+}
+
+export async function resetTeachingProgress(input: {
+  questionBank: string; scope: TeachingResetScope; idempotencyKey: string;
+}): Promise<{
+  questionBank: string; scope: { type: string; code: string; label: string };
+  eligibleQuestionCount: number; attempted: number; correct: number; incorrect: number; unseen: number;
+  completionPercent: number; accuracyPercent: number | null; marked: number;
+  cycleNumber: number; startedAt: string; alreadyApplied: boolean;
+}> {
+  return api("/teaching/progress/reset", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function fetchTeachingSessionHistory(page = 1, pageSize = 20): Promise<{
+  items: Array<Omit<TeachingLearnerSession, "remainingSeconds" | "currentPosition" | "lastActivityAt" | "questions"> & { durationSeconds: number }>;
+  pagination: { page: number; pageSize: number; total: number };
+}> {
+  return api(`/teaching/history?page=${page}&pageSize=${pageSize}`);
 }

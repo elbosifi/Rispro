@@ -8,6 +8,7 @@ await client.connect();
 try {
   await client.query("drop schema if exists doctor_portal cascade");
   await client.query("drop schema if exists appointments_v2 cascade");
+  await client.query("drop schema if exists teaching cascade");
   await client.query("drop schema if exists ohif cascade");
   await client.query("drop schema if exists public cascade");
   await client.query("create schema public");

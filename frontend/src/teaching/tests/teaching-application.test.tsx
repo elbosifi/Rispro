@@ -1,8 +1,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TeachingApplication } from "../teaching-application";
+
+const learnerApi = vi.hoisted(() => ({ fetchDashboard: vi.fn() }));
+
+vi.mock("../api/teaching-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/teaching-api")>();
+  return { ...actual, fetchTeachingLearnerDashboard: learnerApi.fetchDashboard };
+});
 
 const teachingAuthState = vi.hoisted(() => ({
   isAuthenticated: false,
@@ -29,12 +37,15 @@ vi.mock("@/providers/language-provider", () => ({
 }));
 
 function renderTeaching(path: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/teaching/*" element={<TeachingApplication />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/teaching/*" element={<TeachingApplication />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -49,6 +60,15 @@ describe("Teaching application routes", () => {
     vi.clearAllMocks();
   });
 
+  beforeEach(() => {
+    learnerApi.fetchDashboard.mockResolvedValue({
+      publishedQuestionCount: 0,
+      progress: { attemptedQuestions: 0, unseenQuestions: 0, correctQuestions: 0, incorrectQuestions: 0, markedQuestions: 0 },
+      recentSessions: [],
+      continueSession: null,
+    });
+  });
+
   it("renders a separately branded login route", () => {
     renderTeaching("/teaching/login");
 
@@ -57,7 +77,7 @@ describe("Teaching application routes", () => {
     expect(screen.getByRole("button", { name: /^sign in$/i })).toBeTruthy();
   });
 
-  it("sends an authenticated Teaching user from login to the dashboard", () => {
+  it("sends an authenticated Teaching learner from login to the dashboard", async () => {
     teachingAuthState.isAuthenticated = true;
     teachingAuthState.identity = {
       identitySubject: "123",
@@ -67,8 +87,9 @@ describe("Teaching application routes", () => {
 
     renderTeaching("/teaching/login");
 
-    expect(screen.getByRole("heading", { name: "Question Bank and Residency Education" })).toBeTruthy();
-    expect(screen.getByText("Teaching workspace initialized.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Question Bank" })).toBeTruthy();
+    expect(screen.getByText(/Current cycle: 0 \/ 0 questions/)).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "Progress" }).length).toBe(2);
   });
 
   it("redirects unauthenticated dashboard visits to the Teaching login", () => {
@@ -95,7 +116,21 @@ describe("Teaching application routes", () => {
     renderTeaching("/teaching/dashboard");
 
     expect(screen.getByRole("heading", { name: "Teaching access is not enabled" })).toBeTruthy();
-    expect(screen.queryByText("Teaching workspace initialized.")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Question Bank" })).toBeNull();
+  });
+
+  it("requires teaching.learn for the learner dashboard", () => {
+    teachingAuthState.isAuthenticated = true;
+    teachingAuthState.identity = {
+      identitySubject: "123",
+      displayName: "Teaching Author",
+      permissions: ["teaching.access", "teaching.author"],
+    };
+
+    renderTeaching("/teaching/dashboard");
+
+    expect(screen.getByRole("heading", { name: "Teaching learner access is not enabled" })).toBeTruthy();
+    expect(learnerApi.fetchDashboard).not.toHaveBeenCalled();
   });
 
   it("requires the Teaching author capability to open the import workspace", () => {
@@ -146,7 +181,7 @@ describe("Teaching application routes", () => {
     teachingAuthState.identity = {
       identitySubject: "123",
       displayName: "Teaching Learner",
-      permissions: ["teaching.access"],
+      permissions: ["teaching.access", "teaching.learn"],
     };
 
     renderTeaching("/teaching");

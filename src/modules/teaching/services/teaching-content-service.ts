@@ -11,6 +11,11 @@ import type {
   TeachingSourceInput,
 } from "../domain/teaching-content.js";
 import { parseTeachingQuestionInput } from "../domain/teaching-content-validation.js";
+import {
+  saveTeachingQuestionValidationSummary,
+  type TeachingValidationClassification,
+  type TeachingValidationIssue,
+} from "../repositories/teaching-validation-repository.js";
 import { assertTeachingAssetsAvailable } from "./teaching-asset-service.js";
 import { withTeachingTransaction } from "./teaching-transaction.js";
 
@@ -295,25 +300,30 @@ export async function createTeachingQuestion(value: unknown, actor: TeachingAudi
   return getTeachingQuestion(id);
 }
 
-export async function validateTeachingQuestion(value: unknown) {
+async function validateTeachingQuestionInput(client: PoolClient, value: unknown): Promise<{ errors: TeachingValidationIssue[]; warnings: TeachingValidationIssue[] }> {
   try {
-    const warnings = await withTeachingTransaction(async (client) => {
-      const input = parseTeachingQuestionInput(value);
-      await validateQuestionContentForLifecycle(client, input);
-      const issues: Array<{ code: string; message: string }> = [];
-      if (input.sources.length === 0) issues.push({ code: "source_missing", message: "No question source is recorded." });
-      if (input.references.length === 0) issues.push({ code: "references_missing", message: "No supporting references are recorded." });
-      if (input.options.some((option) => !option.explanation?.trim())) issues.push({ code: "option_explanation_missing", message: "One or more answer options have no explanation." });
-      if (!input.trainingLevelCode) issues.push({ code: "training_level_missing", message: "Training level is not set." });
-      if (!input.explanationSummary.trim()) issues.push({ code: "explanation_summary_missing", message: "Explanation summary is empty." });
-      if (!input.teachingPoint.trim()) issues.push({ code: "teaching_point_missing", message: "Teaching point is empty." });
-      return issues;
-    });
+    const input = parseTeachingQuestionInput(value);
+    await validateQuestionContentForLifecycle(client, input);
+    const warnings: TeachingValidationIssue[] = [];
+    if (input.sources.length === 0) warnings.push({ code: "source_missing", message: "No question source is recorded." });
+    if (input.references.length === 0) warnings.push({ code: "references_missing", message: "No supporting references are recorded." });
+    if (input.options.some((option) => !option.explanation?.trim())) warnings.push({ code: "option_explanation_missing", message: "One or more answer options have no explanation." });
+    if (!input.trainingLevelCode) warnings.push({ code: "training_level_missing", message: "Training level is not set." });
+    if (!input.explanationSummary.trim()) warnings.push({ code: "explanation_summary_missing", message: "Explanation summary is empty." });
+    if (!input.teachingPoint.trim()) warnings.push({ code: "teaching_point_missing", message: "Teaching point is empty." });
     return { errors: [], warnings };
   } catch (error) {
     if (error instanceof HttpError && error.statusCode < 500) return { errors: [{ code: "invalid_content", message: error.message }], warnings: [] };
     throw error;
   }
+}
+
+function teachingValidationClassification(result: { errors: TeachingValidationIssue[]; warnings: TeachingValidationIssue[] }): TeachingValidationClassification {
+  return result.errors.length > 0 ? "invalid" : result.warnings.length > 0 ? "valid_with_warnings" : "valid";
+}
+
+export async function validateTeachingQuestion(value: unknown) {
+  return withTeachingTransaction((client) => validateTeachingQuestionInput(client, value));
 }
 
 async function questionBase(id: number, client?: PoolClient): Promise<QuestionBaseRow> {
@@ -385,6 +395,49 @@ async function loadRevisionInput(client: PoolClient, revisionId: number, questio
   };
 }
 
+export async function validateTeachingQuestionRevisionInTransaction(
+  client: PoolClient,
+  questionId: number,
+  revisionId: number,
+  expectedVersion: number,
+): Promise<{ errors: TeachingValidationIssue[]; warnings: TeachingValidationIssue[] }> {
+  const question = await client.query<{ id: number }>(
+    "select id from teaching.questions where id = $1 and retired_at is null for share",
+    [questionId],
+  );
+  const current = await client.query<{ id: number; version: number; status: string }>(
+    `select id, version, status from teaching.question_revisions
+     where question_id = $1 order by revision_number desc, id desc limit 1 for share`,
+    [questionId],
+  );
+  if (!question.rowCount || current.rowCount !== 1 || Number(current.rows[0]!.id) !== revisionId
+    || Number(current.rows[0]!.version) !== expectedVersion || current.rows[0]!.status !== "draft") {
+    throw new HttpError(409, "The current Draft changed during validation. Run Validate All again.");
+  }
+  const base = await questionBase(questionId, client);
+  const value = await loadRevisionInput(client, revisionId, base);
+  return validateTeachingQuestionInput(client, value);
+}
+
+export async function validateTeachingQuestionRevision(
+  questionId: number,
+  revisionId: number,
+  expectedVersion: number,
+  actor: TeachingAuditIdentity,
+) {
+  return withTeachingTransaction(async (client) => {
+    const validation = await validateTeachingQuestionRevisionInTransaction(client, questionId, revisionId, expectedVersion);
+    await saveTeachingQuestionValidationSummary(client, {
+      revisionId,
+      revisionVersion: expectedVersion,
+      classification: teachingValidationClassification(validation),
+      errors: validation.errors,
+      warnings: validation.warnings,
+    }, actor);
+    return validation;
+  });
+}
+
 export async function patchTeachingQuestionDraft(questionId: number, revisionId: number, patchValue: unknown, actor: TeachingAuditIdentity) {
   const patch = asUnknownRecord(patchValue);
   if (!patch) throw new HttpError(400, "Question patch must be an object.");
@@ -431,48 +484,80 @@ export async function patchTeachingQuestionDraft(questionId: number, revisionId:
   return getTeachingQuestion(questionId);
 }
 
-export async function submitTeachingQuestionForReview(questionId: number, actor: TeachingAuditIdentity) {
-  await withTeachingTransaction(async (client) => {
-    await client.query("select id from teaching.questions where id = $1 and retired_at is null for update", [questionId]).then((result) => {
-      if (!result.rowCount) throw new HttpError(404, "Teaching question not found.");
-    });
-    const revision = await client.query<{ id: number; status: string }>(
-      `select id, status from teaching.question_revisions where question_id = $1 and status = 'draft' for update`,
-      [questionId],
-    );
-    if (revision.rowCount !== 1) throw new HttpError(409, "A single draft revision is required to submit for review.");
-    const base = await questionBase(questionId, client);
-    const input = parseTeachingQuestionInput(await loadRevisionInput(client, revision.rows[0]!.id, base));
-    await validateQuestionContentForLifecycle(client, input);
-    await client.query(
-      `update teaching.question_revisions set status = 'in_review', submitted_by_identity_issuer = $2,
-       submitted_by_identity_subject = $3, submitted_at = now(), updated_by_identity_issuer = $2,
-       updated_by_identity_subject = $3, updated_at = now(), version = version + 1 where id = $1`,
-      [revision.rows[0]!.id, actor.identityIssuer, actor.identitySubject],
-    );
-    await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+async function submitTeachingQuestionForReviewInTransaction(client: PoolClient, questionId: number, actor: TeachingAuditIdentity): Promise<number> {
+  await client.query("select id from teaching.questions where id = $1 and retired_at is null for update", [questionId]).then((result) => {
+    if (!result.rowCount) throw new HttpError(404, "Teaching question not found.");
   });
+  const revision = await client.query<{ id: number; status: string }>(
+    "select id, status from teaching.question_revisions where question_id = $1 and status = 'draft' for update",
+    [questionId],
+  );
+  if (revision.rowCount !== 1) throw new HttpError(409, "A single draft revision is required to submit for review.");
+  const revisionId = toId(revision.rows[0]!.id);
+  const base = await questionBase(questionId, client);
+  const input = parseTeachingQuestionInput(await loadRevisionInput(client, revisionId, base));
+  await validateQuestionContentForLifecycle(client, input);
+  await client.query(
+    `update teaching.question_revisions set status = 'in_review', submitted_by_identity_issuer = $2,
+     submitted_by_identity_subject = $3, submitted_at = now(), updated_by_identity_issuer = $2,
+     updated_by_identity_subject = $3, updated_at = now(), version = version + 1 where id = $1`,
+    [revisionId, actor.identityIssuer, actor.identitySubject],
+  );
+  await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+  return revisionId;
+}
+
+async function reviewTeachingQuestionInTransaction(client: PoolClient, questionId: number, revisionId: number, actor: TeachingAuditIdentity): Promise<void> {
+  const question = await client.query("select id from teaching.questions where id = $1 for update", [questionId]);
+  if (!question.rowCount) throw new HttpError(404, "Teaching question not found.");
+  const revision = await client.query<{ status: string; reviewed_at: Date | null }>(
+    "select status, reviewed_at from teaching.question_revisions where id = $1 and question_id = $2 for update",
+    [revisionId, questionId],
+  );
+  if (revision.rowCount !== 1) throw new HttpError(404, "Teaching question revision not found.");
+  if (revision.rows[0]!.status !== "in_review" || revision.rows[0]!.reviewed_at) throw new HttpError(409, "Only an unreviewed revision in review can be approved.");
+  await client.query(
+    `update teaching.question_revisions set reviewed_by_identity_issuer = $3, reviewed_by_identity_subject = $4,
+     reviewed_at = now(), updated_by_identity_issuer = $3, updated_by_identity_subject = $4, updated_at = now(), version = version + 1
+     where id = $1 and question_id = $2`,
+    [revisionId, questionId, actor.identityIssuer, actor.identitySubject],
+  );
+  await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+}
+
+async function publishTeachingQuestionInTransaction(client: PoolClient, questionId: number, actor: TeachingAuditIdentity): Promise<number> {
+  const question = await client.query("select id, retired_at from teaching.questions where id = $1 for update", [questionId]);
+  if (question.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
+  if (question.rows[0]!.retired_at) throw new HttpError(409, "A retired question cannot be published.");
+  const revision = await client.query<{ id: number; reviewed_at: Date | null; question_type: string }>(
+    `select id, reviewed_at, question_type from teaching.question_revisions
+     where question_id = $1 and status = 'in_review' order by revision_number desc limit 1 for update`,
+    [questionId],
+  );
+  if (revision.rowCount !== 1 || !revision.rows[0]!.reviewed_at) throw new HttpError(409, "An approved revision in review is required before publishing.");
+  const revisionId = toId(revision.rows[0]!.id);
+  const base = await questionBase(questionId, client);
+  const input = parseTeachingQuestionInput(await loadRevisionInput(client, revisionId, base));
+  await validateQuestionContentForLifecycle(client, input);
+  const published = await client.query(
+    `update teaching.question_revisions set status = 'published', published_by_identity_issuer = $2,
+     published_by_identity_subject = $3, published_at = now(), updated_by_identity_issuer = $2,
+     updated_by_identity_subject = $3, updated_at = now(), version = version + 1
+     where id = $1 and status = 'in_review' and reviewed_at is not null`,
+    [revisionId, actor.identityIssuer, actor.identitySubject],
+  );
+  if (published.rowCount !== 1) throw new HttpError(409, "The approved revision changed before it could be published.");
+  await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+  return revisionId;
+}
+
+export async function submitTeachingQuestionForReview(questionId: number, actor: TeachingAuditIdentity) {
+  await withTeachingTransaction((client) => submitTeachingQuestionForReviewInTransaction(client, questionId, actor));
   return getTeachingQuestion(questionId);
 }
 
 export async function reviewTeachingQuestion(questionId: number, revisionId: number, actor: TeachingAuditIdentity) {
-  await withTeachingTransaction(async (client) => {
-    const question = await client.query("select id from teaching.questions where id = $1 for update", [questionId]);
-    if (!question.rowCount) throw new HttpError(404, "Teaching question not found.");
-    const revision = await client.query<{ status: string; reviewed_at: Date | null }>(
-      "select status, reviewed_at from teaching.question_revisions where id = $1 and question_id = $2 for update",
-      [revisionId, questionId],
-    );
-    if (revision.rowCount !== 1) throw new HttpError(404, "Teaching question revision not found.");
-    if (revision.rows[0]!.status !== "in_review" || revision.rows[0]!.reviewed_at) throw new HttpError(409, "Only an unreviewed revision in review can be approved.");
-    await client.query(
-      `update teaching.question_revisions set reviewed_by_identity_issuer = $3, reviewed_by_identity_subject = $4,
-       reviewed_at = now(), updated_by_identity_issuer = $3, updated_by_identity_subject = $4, updated_at = now(), version = version + 1
-       where id = $1 and question_id = $2`,
-      [revisionId, questionId, actor.identityIssuer, actor.identitySubject],
-    );
-    await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
-  });
+  await withTeachingTransaction((client) => reviewTeachingQuestionInTransaction(client, questionId, revisionId, actor));
   return getTeachingQuestion(questionId);
 }
 
@@ -501,28 +586,96 @@ export async function returnTeachingQuestionToDraft(questionId: number, revision
 }
 
 export async function publishTeachingQuestion(questionId: number, actor: TeachingAuditIdentity) {
-  await withTeachingTransaction(async (client) => {
-    const question = await client.query("select id, retired_at from teaching.questions where id = $1 for update", [questionId]);
-    if (question.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
-    if (question.rows[0]!.retired_at) throw new HttpError(409, "A retired question cannot be published.");
-    const revision = await client.query<{ id: number; reviewed_at: Date | null; question_type: string }>(
-      `select id, reviewed_at, question_type from teaching.question_revisions
-       where question_id = $1 and status = 'in_review' order by revision_number desc limit 1 for update`,
+  await withTeachingTransaction((client) => publishTeachingQuestionInTransaction(client, questionId, actor));
+  return getTeachingQuestion(questionId);
+}
+
+export async function publishTeachingQuestionFromBulk(
+  questionId: number,
+  expectedRevisionId: number,
+  expectedVersion: number,
+  actor: TeachingAuditIdentity,
+  canSubmitAndReviewDrafts: boolean,
+) {
+  return withTeachingTransaction(async (client) => {
+    const question = await client.query<{ retired_at: Date | null }>(
+      "select retired_at from teaching.questions where id = $1 for update",
       [questionId],
     );
-    if (revision.rowCount !== 1 || !revision.rows[0]!.reviewed_at) throw new HttpError(409, "An approved revision in review is required before publishing.");
-    const base = await questionBase(questionId, client);
-    const input = parseTeachingQuestionInput(await loadRevisionInput(client, revision.rows[0]!.id, base));
-    await validateQuestionContentForLifecycle(client, input);
-    await client.query(
-      `update teaching.question_revisions set status = 'published', published_by_identity_issuer = $2,
-       published_by_identity_subject = $3, published_at = now(), updated_by_identity_issuer = $2,
-       updated_by_identity_subject = $3, updated_at = now(), version = version + 1 where id = $1 and status = 'in_review' and reviewed_at is not null`,
-      [revision.rows[0]!.id, actor.identityIssuer, actor.identitySubject],
+    if (!question.rowCount) throw new HttpError(404, "Teaching question not found.");
+    if (question.rows[0]!.retired_at) {
+      return { status: "retired" as const, revisionId: expectedRevisionId, revisionVersion: expectedVersion, errors: [], warnings: [] };
+    }
+    const revision = await client.query<{ id: number; version: number; status: string; reviewed_at: Date | null }>(
+      `select id, version, status, reviewed_at from teaching.question_revisions
+       where question_id = $1 order by revision_number desc, id desc limit 1 for update`,
+      [questionId],
     );
-    await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+    if (!revision.rowCount) throw new HttpError(404, "Teaching question revision not found.");
+    const current = revision.rows[0]!;
+    if (Number(current.id) === expectedRevisionId && current.status === "published") {
+      return { status: "already_published" as const, revisionId: expectedRevisionId, revisionVersion: Number(current.version), errors: [], warnings: [] };
+    }
+    if (Number(current.id) !== expectedRevisionId || Number(current.version) !== expectedVersion) {
+      throw new HttpError(409, "The question changed while the batch was being published.");
+    }
+    if (current.status !== "draft" && current.status !== "in_review") {
+      return { status: current.status === "retired" ? "retired" as const : "conflict" as const, revisionId: expectedRevisionId, revisionVersion: expectedVersion, errors: [], warnings: [] };
+    }
+
+    const base = await questionBase(questionId, client);
+    const value = await loadRevisionInput(client, expectedRevisionId, base);
+    const validation = await validateTeachingQuestionInput(client, value);
+    if (validation.errors.length > 0) {
+      await saveTeachingQuestionValidationSummary(client, {
+        revisionId: expectedRevisionId,
+        revisionVersion: expectedVersion,
+        classification: "invalid",
+        errors: validation.errors,
+        warnings: validation.warnings,
+      }, actor);
+      return { status: "invalid" as const, revisionId: expectedRevisionId, revisionVersion: expectedVersion, ...validation };
+    }
+
+    if (current.status === "draft") {
+      if (!canSubmitAndReviewDrafts) {
+        await saveTeachingQuestionValidationSummary(client, {
+          revisionId: expectedRevisionId,
+          revisionVersion: expectedVersion,
+          classification: teachingValidationClassification(validation),
+          errors: validation.errors,
+          warnings: validation.warnings,
+        }, actor);
+        return { status: "requires_review" as const, revisionId: expectedRevisionId, revisionVersion: expectedVersion, ...validation };
+      }
+      const submittedRevisionId = await submitTeachingQuestionForReviewInTransaction(client, questionId, actor);
+      await reviewTeachingQuestionInTransaction(client, questionId, submittedRevisionId, actor);
+    } else if (!current.reviewed_at) {
+      await saveTeachingQuestionValidationSummary(client, {
+        revisionId: expectedRevisionId,
+        revisionVersion: expectedVersion,
+        classification: teachingValidationClassification(validation),
+        errors: validation.errors,
+        warnings: validation.warnings,
+      }, actor);
+      return { status: "requires_review" as const, revisionId: expectedRevisionId, revisionVersion: expectedVersion, ...validation };
+    }
+
+    const publishedRevisionId = await publishTeachingQuestionInTransaction(client, questionId, actor);
+    const finalRevision = await client.query<{ version: number; status: string }>(
+      "select version, status from teaching.question_revisions where id = $1",
+      [publishedRevisionId],
+    );
+    const finalVersion = Number(finalRevision.rows[0]!.version);
+    await saveTeachingQuestionValidationSummary(client, {
+      revisionId: publishedRevisionId,
+      revisionVersion: finalVersion,
+      classification: teachingValidationClassification(validation),
+      errors: validation.errors,
+      warnings: validation.warnings,
+    }, actor);
+    return { status: "published" as const, revisionId: publishedRevisionId, revisionVersion: finalVersion, ...validation };
   });
-  return getTeachingQuestion(questionId);
 }
 
 export async function createTeachingQuestionRevision(questionId: number, actor: TeachingAuditIdentity) {
@@ -687,10 +840,13 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
   ), filtered as (
     select question.id, question.external_id, question.created_at as question_created_at, question.updated_at as question_updated_at,
       question.retired_at, bank.code as bank_code, bank.name as bank_name, revision.id as revision_id,
-      revision.revision_number, revision.status, revision.question_type as type, revision.stem, revision.import_batch_id,
+      revision.version as revision_version, revision.revision_number, revision.status, revision.question_type as type, revision.stem, revision.import_batch_id,
       specialty.code as specialty_code, specialty.label as specialty_label, domain.code as domain_code, domain.label as domain_label,
       topic.code as topic_code, topic.label as topic_label, difficulty.value as difficulty,
       level.code as training_level_code, level.label as training_level_label,
+      summary.classification as validation_classification,
+      coalesce(jsonb_array_length(summary.errors_json), 0) as validation_error_count,
+      coalesce(jsonb_array_length(summary.warnings_json), 0) as validation_warning_count,
       source_summary.title as source_title,
       exists (select 1 from teaching.question_revision_assets asset_link where asset_link.question_revision_id = revision.id) as has_image,
       exists (select 1 from teaching.question_revisions imported_revision where imported_revision.question_id = question.id and imported_revision.import_batch_id is not null) as imported
@@ -703,6 +859,8 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
     left join teaching.subtopics subtopic on subtopic.id = revision.subtopic_id
     join teaching.difficulties difficulty on difficulty.id = revision.difficulty_id
     left join teaching.training_levels level on level.id = revision.training_level_id
+    left join teaching.question_validation_summaries summary
+      on summary.question_revision_id = revision.id and summary.revision_version = revision.version
     left join teaching.tags tag on tag.code = ${query.tagCode?.trim() ? bind(query.tagCode.trim()) : "null::text"}
     left join lateral (
       select string_agg(coalesce(source.title, source.source_type), ', ' order by source.title nulls last, source.id) as title
@@ -715,10 +873,11 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
   const total = Number(count.rows[0]?.total ?? 0);
   const rows = await pool.query<{
     id: string | number; external_id: string; question_created_at: Date; question_updated_at: Date; retired_at: Date | null;
-    bank_code: string; bank_name: string; revision_id: string | number; revision_number: number; status: string; type: string;
+    bank_code: string; bank_name: string; revision_id: string | number; revision_version: number; revision_number: number; status: string; type: string;
     stem: string; import_batch_id: string | null; specialty_code: string; specialty_label: string; domain_code: string; domain_label: string;
     topic_code: string | null; topic_label: string | null; difficulty: number; training_level_code: string | null;
-    training_level_label: string | null; source_title: string | null; has_image: boolean; imported: boolean;
+    training_level_label: string | null; validation_classification: TeachingValidationClassification | null;
+    validation_error_count: number; validation_warning_count: number; source_title: string | null; has_image: boolean; imported: boolean;
   }>(
     `${cte} select filtered.* from filtered order by ${sortExpressions[sort]} ${directionSql} nulls last, external_id asc, id asc limit ${bind(pageSize)} offset ${bind(offset)}`,
     values,
@@ -728,7 +887,12 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
       id: toId(row.id),
       externalId: row.external_id,
       questionBank: { code: row.bank_code, name: row.bank_name },
-      revision: { revisionNumber: row.revision_number, status: row.status, type: row.type, stem: row.stem, importBatchId: row.import_batch_id },
+      revision: { id: toId(row.revision_id), version: Number(row.revision_version), revisionNumber: row.revision_number, status: row.status, type: row.type, stem: row.stem, importBatchId: row.import_batch_id },
+      validation: row.validation_classification === null ? null : {
+        classification: row.validation_classification,
+        errorCount: Number(row.validation_error_count),
+        warningCount: Number(row.validation_warning_count),
+      },
       sourceTitle: row.source_title,
       hasImage: row.has_image,
       imported: row.imported,

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownAZ, ArrowUpDown, Plus, Search } from "lucide-react";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
 import { useTeachingAuth } from "../auth/teaching-auth-context";
-import { fetchTeachingCatalog, fetchTeachingQuestions, type TeachingCatalogItem, type TeachingQuestionStatus } from "../api/teaching-api";
+import { fetchTeachingCatalog, fetchTeachingQuestions, validateTeachingQuestionSelection, type TeachingCatalogItem, type TeachingQuestionStatus } from "../api/teaching-api";
 
 const PAGE_SIZE = 20;
 
@@ -20,6 +20,7 @@ function optionsBelow(items: TeachingCatalogItem[], parentCode: string | null): 
 export function TeachingQuestionListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const { identity } = useTeachingAuth();
   const canAuthor = Boolean(identity?.permissions.includes("teaching.author") || identity?.permissions.includes("teaching.admin"));
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
@@ -35,6 +36,10 @@ export function TeachingQuestionListPage() {
   const questions = useQuery({
     queryKey: ["teaching", "admin-questions", query.toString()],
     queryFn: () => fetchTeachingQuestions(query),
+  });
+  const validatePage = useMutation({
+    mutationFn: () => validateTeachingQuestionSelection(questions.data?.items.map((item) => item.id) ?? []),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] }),
   });
 
   const setFilter = (key: string, value: string) => {
@@ -152,8 +157,15 @@ export function TeachingQuestionListPage() {
         </form>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-muted-foreground" style={{ borderColor: "var(--border)" }}>
           <span>{pagination ? `${pagination.total} questions · page ${pagination.page} of ${Math.max(1, pagination.totalPages)}` : "Loading question count…"}</span>
-          <span>Filters are saved in this page URL.</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>Filters are saved in this page URL.</span>
+            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={!questions.data?.items.length || validatePage.isPending} onClick={() => validatePage.mutate()}>
+              {validatePage.isPending ? "Validating this page…" : "Validate current page"}
+            </Button> : null}
+          </div>
         </div>
+        {validatePage.error ? <p role="alert" className="text-sm text-destructive">{validatePage.error.message}</p> : null}
+        {validatePage.data ? <p role="status" className="text-sm text-muted-foreground">Validated {validatePage.data.draft} Drafts: {validatePage.data.valid} valid, {validatePage.data.validWithWarnings} with warnings, {validatePage.data.invalid} invalid.</p> : null}
       </Card>
 
       {questions.isPending ? <LoadingState message="Loading Teaching questions…" /> : null}
@@ -165,7 +177,7 @@ export function TeachingQuestionListPage() {
           <div className="overflow-x-auto">
             <Table className="min-w-[1100px]">
               <TableHeader><TableRow>
-                <TableHead>External ID</TableHead><TableHead>Stem</TableHead><TableHead>Status</TableHead>
+                <TableHead>External ID</TableHead><TableHead>Stem</TableHead><TableHead>Status</TableHead><TableHead>Validation</TableHead>
                 <TableHead>Type</TableHead><TableHead>Domain / Topic</TableHead><TableHead>Difficulty</TableHead>
                 <TableHead>Level</TableHead><TableHead>Source</TableHead><TableHead>Revision</TableHead><TableHead>Updated</TableHead>
               </TableRow></TableHeader>
@@ -175,6 +187,9 @@ export function TeachingQuestionListPage() {
                     <TableCell className="whitespace-nowrap font-medium"><Link className="text-accent underline-offset-4 hover:underline" to={`/teaching/admin/questions/${item.id}`}>{item.externalId}</Link></TableCell>
                     <TableCell className="max-w-[28rem] min-w-64"><Link className="line-clamp-2 text-foreground hover:text-accent" to={`/teaching/admin/questions/${item.id}`}>{item.revision.stem}</Link></TableCell>
                     <TableCell><StatusBadge status={item.revision.status} /></TableCell>
+                    <TableCell>{item.validation ? <Badge variant={item.validation.classification === "invalid" ? "error" : item.validation.classification === "valid_with_warnings" ? "warning" : "success"}>
+                      {item.validation.classification === "invalid" ? `${item.validation.errorCount} Errors` : item.validation.classification === "valid_with_warnings" ? `${item.validation.warningCount} Warnings` : "Valid"}
+                    </Badge> : <Badge variant="neutral">Not validated</Badge>}</TableCell>
                     <TableCell className="whitespace-nowrap">{item.revision.type.replaceAll("_", " ")}</TableCell>
                     <TableCell className="min-w-44">{item.classification.domain.label}{item.classification.topic ? <span className="block text-xs text-muted-foreground">{item.classification.topic.label}</span> : null}</TableCell>
                     <TableCell>{item.classification.difficulty}</TableCell>

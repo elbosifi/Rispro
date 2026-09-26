@@ -6,7 +6,7 @@ test("Teaching author imports a reviewed JSON batch from the isolated applicatio
   await signInWithSession(page, "e2e_supervisor");
   await page.goto("/teaching/login");
   await expect(page).toHaveURL(/\/teaching\/dashboard$/);
-  await expect(page.getByText("Teaching workspace initialized.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Question Bank" })).toBeVisible();
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 1440);
 
   await page.getByRole("link", { name: "Question Bank Import" }).click();

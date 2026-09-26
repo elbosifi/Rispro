@@ -8,16 +8,58 @@ import { TeachingImportPage } from "./pages/teaching-import-page";
 import { TeachingQuestionEditorPage } from "./pages/teaching-question-editor-page";
 import { TeachingQuestionListPage } from "./pages/teaching-question-list-page";
 import { TeachingImportBatchPage } from "./pages/teaching-import-batch-page";
+import { TeachingQbankPage } from "./pages/teaching-qbank-page";
+import { TeachingSessionPage } from "./pages/teaching-session-page";
+import { TeachingHistoryPage } from "./pages/teaching-history-page";
+import { TeachingProgressPage } from "./pages/teaching-progress-page";
 import { TeachingAccessDenied } from "./components/teaching-access-denied";
 import { useTeachingAuth } from "./auth/teaching-auth-context";
 
-function TeachingDashboardRoute() {
+function TeachingLearnerCapabilityRoute({ children }: { children: React.ReactNode }) {
+  const { identity } = useTeachingAuth();
+  if (!identity?.permissions.includes("teaching.learn")) return <TeachingAccessDenied capability="Teaching learner access" />;
+  return <>{children}</>;
+}
+
+function TeachingLearnerRoute({ children }: { children: React.ReactNode }) {
   return (
     <TeachingAccessRoute>
-      <TeachingLayout>
-        <TeachingDashboardPage />
-      </TeachingLayout>
+      <TeachingLearnerCapabilityRoute>
+        <TeachingLayout>{children}</TeachingLayout>
+      </TeachingLearnerCapabilityRoute>
     </TeachingAccessRoute>
+  );
+}
+
+function TeachingDashboardRoute() {
+  return (
+    <TeachingLearnerRoute>
+      <TeachingDashboardPage />
+    </TeachingLearnerRoute>
+  );
+}
+
+function TeachingQbankRoute() {
+  return (
+    <TeachingLearnerRoute>
+      <TeachingQbankPage />
+    </TeachingLearnerRoute>
+  );
+}
+
+function TeachingSessionRoute() {
+  return (
+    <TeachingLearnerRoute>
+      <TeachingSessionPage />
+    </TeachingLearnerRoute>
+  );
+}
+
+function TeachingHistoryRoute() {
+  return (
+    <TeachingLearnerRoute>
+      <TeachingHistoryPage />
+    </TeachingLearnerRoute>
   );
 }
 
@@ -55,6 +97,10 @@ export function TeachingApplication() {
         <Route path="login" element={<TeachingLoginPage />} />
         <Route index element={<Navigate to="/teaching/dashboard" replace />} />
         <Route path="dashboard" element={<TeachingDashboardRoute />} />
+        <Route path="qbank" element={<TeachingQbankRoute />} />
+        <Route path="qbank/session/:sessionId" element={<TeachingSessionRoute />} />
+        <Route path="history" element={<TeachingHistoryRoute />} />
+        <Route path="progress" element={<TeachingLearnerRoute><TeachingProgressPage /></TeachingLearnerRoute>} />
         <Route path="admin/import" element={<TeachingImportRoute />} />
         <Route path="admin/import/batches/:batchId" element={<TeachingEditorialRoute><TeachingImportBatchPage /></TeachingEditorialRoute>} />
         <Route path="admin/questions" element={<TeachingEditorialRoute><TeachingQuestionListPage /></TeachingEditorialRoute>} />

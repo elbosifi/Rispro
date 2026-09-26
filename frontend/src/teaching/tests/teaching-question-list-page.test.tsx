@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TeachingQuestionListPage } from "../pages/teaching-question-list-page";
 
-const listApi = vi.hoisted(() => ({ fetchCatalog: vi.fn(), fetchQuestions: vi.fn() }));
+const listApi = vi.hoisted(() => ({ fetchCatalog: vi.fn(), fetchQuestions: vi.fn(), validateSelection: vi.fn() }));
 vi.mock("../api/teaching-api", () => ({
   fetchTeachingCatalog: listApi.fetchCatalog,
   fetchTeachingQuestions: listApi.fetchQuestions,
+  validateTeachingQuestionSelection: listApi.validateSelection,
 }));
 
 vi.mock("../auth/teaching-auth-context", () => ({
@@ -25,7 +26,8 @@ const catalog = {
 const listResponse = {
   items: [{
     id: 12, externalId: "RAD-NEURO-012", questionBank: { code: "radiology-main", name: "Radiology Main" },
-    revision: { revisionNumber: 3, status: "draft" as const, type: "single_best_answer" as const, stem: "Synthetic editorial question.", importBatchId: null },
+    revision: { id: 112, version: 1, revisionNumber: 3, status: "draft" as const, type: "single_best_answer" as const, stem: "Synthetic editorial question.", importBatchId: null },
+    validation: null,
     classification: { specialty: { code: "radiology", label: "Radiology" }, domain: { code: "neuroradiology", label: "Neuroradiology" }, topic: { code: "brain-tumors", label: "Brain tumors" }, difficulty: 3, trainingLevel: { code: "junior_resident", label: "Junior resident" } },
     sourceTitle: "Teaching source", hasImage: false, imported: false, retiredAt: null,
     createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-02-01T00:00:00.000Z",
@@ -66,5 +68,25 @@ describe("Teaching editorial question list", () => {
       const latestParams = listApi.fetchQuestions.mock.calls.at(-1)?.[0] as URLSearchParams;
       expect(latestParams.get("page")).toBe("2");
     });
+  });
+
+  it("validates the visible worklist page with one bulk request and shows the saved status", async () => {
+    listApi.fetchCatalog.mockResolvedValue(catalog);
+    listApi.fetchQuestions.mockResolvedValueOnce({
+      ...listResponse,
+      items: [{ ...listResponse.items[0]!, validation: null }],
+    });
+    listApi.fetchQuestions.mockResolvedValue({
+      ...listResponse,
+      items: [{ ...listResponse.items[0]!, validation: { classification: "valid", errorCount: 0, warningCount: 0 } }],
+    });
+    listApi.validateSelection.mockResolvedValue({ total: 1, draft: 1, inReview: 0, published: 0, retired: 0, valid: 1, validWithWarnings: 0, invalid: 0, conflicts: 0, questions: [] });
+    renderList();
+
+    expect(await screen.findByText("Not validated")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Validate current page" }));
+    await waitFor(() => expect(listApi.validateSelection).toHaveBeenCalledWith([12]));
+    expect(await screen.findByText("Validated 1 Drafts: 1 valid, 0 with warnings, 0 invalid.")).toBeTruthy();
+    expect(await screen.findByText("Valid")).toBeTruthy();
   });
 });

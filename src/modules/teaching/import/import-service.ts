@@ -14,6 +14,7 @@ import {
 import { parseTeachingCaseInput, parseTeachingReferenceInput, parseTeachingSourceInput } from "../domain/teaching-content-validation.js";
 import { listTeachingQuestionBanks } from "../repositories/teaching-catalog-repository.js";
 import { createTeachingImportBatch, getTeachingImportBatch, listTeachingImportBatches, toTeachingImportBatchDto } from "./import-batch-repository.js";
+import { getTeachingImportBatchQuestionSummary } from "./bulk-operations-service.js";
 import { parseTeachingImportJson, type ParsedTeachingImport, type TeachingImportIssue, type TeachingImportQuestion } from "./import-schema.js";
 import {
   cleanupExpiredTeachingImports,
@@ -414,7 +415,10 @@ export async function getTeachingImportBatchDto(batchId: string) {
   await cleanupExpiredTeachingImports();
   const batch = await getTeachingImportBatch(batchId);
   if (!batch) throw new HttpError(404, "Teaching import batch not found.");
-  return toTeachingImportBatchDto(batch);
+  const publication = batch.status === "confirmed"
+    ? await getTeachingImportBatchQuestionSummary(batchId)
+    : { total: 0, draft: 0, inReview: 0, published: 0, retired: 0 };
+  return { ...toTeachingImportBatchDto(batch), publication };
 }
 
 export async function listTeachingImportBatchDtos(limit = 25, offset = 0) {

@@ -32,3 +32,11 @@ export async function requireTeachingCapabilities(req: TeachingRequest, allowed:
   };
   return { teachingIdentity, actor };
 }
+
+export async function requireTeachingLearner(req: TeachingRequest) {
+  const access = await requireTeachingCapabilities(req, []);
+  if (!access.teachingIdentity.permissions.includes("teaching.learn")) {
+    throw new HttpError(403, "Teaching learner access is required.");
+  }
+  return access;
+}

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../../middleware/auth.js";
 import { asyncRoute } from "../../../utils/async-route.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { requireTeachingCapabilities, type TeachingRequest } from "./teaching-route-auth.js";
+import { requireTeachingCapabilities, requireTeachingLearner, type TeachingRequest } from "./teaching-route-auth.js";
 import { getTeachingCatalog, listTeachingQuestionBanks } from "../repositories/teaching-catalog-repository.js";
 import {
   createTeachingCase,
@@ -36,9 +36,39 @@ import {
   previewTeachingImport,
 } from "../import/import-service.js";
 import { createTeachingImportTemplate } from "../import/template-service.js";
+import {
+  parseTeachingBulkQuestionIds,
+  publishTeachingQuestionScope,
+  validateTeachingQuestionScope,
+} from "../import/bulk-operations-service.js";
 import { listTeachingAssets, listTeachingCases, listTeachingReferences, listTeachingSources } from "../repositories/teaching-editorial-repository.js";
 import { readTeachingAsset } from "../services/teaching-asset-service.js";
 import { createTeachingAssetFromUpload } from "../services/teaching-asset-upload-service.js";
+import {
+  clearTeachingQuestionNote,
+  assertLearnerTeachingAssetAccessible,
+  createTeachingSession,
+  getTeachingLearnerDashboard,
+  getTeachingQuestionAvailability,
+  getTeachingSession,
+  getTeachingSessionQuestion,
+  listTeachingSessionHistory,
+  parseCreateTeachingSession,
+  parseTeachingHistoryPagination,
+  saveTeachingExamResponse,
+  saveTeachingQuestionNote,
+  setTeachingQuestionBookmark,
+  submitTeachingSession,
+  submitTeachingStudyAnswer,
+} from "../services/teaching-learner-service.js";
+import {
+  getTeachingProgress,
+  getTeachingProgressBreakdown,
+  getTeachingProgressCycles,
+  getTeachingProgressPreview,
+  parseTeachingProgressDimension,
+  resetTeachingProgress,
+} from "../services/teaching-progress-service.js";
 
 function queryText(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -64,6 +94,18 @@ function bodyBatchId(value: unknown): string {
   return parseTeachingImportBatchId(value.batchId);
 }
 
+function positivePosition(value: unknown): number {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) throw new HttpError(400, "Question position is invalid.");
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new HttpError(400, "Question position is invalid.");
+  return parsed;
+}
+
+function privateNoStore(res: Response): void {
+  res.setHeader("Cache-Control", "no-store, private");
+  res.setHeader("Vary", "Cookie");
+}
+
 export function createTeachingRouter(): Router {
   const router = Router();
 
@@ -72,8 +114,18 @@ export function createTeachingRouter(): Router {
   });
 
   router.get("/assets/:id", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
-    await requireTeachingCapabilities(req, []);
-    const asset = await readTeachingAsset(parsePositivePathId(req.params.id));
+    const { teachingIdentity } = await requireTeachingCapabilities(req, []);
+    const assetId = parsePositivePathId(req.params.id);
+    const hasEditorialAccess = teachingIdentity.permissions.some((permission) =>
+      ["teaching.author", "teaching.review", "teaching.publish", "teaching.admin"].includes(permission),
+    );
+    if (!hasEditorialAccess && !teachingIdentity.permissions.includes("teaching.learn")) {
+      throw new HttpError(403, "Teaching learner access is required.");
+    }
+    if (!hasEditorialAccess) {
+      await assertLearnerTeachingAssetAccessible(teachingIdentity, assetId);
+    }
+    const asset = await readTeachingAsset(assetId);
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader("Content-Disposition", `inline; filename="${asset.filename}"`);
     res.setHeader("Cache-Control", "private, no-store");
@@ -124,6 +176,18 @@ export function createTeachingRouter(): Router {
     res.json(await getTeachingImportBatchDto(parseTeachingImportBatchId(req.params.id)));
   }));
 
+  router.post("/qbank/import/batches/:id/validate", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor } = await requireTeachingCapabilities(req, ["teaching.author"]);
+    res.setHeader("Cache-Control", "no-store, private");
+    res.json(await validateTeachingQuestionScope({ batchId: parseTeachingImportBatchId(req.params.id) }, actor));
+  }));
+
+  router.post("/qbank/import/batches/:id/publish", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.publish"]);
+    res.setHeader("Cache-Control", "no-store, private");
+    res.json(await publishTeachingQuestionScope({ batchId: parseTeachingImportBatchId(req.params.id) }, actor, teachingIdentity.permissions));
+  }));
+
   router.get("/me", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     const { teachingIdentity } = await requireTeachingCapabilities(req, []);
 
@@ -139,6 +203,135 @@ export function createTeachingRouter(): Router {
     await requireTeachingCapabilities(req, []);
     res.setHeader("Cache-Control", "no-store, private");
     res.json(await getTeachingCatalog());
+  }));
+
+  router.get("/qbank/dashboard", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await getTeachingLearnerDashboard(teachingIdentity));
+  }));
+
+  router.get("/progress", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const questionBank = req.query.questionBank ?? "radiology-main";
+    res.json(await getTeachingProgress(teachingIdentity, questionBank));
+  }));
+
+  router.get("/progress/breakdown", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const questionBank = req.query.questionBank ?? "radiology-main";
+    const dimension = parseTeachingProgressDimension(req.query.dimension);
+    res.json(await getTeachingProgressBreakdown(teachingIdentity, questionBank, dimension, {
+      domain: req.query.domain,
+      search: req.query.search,
+    }));
+  }));
+
+  router.get("/progress/preview", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const questionBank = req.query.questionBank ?? "radiology-main";
+    res.json(await getTeachingProgressPreview(teachingIdentity, questionBank, {
+      type: req.query.scopeType,
+      code: req.query.scopeCode,
+      domain: req.query.domain,
+    }));
+  }));
+
+  router.get("/progress/cycles", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const questionBank = req.query.questionBank ?? "radiology-main";
+    res.json(await getTeachingProgressCycles(teachingIdentity, questionBank, {
+      type: req.query.scopeType,
+      code: req.query.scopeCode,
+      domain: req.query.domain,
+    }));
+  }));
+
+  router.post("/progress/reset", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.status(201).json(await resetTeachingProgress(teachingIdentity, req.body));
+  }));
+
+  router.post("/qbank/availability", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const filters = typeof req.body === "object" && req.body !== null && "filters" in req.body ? req.body.filters : req.body;
+    res.json(await getTeachingQuestionAvailability(teachingIdentity, filters));
+  }));
+
+  router.post("/sessions", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.status(201).json(await createTeachingSession(teachingIdentity, parseCreateTeachingSession(req.body)));
+  }));
+
+  router.get("/sessions/:sessionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await getTeachingSession(teachingIdentity, parsePositivePathId(req.params.sessionId)));
+  }));
+
+  router.get("/sessions/:sessionId/questions/:position", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await getTeachingSessionQuestion(teachingIdentity, parsePositivePathId(req.params.sessionId), positivePosition(req.params.position)));
+  }));
+
+  router.post("/sessions/:sessionId/questions/:position/answer", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const body = typeof req.body === "object" && req.body !== null ? req.body as Record<string, unknown> : {};
+    res.json(await submitTeachingStudyAnswer(teachingIdentity, parsePositivePathId(req.params.sessionId), positivePosition(req.params.position), body.selectedOptionKey));
+  }));
+
+  router.put("/sessions/:sessionId/questions/:position/response", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const body = typeof req.body === "object" && req.body !== null ? req.body as Record<string, unknown> : {};
+    res.json(await saveTeachingExamResponse(teachingIdentity, parsePositivePathId(req.params.sessionId), positivePosition(req.params.position), body.selectedOptionKey));
+  }));
+
+  router.post("/sessions/:sessionId/submit", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await submitTeachingSession(teachingIdentity, parsePositivePathId(req.params.sessionId)));
+  }));
+
+  router.put("/bookmarks/:questionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await setTeachingQuestionBookmark(teachingIdentity, parsePositivePathId(req.params.questionId), true));
+  }));
+
+  router.delete("/bookmarks/:questionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await setTeachingQuestionBookmark(teachingIdentity, parsePositivePathId(req.params.questionId), false));
+  }));
+
+  router.put("/notes/:questionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const body = typeof req.body === "object" && req.body !== null ? req.body as Record<string, unknown> : {};
+    res.json(await saveTeachingQuestionNote(teachingIdentity, parsePositivePathId(req.params.questionId), body.note));
+  }));
+
+  router.delete("/notes/:questionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    res.json(await clearTeachingQuestionNote(teachingIdentity, parsePositivePathId(req.params.questionId)));
+  }));
+
+  router.get("/history", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { teachingIdentity } = await requireTeachingLearner(req);
+    privateNoStore(res);
+    const pagination = parseTeachingHistoryPagination(req.query.page, req.query.pageSize);
+    res.json(await listTeachingSessionHistory(teachingIdentity, pagination.page, pagination.pageSize));
   }));
 
   router.get("/admin/question-banks", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
@@ -212,6 +405,12 @@ export function createTeachingRouter(): Router {
     await requireTeachingCapabilities(req, ["teaching.author"]);
     res.setHeader("Cache-Control", "no-store, private");
     res.json(await validateTeachingQuestion(req.body));
+  }));
+
+  router.post("/admin/questions/bulk/validate", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor } = await requireTeachingCapabilities(req, ["teaching.author"]);
+    res.setHeader("Cache-Control", "no-store, private");
+    res.json(await validateTeachingQuestionScope({ questionIds: parseTeachingBulkQuestionIds(req.body?.questionIds) }, actor));
   }));
 
   router.patch("/admin/questions/:id/revisions/:revisionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
