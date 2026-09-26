@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -92,6 +92,7 @@ describe("Teaching Progress page", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -118,6 +119,31 @@ describe("Teaching Progress page", () => {
     fireEvent.change(screen.getByLabelText("Analyze by"), { target: { value: "tag" } });
     fireEvent.change(screen.getByLabelText("Find tags"), { target: { value: "RANO" } });
     await waitFor(() => expect(progressApi.fetchBreakdown).toHaveBeenLastCalledWith("tag", { questionBank: "radiology-main", search: "RANO" }));
+  });
+
+  it("resets cycle history to the overall bank when the analytics dimension changes", async () => {
+    renderPage();
+    const row = await screen.findByRole("row", { name: /Neuroradiology/ });
+    fireEvent.click(within(row).getByRole("button", { name: "View cycles" }));
+    await waitFor(() => expect(progressApi.fetchCycles).toHaveBeenLastCalledWith("radiology-main", { type: "domain", code: "neuroradiology" }));
+
+    fireEvent.change(screen.getByLabelText("Analyze by"), { target: { value: "modality" } });
+    await waitFor(() => expect(progressApi.fetchCycles).toHaveBeenLastCalledWith("radiology-main", { type: "bank" }));
+  });
+
+  it("debounces tag analytics search by 300 milliseconds", async () => {
+    renderPage();
+    await screen.findByRole("row", { name: /Neuroradiology/ });
+    fireEvent.change(screen.getByLabelText("Analyze by"), { target: { value: "tag" } });
+    await waitFor(() => expect(progressApi.fetchBreakdown).toHaveBeenLastCalledWith("tag", { questionBank: "radiology-main" }));
+    vi.useFakeTimers();
+    const callsBeforeSearch = progressApi.fetchBreakdown.mock.calls.length;
+    fireEvent.change(screen.getByLabelText("Find tags"), { target: { value: "RANO" } });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+    expect(progressApi.fetchBreakdown).toHaveBeenCalledTimes(callsBeforeSearch);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(progressApi.fetchBreakdown).toHaveBeenLastCalledWith("tag", { questionBank: "radiology-main", search: "RANO" });
   });
 
   it("previews scope and active-session warning before a history-preserving reset", async () => {

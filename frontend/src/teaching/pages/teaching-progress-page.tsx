@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, LoadingState, SearchInput } from "@/components/shared";
@@ -41,20 +41,26 @@ export function TeachingProgressPage() {
   const [dimension, setDimension] = useState<TeachingProgressDimension>("domain");
   const [topicDomain, setTopicDomain] = useState("");
   const [tagSearch, setTagSearch] = useState("");
+  const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetType, setResetType] = useState<"bank" | "domain" | "topic">("bank");
   const [resetDomain, setResetDomain] = useState("");
   const [resetTopic, setResetTopic] = useState("");
   const [historyScope, setHistoryScope] = useState<TeachingResetScope>({ type: "bank" });
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedTagSearch(tagSearch), 300);
+    return () => window.clearTimeout(timeout);
+  }, [tagSearch]);
+
   const catalog = useQuery({ queryKey: ["teaching", "catalog"], queryFn: fetchTeachingCatalog, staleTime: 60_000 });
   const progress = useQuery({ queryKey: ["teaching", "progress", questionBank], queryFn: () => fetchTeachingProgress(questionBank), staleTime: 0 });
   const breakdown = useQuery({
-    queryKey: ["teaching", "progress-breakdown", questionBank, dimension, topicDomain, tagSearch],
+    queryKey: ["teaching", "progress-breakdown", questionBank, dimension, topicDomain, debouncedTagSearch],
     queryFn: () => fetchTeachingProgressBreakdown(dimension, {
       questionBank,
       ...(dimension === "topic" && topicDomain ? { domain: topicDomain } : {}),
-      ...(dimension === "tag" && tagSearch ? { search: tagSearch } : {}),
+      ...(dimension === "tag" && debouncedTagSearch ? { search: debouncedTagSearch } : {}),
     }),
   });
   const cycles = useQuery({
@@ -140,7 +146,7 @@ export function TeachingProgressPage() {
           </div>
           <label className="w-full text-sm font-medium text-foreground sm:w-56">
             Analyze by
-            <select className={`${fieldClass} mt-1`} value={dimension} onChange={(event) => { setDimension(event.target.value as TeachingProgressDimension); setTopicDomain(""); }}>
+            <select className={`${fieldClass} mt-1`} value={dimension} onChange={(event) => { setDimension(event.target.value as TeachingProgressDimension); setTopicDomain(""); setHistoryScope({ type: "bank" }); }}>
               {dimensions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </label>
@@ -174,7 +180,7 @@ export function TeachingProgressPage() {
                     {displayRows.map((row) => <tr key={row.code} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
                       <th scope="row" className="py-3 pe-4 font-medium text-foreground">
                         {row.label}
-                        {dimension === "domain" && <button type="button" className="ms-2 text-xs font-medium text-accent hover:underline" onClick={() => { setDimension("topic"); setTopicDomain(row.code); }}>Topics</button>}
+                        {dimension === "domain" && <button type="button" className="ms-2 text-xs font-medium text-accent hover:underline" onClick={() => { setDimension("topic"); setTopicDomain(row.code); setHistoryScope({ type: "bank" }); }}>Topics</button>}
                       </th>
                       <td className="py-3 pe-4 tabular-nums">{row.attempted} / {row.eligible} · {row.completionPercent}%</td>
                       <td className="py-3 pe-4 tabular-nums">{row.correct} / {row.attempted} · {percent(row.accuracyPercent)}</td>

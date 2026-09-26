@@ -58,7 +58,7 @@ import { resolveModuleNavigationTarget, saveModuleLastLocation } from "@/lib/nav
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { useLanguage } from "@/providers/language-provider";
-import { LanguageProvider } from "@/providers/language-provider-component";
+import { EnglishLanguageScope, LanguageProvider } from "@/providers/language-provider-component";
 import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { useTeachingIdentity } from "@/teaching/api/use-teaching-identity";
 import { TeachingApplication } from "@/teaching/teaching-application";
@@ -140,7 +140,7 @@ function EnglishOnlyRoute({ children }: { children: ReactNode }) {
     };
   }, [language]);
 
-  return <div lang="en" dir="ltr">{children}</div>;
+  return <EnglishLanguageScope><div lang="en" dir="ltr">{children}</div></EnglishLanguageScope>;
 }
 
 function AppContent() {
@@ -412,7 +412,7 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/teaching/*" element={<TeachingApplication />} />
+      <Route path="/teaching/*" element={<EnglishOnlyRoute><TeachingApplication /></EnglishOnlyRoute>} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />

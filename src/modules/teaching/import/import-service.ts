@@ -415,10 +415,14 @@ export async function getTeachingImportBatchDto(batchId: string) {
   await cleanupExpiredTeachingImports();
   const batch = await getTeachingImportBatch(batchId);
   if (!batch) throw new HttpError(404, "Teaching import batch not found.");
-  const publication = batch.status === "confirmed"
+  const questionSummary = batch.status === "confirmed"
     ? await getTeachingImportBatchQuestionSummary(batchId)
-    : { total: 0, draft: 0, inReview: 0, published: 0, retired: 0 };
-  return { ...toTeachingImportBatchDto(batch), publication };
+    : null;
+  return {
+    ...toTeachingImportBatchDto(batch),
+    publication: questionSummary?.publication ?? { total: 0, draft: 0, inReview: 0, published: 0, retired: 0 },
+    lastValidation: questionSummary?.lastValidation ?? null,
+  };
 }
 
 export async function listTeachingImportBatchDtos(limit = 25, offset = 0) {

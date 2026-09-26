@@ -59,6 +59,11 @@ export function TeachingQuestionListPage() {
   currentScopeKeyRef.current = currentScopeKey;
   const validationSummary = validationScope?.result ?? null;
   const publishSummary = publishScope?.result ?? null;
+  const searchIsDirty = search.trim() !== (searchParams.get("search") ?? "");
+
+  useEffect(() => {
+    setSearch(searchParams.get("search") ?? "");
+  }, [searchParams]);
 
   useEffect(() => {
     setValidationScope((current) => current?.scopeKey === currentScopeKey ? current : null);
@@ -68,12 +73,13 @@ export function TeachingQuestionListPage() {
   }, [currentScopeKey]);
 
   const validateMatching = useMutation({
-    mutationFn: ({ filters }: { filters: typeof matchingFilters; scopeKey: string }) => validateTeachingQuestionMatching(filters),
+    mutationFn: ({ filters }: { filters: typeof matchingFilters; scopeKey: string; confirmAfterValidation: boolean }) => validateTeachingQuestionMatching(filters),
     onSuccess: (result, variables) => {
       if (currentScopeKeyRef.current !== variables.scopeKey) return;
       setValidationScope({ scopeKey: variables.scopeKey, result });
       setPublishScope(null);
       setShowAttention(false);
+      setConfirmPublish(variables.confirmAfterValidation && result.eligibleForPublish > 0);
       void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
     },
   });
@@ -85,6 +91,10 @@ export function TeachingQuestionListPage() {
       setValidationScope(null);
       setConfirmPublish(false);
       void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
+    },
+    onError: () => {
+      setValidationScope(null);
+      setConfirmPublish(false);
     },
   });
 
@@ -131,7 +141,7 @@ export function TeachingQuestionListPage() {
   const pagination = questions.data?.pagination;
   const eligibleForPublish = validationSummary?.eligibleForPublish ?? 0;
   const attentionQuestions = (validationSummary?.questions ?? publishSummary?.results ?? []).filter((item) =>
-    item.validationStatus === "invalid" || item.publishStatus === "conflict" || item.publishStatus === "failed",
+    item.validationStatus === "invalid" || ["conflict", "failed", "requires_review", "invalid"].includes(item.publishStatus ?? ""),
   );
 
   const sortItems = [
@@ -158,7 +168,12 @@ export function TeachingQuestionListPage() {
         <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); setFilter("search", search.trim()); }}>
           <label className="min-w-60 flex-[2] text-xs font-medium text-muted-foreground" htmlFor="teaching-question-search">
             <span className="mb-1 block">Search external ID, stem, source, or case ID</span>
-            <Input id="teaching-question-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" />
+            <Input id="teaching-question-search" value={search} onChange={(event) => {
+              setSearch(event.target.value);
+              setValidationScope(null);
+              setPublishScope(null);
+              setConfirmPublish(false);
+            }} placeholder="Search questions" />
           </label>
           <Button type="submit" variant="secondary"><Search size={16} aria-hidden="true" /> Search</Button>
           <label className="block min-w-36 flex-1 text-xs font-medium text-muted-foreground">
@@ -216,22 +231,22 @@ export function TeachingQuestionListPage() {
           <span>{pagination ? `${pagination.total} questions · page ${pagination.page} of ${Math.max(1, pagination.totalPages)}` : "Loading question count…"}</span>
           <div className="flex flex-wrap items-center gap-3">
             <span>Filters are saved in this page URL.</span>
-            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={validateMatching.isPending} onClick={() => validateMatching.mutate({ filters: matchingFilters, scopeKey: currentScopeKey })}>
-              {validateMatching.isPending ? "Validating all matching…" : "Validate all matching"}
+            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={searchIsDirty || validateMatching.isPending || publishMatching.isPending} onClick={() => validateMatching.mutate({ filters: matchingFilters, scopeKey: currentScopeKey, confirmAfterValidation: false })}>
+              {validateMatching.isPending ? "Validating all matching…" : "Validate only"}
             </Button> : null}
-            {canPublish ? <Button type="button" size="sm" disabled={validateMatching.isPending || !validationSummary || validationScope?.scopeKey !== currentScopeKey || !validationSummary.scopeFingerprint || eligibleForPublish === 0} onClick={() => setConfirmPublish(true)}>
-              {validationSummary ? `Validate & publish all eligible (${eligibleForPublish})` : "Validate & publish all eligible"}
+            {canAuthor && canPublish ? <Button type="button" size="sm" disabled={searchIsDirty || validateMatching.isPending || publishMatching.isPending} onClick={() => validateMatching.mutate({ filters: matchingFilters, scopeKey: currentScopeKey, confirmAfterValidation: true })}>
+              {validateMatching.isPending ? "Validating current scope..." : "Validate & publish..."}
             </Button> : null}
           </div>
         </div>
         {validateMatching.error ? <p role="alert" className="text-sm text-destructive">{validateMatching.error.message}</p> : null}
         {publishMatching.error ? <p role="alert" className="text-sm text-destructive">{publishMatching.error.message}</p> : null}
         {validationSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span>Matched {validationSummary.total}: {validationSummary.valid} valid, {validationSummary.validWithWarnings} with warnings, {validationSummary.invalid} invalid.</span>
+          <span>Matched {validationSummary.total}: {validationSummary.valid} valid, {validationSummary.validWithWarnings} with warnings, {validationSummary.invalid} invalid, {validationSummary.conflicts} conflicts, {validationSummary.eligibleForPublish} eligible.</span>
           {attentionQuestions.length ? <Button type="button" size="sm" variant="ghost" onClick={() => setShowAttention((current) => !current)}>View questions requiring attention</Button> : null}
         </div> : null}
         {publishSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span>{publishSummary.requested} matched: {publishSummary.published} published, {publishSummary.warnings} published with warnings, {publishSummary.invalid} invalid / remain Draft, {publishSummary.conflicts} conflicts, {publishSummary.alreadyPublished} already published.</span>
+          <span>{publishSummary.requested} matched: {Math.max(0, publishSummary.published - publishSummary.warnings)} published, {publishSummary.warnings} published with warnings, {publishSummary.invalid + publishSummary.failed + publishSummary.requiresReview} require attention, {publishSummary.conflicts} conflicts, {publishSummary.alreadyPublished} already published.</span>
           {attentionQuestions.length ? <Button type="button" size="sm" variant="ghost" onClick={() => setShowAttention((current) => !current)}>View questions requiring attention</Button> : null}
         </div> : null}
         {showAttention && attentionQuestions.length ? <div aria-label="Questions requiring attention" className="space-y-1 border-t pt-3 text-sm" style={{ borderColor: "var(--border)" }}>
@@ -284,14 +299,16 @@ export function TeachingQuestionListPage() {
       <Dialog open={confirmPublish} onClose={() => { if (!publishMatching.isPending) setConfirmPublish(false); }}>
         <DialogContent maxWidth="560px" aria-labelledby="teaching-matching-publish-title">
           <DialogHeader>
-            <DialogTitle id="teaching-matching-publish-title">Publish all eligible matching questions?</DialogTitle>
+            <DialogTitle id="teaching-matching-publish-title">Publish validated matching questions?</DialogTitle>
             <DialogDescription>The server will revalidate each matching Draft question before applying its existing lifecycle transitions.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-sm text-foreground">
-            <p><strong>{validationSummary?.total ?? 0} questions</strong> match the current filters.</p>
+            <p><strong>{validationSummary?.total ?? 0} questions</strong> match the validated filter scope.</p>
+            <p><strong>{validationSummary?.valid ?? 0} questions</strong> are valid.</p>
+            <p><strong>{validationSummary?.validWithWarnings ?? 0} questions</strong> are valid with warnings.</p>
+            <p><strong>{validationSummary?.conflicts ?? 0} questions</strong> changed during validation.</p>
             <p><strong>{eligibleForPublish} eligible questions</strong> will be published.</p>
-            <p><strong>{validationSummary?.validWithWarnings ?? 0} questions have warnings.</strong> Warnings do not block publication.</p>
-            <p><strong>{validationSummary?.invalid ?? 0} questions contain errors</strong> and will remain Draft.</p>
+            <p><strong>{validationSummary?.invalid ?? 0} questions contain errors</strong> and will remain Draft. Warnings do not block publication.</p>
           </div>
           <DialogFooter>
             <Button variant="secondary" disabled={publishMatching.isPending} onClick={() => setConfirmPublish(false)}>Cancel</Button>

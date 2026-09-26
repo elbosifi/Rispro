@@ -29,10 +29,16 @@ test("Teaching faculty imports, reviews, publishes, and revises an image questio
   await expect(page.getByText("Structure valid")).toBeVisible();
   await page.getByRole("button", { name: "Validate and preview" }).click();
   await expect(page.getByText(externalId)).toBeVisible();
+  const importConfirmation = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/qbank/import/confirm" && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Import 1 Draft Questions" }).first().click();
-  await expect(page.getByText("1 questions imported as Draft.")).toBeVisible();
+  const importResult = await importConfirmation;
+  expect(importResult.ok()).toBeTruthy();
+  const batch = await importResult.json() as { batchId: string };
+  await expect(page).toHaveURL(`/teaching/admin/import/batches/${batch.batchId}`);
+  await expect(page.getByRole("heading", { name: "Import batch" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Import" }).click();
   await page.getByRole("link", { name: "Question Bank", exact: true }).click();
   await page.getByLabel(/Search external ID/).fill(externalId);
   await page.getByRole("button", { name: "Search" }).click();

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Check, Download, Eye, FileUp, Upload } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle, Badge, Button, Card } from "@/components/shared";
 import {
   confirmTeachingImport,
@@ -50,6 +51,7 @@ function ApiValidation(error: unknown): TeachingImportValidation | null {
 }
 
 export function TeachingImportPage() {
+  const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [inspection, setInspection] = useState<TeachingImportInspectResult | null>(null);
   const [validation, setValidation] = useState<TeachingImportValidation | null>(null);
@@ -105,10 +107,7 @@ export function TeachingImportPage() {
     if (!inspection || !validation || validation.errors.length > 0 || validation.questions.length === 0) return;
     const result = await runOnce("confirm", () => confirmTeachingImport(inspection.batchId));
     if (result?.status === "confirmed") {
-      setMessage({ text: `${result.questionCount} questions imported as Draft.`, variant: "success" });
-      setInspection(null);
-      setValidation(null);
-      setFile(null);
+      navigate(`/teaching/admin/import/batches/${encodeURIComponent(result.batchId)}`);
     }
   }
 
@@ -120,10 +119,13 @@ export function TeachingImportPage() {
           <h1 id="teaching-import-title" className="mt-1 text-2xl font-semibold text-foreground">Question Bank Import</h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Prepare questions elsewhere, inspect and validate them against the live Teaching catalog, then import them as drafts.</p>
         </div>
-        <Button type="button" variant="secondary" onClick={() => void handleDownload()} disabled={busy !== null}>
-          <Download size={16} aria-hidden="true" />
-          {busy === "download" ? "Preparing template…" : "Download AI Template"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link to="/teaching/admin/import/history" className="text-sm font-medium text-accent underline-offset-4 hover:underline">Import history</Link>
+          <Button type="button" variant="secondary" onClick={() => void handleDownload()} disabled={busy !== null}>
+            <Download size={16} aria-hidden="true" />
+            {busy === "download" ? "Preparing template…" : "Download AI Template"}
+          </Button>
+        </div>
       </header>
 
       {message && (

@@ -193,6 +193,14 @@ test("Teaching import batches validate current drafts and publish eligible revis
     });
     assert.equal(staleScopePublish.status, 409, "a validation fingerprint cannot publish a changed matching scope");
 
+    const changedMatchingFilters = { search: batchExternalIds[0], status: "draft" };
+    const changedScopeValidation = await request("/api/teaching/admin/questions/bulk/validate-matching", {
+      method: "POST", subject: authorSubject, body: { filters: changedMatchingFilters },
+    });
+    assert.equal(changedScopeValidation.status, 200, JSON.stringify(changedScopeValidation.data));
+    assert.equal(object(changedScopeValidation.data).total, 1, "revalidation is bound to the new search and status scope");
+    const changedScopeFingerprint = object(changedScopeValidation.data).scopeFingerprint;
+
     const manualValidation = await request("/api/teaching/admin/questions/bulk/validate", {
       method: "POST", subject: authorSubject, body: { questionIds: [manualQuestionId] },
     });
@@ -223,7 +231,14 @@ test("Teaching import batches validate current drafts and publish eligible revis
     );
     assert.equal(afterValidation.rows.length, 10);
     assert.ok(afterValidation.rows.every((row) => row.status === "draft" && row.version === 1), "validation does not advance draft lifecycle state");
-    const conflictCandidate = resultItems.find((item) => item.questionId === questionIds[0])!;
+    const changedScopePublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: changedMatchingFilters, scopeFingerprint: changedScopeFingerprint },
+    });
+    assert.equal(changedScopePublish.status, 200, JSON.stringify(changedScopePublish.data));
+    assert.equal(object(changedScopePublish.data).requested, 1);
+    assert.equal(object(changedScopePublish.data).published, 1, "the revalidated exact matching scope is the only scope published");
+    const conflictQuestionId = questionIds[1]!;
+    const conflictCandidate = resultItems.find((item) => item.questionId === conflictQuestionId)!;
     await assert.rejects(
       content.publishTeachingQuestionFromBulk(
         Number(conflictCandidate.questionId),
@@ -236,21 +251,35 @@ test("Teaching import batches validate current drafts and publish eligible revis
     );
     const afterConflict = await pool.query<{ status: string; version: number }>(
       "select status, version from teaching.question_revisions where question_id = $1 order by revision_number desc limit 1",
-      [questionIds[0]],
+      [conflictQuestionId],
     );
     assert.deepEqual(afterConflict.rows[0], { status: "draft", version: 1 }, "stale publication cannot mutate the current revision");
 
-    const publisherOnlyResult = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: publisherSubject, body: {} });
+    const batchPublishValidation = await request(`/api/teaching/qbank/import/batches/${batchId}/validate`, { method: "POST", subject: authorSubject, body: {} });
+    assert.equal(batchPublishValidation.status, 200, JSON.stringify(batchPublishValidation.data));
+    const batchScopeFingerprint = object(batchPublishValidation.data).scopeFingerprint;
+    const batchStateAfterValidation = await request(`/api/teaching/qbank/import/batches/${batchId}`, { subject: authorSubject });
+    assert.deepEqual(object(object(batchStateAfterValidation.data).lastValidation), {
+      total: 10, valid: 8, validWithWarnings: 1, invalid: 1, eligibleForPublish: 8,
+      validatedAt: object(object(batchStateAfterValidation.data).lastValidation).validatedAt,
+      questions: object(object(batchStateAfterValidation.data).lastValidation).questions,
+    });
+    assert.ok(Array.isArray(object(object(batchStateAfterValidation.data).lastValidation).questions));
+    const missingFingerprintPublish = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: {} });
+    assert.equal(missingFingerprintPublish.status, 409, "publication requires the current validation scope token");
+    const publisherOnlyResult = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: publisherSubject, body: { scopeFingerprint: batchScopeFingerprint } });
     assert.equal(publisherOnlyResult.status, 200);
     assert.equal(object(publisherOnlyResult.data).published, 0);
-    assert.equal(object(publisherOnlyResult.data).requiresReview, 9);
+    assert.equal(object(publisherOnlyResult.data).alreadyPublished, 1);
+    assert.equal(object(publisherOnlyResult.data).requiresReview, 8);
     assert.equal(object(publisherOnlyResult.data).invalid, 1);
 
     const publishStarted = Date.now();
-    const publishResponse = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: {} });
+    const publishResponse = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: { scopeFingerprint: batchScopeFingerprint } });
     assert.equal(publishResponse.status, 200, JSON.stringify(publishResponse.data));
     const publishSummary = object(publishResponse.data);
-    assert.equal(publishSummary.published, 9);
+    assert.equal(publishSummary.published, 8);
+    assert.equal(publishSummary.alreadyPublished, 1);
     assert.equal(publishSummary.invalid, 1);
     assert.equal(publishSummary.warnings, 1);
     performanceMs.publication = Date.now() - publishStarted;
@@ -280,7 +309,9 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(learnerAvailability.status, 200);
     assert.equal(object(learnerAvailability.data).available, 9);
 
-    const retryPublish = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: {} });
+    const retryValidation = await request(`/api/teaching/qbank/import/batches/${batchId}/validate`, { method: "POST", subject: authorSubject, body: {} });
+    assert.equal(retryValidation.status, 200);
+    const retryPublish = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: { scopeFingerprint: object(retryValidation.data).scopeFingerprint } });
     assert.equal(retryPublish.status, 200);
     assert.equal(object(retryPublish.data).published, 0);
     assert.equal(object(retryPublish.data).alreadyPublished, 9);
@@ -306,7 +337,7 @@ test("Teaching import batches validate current drafts and publish eligible revis
     const revalidation = await request(`/api/teaching/qbank/import/batches/${batchId}/validate`, { method: "POST", subject: authorSubject, body: {} });
     assert.equal(revalidation.status, 200);
     assert.equal(object(revalidation.data).invalid, 0);
-    const finalPublish = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: {} });
+    const finalPublish = await request(`/api/teaching/qbank/import/batches/${batchId}/publish`, { method: "POST", subject: authorSubject, body: { scopeFingerprint: object(revalidation.data).scopeFingerprint } });
     assert.equal(finalPublish.status, 200);
     assert.equal(object(finalPublish.data).published, 1);
     assert.equal(object(finalPublish.data).alreadyPublished, 9);

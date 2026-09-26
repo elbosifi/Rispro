@@ -1,19 +1,41 @@
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { Button, Card, EmptyState, ErrorState, LoadingState } from "@/components/shared";
-import { fetchTeachingSessionHistory, type TeachingSessionMode } from "../api/teaching-api";
+import { fetchTeachingCatalog, fetchTeachingSessionHistory, type TeachingCatalog, type TeachingSessionMode } from "../api/teaching-api";
 
 function modeLabel(mode: TeachingSessionMode): string {
   return mode === "exam" ? "Exam" : mode === "review" ? "Review" : "Study";
 }
 
-function filterSummary(filters: Record<string, unknown>): string {
+function filterSummary(filters: Record<string, unknown>, catalog?: TeachingCatalog): string {
+  const label = (items: Array<{ code: string; label: string }>, code: unknown) =>
+    typeof code === "string" ? items.find((item) => item.code === code)?.label ?? code : null;
+  const labels = (items: Array<{ code: string; label: string }>, codes: unknown) =>
+    Array.isArray(codes) ? codes.map((code) => label(items, code)).filter((item): item is string => item !== null).join(", ") || null : null;
+  const stateLabels: Record<string, string> = { unseen: "Unseen", correct: "Correct", incorrect: "Incorrect", answered: "Previously answered", marked: "Marked" };
   const parts = [
-    typeof filters.specialty === "string" ? filters.specialty : null,
-    typeof filters.domain === "string" ? filters.domain : null,
-    typeof filters.questionState === "string" && filters.questionState !== "all" ? filters.questionState : null,
+    label(catalog?.specialties ?? [], filters.specialty),
+    label(catalog?.domains ?? [], filters.domain),
+    labels(catalog?.topics ?? [], filters.topics),
+    labels(catalog?.subtopics ?? [], filters.subtopics),
+    labels(catalog?.modalities ?? [], filters.modalities),
+    labels(catalog?.competencies ?? [], filters.competencies),
+    labels(catalog?.trainingLevels ?? [], filters.trainingLevels),
+    Array.isArray(filters.difficulty) ? filters.difficulty.map((value) => catalog?.difficulties.find((item) => item.value === Number(value))?.label ?? String(value)).join(", ") : null,
+    labels(catalog?.tags ?? [], filters.tags),
+    typeof filters.questionState === "string" && filters.questionState !== "all" ? stateLabels[filters.questionState] ?? filters.questionState : null,
   ].filter((item): item is string => item !== null);
   return parts.length ? parts.join(" · ") : "All published questions";
+}
+
+function durationLabel(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+  if (hours) return `${hours} hr ${minutes} min ${remainingSeconds} sec`;
+  if (minutes) return `${minutes} min ${remainingSeconds} sec`;
+  return `${remainingSeconds} sec`;
 }
 
 export function TeachingHistoryPage() {
@@ -24,6 +46,7 @@ export function TeachingHistoryPage() {
     queryFn: () => fetchTeachingSessionHistory(page),
     staleTime: 10_000,
   });
+  const catalog = useQuery({ queryKey: ["teaching", "catalog"], queryFn: fetchTeachingCatalog, staleTime: 60_000 });
 
   if (history.isLoading) return <LoadingState message="Loading session history" />;
   if (history.isError || !history.data) return <ErrorState message="Session history could not be loaded." onRetry={() => void history.refetch()} />;
@@ -45,9 +68,9 @@ export function TeachingHistoryPage() {
             <Card key={item.id} className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
               <div className="min-w-0">
                 <h2 className="font-semibold text-foreground">{modeLabel(item.mode)} · {item.questionCount} questions</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{filterSummary(item.filters as Record<string, unknown>)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{filterSummary(item.filters as Record<string, unknown>, catalog.data)}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {new Date(item.startedAt).toLocaleString()} · {item.status === "active" ? "Active" : "Submitted"} · {item.durationSeconds} sec
+                  {new Date(item.startedAt).toLocaleString()} · {item.status === "active" ? "Active" : "Submitted"} · {durationLabel(item.durationSeconds)}
                 </p>
                 {item.status === "submitted" && <p className="mt-1 text-sm font-medium text-foreground">
                   {item.progress.correct ?? 0} correct · {item.progress.incorrect ?? 0} incorrect · {item.progress.unanswered} unanswered · {item.progress.scorePercent ?? 0}% of total

@@ -229,6 +229,28 @@ describe("Teaching learner pages", () => {
     expect(screen.getByText("Synthetic explanation after submission.")).toBeTruthy();
   });
 
+  it("clears the saved-note indication when the draft changes and clears saved and draft note state together", async () => {
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+    await screen.findByText("Which answer is selected only after the learner submits?");
+    fireEvent.click(screen.getByText("Personal note"));
+    const note = screen.getByRole("textbox", { name: "Personal note" });
+    fireEvent.change(note, { target: { value: "Persisted private note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    expect(await screen.findByText("Note saved")).toBeTruthy();
+
+    fireEvent.change(note, { target: { value: "Edited but not saved" } });
+    expect(screen.queryByText("Note saved")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Unsaved changes");
+    fireEvent.click(screen.getByRole("button", { name: "Clear note" }));
+    expect(await screen.findByText("Note cleared")).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Personal note" }) as HTMLTextAreaElement).value).toBe("");
+    expect(learnerApi.saveNote).toHaveBeenCalledWith(501, "Persisted private note");
+    expect(learnerApi.clearNote).toHaveBeenCalledWith(501);
+  });
+
   it("loads submitted feedback when the server expires a timed Exam", async () => {
     let expired = false;
     learnerApi.fetchSession.mockImplementation(async () => ({
@@ -310,5 +332,21 @@ describe("Teaching learner pages", () => {
 
     expect(await screen.findByText("No sessions yet. Create a Study, Exam, or Review session to get started.")).toBeTruthy();
     expect(screen.getByText("Page 1 of 1 · 0 sessions")).toBeTruthy();
+  });
+
+  it("uses catalog labels for saved filters and formats session duration readably", async () => {
+    learnerApi.fetchHistory.mockResolvedValue({
+      items: [{
+        id: 84, mode: "study", status: "submitted", questionCount: 5, durationSeconds: 532,
+        startedAt: "2026-09-26T10:00:00.000Z", submittedAt: "2026-09-26T10:08:52.000Z",
+        filters: { specialty: "radiology", domain: "neuroradiology", questionState: "incorrect", trainingLevels: ["junior"] },
+        progress: { total: 5, answered: 5, correct: 3, incorrect: 2, unanswered: 0, scorePercent: 60, answeredAccuracy: 60 },
+      }],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+    renderWithProviders(<TeachingHistoryPage />);
+
+    expect(await screen.findByText("Radiology · Neuroradiology · Junior resident · Incorrect")).toBeTruthy();
+    expect(screen.getByText(/8 min 52 sec/)).toBeTruthy();
   });
 });

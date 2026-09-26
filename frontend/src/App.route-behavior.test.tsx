@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 
@@ -61,6 +61,7 @@ vi.mock("@/providers/language-provider", async () => {
 
 vi.mock("@/providers/language-provider-component", () => ({
   LanguageProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  EnglishLanguageScope: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@/providers/action-pin-provider", () => ({
@@ -245,6 +246,51 @@ describe("App route behavior", () => {
     expect(await screen.findByTestId("teaching-application")).toBeTruthy();
     expect(screen.queryByTestId("dashboard-page")).toBeNull();
     expect(screen.queryByRole("navigation", { name: "RISpro navigation" })).toBeNull();
+  });
+
+  it("uses English/LTR in Teaching and restores the active Arabic RISpro direction after leaving", async () => {
+    testState.language = "ar";
+    localStorage.setItem("rispro-language", "ar");
+    document.documentElement.setAttribute("lang", "ar-LY");
+    document.documentElement.setAttribute("dir", "rtl");
+    renderAppAt("/teaching/login");
+
+    expect(await screen.findByTestId("teaching-application")).toBeTruthy();
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("lang")).toBe("en");
+      expect(document.documentElement.getAttribute("dir")).toBe("ltr");
+    });
+    expect(localStorage.getItem("rispro-language")).toBe("ar");
+
+    act(() => {
+      window.history.pushState({}, "", "/dashboard");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("lang")).toBe("ar-LY");
+      expect(document.documentElement.getAttribute("dir")).toBe("rtl");
+    });
+    expect(localStorage.getItem("rispro-language")).toBe("ar");
+  });
+
+  it("keeps global English/LTR unchanged when entering and leaving Teaching", async () => {
+    testState.language = "en";
+    localStorage.setItem("rispro-language", "en");
+    document.documentElement.setAttribute("lang", "en");
+    document.documentElement.setAttribute("dir", "ltr");
+    renderAppAt("/teaching/login");
+    expect(await screen.findByTestId("teaching-application")).toBeTruthy();
+    await waitFor(() => expect(document.documentElement.getAttribute("dir")).toBe("ltr"));
+
+    act(() => {
+      window.history.pushState({}, "", "/dashboard");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("lang")).toBe("en");
+      expect(document.documentElement.getAttribute("dir")).toBe("ltr");
+    });
+    expect(localStorage.getItem("rispro-language")).toBe("en");
   });
 
   it("turns a global patient selection into a Patients deep link while retaining active Patients filters", async () => {

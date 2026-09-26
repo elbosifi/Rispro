@@ -594,6 +594,18 @@ test("Teaching import template, authorization, inspect-preview-confirm, conflict
     assert.equal(batchDtos.status, 200);
     assert.ok(Array.isArray(batchDtos.data.items));
     assert.equal(JSON.stringify(batchDtos.data.items).includes("Synthetic teaching question stem"), false, "batch list must omit imported question content");
+    const listedBatches = batchDtos.data.items as Array<Record<string, unknown>>;
+    const listedBatch = listedBatches.find((item) => item.id === batchId);
+    assert.ok(listedBatch);
+    assert.equal(listedBatch.originalFilename, "synthetic-qbank.json");
+    assert.equal(listedBatch.questionCount, 1);
+    assert.equal(listedBatch.status, "confirmed");
+    assert.deepEqual(listedBatch.publication, { total: 1, draft: 1, inReview: 0, published: 0, retired: 0 });
+    const batchListPagination = batchDtos.data.pagination as Record<string, unknown>;
+    const paginatedBatchDtos = await request("/api/teaching/qbank/import/batches?limit=1&offset=1", { role: "supervisor" });
+    assert.equal(paginatedBatchDtos.status, 200);
+    assert.equal((paginatedBatchDtos.data.items as unknown[]).length, 1);
+    assert.deepEqual(paginatedBatchDtos.data.pagination, { limit: 1, offset: 1, total: batchListPagination.total });
     const detail = await request(`/api/teaching/qbank/import/batches/${batchId}`, { role: "supervisor" });
     assert.equal(detail.status, 200);
     assert.equal(Object.hasOwn(detail.data, "payload_json"), false);

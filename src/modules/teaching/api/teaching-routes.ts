@@ -40,7 +40,6 @@ import { createTeachingImportTemplate } from "../import/template-service.js";
 import {
   parseTeachingBulkQuestionIds,
   publishTeachingQuestionScope,
-  requireTeachingMatchingScopeFingerprint,
   validateTeachingQuestionScope,
 } from "../import/bulk-operations-service.js";
 import { listTeachingAssets, listTeachingCases, listTeachingReferences, listTeachingSources } from "../repositories/teaching-editorial-repository.js";
@@ -218,7 +217,7 @@ export function createTeachingRouter(): Router {
   router.post("/qbank/import/batches/:id/publish", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.publish"]);
     res.setHeader("Cache-Control", "no-store, private");
-    res.json(await publishTeachingQuestionScope({ batchId: parseTeachingImportBatchId(req.params.id) }, actor, teachingIdentity.permissions));
+    res.json(await publishTeachingQuestionScope({ batchId: parseTeachingImportBatchId(req.params.id) }, actor, teachingIdentity.permissions, req.body?.scopeFingerprint));
   }));
 
   router.get("/me", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
@@ -435,8 +434,7 @@ export function createTeachingRouter(): Router {
     const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.publish"]);
     res.setHeader("Cache-Control", "no-store, private");
     const filters = matchingQuestionFilters(req.body?.filters);
-    requireTeachingMatchingScopeFingerprint(filters, req.body?.scopeFingerprint);
-    res.json(await publishTeachingQuestionScope({ filters }, actor, teachingIdentity.permissions));
+    res.json(await publishTeachingQuestionScope({ filters }, actor, teachingIdentity.permissions, req.body?.scopeFingerprint));
   }));
 
   router.patch("/admin/questions/:id/revisions/:revisionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {

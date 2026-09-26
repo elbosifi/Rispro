@@ -14,6 +14,7 @@ import {
 } from "../api/teaching-api";
 
 type ResultFilter = "all" | "valid" | "warnings" | "invalid" | "draft" | "published";
+const ellipsis = "…";
 
 function value(record: Record<string, unknown>, key: string): string {
   const item = record[key];
@@ -69,25 +70,37 @@ export function TeachingImportBatchPage() {
   const [publishSummary, setPublishSummary] = useState<TeachingBulkPublishResult | null>(null);
   const [filter, setFilter] = useState<ResultFilter>("all");
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const [showAllResults, setShowAllResults] = useState(false);
+  const [showPersistedValidation, setShowPersistedValidation] = useState(false);
 
   const batch = useQuery({ queryKey: ["teaching", "import-batch", batchId], queryFn: () => fetchTeachingImportBatch(batchId), enabled: canInspect && Boolean(batchId) });
   const validate = useMutation({
-    mutationFn: () => validateTeachingImportBatch(batchId),
-    onSuccess: (result) => {
+    mutationFn: (confirmAfterValidation: boolean) => validateTeachingImportBatch(batchId),
+    onSuccess: (result, confirmAfterValidation) => {
       setQuestions(result.questions);
       setValidationSummary(result);
       setPublishSummary(null);
       setFilter("all");
+      setShowAllResults(false);
+      setConfirmPublish(confirmAfterValidation && result.eligibleForPublish > 0);
     },
   });
   const publish = useMutation({
-    mutationFn: () => publishTeachingImportBatch(batchId),
+    mutationFn: (scopeFingerprint: string) => publishTeachingImportBatch(batchId, scopeFingerprint),
     onSuccess: (result) => {
       setQuestions(result.results);
       setPublishSummary(result);
+      setValidationSummary(null);
       setConfirmPublish(false);
-      setFilter(result.invalid > 0 ? "invalid" : "all");
+      setFilter("all");
+      setShowAllResults(false);
       void queryClient.invalidateQueries({ queryKey: ["teaching", "import-batch", batchId] });
+    },
+    onError: () => {
+      setValidationSummary(null);
+      setQuestions(null);
+      setConfirmPublish(false);
+      void batch.refetch();
     },
   });
 
@@ -100,9 +113,25 @@ export function TeachingImportBatchPage() {
   const publication = typeof data.publication === "object" && data.publication !== null
     ? data.publication as Record<string, unknown>
     : {};
+  const persistedValidation = typeof data.lastValidation === "object" && data.lastValidation !== null
+    ? data.lastValidation as Partial<TeachingBulkValidationResult>
+    : null;
+  const persistedQuestions = Array.isArray(persistedValidation?.questions)
+    ? persistedValidation.questions as TeachingBulkQuestionResult[]
+    : [];
+  const validationDisplay = validationSummary ?? persistedValidation;
   const initialCount = count(data, "questionCount");
-  const items = questions ?? [];
-  const visibleQuestions = filteredQuestions(items, filter);
+  const items = questions ?? (showPersistedValidation && !publishSummary ? persistedQuestions : []);
+  const attentionQuestions = items.filter((question) =>
+    question.validationStatus === "invalid" || ["invalid", "conflict", "failed", "requires_review"].includes(question.publishStatus ?? ""),
+  );
+  const attentionCount = publishSummary
+    ? publishSummary.invalid + publishSummary.failed + publishSummary.requiresReview
+    : attentionQuestions.length;
+  const visibleQuestions = publishSummary && !showAllResults ? attentionQuestions : filteredQuestions(items, filter);
+  const showQuestionResults = publishSummary
+    ? showAllResults || attentionQuestions.length > 0
+    : Boolean(questions) || showPersistedValidation;
   const eligibleCount = items.filter((question) => question.eligibleForPublish && question.revisionStatus === "draft").length;
   const invalidCount = items.filter((question) => question.validationStatus === "invalid").length;
   const warningQuestions = items.filter((question) => question.eligibleForPublish && question.revisionStatus === "draft" && question.validationStatus === "valid_with_warnings");
@@ -127,17 +156,23 @@ export function TeachingImportBatchPage() {
           <p className="mt-2 break-all font-mono text-sm text-muted-foreground">{batchId}</p>
           <p className="mt-1 text-sm text-muted-foreground">{initialCount} questions · {value(data, "originalFilename")}</p>
         </div>
-        <Badge variant="info">{value(data, "status")}</Badge>
+        <div className="flex items-center gap-3">
+          <Link className="text-sm font-medium text-accent underline-offset-4 hover:underline" to="/teaching/admin/import/history">Import history</Link>
+          <Badge variant="info">{value(data, "status")}</Badge>
+        </div>
       </div>
 
       <Card className="space-y-5 p-4 sm:p-6">
         <div>
-          <h2 className="font-semibold text-foreground">Validation</h2>
+          <h2 className="font-semibold text-foreground">{validationSummary ? "Current validation" : "Last validation result"}</h2>
+          {!validationSummary ? <p className="mt-1 text-sm text-muted-foreground">Saved classifications are informational. Current validation is required before publication.</p> : null}
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div><dt className="text-muted-foreground">Valid</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationSummary?.valid ?? "—"}</dd></div>
-            <div><dt className="text-muted-foreground">Valid with warnings</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationSummary?.validWithWarnings ?? "—"}</dd></div>
-            <div><dt className="text-muted-foreground">Invalid</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationSummary?.invalid ?? "—"}</dd></div>
-            <div><dt className="text-muted-foreground">Changed during validation</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationSummary?.conflicts ?? 0}</dd></div>
+            <div><dt className="text-muted-foreground">Valid</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationDisplay?.valid ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">Valid with warnings</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationDisplay?.validWithWarnings ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">Invalid</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationDisplay?.invalid ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">{validationSummary ? "Matched" : "Previously classified"}</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationDisplay?.total ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">Eligible for publication</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationDisplay?.eligibleForPublish ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">Changed during validation</dt><dd className="mt-1 text-xl font-semibold text-foreground">{validationSummary?.conflicts ?? "—"}</dd></div>
           </dl>
         </div>
         <div>
@@ -151,38 +186,48 @@ export function TeachingImportBatchPage() {
         </div>
         {canOperate ? (
           <div className="flex flex-wrap items-center gap-3 border-t pt-4" style={{ borderColor: "var(--border)" }}>
-            {canValidate ? <Button type="button" variant="secondary" disabled={validate.isPending || publish.isPending} onClick={() => validate.mutate()}>
-              {validate.isPending ? `Validating ${initialCount} questions…` : "Validate All"}
+            {canValidate ? <Button type="button" variant="secondary" disabled={validate.isPending || publish.isPending} onClick={() => validate.mutate(false)}>
+              {validate.isPending ? `Validating ${initialCount} questions${ellipsis}` : "Validate only"}
             </Button> : null}
-            {canPublish ? <Button type="button" disabled={!questions || eligibleCount === 0 || validate.isPending || publish.isPending} onClick={() => setConfirmPublish(true)}>
-              Publish All Eligible{questions ? ` (${eligibleCount})` : ""}
+            {canValidate && canPublish ? <Button type="button" disabled={validate.isPending || publish.isPending} onClick={() => validate.mutate(true)}>
+              {validate.isPending ? `Validating current batch${ellipsis}` : `Validate & publish${ellipsis}`}
             </Button> : null}
-            {validate.isPending ? <span role="status" className="text-sm text-muted-foreground">Evaluating current Draft revisions with Teaching validation rules.</span> : null}
+            {validate.isPending ? <span role="status" className="text-sm text-muted-foreground">Evaluating current revisions with Teaching validation rules.</span> : null}
             {publish.isPending ? <span role="status" className="text-sm text-muted-foreground">Publishing eligible questions…</span> : null}
             {validate.error ? <p role="alert" className="w-full text-sm text-destructive">{validate.error.message}</p> : null}
             {publish.error ? <p role="alert" className="w-full text-sm text-destructive">{publish.error.message}</p> : null}
-            {publishSummary ? <p role="status" className="w-full text-sm text-muted-foreground">
-              {publishSummary.published} published · {publishSummary.invalid} invalid · {publishSummary.conflicts} conflicts · {publishSummary.alreadyPublished} already published
-              {publishSummary.requiresReview ? ` · ${publishSummary.requiresReview} require author and review access` : ""}
-            </p> : null}
+            {publishSummary ? <div role="status" className="w-full rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)" }}>
+              <h2 className="font-semibold text-foreground">Publication complete</h2>
+              <p className="mt-2 text-muted-foreground">{Math.max(0, publishSummary.published - publishSummary.warnings)} published · {publishSummary.warnings} published with warnings · {attentionCount} require attention · {publishSummary.conflicts} conflicts</p>
+              {publishSummary.alreadyPublished > 0 ? <p className="mt-1 text-muted-foreground">{publishSummary.alreadyPublished} were already published.</p> : null}
+              <div className="mt-3 flex flex-wrap gap-3">
+                {attentionQuestions.length ? <a className="font-medium text-accent underline-offset-4 hover:underline" href="#teaching-batch-results">View {attentionQuestions.length} exception{attentionQuestions.length === 1 ? "" : "s"}</a> : null}
+                <Button type="button" size="sm" variant="secondary" onClick={() => setShowAllResults((current) => !current)}>
+                  {showAllResults ? "Show exceptions only" : "View all results"}
+                </Button>
+              </div>
+            </div> : null}
           </div>
         ) : null}
       </Card>
 
-      {questions ? (
-        <Card className="space-y-4 p-4 sm:p-5">
+      {!questions && !publishSummary && persistedValidation?.total ? <Button type="button" size="sm" variant="secondary" onClick={() => setShowPersistedValidation((current) => !current)}>
+        {showPersistedValidation ? "Hide last validation classifications" : "View last validation classifications"}
+      </Button> : null}
+      {showQuestionResults ? (
+        <Card id="teaching-batch-results" className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="font-semibold text-foreground">Question results</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Errors keep a Draft question unchanged. Warnings do not block publication.</p>
+              <h2 className="font-semibold text-foreground">{publishSummary && !showAllResults ? "Questions requiring attention" : showPersistedValidation && !validationSummary && !publishSummary ? "Last validation classifications" : "Question results"}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{showPersistedValidation && !validationSummary && !publishSummary ? "These saved classifications are informational and do not authorize publication." : "Errors keep a Draft question unchanged. Warnings do not block publication."}</p>
             </div>
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Filter questions">
+            {!publishSummary || showAllResults ? <div className="flex flex-wrap gap-2" role="group" aria-label="Filter questions">
               {filters.map((item) => <Button key={item.value} type="button" size="sm" variant={filter === item.value ? "primary" : "secondary"} aria-pressed={filter === item.value} onClick={() => setFilter(item.value)}>
                 {item.label} ({item.count})
               </Button>)}
-            </div>
+            </div> : null}
           </div>
-          {validationSummary?.conflicts ? <p role="status" className="text-sm text-warning">{validationSummary.conflicts} question(s) changed during validation. Run Validate All again before publishing.</p> : null}
+          {validationSummary?.conflicts ? <p role="status" className="text-sm text-warning">{validationSummary.conflicts} question(s) changed during validation. Run Validate &amp; publish again before publishing.</p> : null}
           {publishSummary?.requiresReview ? <p role="status" className="text-sm text-warning">Some valid Drafts need both author and review capabilities before the existing lifecycle can publish them.</p> : null}
           {visibleQuestions.length ? <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <Table className="min-w-[760px]">
@@ -197,9 +242,10 @@ export function TeachingImportBatchPage() {
                     {question.errors.length ? <ul className="list-disc space-y-1 ps-4 text-sm text-destructive">{question.errors.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}</ul> : null}
                     {!question.errors.length && question.warnings.length ? <ul className="list-disc space-y-1 ps-4 text-sm text-warning">{question.warnings.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}</ul> : null}
                     {!question.errors.length && !question.warnings.length && question.publishStatus === "conflict" ? <span className="text-sm text-warning">Changed during publication; validate again.</span> : null}
+                    {!question.errors.length && !question.warnings.length && question.publishStatus === "failed" ? <span className="text-sm text-destructive">The bulk operation failed; retry validation.</span> : null}
                     {!question.errors.length && !question.warnings.length && question.publishStatus === "requires_review" ? <span className="text-sm text-muted-foreground">Author and review access are required.</span> : null}
                   </TableCell>
-                  <TableCell>{question.revisionStatus === "draft" && question.validationStatus === "invalid" ? <Link className="text-accent underline-offset-4 hover:underline" to={`/teaching/admin/questions/${question.questionId}`}>Edit</Link> : question.publishStatus === "already_published" ? <span className="text-sm text-muted-foreground">Already published</span> : "—"}</TableCell>
+                  <TableCell>{attentionQuestions.some((item) => item.questionId === question.questionId) ? <Link className="text-accent underline-offset-4 hover:underline" to={`/teaching/admin/questions/${question.questionId}`}>{question.revisionStatus === "draft" ? "Edit" : "Open"}</Link> : question.publishStatus === "already_published" ? <span className="text-sm text-muted-foreground">Already published</span> : "—"}</TableCell>
                 </TableRow>
               ))}</TableBody>
             </Table>
@@ -207,7 +253,7 @@ export function TeachingImportBatchPage() {
           {invalidCount > 0 ? <p className="text-sm font-medium text-destructive">{invalidCount} question{invalidCount === 1 ? " requires" : "s require"} attention and remain Draft.</p> : null}
           {totalWarnings > 0 ? <p className="text-sm text-warning">{warningQuestions.length} eligible question{warningQuestions.length === 1 ? " contains" : "s contain"} {totalWarnings} warning{totalWarnings === 1 ? "" : "s"}.</p> : null}
         </Card>
-      ) : <p className="text-sm text-muted-foreground">Run Validate All to see per-question validation and exceptions for this batch.</p>}
+      ) : !publishSummary ? <p className="text-sm text-muted-foreground">Current validation is required before publication. Use Validate &amp; publish to check this batch and review exact confirmation counts.</p> : null}
 
       <Card className="p-4 sm:p-6">
         <h2 className="font-semibold text-foreground">Import audit details</h2>
@@ -220,17 +266,24 @@ export function TeachingImportBatchPage() {
         </dl>
         {data.failureMessage ? <p role="alert" className="mt-4 text-sm text-destructive">{String(data.failureMessage)}</p> : null}
       </Card>
-      <div className="flex flex-wrap gap-3"><Button variant="secondary" onClick={() => navigate("/teaching/admin/questions")}>Back to questions</Button></div>
+      <div className="flex flex-wrap gap-3">
+        <Button variant="secondary" onClick={() => navigate("/teaching/admin/import/history")}>Import history</Button>
+        <Button variant="secondary" onClick={() => navigate("/teaching/admin/questions")}>Back to questions</Button>
+      </div>
 
       <Dialog open={confirmPublish} onClose={() => { if (!publish.isPending) setConfirmPublish(false); }}>
         <DialogContent maxWidth="560px" aria-labelledby="teaching-batch-publish-title">
           <DialogHeader>
-            <DialogTitle id="teaching-batch-publish-title">Publish imported questions?</DialogTitle>
-            <DialogDescription>This action publishes immutable question revisions. Each question is revalidated on the server before its lifecycle transitions.</DialogDescription>
+            <DialogTitle id="teaching-batch-publish-title">Review validation before publishing</DialogTitle>
+            <DialogDescription>The confirmation is tied to the exact batch revisions validated by the server. Publication still rechecks each question.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm text-foreground">
+            <p><strong>{validationSummary?.total ?? 0}</strong> matched.</p>
+            <p><strong>{validationSummary?.valid ?? 0}</strong> valid.</p>
+            <p><strong>{validationSummary?.validWithWarnings ?? 0}</strong> valid with warnings.</p>
+            <p><strong>{validationSummary?.invalid ?? 0}</strong> invalid and will remain Draft.</p>
+            <p><strong>{validationSummary?.conflicts ?? 0}</strong> conflicts.</p>
             <p><strong>{questionCountLabel(eligibleCount)}</strong> {eligibleCount === 1 ? "is" : "are"} eligible for publication.</p>
-            <p><strong>{questionCountLabel(invalidCount)}</strong> {invalidCount === 1 ? "contains" : "contain"} validation errors and will remain Draft.</p>
             <p><strong>{warningQuestions.length} eligible question{warningQuestions.length === 1 ? "" : "s"}</strong> {warningQuestions.length === 1 ? "contains" : "contain"} {totalWarnings} warning{totalWarnings === 1 ? "" : "s"}. Warnings do not block publication.</p>
             {warningQuestions.length ? <details className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
               <summary className="cursor-pointer font-medium">View warnings</summary>
@@ -241,7 +294,7 @@ export function TeachingImportBatchPage() {
           </div>
           <DialogFooter>
             <Button variant="secondary" disabled={publish.isPending} onClick={() => setConfirmPublish(false)}>Cancel</Button>
-            <Button disabled={publish.isPending || eligibleCount === 0} onClick={() => publish.mutate()}>
+            <Button disabled={publish.isPending || eligibleCount === 0 || !validationSummary?.scopeFingerprint} onClick={() => validationSummary?.scopeFingerprint && publish.mutate(validationSummary.scopeFingerprint)}>
               {publish.isPending ? "Publishing…" : `Publish ${questionCountLabel(eligibleCount)}`}
             </Button>
           </DialogFooter>

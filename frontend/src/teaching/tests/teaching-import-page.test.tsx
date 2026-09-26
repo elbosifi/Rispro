@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { TeachingImportPage } from "../pages/teaching-import-page";
 
 const importApi = vi.hoisted(() => ({
@@ -16,6 +16,18 @@ vi.mock("../api/teaching-api", () => ({
   inspectTeachingImport: importApi.inspect,
   previewTeachingImport: importApi.preview,
 }));
+
+function LocationDisplay() {
+  const location = useLocation();
+  return <p data-testid="current-location">{location.pathname}</p>;
+}
+
+function renderImportPage() {
+  return render(<MemoryRouter initialEntries={["/teaching/admin/import"]}><Routes>
+    <Route path="/teaching/admin/import" element={<><TeachingImportPage /><LocationDisplay /></>} />
+    <Route path="/teaching/admin/import/batches/:batchId" element={<LocationDisplay />} />
+  </Routes></MemoryRouter>);
+}
 
 describe("Teaching import page", () => {
   afterEach(() => {
@@ -75,7 +87,7 @@ describe("Teaching import page", () => {
     });
     importApi.confirm.mockResolvedValue({ batchId: "batch-1", status: "confirmed", questionCount: 1 });
 
-    render(<MemoryRouter><TeachingImportPage /></MemoryRouter>);
+    renderImportPage();
 
     fireEvent.click(screen.getByRole("button", { name: "Download AI Template" }));
     await waitFor(() => expect(importApi.download).toHaveBeenCalledOnce());
@@ -92,7 +104,7 @@ describe("Teaching import page", () => {
     expect(importApi.confirm).not.toHaveBeenCalled();
     fireEvent.click(screen.getAllByRole("button", { name: "Import 1 Draft Questions" })[0]!);
     await waitFor(() => expect(importApi.confirm).toHaveBeenCalledWith("batch-1"));
-    expect(await screen.findByText("1 questions imported as Draft.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("current-location").textContent).toBe("/teaching/admin/import/batches/batch-1"));
   });
 
   it("shows validation errors and blocks confirmation", async () => {
@@ -105,7 +117,7 @@ describe("Teaching import page", () => {
       errors: [{ code: "unknown_specialty", message: "Unknown specialty." }], warnings: [], questions: [],
     });
 
-    render(<MemoryRouter><TeachingImportPage /></MemoryRouter>);
+    renderImportPage();
     const file = new File(["{}"], "questions.json", { type: "application/json" });
     fireEvent.change(screen.getByLabelText(/Choose JSON or ZIP file/i), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Inspect upload" }));
@@ -140,7 +152,7 @@ describe("Teaching import page", () => {
     let finishConfirm!: (result: { batchId: string; status: string; questionCount: number }) => void;
     importApi.confirm.mockImplementation(() => new Promise((resolve) => { finishConfirm = resolve; }));
 
-    render(<MemoryRouter><TeachingImportPage /></MemoryRouter>);
+    renderImportPage();
     const file = new File(["synthetic ZIP bytes"], "questions.zip", { type: "application/zip" });
     fireEvent.change(document.getElementById("teaching-import-file")!, { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Inspect upload" }));
@@ -155,6 +167,36 @@ describe("Teaching import page", () => {
     });
     await waitFor(() => expect(importApi.confirm).toHaveBeenCalledOnce());
     finishConfirm({ batchId: "zip-batch", status: "confirmed", questionCount: 1 });
-    expect(await screen.findByText("1 questions imported as Draft.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("current-location").textContent).toBe("/teaching/admin/import/batches/zip-batch"));
+  });
+
+  it("stays on the import screen when confirmation fails", async () => {
+    importApi.inspect.mockResolvedValue({
+      batchId: "batch-failed", schemaVersion: "1.0", questions: 1, cases: 0, assets: 0,
+      structurallyValid: true, errors: [], warnings: [],
+    });
+    importApi.preview.mockResolvedValue({
+      schemaVersion: "1.0", questionCount: 1, caseCount: 0, assetCount: 0,
+      errors: [], warnings: [], questions: [{
+        externalId: "SYNTHETIC-FAIL", type: "single_best_answer", stem: "Synthetic", disposition: "new",
+        classification: {
+          specialty: { label: "Radiology" }, domain: { label: "Neuroradiology" }, topic: null, subtopic: null,
+          modalities: [], competencies: [], trainingLevel: null, difficulty: null, tags: [],
+        },
+        explanation: { summary: "Synthetic explanation.", teachingPoint: "Synthetic point." },
+        options: [], source: null, provenance: null, referenceCount: 0, media: [], case: null, errors: [], warnings: [],
+      }],
+    });
+    importApi.confirm.mockRejectedValue(new Error("The import could not be confirmed."));
+    renderImportPage();
+
+    const file = new File(["{}"], "questions.json", { type: "application/json" });
+    fireEvent.change(screen.getByLabelText(/Choose JSON or ZIP file/i), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect upload" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Validate and preview" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Import 1 Draft Questions" }))[0]!);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("The import could not be confirmed.");
+    expect(screen.getByTestId("current-location").textContent).toBe("/teaching/admin/import");
   });
 });

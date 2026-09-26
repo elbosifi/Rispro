@@ -75,11 +75,61 @@ export async function listTeachingImportBatches(limit: number, offset: number) {
       [limit, offset],
     ),
   ]);
+  const publicationByBatch = new Map<string, { total: number; draft: number; inReview: number; published: number; retired: number }>();
+  const batchIds = rows.rows.map((row) => row.id);
+  if (batchIds.length > 0) {
+    const publications = await pool.query<{
+      batch_id: string; total: number; draft: number; in_review: number; published: number; retired: number;
+    }>(
+      `with linked_questions as materialized (
+         select distinct revision.import_batch_id, revision.question_id
+         from teaching.question_revisions revision
+         where revision.import_batch_id = any($1::uuid[])
+       ), current_revisions as (
+         select distinct on (linked.import_batch_id, linked.question_id)
+           linked.import_batch_id, question.retired_at, revision.status
+         from linked_questions linked
+         join teaching.questions question on question.id = linked.question_id
+         join teaching.question_revisions revision on revision.question_id = linked.question_id
+         order by linked.import_batch_id, linked.question_id, revision.revision_number desc, revision.id desc
+       )
+       select import_batch_id::text as batch_id, count(*)::int as total,
+         count(*) filter (where retired_at is null and status = 'draft')::int as draft,
+         count(*) filter (where retired_at is null and status = 'in_review')::int as in_review,
+         count(*) filter (where retired_at is null and status = 'published')::int as published,
+         count(*) filter (where retired_at is not null or status = 'retired')::int as retired
+       from current_revisions group by import_batch_id`,
+      [batchIds],
+    );
+    for (const row of publications.rows) {
+      publicationByBatch.set(row.batch_id, {
+        total: row.total, draft: row.draft, inReview: row.in_review, published: row.published, retired: row.retired,
+      });
+    }
+  }
   return {
-    items: rows.rows.map(({ payload_json: _payload, validation_summary_json: validation, uploaded_by_identity_issuer: issuer, uploaded_by_identity_subject: subject, ...row }) => ({
-      ...row,
-      validation_summary_json: withoutQuestionPreview(validation),
-      uploadedBy: { identityIssuer: issuer, identitySubject: subject },
+    items: rows.rows.map((row) => ({
+      id: row.id,
+      originalFilename: row.original_filename,
+      inputType: row.input_type,
+      schemaVersion: row.schema_version,
+      status: row.status,
+      questionCount: row.question_count,
+      caseCount: row.case_count,
+      assetCount: row.asset_count,
+      validation: withoutQuestionPreview(row.validation_summary_json),
+      uploader: { identityIssuer: row.uploaded_by_identity_issuer, identitySubject: row.uploaded_by_identity_subject },
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      inspectedAt: row.inspected_at,
+      validatedAt: row.validated_at,
+      confirmedAt: row.confirmed_at,
+      confirmedBy: row.confirmed_by_identity_subject === null ? null : {
+        identityIssuer: row.confirmed_by_identity_issuer,
+        identitySubject: row.confirmed_by_identity_subject,
+      },
+      failureMessage: row.failure_message,
+      publication: row.status === "confirmed" ? publicationByBatch.get(row.id) ?? { total: 0, draft: 0, inReview: 0, published: 0, retired: 0 } : null,
     })),
     pagination: { limit, offset, total: Number(count.rows[0]?.total ?? 0) },
   };

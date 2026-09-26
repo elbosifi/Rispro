@@ -45,8 +45,14 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   await page.getByRole("button", { name: "Validate and preview" }).click();
   await expect(page.getByRole("heading", { name: "3. Preview import" })).toBeVisible();
   await expect(page.getByText(externalIds[0]!, { exact: true })).toBeVisible();
+  const confirmedBatch = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/qbank/import/confirm" && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Import 10 Draft Questions" }).first().click();
-  await expect(page.getByText("10 questions imported as Draft.")).toBeVisible();
+  const confirmResponse = await confirmedBatch;
+  expect(confirmResponse.ok()).toBeTruthy();
+  const batch = await confirmResponse.json() as { batchId: string };
+  await expect(page).toHaveURL(`/teaching/admin/import/batches/${batch.batchId}`);
 
   const listResponse = await page.request.get(
     `http://127.0.0.1:3100/api/teaching/admin/questions?search=${encodeURIComponent(externalIds[9]!)}&status=draft`,
@@ -67,28 +73,33 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   const validatePromise = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-matching" && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Validate all matching" }).click();
+  await page.getByRole("button", { name: "Validate only" }).click();
   expect((await validatePromise).ok()).toBeTruthy();
-  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid.")).toBeVisible();
+  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid, 0 conflicts, 9 eligible.")).toBeVisible();
 
   await page.getByLabel("Status").selectOption("in_review");
-  await expect(page.getByRole("button", { name: "Validate & publish all eligible" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Validate & publish..." })).toBeEnabled();
+  await expect(page.getByText(/Matched 10:/)).toHaveCount(0);
   await page.getByLabel("Status").selectOption("draft");
   const revalidatePromise = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-matching" && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Validate all matching" }).click();
+  await page.getByRole("button", { name: "Validate only" }).click();
   expect((await revalidatePromise).ok()).toBeTruthy();
-  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid.")).toBeVisible();
+  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid, 0 conflicts, 9 eligible.")).toBeVisible();
 
   await page.setViewportSize({ width: mobileWidth, height: 844 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", mobileWidth);
   await page.screenshot({ path: testInfo.outputPath("teaching-bulk-matching-mobile.png"), fullPage: true });
-  await page.getByRole("button", { name: "Validate & publish all eligible (9)" }).click();
-  const confirmation = page.getByRole("dialog", { name: "Publish all eligible matching questions?" });
-  await expect(confirmation).toContainText("10 questions match the current filters.");
+  const publishValidationPromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-matching" && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Validate & publish..." }).click();
+  expect((await publishValidationPromise).ok()).toBeTruthy();
+  const confirmation = page.getByRole("dialog", { name: "Publish validated matching questions?" });
+  await expect(confirmation).toContainText("10 questions match the validated filter scope.");
   await expect(confirmation).toContainText("9 eligible questions will be published.");
-  await expect(confirmation).toContainText("1 questions have warnings.");
+  await expect(confirmation).toContainText("1 questions are valid with warnings.");
   await expect(confirmation).toContainText("1 questions contain errors and will remain Draft.");
   const publishPromise = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-publish-matching" && response.request().method() === "POST",
@@ -97,7 +108,7 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   const publishResult = await publishPromise;
   expect(publishResult.ok()).toBeTruthy();
   expect(await publishResult.json()).toMatchObject({ requested: 10, published: 9, invalid: 1, warnings: 1 });
-  await expect(page.getByText("10 matched: 9 published, 1 published with warnings, 1 invalid / remain Draft, 0 conflicts, 0 already published.")).toBeVisible();
+  await expect(page.getByText("10 matched: 8 published, 1 published with warnings, 1 require attention, 0 conflicts, 0 already published.")).toBeVisible();
   await page.getByRole("button", { name: "View questions requiring attention" }).click();
   await expect(page.getByLabel("Questions requiring attention").getByRole("link", { name: externalIds[9]!, exact: true })).toBeVisible();
 

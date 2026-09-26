@@ -215,15 +215,54 @@ describe("Teaching application routes", () => {
     fireEvent.click(screen.getAllByRole("link", { name: "Dashboard" })[0]!);
     expect(guard).toHaveBeenCalledOnce();
     expect(screen.getByTestId("location").textContent).toBe("/teaching/admin/questions/12");
+    // Cancel means the shared guard does not invoke its continuation.
+    expect(screen.getByTestId("location").textContent).toBe("/teaching/admin/questions/12");
+    fireEvent.click(screen.getAllByRole("link", { name: "Dashboard" })[0]!);
+    expect(guard).toHaveBeenCalledTimes(2);
     act(() => proceed?.());
     expect(screen.getByTestId("location").textContent).toBe("/teaching/dashboard");
 
     const unregisterSignOut = registerUnsavedNavigationGuard(guard);
     fireEvent.click(screen.getByRole("button", { name: "Sign out of Teaching" }));
     expect(teachingAuthState.logout).not.toHaveBeenCalled();
+    expect(guard).toHaveBeenCalledTimes(3);
+    // Cancel the first logout attempt, then confirm a fresh attempt.
+    expect(screen.getByTestId("location").textContent).toBe("/teaching/dashboard");
+    fireEvent.click(screen.getByRole("button", { name: "Sign out of Teaching" }));
     act(() => proceed?.());
     expect(teachingAuthState.logout).toHaveBeenCalledOnce();
     unregisterSignOut();
     unregister();
+  });
+
+  it("shows the active route in the compact nav and gates import history by capability", () => {
+    teachingAuthState.isAuthenticated = true;
+    teachingAuthState.identity = {
+      identitySubject: "123", displayName: "Teaching Author", permissions: ["teaching.access", "teaching.learn", "teaching.author"],
+    };
+    const Location = () => <p data-testid="location">{useLocation().pathname}</p>;
+    render(<MemoryRouter initialEntries={["/teaching/progress"]}><TeachingLayout><Location /></TeachingLayout></MemoryRouter>);
+
+    for (const link of screen.getAllByRole("link", { name: "Progress" })) expect(link.getAttribute("aria-current")).toBe("page");
+    for (const link of screen.getAllByRole("link", { name: "Dashboard" })) expect(link.getAttribute("aria-current")).toBeNull();
+    expect(screen.getAllByRole("link", { name: "Import history" })).toHaveLength(2);
+
+    cleanup();
+    teachingAuthState.identity.permissions = ["teaching.access", "teaching.learn"];
+    render(<MemoryRouter initialEntries={["/teaching/progress"]}><TeachingLayout><Location /></TeachingLayout></MemoryRouter>);
+    expect(screen.queryByRole("link", { name: "Import history" })).toBeNull();
+  });
+
+  it("lets clean Teaching navigation proceed without showing a confirmation", () => {
+    teachingAuthState.isAuthenticated = true;
+    teachingAuthState.identity = { identitySubject: "123", displayName: "Learner", permissions: ["teaching.access", "teaching.learn"] };
+    const Location = () => <p data-testid="location">{useLocation().pathname}</p>;
+    render(<MemoryRouter initialEntries={["/teaching/progress"]}><TeachingLayout><Location /></TeachingLayout></MemoryRouter>);
+
+    fireEvent.click(screen.getAllByRole("link", { name: "Dashboard" })[0]!);
+    expect(screen.getByTestId("location").textContent).toBe("/teaching/dashboard");
+    fireEvent.click(screen.getByRole("button", { name: "Sign out of Teaching" }));
+    expect(teachingAuthState.logout).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

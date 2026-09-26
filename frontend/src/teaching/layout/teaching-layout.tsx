@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BookOpenText, ClipboardList, FileUp, GraduationCap, History, LogOut, NotebookTabs } from "lucide-react";
 import { Button } from "@/components/shared";
 import { requestNavigationWithUnsavedGuard } from "@/lib/unsaved-navigation-guard";
@@ -6,6 +6,7 @@ import { useTeachingAuth } from "../auth/teaching-auth-context";
 
 export function TeachingLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { identity, logout } = useTeachingAuth();
   const canImport = Boolean(identity?.permissions.includes("teaching.author") || identity?.permissions.includes("teaching.admin"));
   const canLearn = Boolean(identity?.permissions.includes("teaching.learn"));
@@ -16,6 +17,8 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
     event.preventDefault();
     requestNavigationWithUnsavedGuard(() => navigate(path));
   };
+  const mobileLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`;
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }}>
@@ -43,6 +46,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
           <nav aria-label="Teaching navigation" className="space-y-1">
             <NavLink
               to="/teaching/dashboard"
+              end
               onClick={(event) => follow(event, "/teaching/dashboard")}
               className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}
             >
@@ -54,34 +58,37 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
             {canLearn && <NavLink to="/teaching/history" onClick={(event) => follow(event, "/teaching/history")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}><History size={17} aria-hidden="true" /> Session History</NavLink>}
             {canAdministerQuestions && <NavLink to="/teaching/admin/questions" onClick={(event) => follow(event, "/teaching/admin/questions")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}><NotebookTabs size={17} aria-hidden="true" /> Question Bank</NavLink>}
             {canImport && (
-              <NavLink
+              <Link
                 to="/teaching/admin/import"
                 onClick={(event) => follow(event, "/teaching/admin/import")}
-                className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}
+                aria-current={location.pathname === "/teaching/admin/import" || location.pathname.startsWith("/teaching/admin/import/batches/") ? "page" : undefined}
+                className={`flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${location.pathname === "/teaching/admin/import" || location.pathname.startsWith("/teaching/admin/import/batches/") ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}
               >
                 <FileUp size={17} aria-hidden="true" />
                 Question Bank Import
-              </NavLink>
+              </Link>
             )}
+            {canImport && <NavLink to="/teaching/admin/import/history" onClick={(event) => follow(event, "/teaching/admin/import/history")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}><History size={17} aria-hidden="true" /> Import history</NavLink>}
           </nav>
         </aside>
 
         <div className="min-w-0">
-          <nav aria-label="Teaching navigation" className="flex flex-wrap items-center border-b px-4 py-2 lg:hidden" style={{ borderColor: "var(--border)" }}>
-            <NavLink to="/teaching/dashboard" onClick={(event) => follow(event, "/teaching/dashboard")} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-accent">
+          <nav aria-label="Teaching navigation" className="flex flex-nowrap items-center gap-1 overflow-x-auto whitespace-nowrap border-b px-4 py-2 lg:hidden" style={{ borderColor: "var(--border)" }}>
+            <NavLink end to="/teaching/dashboard" onClick={(event) => follow(event, "/teaching/dashboard")} className={mobileLinkClass}>
               <BookOpenText size={16} aria-hidden="true" />
               Dashboard
             </NavLink>
-            {canLearn && <NavLink to="/teaching/progress" onClick={(event) => follow(event, "/teaching/progress")} className="ms-1 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted">Progress</NavLink>}
-            {canLearn && <NavLink to="/teaching/qbank" onClick={(event) => follow(event, "/teaching/qbank")} className="ms-1 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted"><ClipboardList size={16} aria-hidden="true" /> Learn</NavLink>}
-            {canLearn && <NavLink to="/teaching/history" onClick={(event) => follow(event, "/teaching/history")} className="ms-1 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted"><History size={16} aria-hidden="true" /> History</NavLink>}
-            {canAdministerQuestions && <NavLink to="/teaching/admin/questions" onClick={(event) => follow(event, "/teaching/admin/questions")} className="ms-1 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted"><NotebookTabs size={16} aria-hidden="true" /> Questions</NavLink>}
+            {canLearn && <NavLink to="/teaching/progress" onClick={(event) => follow(event, "/teaching/progress")} className={mobileLinkClass}>Progress</NavLink>}
+            {canLearn && <NavLink to="/teaching/qbank" onClick={(event) => follow(event, "/teaching/qbank")} className={mobileLinkClass}><ClipboardList size={16} aria-hidden="true" /> Learn</NavLink>}
+            {canLearn && <NavLink to="/teaching/history" onClick={(event) => follow(event, "/teaching/history")} className={mobileLinkClass}><History size={16} aria-hidden="true" /> History</NavLink>}
+            {canAdministerQuestions && <NavLink to="/teaching/admin/questions" onClick={(event) => follow(event, "/teaching/admin/questions")} className={mobileLinkClass}><NotebookTabs size={16} aria-hidden="true" /> Questions</NavLink>}
             {canImport && (
-              <NavLink to="/teaching/admin/import" onClick={(event) => follow(event, "/teaching/admin/import")} className="ms-2 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground hover:bg-muted">
+              <Link to="/teaching/admin/import" onClick={(event) => follow(event, "/teaching/admin/import")} aria-current={location.pathname === "/teaching/admin/import" || location.pathname.startsWith("/teaching/admin/import/batches/") ? "page" : undefined} className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium ${location.pathname === "/teaching/admin/import" || location.pathname.startsWith("/teaching/admin/import/batches/") ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}>
                 <FileUp size={16} aria-hidden="true" />
                 Import
-              </NavLink>
+              </Link>
             )}
+            {canImport && <NavLink to="/teaching/admin/import/history" onClick={(event) => follow(event, "/teaching/admin/import/history")} className={mobileLinkClass}><History size={16} aria-hidden="true" /> Import history</NavLink>}
           </nav>
           <main className="mx-auto w-full max-w-6xl p-4 sm:p-6 lg:p-8">
             {children}

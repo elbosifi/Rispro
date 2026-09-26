@@ -5,6 +5,7 @@ import { TeachingLayout } from "./layout/teaching-layout";
 import { TeachingDashboardPage } from "./pages/teaching-dashboard-page";
 import { TeachingLoginPage } from "./pages/teaching-login-page";
 import { TeachingImportPage } from "./pages/teaching-import-page";
+import { TeachingImportHistoryPage } from "./pages/teaching-import-history-page";
 import { TeachingQuestionEditorPage } from "./pages/teaching-question-editor-page";
 import { TeachingQuestionListPage } from "./pages/teaching-question-list-page";
 import { TeachingImportBatchPage } from "./pages/teaching-import-batch-page";
@@ -102,6 +103,7 @@ export function TeachingApplication() {
         <Route path="history" element={<TeachingHistoryRoute />} />
         <Route path="progress" element={<TeachingLearnerRoute><TeachingProgressPage /></TeachingLearnerRoute>} />
         <Route path="admin/import" element={<TeachingImportRoute />} />
+        <Route path="admin/import/history" element={<TeachingAccessRoute requiredPermission="teaching.author"><TeachingLayout><TeachingImportHistoryPage /></TeachingLayout></TeachingAccessRoute>} />
         <Route path="admin/import/batches/:batchId" element={<TeachingEditorialRoute><TeachingImportBatchPage /></TeachingEditorialRoute>} />
         <Route path="admin/questions" element={<TeachingEditorialRoute><TeachingQuestionListPage /></TeachingEditorialRoute>} />
         <Route path="admin/questions/new" element={<TeachingEditorialRoute><TeachingQuestionEditorPage /></TeachingEditorialRoute>} />

@@ -57,6 +57,7 @@ export function TeachingSessionPage() {
     ? Math.max(0, (timerAnchor?.sessionId === session.id ? timerAnchor.serverRemainingSeconds - Math.floor((timerNow - timerAnchor.receivedAt) / 1000) : session.remainingSeconds ?? 0))
     : null;
   const noteDraft = question && noteDraftState?.questionId === question.questionId ? noteDraftState.text : question?.note ?? "";
+  const noteDirty = Boolean(question && noteDraft !== question.note);
   const selectedChoice = question && session?.mode === "exam"
     ? examResponseState?.questionId === question.questionId && examResponseState.pendingKey !== null
       ? examResponseState.pendingKey
@@ -285,11 +286,18 @@ export function TeachingSessionPage() {
         <details className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
           <summary className="cursor-pointer text-sm font-semibold text-foreground">Personal note</summary>
           <div className="mt-3 space-y-3">
-            <Textarea value={noteDraft} maxLength={5000} onChange={(event) => setNoteDraftState({ questionId: question.questionId, text: event.target.value })} aria-label="Personal note" placeholder="Private to your Teaching identity" />
+            <Textarea value={noteDraft} maxLength={5000} onChange={(event) => {
+              noteMutation.reset();
+              clearNoteMutation.reset();
+              setNoteDraftState({ questionId: question.questionId, text: event.target.value });
+            }} aria-label="Personal note" placeholder="Private to your Teaching identity" />
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => noteMutation.mutate(noteDraft)} disabled={!noteDraft.trim() || noteMutation.isPending}>Save note</Button>
+              <Button size="sm" onClick={() => noteMutation.mutate(noteDraft)} disabled={!noteDraft.trim() || !noteDirty || noteMutation.isPending}>Save note</Button>
               <Button size="sm" variant="outline" onClick={() => clearNoteMutation.mutate()} disabled={!question.note || clearNoteMutation.isPending}>Clear note</Button>
-              {noteMutation.isSuccess && <span className="self-center text-sm text-muted-foreground" role="status">Note saved</span>}
+              {noteMutation.isPending || clearNoteMutation.isPending ? <span className="self-center text-sm text-muted-foreground" role="status">Saving note…</span> : null}
+              {noteDirty && !noteMutation.isPending && !clearNoteMutation.isPending ? <span className="self-center text-sm text-muted-foreground" role="status">Unsaved changes</span> : null}
+              {noteMutation.isSuccess && !noteDirty && <span className="self-center text-sm text-muted-foreground" role="status">Note saved</span>}
+              {clearNoteMutation.isSuccess && !noteDirty && <span className="self-center text-sm text-muted-foreground" role="status">Note cleared</span>}
             </div>
             {(noteMutation.isError || clearNoteMutation.isError) && <p role="alert" className="text-sm text-red-700">Your note could not be saved.</p>}
           </div>

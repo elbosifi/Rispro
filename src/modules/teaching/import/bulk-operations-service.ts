@@ -16,26 +16,40 @@ const BULK_CONCURRENCY = 8;
 const matchingScopeSecret = randomBytes(32);
 type TeachingBulkScope = { batchId: string } | { questionIds: number[] } | { filters: TeachingQuestionListQuery };
 
-const MATCHING_SCOPE_FIELDS = [
-  "search", "status", "specialtyCode", "domainCode", "topicCode", "subtopicCode", "type", "difficulty",
-  "trainingLevelCode", "tagCode", "sourceType", "hasImage", "imported", "validationStatus", "importBatchId",
-] as const satisfies ReadonlyArray<keyof TeachingQuestionListQuery>;
+const NON_MATCHING_SCOPE_FIELDS = new Set(["page", "pageSize", "limit", "offset", "sort", "direction"]);
 
-/** A server-signed scope covering only fields that change matching questions. */
-export function teachingMatchingScopeFingerprint(filters: TeachingQuestionListQuery): string {
-  const canonical = Object.fromEntries(MATCHING_SCOPE_FIELDS.flatMap((field) => {
-    const value = filters[field];
-    return value === undefined || value === "" ? [] : [[field, value]];
-  }));
-  return createHmac("sha256", matchingScopeSecret).update(JSON.stringify(canonical)).digest("base64url");
+function matchingScope(filters: TeachingQuestionListQuery) {
+  return Object.fromEntries(Object.entries(filters as Record<string, unknown>)
+    .filter(([field, value]) => !NON_MATCHING_SCOPE_FIELDS.has(field) && value !== undefined && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([field, value]) => [field, Array.isArray(value) ? [...value].sort() : value]));
 }
 
-export function requireTeachingMatchingScopeFingerprint(filters: TeachingQuestionListQuery, fingerprint: unknown): void {
+function scopeFingerprint(scope: TeachingBulkScope, rows: BatchQuestionRow[]): string {
+  const canonicalScope = "batchId" in scope
+    ? { kind: "batch", batchId: scope.batchId }
+    : "questionIds" in scope
+      ? { kind: "questions", questionIds: [...scope.questionIds].sort((left, right) => left - right) }
+      : { kind: "matching", filters: matchingScope(scope.filters) };
+  const questions = rows.map((row) => ({
+    questionId: safeNumber(row.id),
+    revisionId: safeNumber(row.revision_id),
+    revisionVersion: Number(row.revision_version),
+    revisionStatus: row.revision_status,
+    retired: row.retired_at !== null,
+    selectionConflict: row.selection_conflict,
+  })).sort((left, right) => left.questionId - right.questionId);
+  return createHmac("sha256", matchingScopeSecret)
+    .update(JSON.stringify({ scope: canonicalScope, questions }))
+    .digest("base64url");
+}
+
+function requireScopeFingerprint(scope: TeachingBulkScope, rows: BatchQuestionRow[], fingerprint: unknown): void {
   if (typeof fingerprint !== "string" || fingerprint.length < 1) {
-    throw new HttpError(409, "Validate the current matching question scope before publishing.");
+    throw new HttpError(409, "Validate the current question scope before publishing.");
   }
-  if (fingerprint !== teachingMatchingScopeFingerprint(filters)) {
-    throw new HttpError(409, "The matching question scope changed. Validate the current filters before publishing.");
+  if (fingerprint !== scopeFingerprint(scope, rows)) {
+    throw new HttpError(409, "The question scope or revisions changed. Validate the current questions before publishing.");
   }
 }
 
@@ -51,6 +65,7 @@ interface BatchQuestionRow {
   classification: TeachingValidationClassification | null;
   errors_json: TeachingValidationIssue[];
   warnings_json: TeachingValidationIssue[];
+  validated_at: Date | null;
   selection_conflict: boolean;
 }
 
@@ -112,7 +127,7 @@ async function listCurrentQuestions(scope: TeachingBulkScope): Promise<BatchQues
      select question.id, question.external_id, question.retired_at, revision.id as revision_id,
        revision.version as revision_version, revision.status as revision_status, revision.reviewed_at,
        revision.stem, summary.classification, coalesce(summary.errors_json, '[]'::jsonb) as errors_json,
-       coalesce(summary.warnings_json, '[]'::jsonb) as warnings_json
+       coalesce(summary.warnings_json, '[]'::jsonb) as warnings_json, summary.validated_at
      from linked_questions linked
      join teaching.questions question on question.id = linked.question_id
      join latest_revision revision on revision.question_id = question.id
@@ -150,7 +165,7 @@ function toQuestionResult(row: BatchQuestionRow): TeachingBulkQuestionResult {
     revisionVersion: Number(row.revision_version),
     revisionStatus: row.revision_status,
     validationStatus: row.classification,
-    eligibleForPublish: row.revision_status === "draft" && row.classification !== "invalid",
+    eligibleForPublish: row.revision_status === "draft" && (row.classification === "valid" || row.classification === "valid_with_warnings"),
     errors,
     warnings,
   };
@@ -225,7 +240,7 @@ export async function validateTeachingQuestionScope(scope: TeachingBulkScope, ac
     }
   });
   return {
-    ...("filters" in scope ? { scopeFingerprint: teachingMatchingScopeFingerprint(scope.filters) } : {}),
+    scopeFingerprint: scopeFingerprint(scope, rows),
     ...validationCounts(results),
     eligibleForPublish: results.filter((item) => item.revisionStatus === "draft" && item.eligibleForPublish).length,
     questions: results,
@@ -236,8 +251,10 @@ export async function publishTeachingQuestionScope(
   scope: TeachingBulkScope,
   actor: TeachingAuditIdentity,
   permissions: readonly string[],
+  validatedScopeFingerprint: unknown,
 ) {
   const rows = await scopeQuestions(scope);
+  requireScopeFingerprint(scope, rows, validatedScopeFingerprint);
   const canSubmitAndReviewDrafts = permissions.includes("teaching.admin")
     || (permissions.includes("teaching.author") && permissions.includes("teaching.review"));
   const results = await mapConcurrent(rows, async (row) => {
@@ -289,11 +306,23 @@ export async function publishTeachingQuestionScope(
 
 export async function getTeachingImportBatchQuestionSummary(batchId: string) {
   const rows = await listCurrentQuestions({ batchId });
+  const questions = rows.map(toQuestionResult);
   return {
-    total: rows.length,
-    draft: rows.filter((row) => row.revision_status === "draft").length,
-    inReview: rows.filter((row) => row.revision_status === "in_review").length,
-    published: rows.filter((row) => row.revision_status === "published").length,
-    retired: rows.filter((row) => row.revision_status === "retired" || row.retired_at !== null).length,
+    publication: {
+      total: rows.length,
+      draft: rows.filter((row) => row.revision_status === "draft" && row.retired_at === null).length,
+      inReview: rows.filter((row) => row.revision_status === "in_review" && row.retired_at === null).length,
+      published: rows.filter((row) => row.revision_status === "published" && row.retired_at === null).length,
+      retired: rows.filter((row) => row.revision_status === "retired" || row.retired_at !== null).length,
+    },
+    lastValidation: {
+      total: rows.filter((row) => row.classification !== null).length,
+      valid: rows.filter((row) => row.classification === "valid").length,
+      validWithWarnings: rows.filter((row) => row.classification === "valid_with_warnings").length,
+      invalid: rows.filter((row) => row.classification === "invalid").length,
+      eligibleForPublish: rows.filter((row) => row.revision_status === "draft" && (row.classification === "valid" || row.classification === "valid_with_warnings")).length,
+      validatedAt: rows.reduce<Date | null>((latest, row) => !row.validated_at || (latest && latest >= row.validated_at) ? latest : row.validated_at, null),
+      questions,
+    },
   };
 }

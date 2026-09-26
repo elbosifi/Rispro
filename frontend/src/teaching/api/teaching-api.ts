@@ -418,6 +418,36 @@ export async function fetchTeachingImportBatch(id: string): Promise<Record<strin
   return api(`/teaching/qbank/import/batches/${encodeURIComponent(id)}`);
 }
 
+export interface TeachingImportPublicationSummary {
+  total: number;
+  draft: number;
+  inReview: number;
+  published: number;
+  retired: number;
+}
+
+export interface TeachingImportBatchListItem {
+  id: string;
+  originalFilename: string;
+  inputType: "json" | "zip";
+  schemaVersion: string | null;
+  status: string;
+  questionCount: number;
+  caseCount: number;
+  assetCount: number;
+  uploader: { identityIssuer: string; identitySubject: string };
+  createdAt: string;
+  confirmedAt: string | null;
+  publication: TeachingImportPublicationSummary | null;
+}
+
+export async function fetchTeachingImportBatches(limit = 20, offset = 0): Promise<{
+  items: TeachingImportBatchListItem[];
+  pagination: { limit: number; offset: number; total: number };
+}> {
+  return api(`/teaching/qbank/import/batches?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`);
+}
+
 export type TeachingValidationClassification = "valid" | "valid_with_warnings" | "invalid";
 export interface TeachingValidationIssue {
   code: string;
@@ -470,8 +500,8 @@ export async function validateTeachingImportBatch(batchId: string): Promise<Teac
   return api(`/teaching/qbank/import/batches/${encodeURIComponent(batchId)}/validate`, { method: "POST", body: "{}" });
 }
 
-export async function publishTeachingImportBatch(batchId: string): Promise<TeachingBulkPublishResult> {
-  return api(`/teaching/qbank/import/batches/${encodeURIComponent(batchId)}/publish`, { method: "POST", body: "{}" });
+export async function publishTeachingImportBatch(batchId: string, scopeFingerprint: string): Promise<TeachingBulkPublishResult> {
+  return api(`/teaching/qbank/import/batches/${encodeURIComponent(batchId)}/publish`, { method: "POST", body: JSON.stringify({ scopeFingerprint }) });
 }
 
 export async function validateTeachingQuestionSelection(questionIds: number[]): Promise<TeachingBulkValidationResult> {

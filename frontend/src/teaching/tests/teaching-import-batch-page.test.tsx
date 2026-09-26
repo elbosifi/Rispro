@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TeachingImportBatchPage } from "../pages/teaching-import-batch-page";
 
@@ -56,6 +56,7 @@ function renderPage() {
 }
 
 describe("Teaching import batch bulk validation and publication", () => {
+  beforeEach(() => { batchApi.fetch.mockResolvedValue(batch); });
   afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
   it("validates the full batch, confirms once, publishes eligible questions, and leaves the invalid Draft visible", async () => {
@@ -65,7 +66,7 @@ describe("Teaching import batch bulk validation and publication", () => {
       question(9, "valid_with_warnings"),
       question(10, "invalid"),
     ];
-    batchApi.validate.mockResolvedValue({ total: 10, draft: 10, inReview: 0, published: 0, retired: 0, valid: 8, validWithWarnings: 1, invalid: 1, conflicts: 0, questions: validatedQuestions });
+    batchApi.validate.mockResolvedValue({ scopeFingerprint: "batch-fingerprint", total: 10, draft: 10, inReview: 0, published: 0, retired: 0, valid: 8, validWithWarnings: 1, invalid: 1, conflicts: 0, eligibleForPublish: 9, questions: validatedQuestions });
     batchApi.publish.mockResolvedValue({
       requested: 10, published: 9, alreadyPublished: 0, invalid: 1, conflicts: 0, requiresReview: 0, retired: 0, failed: 0, warnings: 1,
       results: validatedQuestions.map((item) => item.validationStatus === "invalid"
@@ -75,14 +76,11 @@ describe("Teaching import batch bulk validation and publication", () => {
     renderPage();
 
     expect(await screen.findByText(/radiology-neuro-qbank\.zip/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Validate All" }));
-    expect(await screen.findByText("1 warning")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Validate & publish…" }));
     await waitFor(() => expect(batchApi.validate).toHaveBeenCalledOnce());
-    expect(screen.getByRole("button", { name: "Publish All Eligible (9)" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Publish All Eligible (9)" }));
-    const confirmation = await screen.findByRole("dialog", { name: "Publish imported questions?" });
+    const confirmation = await screen.findByRole("dialog", { name: "Review validation before publishing" });
     expect(confirmation.textContent).toContain("9 questions are eligible for publication.");
-    expect(confirmation.textContent).toContain("1 question contains validation errors and will remain Draft.");
+    expect(confirmation.textContent).toContain("1 invalid and will remain Draft.");
     expect(confirmation.textContent).toContain("1 eligible question contains 1 warning.");
     fireEvent.click(screen.getByText("View warnings"));
     expect(screen.getAllByText("No supporting references are recorded.")).toHaveLength(2);
@@ -90,9 +88,31 @@ describe("Teaching import batch bulk validation and publication", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Publish 9 questions" }));
     await waitFor(() => expect(batchApi.publish).toHaveBeenCalledOnce());
-    expect(await screen.findByText("1 question requires attention and remain Draft.")).toBeTruthy();
+    expect(batchApi.publish).toHaveBeenCalledWith("batch-143", "batch-fingerprint");
+    expect(await screen.findByText("8 published · 1 published with warnings · 1 require attention · 0 conflicts")).toBeTruthy();
+    expect(await screen.findByText(/1 require attention/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Edit" }).getAttribute("href")).toBe("/teaching/admin/questions/10");
     expect(screen.getByText("An image-based question requires at least one image asset.")).toBeTruthy();
-    expect(batchApi.publish).toHaveBeenCalledWith("batch-143");
+  });
+
+  it("shows persisted validation and publication state after a batch reload without authorizing publication", async () => {
+    batchApi.fetch.mockResolvedValue({
+      ...batch,
+      publication: { total: 10, draft: 10, inReview: 0, published: 0, retired: 0 },
+      lastValidation: {
+        total: 1, valid: 1, validWithWarnings: 0, invalid: 0, eligibleForPublish: 1,
+        questions: [question(33, "valid")],
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Last validation result")).toBeTruthy();
+    expect(screen.getByText("Saved classifications are informational. Current validation is required before publication.")).toBeTruthy();
+    expect(screen.getByText("10", { selector: "dd" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Validate & publish…" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View last validation classifications" }));
+    expect(await screen.findByText("RAD-NEURO-0033")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(batchApi.publish).not.toHaveBeenCalled();
   });
 });
