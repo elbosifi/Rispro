@@ -133,7 +133,7 @@ describe("Teaching learner pages", () => {
     learnerApi.clearNote.mockImplementation(async (questionId: number) => ({ questionId, cleared: true }));
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
 
   it("shows learner progress and a direct resume link", async () => {
     renderWithProviders(<TeachingDashboardPage />);
@@ -169,6 +169,18 @@ describe("Teaching learner pages", () => {
       mode: "exam", questionCount: 4, timed: true, timeLimitSeconds: 1800,
       filters: { specialty: "radiology", questionState: "all" },
     }));
+  });
+
+  it("normalizes unsupported question states on entering Review and preserves supported ones", async () => {
+    renderWithProviders(<TeachingQbankPage />);
+
+    await screen.findByText("Available questions: 12");
+    fireEvent.change(screen.getByLabelText("Question state"), { target: { value: "correct" } });
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "review" } });
+    expect((screen.getByLabelText("Question state") as HTMLSelectElement).value).toBe("incorrect");
+    fireEvent.change(screen.getByLabelText("Question state"), { target: { value: "marked" } });
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "study" } });
+    expect((screen.getByLabelText("Question state") as HTMLSelectElement).value).toBe("marked");
   });
 
   it("keeps Exam answers editable and withholds feedback until final submission", async () => {
@@ -240,6 +252,57 @@ describe("Teaching learner pages", () => {
 
     expect(await screen.findByRole("heading", { name: "Incorrect" })).toBeTruthy();
     expect(learnerApi.fetchQuestion).toHaveBeenCalledTimes(2);
+  });
+
+  it("anchors the timed Exam countdown to each fresh server remaining value", async () => {
+    vi.useFakeTimers();
+    learnerApi.fetchSession.mockResolvedValue({ ...sessionFixture("active"), timed: true, timeLimitSeconds: 120, remainingSeconds: 120 });
+    learnerApi.saveExamResponse.mockResolvedValue({
+      saved: true,
+      submitted: false,
+      session: { ...sessionFixture("active"), timed: true, timeLimitSeconds: 120, remainingSeconds: 118 },
+    });
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByRole("timer", { name: "Time remaining 2:00" })).toBeTruthy();
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(screen.getByRole("timer", { name: "Time remaining 1:50" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(screen.getByRole("timer", { name: "Time remaining 1:58" })).toBeTruthy();
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(screen.getByRole("timer", { name: "Time remaining 1:56" })).toBeTruthy();
+  });
+
+  it("rolls back a failed Exam response, blocks navigation, and permits a retry", async () => {
+    let rejectSave: ((error: Error) => void) | undefined;
+    learnerApi.saveExamResponse
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }))
+      .mockImplementationOnce(async (_id: number, _position: number, selected: string) => ({ saved: true, submitted: false, session: sessionFixture("active", selected) }));
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+
+    await screen.findByText("Which answer is selected only after the learner submits?");
+    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    expect(screen.getByRole("status").textContent).toContain("Saving…");
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Submit exam" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(learnerApi.saveExamResponse).toHaveBeenCalledTimes(1));
+    await act(async () => { rejectSave?.(new Error("network unavailable")); await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => expect(screen.queryByText("Answer was not saved. Please select it again or retry.")).toBeTruthy());
+    expect((screen.getByRole("radio", { name: /A\.Alpha/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    await waitFor(() => expect(learnerApi.saveExamResponse).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((screen.getByRole("radio", { name: /A\.Alpha/ }) as HTMLInputElement).checked).toBe(true));
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("shows empty history with a path to create the first session", async () => {

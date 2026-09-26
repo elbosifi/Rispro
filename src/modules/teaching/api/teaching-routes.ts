@@ -40,6 +40,7 @@ import { createTeachingImportTemplate } from "../import/template-service.js";
 import {
   parseTeachingBulkQuestionIds,
   publishTeachingQuestionScope,
+  requireTeachingMatchingScopeFingerprint,
   validateTeachingQuestionScope,
 } from "../import/bulk-operations-service.js";
 import { listTeachingAssets, listTeachingCases, listTeachingReferences, listTeachingSources } from "../repositories/teaching-editorial-repository.js";
@@ -433,7 +434,9 @@ export function createTeachingRouter(): Router {
   router.post("/admin/questions/bulk/validate-publish-matching", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.publish"]);
     res.setHeader("Cache-Control", "no-store, private");
-    res.json(await publishTeachingQuestionScope({ filters: matchingQuestionFilters(req.body?.filters) }, actor, teachingIdentity.permissions));
+    const filters = matchingQuestionFilters(req.body?.filters);
+    requireTeachingMatchingScopeFingerprint(filters, req.body?.scopeFingerprint);
+    res.json(await publishTeachingQuestionScope({ filters }, actor, teachingIdentity.permissions));
   }));
 
   router.patch("/admin/questions/:id/revisions/:revisionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {

@@ -71,6 +71,16 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   expect((await validatePromise).ok()).toBeTruthy();
   await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid.")).toBeVisible();
 
+  await page.getByLabel("Status").selectOption("in_review");
+  await expect(page.getByRole("button", { name: "Validate & publish all eligible" })).toBeDisabled();
+  await page.getByLabel("Status").selectOption("draft");
+  const revalidatePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-matching" && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Validate all matching" }).click();
+  expect((await revalidatePromise).ok()).toBeTruthy();
+  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid.")).toBeVisible();
+
   await page.setViewportSize({ width: mobileWidth, height: 844 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", mobileWidth);
   await page.screenshot({ path: testInfo.outputPath("teaching-bulk-matching-mobile.png"), fullPage: true });
@@ -88,9 +98,8 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   expect(publishResult.ok()).toBeTruthy();
   expect(await publishResult.json()).toMatchObject({ requested: 10, published: 9, invalid: 1, warnings: 1 });
   await expect(page.getByText("10 matched: 9 published, 1 published with warnings, 1 invalid / remain Draft, 0 conflicts, 0 already published.")).toBeVisible();
-  await page.getByRole("button", { name: "View invalid Drafts" }).click();
-  await expect(page).toHaveURL(new RegExp(`search=${encodeURIComponent(marker)}.*status=draft.*validationStatus=invalid`));
-  await expect(page.getByRole("link", { name: externalIds[9]!, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "View questions requiring attention" }).click();
+  await expect(page.getByLabel("Questions requiring attention").getByRole("link", { name: externalIds[9]!, exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Sign out of Teaching" }).click();
   await signInWithSession(page, "e2e_doctor");

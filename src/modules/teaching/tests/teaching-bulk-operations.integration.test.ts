@@ -186,14 +186,25 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(object(matchingValidation.data).validWithWarnings, 1);
     assert.equal(object(matchingValidation.data).invalid, 1);
     assert.equal(object(matchingValidation.data).eligibleForPublish, 9);
+    const draftImportedScopeFingerprint = object(matchingValidation.data).scopeFingerprint;
+    assert.equal(typeof draftImportedScopeFingerprint, "string");
+    const staleScopePublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { tagCode, status: "in_review" }, scopeFingerprint: draftImportedScopeFingerprint },
+    });
+    assert.equal(staleScopePublish.status, 409, "a validation fingerprint cannot publish a changed matching scope");
 
     const manualValidation = await request("/api/teaching/admin/questions/bulk/validate", {
       method: "POST", subject: authorSubject, body: { questionIds: [manualQuestionId] },
     });
     assert.equal(manualValidation.status, 200);
     assert.equal(object(manualValidation.data).valid, 1);
-    const matchingManualPublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+    const matchingManualValidation = await request("/api/teaching/admin/questions/bulk/validate-matching", {
       method: "POST", subject: authorSubject, body: { filters: { search: `${marker}-MANUAL-001`, status: "draft" } },
+    });
+    assert.equal(matchingManualValidation.status, 200, JSON.stringify(matchingManualValidation.data));
+    assert.equal(object(matchingManualValidation.data).total, 1);
+    const matchingManualPublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { search: `${marker}-MANUAL-001`, status: "draft" }, scopeFingerprint: object(matchingManualValidation.data).scopeFingerprint },
     });
     assert.equal(matchingManualPublish.status, 200, JSON.stringify(matchingManualPublish.data));
     assert.equal(object(matchingManualPublish.data).requested, 1);
@@ -274,8 +285,12 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(object(retryPublish.data).published, 0);
     assert.equal(object(retryPublish.data).alreadyPublished, 9);
     assert.equal(object(retryPublish.data).invalid, 1);
-    const matchingRetry = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+    const matchingRetryValidation = await request("/api/teaching/admin/questions/bulk/validate-matching", {
       method: "POST", subject: authorSubject, body: { filters: { tagCode } },
+    });
+    assert.equal(matchingRetryValidation.status, 200, JSON.stringify(matchingRetryValidation.data));
+    const matchingRetry = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { tagCode }, scopeFingerprint: object(matchingRetryValidation.data).scopeFingerprint },
     });
     assert.equal(matchingRetry.status, 200, JSON.stringify(matchingRetry.data));
     assert.equal(object(matchingRetry.data).published, 0);
@@ -374,7 +389,7 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(object(largeValidation.data).validWithWarnings, 500);
     const largePublicationStart = Date.now();
     const largePublication = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
-      method: "POST", subject: authorSubject, body: { filters: { importBatchId: syntheticBatchId, status: "draft" } },
+      method: "POST", subject: authorSubject, body: { filters: { importBatchId: syntheticBatchId, status: "draft" }, scopeFingerprint: object(largeValidation.data).scopeFingerprint },
     });
     performanceMs.publication = Date.now() - largePublicationStart;
     assert.equal(largePublication.status, 200, JSON.stringify(largePublication.data));

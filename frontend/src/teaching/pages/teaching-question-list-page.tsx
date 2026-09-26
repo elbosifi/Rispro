@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownAZ, ArrowUpDown, Plus, Search } from "lucide-react";
@@ -7,6 +7,13 @@ import { useTeachingAuth } from "../auth/teaching-auth-context";
 import { fetchTeachingCatalog, fetchTeachingQuestions, validateAndPublishTeachingQuestionMatching, validateTeachingQuestionMatching, type TeachingBulkPublishResult, type TeachingBulkValidationResult, type TeachingCatalogItem, type TeachingQuestionStatus } from "../api/teaching-api";
 
 const PAGE_SIZE = 20;
+const NON_MATCHING_QUERY_KEYS = new Set(["page", "pageSize", "limit", "offset", "sort", "direction"]);
+
+function matchingScopeKey(params: URLSearchParams): string {
+  return JSON.stringify([...params.entries()]
+    .filter(([key]) => !NON_MATCHING_QUERY_KEYS.has(key))
+    .sort(([left], [right]) => left.localeCompare(right)));
+}
 
 function StatusBadge({ status }: { status: TeachingQuestionStatus }) {
   const variant = status === "published" ? "success" : status === "in_review" ? "info" : status === "draft" ? "draft" : "neutral";
@@ -25,9 +32,10 @@ export function TeachingQuestionListPage() {
   const canAuthor = Boolean(identity?.permissions.includes("teaching.author") || identity?.permissions.includes("teaching.admin"));
   const canPublish = Boolean(identity?.permissions.includes("teaching.publish") || identity?.permissions.includes("teaching.admin"));
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
-  const [validationSummary, setValidationSummary] = useState<TeachingBulkValidationResult | null>(null);
-  const [publishSummary, setPublishSummary] = useState<TeachingBulkPublishResult | null>(null);
+  const [validationScope, setValidationScope] = useState<{ scopeKey: string; result: TeachingBulkValidationResult } | null>(null);
+  const [publishScope, setPublishScope] = useState<{ scopeKey: string; result: TeachingBulkPublishResult } | null>(null);
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const [showAttention, setShowAttention] = useState(false);
   const catalog = useQuery({ queryKey: ["teaching", "catalog"], queryFn: fetchTeachingCatalog, staleTime: 60_000 });
   const query = useMemo(() => {
     const params = new URLSearchParams(searchParams);
@@ -43,22 +51,38 @@ export function TeachingQuestionListPage() {
   });
   const matchingFilters = useMemo(() => {
     const filters = new URLSearchParams(searchParams);
-    for (const key of ["page", "pageSize", "limit", "offset", "sort", "direction"]) filters.delete(key);
+    for (const key of NON_MATCHING_QUERY_KEYS) filters.delete(key);
     return Object.fromEntries(filters.entries());
   }, [searchParams]);
+  const currentScopeKey = useMemo(() => matchingScopeKey(searchParams), [searchParams]);
+  const currentScopeKeyRef = useRef(currentScopeKey);
+  currentScopeKeyRef.current = currentScopeKey;
+  const validationSummary = validationScope?.result ?? null;
+  const publishSummary = publishScope?.result ?? null;
+
+  useEffect(() => {
+    setValidationScope((current) => current?.scopeKey === currentScopeKey ? current : null);
+    setPublishScope((current) => current?.scopeKey === currentScopeKey ? current : null);
+    setConfirmPublish(false);
+    setShowAttention(false);
+  }, [currentScopeKey]);
+
   const validateMatching = useMutation({
-    mutationFn: () => validateTeachingQuestionMatching(matchingFilters),
-    onSuccess: (result) => {
-      setValidationSummary(result);
-      setPublishSummary(null);
+    mutationFn: ({ filters }: { filters: typeof matchingFilters; scopeKey: string }) => validateTeachingQuestionMatching(filters),
+    onSuccess: (result, variables) => {
+      if (currentScopeKeyRef.current !== variables.scopeKey) return;
+      setValidationScope({ scopeKey: variables.scopeKey, result });
+      setPublishScope(null);
+      setShowAttention(false);
       void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
     },
   });
   const publishMatching = useMutation({
-    mutationFn: () => validateAndPublishTeachingQuestionMatching(matchingFilters),
-    onSuccess: (result) => {
-      setPublishSummary(result);
-      setValidationSummary(null);
+    mutationFn: ({ filters, scopeFingerprint }: { filters: typeof matchingFilters; scopeKey: string; scopeFingerprint: string }) => validateAndPublishTeachingQuestionMatching(filters, scopeFingerprint),
+    onSuccess: (result, variables) => {
+      if (currentScopeKeyRef.current !== variables.scopeKey) return;
+      setPublishScope({ scopeKey: variables.scopeKey, result });
+      setValidationScope(null);
       setConfirmPublish(false);
       void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
     },
@@ -68,6 +92,13 @@ export function TeachingQuestionListPage() {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
+    if (key === "specialtyCode") {
+      next.delete("domainCode"); next.delete("topicCode"); next.delete("subtopicCode");
+    } else if (key === "domainCode") {
+      next.delete("topicCode"); next.delete("subtopicCode");
+    } else if (key === "topicCode") {
+      next.delete("subtopicCode");
+    }
     if (key !== "page") next.set("page", "1");
     setSearchParams(next);
   };
@@ -99,13 +130,9 @@ export function TeachingQuestionListPage() {
     : questions.data?.pagination.page ?? 1;
   const pagination = questions.data?.pagination;
   const eligibleForPublish = validationSummary?.eligibleForPublish ?? 0;
-  const showAttention = () => {
-    const next = new URLSearchParams(searchParams);
-    next.set("status", "draft");
-    next.set("validationStatus", "invalid");
-    next.set("page", "1");
-    setSearchParams(next);
-  };
+  const attentionQuestions = (validationSummary?.questions ?? publishSummary?.results ?? []).filter((item) =>
+    item.validationStatus === "invalid" || item.publishStatus === "conflict" || item.publishStatus === "failed",
+  );
 
   const sortItems = [
     { value: "updated", label: "Recently updated" },
@@ -189,10 +216,10 @@ export function TeachingQuestionListPage() {
           <span>{pagination ? `${pagination.total} questions · page ${pagination.page} of ${Math.max(1, pagination.totalPages)}` : "Loading question count…"}</span>
           <div className="flex flex-wrap items-center gap-3">
             <span>Filters are saved in this page URL.</span>
-            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={validateMatching.isPending} onClick={() => validateMatching.mutate()}>
+            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={validateMatching.isPending} onClick={() => validateMatching.mutate({ filters: matchingFilters, scopeKey: currentScopeKey })}>
               {validateMatching.isPending ? "Validating all matching…" : "Validate all matching"}
             </Button> : null}
-            {canPublish ? <Button type="button" size="sm" disabled={validateMatching.isPending || !validationSummary || eligibleForPublish === 0} onClick={() => setConfirmPublish(true)}>
+            {canPublish ? <Button type="button" size="sm" disabled={validateMatching.isPending || !validationSummary || validationScope?.scopeKey !== currentScopeKey || !validationSummary.scopeFingerprint || eligibleForPublish === 0} onClick={() => setConfirmPublish(true)}>
               {validationSummary ? `Validate & publish all eligible (${eligibleForPublish})` : "Validate & publish all eligible"}
             </Button> : null}
           </div>
@@ -201,11 +228,14 @@ export function TeachingQuestionListPage() {
         {publishMatching.error ? <p role="alert" className="text-sm text-destructive">{publishMatching.error.message}</p> : null}
         {validationSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <span>Matched {validationSummary.total}: {validationSummary.valid} valid, {validationSummary.validWithWarnings} with warnings, {validationSummary.invalid} invalid.</span>
-          {validationSummary.invalid || validationSummary.conflicts ? <Button type="button" size="sm" variant="ghost" onClick={showAttention}>View invalid Drafts</Button> : null}
+          {attentionQuestions.length ? <Button type="button" size="sm" variant="ghost" onClick={() => setShowAttention((current) => !current)}>View questions requiring attention</Button> : null}
         </div> : null}
         {publishSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <span>{publishSummary.requested} matched: {publishSummary.published} published, {publishSummary.warnings} published with warnings, {publishSummary.invalid} invalid / remain Draft, {publishSummary.conflicts} conflicts, {publishSummary.alreadyPublished} already published.</span>
-          {publishSummary.invalid || publishSummary.conflicts ? <Button type="button" size="sm" variant="ghost" onClick={showAttention}>View invalid Drafts</Button> : null}
+          {attentionQuestions.length ? <Button type="button" size="sm" variant="ghost" onClick={() => setShowAttention((current) => !current)}>View questions requiring attention</Button> : null}
+        </div> : null}
+        {showAttention && attentionQuestions.length ? <div aria-label="Questions requiring attention" className="space-y-1 border-t pt-3 text-sm" style={{ borderColor: "var(--border)" }}>
+          {attentionQuestions.map((item) => <p key={`${item.questionId}-${item.publishStatus ?? item.validationStatus}`}><Link className="text-accent underline-offset-4 hover:underline" to={`/teaching/admin/questions/${item.questionId}`}>{item.externalId}</Link>{item.publishStatus === "conflict" ? " — changed concurrently; reopen and revalidate." : item.publishStatus === "failed" ? " — bulk operation failed; retry validation." : " — validation errors require correction."}</p>)}
         </div> : null}
       </Card>
 
@@ -265,7 +295,7 @@ export function TeachingQuestionListPage() {
           </div>
           <DialogFooter>
             <Button variant="secondary" disabled={publishMatching.isPending} onClick={() => setConfirmPublish(false)}>Cancel</Button>
-            <Button disabled={publishMatching.isPending || eligibleForPublish === 0} onClick={() => publishMatching.mutate()}>
+            <Button disabled={publishMatching.isPending || eligibleForPublish === 0 || !validationSummary?.scopeFingerprint || validationScope?.scopeKey !== currentScopeKey} onClick={() => validationSummary?.scopeFingerprint && publishMatching.mutate({ filters: matchingFilters, scopeKey: currentScopeKey, scopeFingerprint: validationSummary.scopeFingerprint })}>
               {publishMatching.isPending ? "Publishing…" : `Publish ${eligibleForPublish} eligible questions`}
             </Button>
           </DialogFooter>

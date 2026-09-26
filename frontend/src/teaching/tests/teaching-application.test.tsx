@@ -1,9 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { TeachingApplication } from "../teaching-application";
+import { TeachingLayout } from "../layout/teaching-layout";
+import { registerUnsavedNavigationGuard } from "@/lib/unsaved-navigation-guard";
 
 const learnerApi = vi.hoisted(() => ({ fetchDashboard: vi.fn() }));
 
@@ -191,5 +193,37 @@ describe("Teaching application routes", () => {
     expect(screen.queryByText("RISpro Core")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Sign out of Teaching" }));
     expect(teachingAuthState.logout).toHaveBeenCalledOnce();
+  });
+
+  it("uses the shared unsaved-navigation guard for desktop Dashboard and sign out", () => {
+    teachingAuthState.isAuthenticated = true;
+    teachingAuthState.identity = {
+      identitySubject: "123",
+      displayName: "Teaching Author",
+      permissions: ["teaching.access", "teaching.learn"],
+    };
+    let proceed: (() => void) | undefined;
+    const guard = vi.fn((next: () => void) => { proceed = next; });
+    const unregister = registerUnsavedNavigationGuard(guard);
+    const Location = () => <p data-testid="location">{useLocation().pathname}</p>;
+    render(
+      <MemoryRouter initialEntries={["/teaching/admin/questions/12"]}>
+        <TeachingLayout><Location /></TeachingLayout>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getAllByRole("link", { name: "Dashboard" })[0]!);
+    expect(guard).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("location").textContent).toBe("/teaching/admin/questions/12");
+    act(() => proceed?.());
+    expect(screen.getByTestId("location").textContent).toBe("/teaching/dashboard");
+
+    const unregisterSignOut = registerUnsavedNavigationGuard(guard);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out of Teaching" }));
+    expect(teachingAuthState.logout).not.toHaveBeenCalled();
+    act(() => proceed?.());
+    expect(teachingAuthState.logout).toHaveBeenCalledOnce();
+    unregisterSignOut();
+    unregister();
   });
 });

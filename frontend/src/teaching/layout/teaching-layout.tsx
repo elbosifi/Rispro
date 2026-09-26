@@ -10,7 +10,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
   const canImport = Boolean(identity?.permissions.includes("teaching.author") || identity?.permissions.includes("teaching.admin"));
   const canLearn = Boolean(identity?.permissions.includes("teaching.learn"));
   const canAdministerQuestions = Boolean(identity?.permissions.some((permission) => ["teaching.author", "teaching.review", "teaching.publish", "teaching.admin"].includes(permission)));
-  const signOut = () => void logout();
+  const signOut = () => requestNavigationWithUnsavedGuard(() => { void logout(); });
   const follow = (event: React.MouseEvent<HTMLAnchorElement>, path: string) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -43,6 +43,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
           <nav aria-label="Teaching navigation" className="space-y-1">
             <NavLink
               to="/teaching/dashboard"
+              onClick={(event) => follow(event, "/teaching/dashboard")}
               className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}
             >
               <BookOpenText size={17} aria-hidden="true" />

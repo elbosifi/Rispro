@@ -439,6 +439,7 @@ export interface TeachingBulkQuestionResult {
 }
 
 export interface TeachingBulkValidationResult {
+  scopeFingerprint?: string;
   total: number;
   draft: number;
   inReview: number;
@@ -483,8 +484,8 @@ export async function validateTeachingQuestionMatching(filters: TeachingQuestion
   return api("/teaching/admin/questions/bulk/validate-matching", { method: "POST", body: JSON.stringify({ filters }) });
 }
 
-export async function validateAndPublishTeachingQuestionMatching(filters: TeachingQuestionMatchingFilters): Promise<TeachingBulkPublishResult> {
-  return api("/teaching/admin/questions/bulk/validate-publish-matching", { method: "POST", body: JSON.stringify({ filters }) });
+export async function validateAndPublishTeachingQuestionMatching(filters: TeachingQuestionMatchingFilters, scopeFingerprint: string): Promise<TeachingBulkPublishResult> {
+  return api("/teaching/admin/questions/bulk/validate-publish-matching", { method: "POST", body: JSON.stringify({ filters, scopeFingerprint }) });
 }
 
 export function teachingAssetUrl(id: number): string {

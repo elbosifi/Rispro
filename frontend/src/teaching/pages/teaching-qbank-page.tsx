@@ -188,7 +188,7 @@ export function TeachingQbankPage() {
             <select className={fieldClass} value={mode} onChange={(event) => {
               const nextMode = event.target.value as TeachingSessionMode;
               setMode(nextMode);
-              if (nextMode === "review" && questionState === "all") setQuestionState("incorrect");
+              if (nextMode === "review" && !["incorrect", "marked", "answered"].includes(questionState)) setQuestionState("incorrect");
               if (nextMode !== "exam") setTimed(false);
             }}>
               <option value="study">Study / Tutor</option>

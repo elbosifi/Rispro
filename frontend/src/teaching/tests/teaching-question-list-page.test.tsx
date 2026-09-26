@@ -81,7 +81,7 @@ describe("Teaching editorial question list", () => {
       ...listResponse,
       items: [{ ...listResponse.items[0]!, validation: { classification: "valid", errorCount: 0, warningCount: 0 } }],
     });
-    listApi.validateMatching.mockResolvedValue({ total: 21, draft: 21, inReview: 0, published: 0, retired: 0, valid: 17, validWithWarnings: 2, invalid: 2, conflicts: 1, eligibleForPublish: 19, questions: [] });
+    listApi.validateMatching.mockResolvedValue({ scopeFingerprint: "scope-draft-neuro", total: 21, draft: 21, inReview: 0, published: 0, retired: 0, valid: 17, validWithWarnings: 2, invalid: 2, conflicts: 1, eligibleForPublish: 19, questions: [] });
     listApi.publishMatching.mockResolvedValue({ requested: 21, published: 19, warnings: 2, invalid: 2, conflicts: 1, alreadyPublished: 0, requiresReview: 0, retired: 0, failed: 0, results: [] });
     renderList("/teaching/admin/questions?status=draft&tagCode=neuro&page=2");
 
@@ -93,24 +93,61 @@ describe("Teaching editorial question list", () => {
     expect(await screen.findByText("21 questions", { selector: "strong" })).toBeTruthy();
     expect(screen.getByText("2 questions have warnings.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Publish 19 eligible questions" }));
-    await waitFor(() => expect(listApi.publishMatching).toHaveBeenCalledWith({ status: "draft", tagCode: "neuro" }));
+    await waitFor(() => expect(listApi.publishMatching).toHaveBeenCalledWith({ status: "draft", tagCode: "neuro" }, "scope-draft-neuro"));
     expect(await screen.findByText("21 matched: 19 published, 2 published with warnings, 2 invalid / remain Draft, 1 conflicts, 0 already published.")).toBeTruthy();
   });
 
-  it("offers an invalid-Draft filter after matching validation", async () => {
+  it("keeps invalid questions and transient conflicts discoverable from the bulk operation result", async () => {
     listApi.fetchCatalog.mockResolvedValue(catalog);
     listApi.fetchQuestions.mockResolvedValue(listResponse);
-    listApi.validateMatching.mockResolvedValue({ total: 1, draft: 1, inReview: 0, published: 0, retired: 0, valid: 0, validWithWarnings: 0, invalid: 1, conflicts: 0, eligibleForPublish: 0, questions: [] });
+    listApi.validateMatching.mockResolvedValue({ scopeFingerprint: "scope-attention", total: 2, draft: 2, inReview: 0, published: 0, retired: 0, valid: 0, validWithWarnings: 0, invalid: 1, conflicts: 1, eligibleForPublish: 0, questions: [
+      { questionId: 12, externalId: "INVALID-12", stemPreview: "", revisionId: 112, revisionVersion: 1, revisionStatus: "draft", validationStatus: "invalid", eligibleForPublish: false, errors: [], warnings: [] },
+      { questionId: 13, externalId: "CONFLICT-13", stemPreview: "", revisionId: 113, revisionVersion: 1, revisionStatus: "draft", validationStatus: null, eligibleForPublish: false, errors: [], warnings: [], publishStatus: "conflict" },
+    ] });
     renderList();
 
     await screen.findByText("Not validated");
     fireEvent.click(screen.getByRole("button", { name: "Validate all matching" }));
-    expect(await screen.findByRole("button", { name: "View invalid Drafts" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "View invalid Drafts" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View questions requiring attention" }));
+    expect(screen.getByRole("link", { name: "INVALID-12" }).getAttribute("href")).toBe("/teaching/admin/questions/12");
+    expect(screen.getByRole("link", { name: "CONFLICT-13" }).getAttribute("href")).toBe("/teaching/admin/questions/13");
+  });
+
+  it("invalidates a validated bulk scope after a matching filter changes and requires a new validation", async () => {
+    listApi.fetchCatalog.mockResolvedValue(catalog);
+    listApi.fetchQuestions.mockResolvedValue(listResponse);
+    listApi.validateMatching
+      .mockResolvedValueOnce({ scopeFingerprint: "scope-draft", total: 1, draft: 1, inReview: 0, published: 0, retired: 0, valid: 1, validWithWarnings: 0, invalid: 0, conflicts: 0, eligibleForPublish: 1, questions: [] })
+      .mockResolvedValueOnce({ scopeFingerprint: "scope-published", total: 1, draft: 0, inReview: 0, published: 1, retired: 0, valid: 1, validWithWarnings: 0, invalid: 0, conflicts: 0, eligibleForPublish: 1, questions: [] });
+    renderList("/teaching/admin/questions?status=draft");
+
+    await screen.findByText("Not validated");
+    fireEvent.click(screen.getByRole("button", { name: "Validate all matching" }));
+    await screen.findByRole("button", { name: "Validate & publish all eligible (1)" });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "published" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Validate & publish all eligible" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(listApi.publishMatching).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Validate all matching" }));
+    await screen.findByRole("button", { name: "Validate & publish all eligible (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "Validate & publish all eligible (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish 1 eligible questions" }));
+    await waitFor(() => expect(listApi.publishMatching).toHaveBeenCalledWith({ status: "published" }, "scope-published"));
+  });
+
+  it("removes dependent taxonomy parameters when a parent filter changes", async () => {
+    listApi.fetchCatalog.mockResolvedValue(catalog);
+    listApi.fetchQuestions.mockResolvedValue(listResponse);
+    renderList("/teaching/admin/questions?specialtyCode=radiology&domainCode=neuroradiology&topicCode=brain-tumors&subtopicCode=glioma");
+
+    await screen.findByText("Not validated");
+    fireEvent.change(screen.getByLabelText("Specialty"), { target: { value: "radiology" } });
     await waitFor(() => {
       const latestParams = listApi.fetchQuestions.mock.calls.at(-1)?.[0] as URLSearchParams;
-      expect(latestParams.get("status")).toBe("draft");
-      expect(latestParams.get("validationStatus")).toBe("invalid");
+      expect(latestParams.get("specialtyCode")).toBe("radiology");
+      expect(latestParams.get("domainCode")).toBeNull();
+      expect(latestParams.get("topicCode")).toBeNull();
+      expect(latestParams.get("subtopicCode")).toBeNull();
     });
   });
 });

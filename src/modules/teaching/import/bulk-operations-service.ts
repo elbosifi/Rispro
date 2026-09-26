@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { pool } from "../../../db/pool.js";
 import { HttpError } from "../../../utils/http-error.js";
 import type { TeachingAuditIdentity } from "../domain/teaching-content.js";
@@ -12,7 +13,31 @@ import {
 
 const MAX_SELECTED_QUESTIONS = 100;
 const BULK_CONCURRENCY = 8;
+const matchingScopeSecret = randomBytes(32);
 type TeachingBulkScope = { batchId: string } | { questionIds: number[] } | { filters: TeachingQuestionListQuery };
+
+const MATCHING_SCOPE_FIELDS = [
+  "search", "status", "specialtyCode", "domainCode", "topicCode", "subtopicCode", "type", "difficulty",
+  "trainingLevelCode", "tagCode", "sourceType", "hasImage", "imported", "validationStatus", "importBatchId",
+] as const satisfies ReadonlyArray<keyof TeachingQuestionListQuery>;
+
+/** A server-signed scope covering only fields that change matching questions. */
+export function teachingMatchingScopeFingerprint(filters: TeachingQuestionListQuery): string {
+  const canonical = Object.fromEntries(MATCHING_SCOPE_FIELDS.flatMap((field) => {
+    const value = filters[field];
+    return value === undefined || value === "" ? [] : [[field, value]];
+  }));
+  return createHmac("sha256", matchingScopeSecret).update(JSON.stringify(canonical)).digest("base64url");
+}
+
+export function requireTeachingMatchingScopeFingerprint(filters: TeachingQuestionListQuery, fingerprint: unknown): void {
+  if (typeof fingerprint !== "string" || fingerprint.length < 1) {
+    throw new HttpError(409, "Validate the current matching question scope before publishing.");
+  }
+  if (fingerprint !== teachingMatchingScopeFingerprint(filters)) {
+    throw new HttpError(409, "The matching question scope changed. Validate the current filters before publishing.");
+  }
+}
 
 interface BatchQuestionRow {
   id: string | number;
@@ -200,6 +225,7 @@ export async function validateTeachingQuestionScope(scope: TeachingBulkScope, ac
     }
   });
   return {
+    ...("filters" in scope ? { scopeFingerprint: teachingMatchingScopeFingerprint(scope.filters) } : {}),
     ...validationCounts(results),
     eligibleForPublish: results.filter((item) => item.revisionStatus === "draft" && item.eligibleForPublish).length,
     questions: results,

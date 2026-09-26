@@ -28,9 +28,11 @@ export function TeachingSessionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const [timerTicks, setTimerTicks] = useState({ sessionId: 0, ticks: 0 });
+  const [timerAnchor, setTimerAnchor] = useState<{ sessionId: number; serverRemainingSeconds: number; receivedAt: number } | null>(null);
+  const [timerNow, setTimerNow] = useState(() => Date.now());
   const [noteDraftState, setNoteDraftState] = useState<{ questionId: number; text: string } | null>(null);
   const [choiceState, setChoiceState] = useState<{ questionId: number; key: string | null } | null>(null);
+  const [examResponseState, setExamResponseState] = useState<{ questionId: number; pendingKey: string | null; failedKey: string | null } | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
   const sessionQuery = useQuery({
     queryKey: ["teaching", "session", sessionId],
@@ -51,20 +53,29 @@ export function TeachingSessionPage() {
     staleTime: 0,
   });
   const question = questionQuery.data;
-  const elapsedTimerTicks = session && timerTicks.sessionId === session.id ? timerTicks.ticks : 0;
   const remainingSeconds = session?.timed
-    ? Math.max(0, (session.remainingSeconds ?? 0) - elapsedTimerTicks)
+    ? Math.max(0, (timerAnchor?.sessionId === session.id ? timerAnchor.serverRemainingSeconds - Math.floor((timerNow - timerAnchor.receivedAt) / 1000) : session.remainingSeconds ?? 0))
     : null;
   const noteDraft = question && noteDraftState?.questionId === question.questionId ? noteDraftState.text : question?.note ?? "";
-  const selectedChoice = question && choiceState?.questionId === question.questionId
-    ? choiceState.key
-    : question?.selectedOptionKey ?? null;
+  const selectedChoice = question && session?.mode === "exam"
+    ? examResponseState?.questionId === question.questionId && examResponseState.pendingKey !== null
+      ? examResponseState.pendingKey
+      : question.selectedOptionKey ?? null
+    : question && choiceState?.questionId === question.questionId
+      ? choiceState.key
+      : question?.selectedOptionKey ?? null;
+
+  useEffect(() => {
+    if (!session?.timed) return;
+    const receivedAt = Date.now();
+    setTimerAnchor({ sessionId: session.id, serverRemainingSeconds: Math.max(0, session.remainingSeconds ?? 0), receivedAt });
+    setTimerNow(receivedAt);
+  }, [session?.id, session?.timed, session?.status, session?.remainingSeconds, sessionQuery.dataUpdatedAt]);
 
   useEffect(() => {
     if (!session?.timed || session.status !== "active") return;
-    const timer = window.setInterval(() => setTimerTicks((current) => current.sessionId === session.id
-      ? { sessionId: session.id, ticks: current.ticks + 1 }
-      : { sessionId: session.id, ticks: 1 }), 1000);
+    setTimerNow(Date.now());
+    const timer = window.setInterval(() => setTimerNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [session?.id, session?.status, session?.timed]);
 
@@ -89,8 +100,18 @@ export function TeachingSessionPage() {
   });
   const responseMutation = useMutation({
     mutationFn: (key: string) => saveTeachingLearnerExamResponse(sessionId, position, key),
-    onSuccess: (value) => {
+    onSuccess: (value, key) => {
       storeSession(value.session);
+      setExamResponseState((current) => current?.pendingKey === key ? null : current);
+      queryClient.setQueryData<TeachingLearnerQuestion>(
+        ["teaching", "session-question", sessionId, position, session?.status ?? "active"],
+        (current) => current ? { ...current, selectedOptionKey: key, answered: true } : current,
+      );
+    },
+    onError: (_error, key) => {
+      setExamResponseState((current) => current?.pendingKey === key
+        ? { ...current, pendingKey: null, failedKey: key }
+        : current);
     },
   });
   const submitMutation = useMutation({
@@ -138,16 +159,20 @@ export function TeachingSessionPage() {
   const isExam = session.mode === "exam";
   const isActive = session.status === "active";
   const canAnswer = isActive && (isExam || !question.answered);
+  const examResponseUnresolved = isExam && examResponseState?.questionId === question.questionId
+    && (examResponseState.pendingKey !== null || examResponseState.failedKey !== null);
   const answeredCount = session.progress.answered;
   const unansweredCount = session.questionCount - answeredCount;
   const choosePosition = (next: number) => {
+    if (examResponseUnresolved) return;
     setSearchParams({ position: String(next) });
     answerMutation.reset();
     responseMutation.reset();
   };
 
   const saveExamChoice = (key: string) => {
-    setChoiceState({ questionId: question.questionId, key });
+    setExamResponseState({ questionId: question.questionId, pendingKey: key, failedKey: null });
+    responseMutation.reset();
     responseMutation.mutate(key);
   };
   const submitStudyAnswer = () => {
@@ -182,7 +207,7 @@ export function TeachingSessionPage() {
           <p className="text-sm text-muted-foreground">Progress: {question.position} / {question.totalQuestions}</p>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Question navigation">
             {session.questions.map((item) => (
-              <Button key={item.position} size="sm" variant={item.position === question.position ? "primary" : "outline"} className="!min-w-10 !px-2" onClick={() => choosePosition(item.position)} aria-current={item.position === question.position ? "step" : undefined} aria-label={`Question ${item.position}${item.answered ? ", answered" : ", unanswered"}`}>
+              <Button key={item.position} size="sm" variant={item.position === question.position ? "primary" : "outline"} className="!min-w-10 !px-2" onClick={() => choosePosition(item.position)} disabled={examResponseUnresolved} aria-current={item.position === question.position ? "step" : undefined} aria-label={`Question ${item.position}${item.answered ? ", answered" : ", unanswered"}`}>
                 {item.position}
               </Button>
             ))}
@@ -221,6 +246,8 @@ export function TeachingSessionPage() {
             </label>
           ))}
         </fieldset>
+        {isExam && responseMutation.isPending ? <p role="status" className="text-sm text-muted-foreground">Saving…</p> : null}
+        {isExam && examResponseState?.questionId === question.questionId && examResponseState.failedKey !== null ? <p role="alert" className="text-sm text-red-700">Answer was not saved. Please select it again or retry.</p> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button variant="outline" onClick={() => bookmarkMutation.mutate(!question.bookmarked)} disabled={bookmarkMutation.isPending} aria-pressed={question.bookmarked}>
@@ -228,12 +255,12 @@ export function TeachingSessionPage() {
             {question.bookmarked ? "Marked" : "Mark question"}
           </Button>
           <div className="flex flex-wrap gap-2">
-            {question.position > 1 && <Button variant="ghost" onClick={() => choosePosition(question.position - 1)}>Previous</Button>}
-            {isExam && isActive && <Button variant="destructive" onClick={() => setShowSubmitConfirm(true)} disabled={submitMutation.isPending}>Submit exam</Button>}
+            {question.position > 1 && <Button variant="ghost" onClick={() => choosePosition(question.position - 1)} disabled={examResponseUnresolved}>Previous</Button>}
+            {isExam && isActive && <Button variant="destructive" onClick={() => setShowSubmitConfirm(true)} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button>}
             {canAnswer && !isExam && <Button onClick={submitStudyAnswer} disabled={!selectedChoice || answerMutation.isPending}>
               {answerMutation.isPending ? "Saving answer…" : "Submit answer"}
             </Button>}
-            {question.position < question.totalQuestions && <Button variant="secondary" onClick={() => choosePosition(question.position + 1)} disabled={isExam && responseMutation.isPending}>
+            {question.position < question.totalQuestions && <Button variant="secondary" onClick={() => choosePosition(question.position + 1)} disabled={examResponseUnresolved}>
               {question.answered || isExam || session.status === "submitted" ? "Next" : "Skip"}
             </Button>}
             {!isExam && isActive && question.position === question.totalQuestions && <Button variant="secondary" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>End {session.mode === "review" ? "review" : "study"} session</Button>}
@@ -270,7 +297,6 @@ export function TeachingSessionPage() {
       </Card>
 
       {answerMutation.isError && <p role="alert" className="text-sm text-red-700">{answerMutation.error instanceof Error ? answerMutation.error.message : "Your answer could not be saved."}</p>}
-      {responseMutation.isError && <p role="alert" className="text-sm text-red-700">{responseMutation.error instanceof Error ? responseMutation.error.message : "Your response could not be saved."}</p>}
       {submitMutation.isError && <p role="alert" className="text-sm text-red-700">{submitMutation.error instanceof Error ? submitMutation.error.message : "The session could not be submitted."}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link to="/teaching/history" className="text-sm font-medium text-accent hover:underline">Session history</Link>
@@ -286,7 +312,7 @@ export function TeachingSessionPage() {
           <p className="text-sm text-foreground">{session.questionCount} questions · {answeredCount} answered · {unansweredCount} unanswered</p>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setShowSubmitConfirm(false)}>Continue exam</Button>
-            <Button variant="destructive" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>Submit exam</Button>
+            <Button variant="destructive" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
