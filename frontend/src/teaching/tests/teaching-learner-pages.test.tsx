@@ -68,7 +68,7 @@ function sessionFixture(status: "active" | "submitted", selectedOptionKey: strin
   };
 }
 
-function questionFixture(submitted = false, selectedOptionKey: string | null = null): TeachingLearnerQuestion {
+function questionFixture(submitted = false, selectedOptionKey: string | null = null, overrides: Partial<TeachingLearnerQuestion> = {}): TeachingLearnerQuestion {
   return {
     session: { id: 42, mode: "exam", status: submitted ? "submitted" : "active", timed: false, timeLimitSeconds: null, remainingSeconds: null },
     position: 1, totalQuestions: 2, questionId: 501, externalId: "SYNTHETIC-501", type: "single_best_answer",
@@ -80,6 +80,7 @@ function questionFixture(submitted = false, selectedOptionKey: string | null = n
       explanation: { summary: "Synthetic explanation after submission.", teachingPoint: "Review the key finding.", furtherDiscussion: null },
       optionExplanations: [], references: [],
     } } : {}),
+    ...overrides,
   };
 }
 
@@ -181,6 +182,20 @@ describe("Teaching learner pages", () => {
     fireEvent.change(screen.getByLabelText("Question state"), { target: { value: "marked" } });
     fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "study" } });
     expect((screen.getByLabelText("Question state") as HTMLSelectElement).value).toBe("marked");
+  });
+
+  it("does not render a previous question while the newly requested position is loading", async () => {
+    learnerApi.fetchQuestion.mockResolvedValue(questionFixture(false, null, { position: 1 }));
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42?position=2",
+    );
+
+    await waitFor(() => expect(learnerApi.fetchQuestion).toHaveBeenCalledWith(42, 2));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(screen.getByText("Loading question")).toBeTruthy();
+    expect(screen.queryByText("Which answer is selected only after the learner submits?")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 
   it("keeps Exam answers editable and withholds feedback until final submission", async () => {
@@ -293,7 +308,7 @@ describe("Teaching learner pages", () => {
     expect(screen.getByRole("timer", { name: "Time remaining 2:00" })).toBeTruthy();
     act(() => vi.advanceTimersByTime(10_000));
     expect(screen.getByRole("timer", { name: "Time remaining 1:50" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /A\.\s*Alpha/ }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(screen.getByRole("timer", { name: "Time remaining 1:58" })).toBeTruthy();
     act(() => vi.advanceTimersByTime(3_000));
@@ -311,20 +326,104 @@ describe("Teaching learner pages", () => {
     );
 
     await screen.findByText("Which answer is selected only after the learner submits?");
-    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /A\.\s*Alpha/ }));
     expect(screen.getByRole("status").textContent).toContain("Saving…");
     expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Submit exam" }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(learnerApi.saveExamResponse).toHaveBeenCalledTimes(1));
     await act(async () => { rejectSave?.(new Error("network unavailable")); await Promise.resolve(); await Promise.resolve(); });
     await waitFor(() => expect(screen.queryByText("Answer was not saved. Please select it again or retry.")).toBeTruthy());
-    expect((screen.getByRole("radio", { name: /A\.Alpha/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: /A\.\s*Alpha/ }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("radio", { name: /A\.Alpha/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /A\.\s*Alpha/ }));
     await waitFor(() => expect(learnerApi.saveExamResponse).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect((screen.getByRole("radio", { name: /A\.Alpha/ }) as HTMLInputElement).checked).toBe(true));
+    await waitFor(() => expect((screen.getByRole("radio", { name: /A\.\s*Alpha/ }) as HTMLInputElement).checked).toBe(true));
     expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("orders radiology content as clinical history, imaging, stem, then answer options", async () => {
+    const scenarios: Array<{
+      type: TeachingLearnerQuestion["type"];
+      case: TeachingLearnerQuestion["case"];
+      images: TeachingLearnerQuestion["images"];
+      expectedContent: string[];
+    }> = [
+      { type: "single_best_answer", case: null, images: [], expectedContent: ["teaching-question-stem"] },
+      { type: "image_based_sba", case: null, images: [{ id: 1, mimeType: "image/png", altText: "Synthetic MRI", url: "/api/teaching/assets/1" }], expectedContent: ["teaching-question-images", "teaching-question-stem"] },
+      { type: "case_based_sba", case: { title: "Synthetic case", clinicalHistory: "Long synthetic clinical history." }, images: [{ id: 2, mimeType: "image/jpeg", altText: "Synthetic radiograph", url: "/api/teaching/assets/2" }], expectedContent: ["teaching-clinical-history", "teaching-question-images", "teaching-question-stem"] },
+      { type: "case_based_sba", case: { title: "Synthetic case", clinicalHistory: "History without imaging." }, images: [], expectedContent: ["teaching-clinical-history", "teaching-question-stem"] },
+    ];
+
+    for (const scenario of scenarios) {
+      learnerApi.fetchSession.mockResolvedValue({
+        ...sessionFixture("active"), mode: "study", questionCount: 1,
+        questions: [{ position: 1, answered: false }],
+        progress: { total: 1, answered: 0, correct: null, incorrect: null, unanswered: 1, scorePercent: null, answeredAccuracy: null },
+      });
+      learnerApi.fetchQuestion.mockResolvedValue(questionFixture(false, null, {
+        type: scenario.type, case: scenario.case, images: scenario.images,
+      }));
+      const view = renderWithProviders(
+        <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+        "/teaching/qbank/session/42",
+      );
+      const article = await screen.findByRole("article", { name: "Question content" });
+      const renderedOrder = Array.from(article.children)
+        .map((element) => element.getAttribute("data-testid"))
+        .filter((testId): testId is string => testId !== null);
+      expect(renderedOrder).toEqual(scenario.expectedContent);
+      expect(article.textContent?.match(/Long synthetic clinical history\./g)?.length ?? 0).toBe(scenario.case?.clinicalHistory === "Long synthetic clinical history." ? 1 : 0);
+      const options = screen.getByRole("group", { name: "Answer options" });
+      expect(article.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("provides a compact 100-question navigator with current, answered, and unanswered states", async () => {
+    const largeSession: TeachingLearnerSession = {
+      ...sessionFixture("active"), mode: "exam", questionCount: 100,
+      questions: Array.from({ length: 100 }, (_, index) => ({ position: index + 1, answered: index === 0 || index === 1 })),
+      progress: { total: 100, answered: 2, correct: null, incorrect: null, unanswered: 98, scorePercent: null, answeredAccuracy: null },
+    };
+    learnerApi.fetchSession.mockResolvedValue(largeSession);
+    learnerApi.fetchQuestion.mockImplementation(async (_id: number, position: number) => questionFixture(false, null, {
+      position, totalQuestions: 100, stem: `Synthetic question ${position}`,
+    }));
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+
+    await screen.findByText("Synthetic question 1");
+    expect(screen.queryByRole("button", { name: /^Question \d+,/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Questions" }));
+    const dialog = screen.getByRole("dialog", { name: "Question navigator" });
+    const withinDialog = within(dialog);
+    expect(withinDialog.getAllByRole("button", { name: /^Question \d+,/ })).toHaveLength(100);
+    expect(withinDialog.getByRole("button", { name: "Question 1, answered, current" }).getAttribute("aria-current")).toBe("step");
+    expect(withinDialog.getByRole("button", { name: "Question 2, answered" })).toBeTruthy();
+    expect(withinDialog.getByRole("button", { name: "Question 3, unanswered" })).toBeTruthy();
+    expect(dialog.textContent).not.toMatch(/Correct|Incorrect/);
+
+    fireEvent.click(withinDialog.getByRole("button", { name: "Question 50, unanswered" }));
+    expect(screen.queryByRole("dialog", { name: "Question navigator" })).toBeNull();
+    expect(await screen.findByText("Synthetic question 50")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Question 50 of 100" })).toBeTruthy();
+  });
+
+  it("keeps the key Study teaching point ahead of the explanation", async () => {
+    learnerApi.fetchSession.mockResolvedValue({ ...sessionFixture("submitted"), mode: "study" });
+    learnerApi.fetchQuestion.mockResolvedValue(questionFixture(true));
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+
+    await screen.findByRole("heading", { name: "Incorrect" });
+    const feedback = screen.getByRole("heading", { name: "Incorrect" }).parentElement;
+    const feedbackText = feedback?.textContent ?? "";
+    expect(feedbackText.indexOf("Review the key finding.")).toBeLessThan(feedbackText.indexOf("Synthetic explanation after submission."));
   });
 
   it("shows empty history with a path to create the first session", async () => {

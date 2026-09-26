@@ -30,6 +30,7 @@ test("Teaching learner sessions keep published revisions, private state, attempt
   const subjects = [learner, otherLearner, accessOnly];
   const createdQuestionIds: number[] = [];
   const createdRevisionIds: number[] = [];
+  let createdIsolationTagId: number | null = null;
   let fixtureCleanupNeeded = false;
   const app = createApp();
   const server = http.createServer(app);
@@ -65,6 +66,7 @@ test("Teaching learner sessions keep published revisions, private state, attempt
       await pool.query("delete from teaching.sessions where identity_issuer = 'rispro' and identity_subject = any($1::text[])", [subjects]);
       if (createdRevisionIds.length) await pool.query("delete from teaching.question_revisions where id = any($1::bigint[])", [createdRevisionIds]);
       if (createdQuestionIds.length) await pool.query("delete from teaching.questions where id = any($1::bigint[])", [createdQuestionIds]);
+      if (createdIsolationTagId !== null) await pool.query("delete from teaching.tags where id = $1", [createdIsolationTagId]);
       await pool.query("delete from teaching.user_profiles where identity_issuer = 'rispro' and identity_subject = any($1::text[])", [subjects]);
     } finally {
       if (attemptTriggerDisabled) await pool.query("alter table teaching.attempts enable trigger teaching_attempts_immutable");
@@ -115,6 +117,13 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     );
     assert.equal(catalog.rowCount, 1);
     const ids = catalog.rows[0]!;
+    const isolationTagCode = `test_${suffix.replaceAll("-", "")}`;
+    const isolationTag = await pool.query<{ id: string }>(
+      "insert into teaching.tags (code, label) values ($1, $2) returning id",
+      [isolationTagCode, `Synthetic learner integration ${suffix.slice(0, 8)}`],
+    );
+    createdIsolationTagId = Number(isolationTag.rows[0]!.id);
+    const isolatedQuestionTags = [Number(createdIsolationTagId)];
 
     const insertQuestion = async (externalId: string, stem: string, tags: number[], addDraft = false,
       domainId = ids.domain_id, topicId: string | null = ids.topic_id) => {
@@ -182,11 +191,30 @@ test("Teaching learner sessions keep published revisions, private state, attempt
       return { questionId, revisionId, draftRevisionId };
     };
 
-    const questionA = await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-A`, "Synthetic question A revision 1.", [Number(ids.oncology_tag_id)], true);
+    const questionA = await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-A`, "Synthetic question A revision 1.", [Number(ids.oncology_tag_id), ...isolatedQuestionTags], true);
     assert.ok(questionA.draftRevisionId);
-    await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-B`, "Synthetic question B.", [Number(ids.emergency_tag_id)]);
-    await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-C`, "Synthetic question C.", []);
+    await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-B`, "Synthetic question B.", [Number(ids.emergency_tag_id), ...isolatedQuestionTags]);
+    await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-C`, "Synthetic question C.", isolatedQuestionTags);
     await insertQuestion(`TEST-${suffix.slice(0, 8).toUpperCase()}-D`, "Synthetic Chest question.", [Number(ids.emergency_tag_id)], false, ids.chest_domain_id, null);
+    const liveNeuroradiologyTopicQuestionCount = await pool.query<{ count: number }>(
+      `with current_published_revision as (
+         select distinct on (revision.question_id) revision.*
+         from teaching.question_revisions revision
+         where revision.status = 'published'
+         order by revision.question_id, revision.revision_number desc, revision.id desc
+       )
+       select count(*)::int as count
+       from teaching.questions question
+       join current_published_revision revision on revision.question_id = question.id
+       join teaching.question_banks bank on bank.id = question.question_bank_id and bank.is_active
+       join teaching.specialties specialty on specialty.id = revision.specialty_id and specialty.is_active
+       join teaching.domains domain on domain.id = revision.domain_id and domain.is_active
+       join teaching.difficulties difficulty on difficulty.id = revision.difficulty_id and difficulty.is_active
+       where question.question_bank_id = $1 and question.retired_at is null
+         and revision.domain_id = $2 and revision.topic_id = $3`,
+      [ids.bank_id, ids.domain_id, ids.topic_id],
+    );
+    const expectedNeuroradiologyTopicQuestionCount = liveNeuroradiologyTopicQuestionCount.rows[0]?.count ?? 0;
 
     const chestSession = await request("/api/teaching/sessions", learner, "POST", {
       mode: "study", questionCount: 1, filters: { specialty: "radiology", domain: "chest", questionState: "unseen" },
@@ -301,7 +329,7 @@ test("Teaching learner sessions keep published revisions, private state, attempt
 
     const examCreated = await request("/api/teaching/sessions", learner, "POST", {
       mode: "exam", questionCount: 3, timed: false,
-      filters: { specialty: "radiology", domain: "neuroradiology", difficulty: [3], modalities: ["MRI"], competencies: ["diagnosis"], questionState: "all" },
+      filters: { specialty: "radiology", domain: "neuroradiology", difficulty: [3], modalities: ["MRI"], competencies: ["diagnosis"], tags: [isolationTagCode], questionState: "all" },
     });
     assert.equal(examCreated.status, 201);
     const examId = examCreated.data.sessionId as number;
@@ -384,7 +412,23 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     assert.ok(history.data.items.some((item: Json) => item.id === studyId && item.status === "submitted"));
     const dashboard = await request("/api/teaching/qbank/dashboard");
     assert.equal(dashboard.status, 200);
-    assert.equal(dashboard.data.publishedQuestionCount, 4);
+    const livePublishedQuestionCount = await pool.query<{ count: number }>(
+      `with current_published_revision as (
+         select distinct on (revision.question_id) revision.*
+         from teaching.question_revisions revision
+         where revision.status = 'published'
+         order by revision.question_id, revision.revision_number desc, revision.id desc
+       )
+       select count(*)::int as count
+       from teaching.questions question
+       join current_published_revision revision on revision.question_id = question.id
+       join teaching.question_banks bank on bank.id = question.question_bank_id and bank.is_active
+       join teaching.specialties specialty on specialty.id = revision.specialty_id and specialty.is_active
+       join teaching.domains domain on domain.id = revision.domain_id and domain.is_active
+       join teaching.difficulties difficulty on difficulty.id = revision.difficulty_id and difficulty.is_active
+       where bank.code = 'radiology-main' and question.retired_at is null`,
+    );
+    assert.equal(dashboard.data.publishedQuestionCount, livePublishedQuestionCount.rows[0]?.count);
     const learnerQuestionState = await pool.query<{ attempted: number; correct: number; incorrect: number }>(
       `select count(*)::int as attempted,
          count(*) filter (where state = 'correct')::int as correct,
@@ -395,12 +439,15 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     assert.equal(dashboard.data.progress.attemptedQuestions, learnerQuestionState.rows[0]?.attempted);
     assert.equal(dashboard.data.progress.correctQuestions, learnerQuestionState.rows[0]?.correct);
     assert.equal(dashboard.data.progress.incorrectQuestions, learnerQuestionState.rows[0]?.incorrect);
-    assert.equal(dashboard.data.progress.unseenQuestions + dashboard.data.progress.attemptedQuestions, 4);
+    assert.equal(
+      dashboard.data.progress.unseenQuestions + dashboard.data.progress.attemptedQuestions,
+      dashboard.data.publishedQuestionCount,
+    );
 
     const neuroFilters = { specialty: "radiology", domain: "neuroradiology", topics: ["brain-tumors"] };
     const preview = await request("/api/teaching/progress/preview?questionBank=radiology-main&scopeType=topic&scopeCode=brain-tumors&domain=neuroradiology");
     assert.equal(preview.status, 200, JSON.stringify(preview.data));
-    assert.equal(preview.data.eligibleQuestionCount, 3);
+    assert.equal(preview.data.eligibleQuestionCount, expectedNeuroradiologyTopicQuestionCount);
     assert.ok(preview.data.activeSessionCount > 0, "reset preview reports intersecting active sessions");
 
     const beforeResetCounts = await pool.query<{ attempts: number; sessions: number; sessionQuestions: number }>(
@@ -439,11 +486,11 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     assert.equal((await pool.query("select note_text from teaching.notes where identity_issuer = 'rispro' and identity_subject = $1 and question_id = $2", [learner, questionA.questionId])).rows[0]?.note_text, "Review the synthetic vessel pattern.");
 
     const unseenAfterReset = await request("/api/teaching/qbank/availability", learner, "POST", { filters: { ...neuroFilters, questionState: "unseen" } });
-    assert.equal(unseenAfterReset.data.available, 3, "old answers are unseen in the new topic cycle");
+    assert.equal(unseenAfterReset.data.available, expectedNeuroradiologyTopicQuestionCount, "old answers are unseen in the new topic cycle");
     const oldSessionAnswer = await request(`/api/teaching/sessions/${pinnedId}/questions/1/answer`, learner, "POST", { selectedOptionKey: "A" });
     assert.equal(oldSessionAnswer.status, 200);
     const unseenAfterOldSessionAnswer = await request("/api/teaching/qbank/availability", learner, "POST", { filters: { ...neuroFilters, questionState: "unseen" } });
-    assert.equal(unseenAfterOldSessionAnswer.data.available, 3, "a session opened before reset remains in the earlier learning period");
+    assert.equal(unseenAfterOldSessionAnswer.data.available, expectedNeuroradiologyTopicQuestionCount, "a session opened before reset remains in the earlier learning period");
     const chestStillCorrect = await request("/api/teaching/qbank/availability", learner, "POST", {
       filters: { specialty: "radiology", domain: "chest", questionState: "correct" },
     });
@@ -461,13 +508,13 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     const domainBreakdown = await request("/api/teaching/progress/breakdown?questionBank=radiology-main&dimension=domain");
     assert.equal(domainBreakdown.status, 200, JSON.stringify(domainBreakdown.data));
     const neuroMetrics = domainBreakdown.data.items.find((item: Json) => item.code === "neuroradiology");
-    assert.equal(neuroMetrics.eligible, 3);
+    assert.equal(neuroMetrics.eligible, expectedNeuroradiologyTopicQuestionCount);
     assert.equal(neuroMetrics.attempted, 1);
     assert.equal(neuroMetrics.correct, 1);
     assert.equal(neuroMetrics.accuracyPercent, 100);
     assert.ok(neuroMetrics.firstPassAccuracyPercent !== 100, "first-pass accuracy remains a lifetime metric");
     const topicBreakdown = await request("/api/teaching/progress/breakdown?questionBank=radiology-main&dimension=topic&domain=neuroradiology");
-    assert.equal(topicBreakdown.data.items.find((item: Json) => item.code === "brain-tumors").eligible, 3);
+    assert.equal(topicBreakdown.data.items.find((item: Json) => item.code === "brain-tumors").eligible, expectedNeuroradiologyTopicQuestionCount);
     for (const dimension of ["modality", "competency", "difficulty", "tag"]) {
       const breakdown = await request(`/api/teaching/progress/breakdown?questionBank=radiology-main&dimension=${dimension}`);
       assert.equal(breakdown.status, 200, `${dimension}: ${JSON.stringify(breakdown.data)}`);
@@ -483,7 +530,7 @@ test("Teaching learner sessions keep published revisions, private state, attempt
       questionBank: "radiology-main", scope: { type: "domain", code: "neuroradiology" }, idempotencyKey: randomUUID(),
     });
     assert.equal(domainReset.status, 201, JSON.stringify(domainReset.data));
-    assert.equal((await request("/api/teaching/qbank/availability", learner, "POST", { filters: { ...neuroFilters, questionState: "unseen" } })).data.available, 3);
+    assert.equal((await request("/api/teaching/qbank/availability", learner, "POST", { filters: { ...neuroFilters, questionState: "unseen" } })).data.available, expectedNeuroradiologyTopicQuestionCount);
     assert.equal((await request("/api/teaching/qbank/availability", learner, "POST", { filters: { specialty: "radiology", domain: "chest", questionState: "correct" } })).data.available, 1);
 
     const bankReset = await request("/api/teaching/progress/reset", learner, "POST", {
@@ -498,7 +545,7 @@ test("Teaching learner sessions keep published revisions, private state, attempt
     assert.equal(bankCycles.data.items[0].current, true);
     const afterBankReset = await request("/api/teaching/progress?questionBank=radiology-main");
     assert.equal(afterBankReset.data.currentCycle.attempted, 0);
-    assert.equal(afterBankReset.data.currentCycle.eligible, 4);
+    assert.equal(afterBankReset.data.currentCycle.eligible, dashboard.data.publishedQuestionCount);
     assert.ok(afterBankReset.data.lifetime.totalAttempts >= 4);
     assert.ok(afterBankReset.data.lifetime.firstPassAccuracyPercent !== 100);
     const invalidReset = await request("/api/teaching/progress/reset", learner, "POST", {

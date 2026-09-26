@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Bookmark, Check, Clock3, X } from "lucide-react";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, LoadingState, Textarea } from "@/components/shared";
+import { TeachingImageViewer } from "../components/teaching-image-viewer";
 import {
   clearTeachingQuestionNote,
   fetchTeachingLearnerQuestion,
@@ -28,6 +29,7 @@ export function TeachingSessionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showQuestionNavigator, setShowQuestionNavigator] = useState(false);
   const [timerAnchor, setTimerAnchor] = useState<{ sessionId: number; serverRemainingSeconds: number; receivedAt: number } | null>(null);
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const [noteDraftState, setNoteDraftState] = useState<{ questionId: number; text: string } | null>(null);
@@ -156,6 +158,7 @@ export function TeachingSessionPage() {
   if (session.status === "abandoned") return <ErrorState message="This session is no longer active." />;
   if (questionQuery.isLoading) return <LoadingState message="Loading question" />;
   if (questionQuery.isError || !question) return <ErrorState message="This question could not be loaded." onRetry={() => void questionQuery.refetch()} />;
+  if (question.position !== position) return <LoadingState message="Loading question" />;
 
   const isExam = session.mode === "exam";
   const isActive = session.status === "active";
@@ -166,6 +169,7 @@ export function TeachingSessionPage() {
   const unansweredCount = session.questionCount - answeredCount;
   const choosePosition = (next: number) => {
     if (examResponseUnresolved) return;
+    setShowQuestionNavigator(false);
     setSearchParams({ position: String(next) });
     answerMutation.reset();
     responseMutation.reset();
@@ -180,16 +184,16 @@ export function TeachingSessionPage() {
     if (selectedChoice) answerMutation.mutate(selectedChoice);
   };
   const timerLabel = session.timed ? formatTime(remainingSeconds ?? question.session.remainingSeconds) : null;
+  const caseHasContent = Boolean(question.case && (question.case.title || question.case.clinicalHistory));
 
   return (
-    <section aria-labelledby="teaching-session-title" className="mx-auto max-w-4xl space-y-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
+    <section aria-labelledby="teaching-session-title" className="mx-auto max-w-5xl space-y-5 pb-4">
+      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/95 py-3 backdrop-blur sm:rounded-lg sm:border sm:px-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">{session.mode === "exam" ? "Exam" : session.mode === "review" ? "Review" : "Study"} session</p>
-          <h1 id="teaching-session-title" className="mt-1 text-xl font-semibold text-foreground">Question {question.position} of {question.totalQuestions}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{question.answered ? "Answered" : "Unanswered"}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-accent">{session.mode === "exam" ? "Exam" : session.mode === "review" ? "Review" : "Study"}</p>
+          <h1 id="teaching-session-title" className="mt-0.5 text-lg font-semibold text-foreground">Question {question.position} of {question.totalQuestions}</h1>
         </div>
-        {session.timed && <p role="timer" aria-label={`Time remaining ${timerLabel}`} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold tabular-nums" style={{ borderColor: "var(--border)" }}>
+        {session.timed && <p role="timer" aria-label={`Time remaining ${timerLabel}`} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold tabular-nums text-foreground">
           <Clock3 size={16} aria-hidden="true" /> <span>{timerLabel}</span>
         </p>}
       </header>
@@ -204,34 +208,30 @@ export function TeachingSessionPage() {
       )}
 
       <Card className="space-y-5 p-4 sm:p-7">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Progress: {question.position} / {question.totalQuestions}</p>
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Question navigation">
-            {session.questions.map((item) => (
-              <Button key={item.position} size="sm" variant={item.position === question.position ? "primary" : "outline"} className="!min-w-10 !px-2" onClick={() => choosePosition(item.position)} disabled={examResponseUnresolved} aria-current={item.position === question.position ? "step" : undefined} aria-label={`Question ${item.position}${item.answered ? ", answered" : ", unanswered"}`}>
-                {item.position}
-              </Button>
-            ))}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <p className="text-sm font-medium text-muted-foreground" aria-live="polite">{question.answered ? "Answered" : "Unanswered"}</p>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Question navigation">
+            <Button type="button" size="sm" variant="secondary" onClick={() => setShowQuestionNavigator(true)} disabled={examResponseUnresolved} aria-haspopup="dialog">Questions</Button>
           </div>
         </div>
 
-        <article>
-          <p className="whitespace-pre-wrap text-base leading-7 text-foreground">{question.stem}</p>
-          {question.case && (question.case.title || question.case.clinicalHistory) && (
-            <aside className="mt-4 rounded-lg bg-muted p-4" aria-label="Teaching case">
+        <article className="space-y-5" aria-label="Question content">
+          {caseHasContent && question.case ? (
+            <aside data-testid="teaching-clinical-history" className="rounded-xl border border-border bg-muted/40 p-4 sm:p-5" aria-label="Clinical history">
               {question.case.title && <h2 className="font-semibold text-foreground">{question.case.title}</h2>}
-              {question.case.clinicalHistory && <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.case.clinicalHistory}</p>}
+              {question.case.clinicalHistory && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.case.clinicalHistory}</p>}
             </aside>
-          )}
-          {question.images.length > 0 && <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {question.images.map((image) => <img key={image.id} src={image.url} alt={image.altText || "Teaching question image"} className="mx-auto max-h-[32rem] max-w-full rounded-lg object-contain" />)}
-          </div>}
+          ) : null}
+          {question.images.length > 0 ? <TeachingImageViewer images={question.images} resetKey={question.questionId} /> : null}
+          <div data-testid="teaching-question-stem">
+            <p className="whitespace-pre-wrap text-base leading-7 text-foreground">{question.stem}</p>
+          </div>
         </article>
 
-        <fieldset disabled={!canAnswer || answerMutation.isPending || responseMutation.isPending} className="space-y-2">
+        <fieldset disabled={!canAnswer || answerMutation.isPending || responseMutation.isPending} className="min-w-0 space-y-2" aria-label="Answer options">
           <legend className="mb-2 text-sm font-semibold text-foreground">Choose one answer</legend>
           {question.options.map((option) => (
-            <label key={option.key} className={`flex min-h-14 cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm leading-6 ${selectedChoice === option.key ? "border-accent bg-muted" : "border-border"}`}>
+            <label key={option.key} className={`flex min-h-16 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm leading-6 transition-colors hover:border-accent/60 hover:bg-muted/40 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50 sm:gap-4 sm:p-4 ${selectedChoice === option.key ? "border-accent bg-accent/5 ring-1 ring-accent/30" : "border-border bg-card"}`}>
               <input
                 type="radio"
                 name="teaching-answer"
@@ -240,10 +240,9 @@ export function TeachingSessionPage() {
                 onChange={() => isExam
                   ? saveExamChoice(option.key)
                   : setChoiceState({ questionId: question.questionId, key: option.key })}
-                className="mt-1 h-4 w-4 shrink-0 accent-accent"
+                className="mt-1 h-5 w-5 shrink-0 accent-accent"
               />
-              <span className="font-semibold">{option.key}.</span>
-              <span className="whitespace-pre-wrap">{option.text}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words"><span className="me-1 font-semibold">{option.key}.</span> {option.text}</span>
             </label>
           ))}
         </fieldset>
@@ -251,20 +250,18 @@ export function TeachingSessionPage() {
         {isExam && examResponseState?.questionId === question.questionId && examResponseState.failedKey !== null ? <p role="alert" className="text-sm text-red-700">Answer was not saved. Please select it again or retry.</p> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button variant="outline" onClick={() => bookmarkMutation.mutate(!question.bookmarked)} disabled={bookmarkMutation.isPending} aria-pressed={question.bookmarked}>
+          <Button type="button" variant={question.bookmarked ? "secondary" : "outline"} onClick={() => bookmarkMutation.mutate(!question.bookmarked)} disabled={bookmarkMutation.isPending} aria-pressed={question.bookmarked} className={question.bookmarked ? "ring-2 ring-accent/30" : ""}>
             <Bookmark size={16} aria-hidden="true" className={question.bookmarked ? "fill-current" : ""} />
             {question.bookmarked ? "Marked" : "Mark question"}
           </Button>
-          <div className="flex flex-wrap gap-2">
-            {question.position > 1 && <Button variant="ghost" onClick={() => choosePosition(question.position - 1)} disabled={examResponseUnresolved}>Previous</Button>}
-            {isExam && isActive && <Button variant="destructive" onClick={() => setShowSubmitConfirm(true)} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button>}
-            {canAnswer && !isExam && <Button onClick={submitStudyAnswer} disabled={!selectedChoice || answerMutation.isPending}>
+          <div className="flex flex-wrap justify-end gap-2">
+            {question.position > 1 ? <Button type="button" variant="ghost" onClick={() => choosePosition(question.position - 1)} disabled={examResponseUnresolved}>Previous</Button> : null}
+            {canAnswer && !isExam ? <Button type="button" onClick={submitStudyAnswer} disabled={!selectedChoice || answerMutation.isPending}>
               {answerMutation.isPending ? "Saving answer…" : "Submit answer"}
-            </Button>}
-            {question.position < question.totalQuestions && <Button variant="secondary" onClick={() => choosePosition(question.position + 1)} disabled={examResponseUnresolved}>
-              {question.answered || isExam || session.status === "submitted" ? "Next" : "Skip"}
-            </Button>}
-            {!isExam && isActive && question.position === question.totalQuestions && <Button variant="secondary" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>End {session.mode === "review" ? "review" : "study"} session</Button>}
+            </Button> : null}
+            {question.position < question.totalQuestions && (question.answered || isExam || !isActive) ? <Button type="button" variant="secondary" onClick={() => choosePosition(question.position + 1)} disabled={examResponseUnresolved}>Next</Button> : null}
+            {!isExam && isActive && question.position === question.totalQuestions && question.answered ? <Button type="button" variant="secondary" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>End {session.mode === "review" ? "review" : "study"} session</Button> : null}
+            {isExam && isActive ? <Button type="button" variant="outline" onClick={() => setShowSubmitConfirm(true)} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button> : null}
           </div>
         </div>
 
@@ -275,15 +272,17 @@ export function TeachingSessionPage() {
               {question.feedback.isCorrect === null ? "Unanswered" : question.feedback.isCorrect ? "Correct" : "Incorrect"}
             </h2>
             {question.feedback.correctOption && <p className="text-sm text-foreground"><strong>Correct answer:</strong> {question.feedback.correctOption.key}. {question.feedback.correctOption.text}</p>}
+            {question.feedback.explanation.teachingPoint && <div className="rounded-lg bg-muted/50 p-3"><h3 className="font-semibold text-foreground">Teaching point</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.feedback.explanation.teachingPoint}</p></div>}
             {question.feedback.explanation.summary && <div><h3 className="font-semibold text-foreground">Explanation</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.feedback.explanation.summary}</p></div>}
-            {question.feedback.explanation.teachingPoint && <div><h3 className="font-semibold text-foreground">Teaching point</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.feedback.explanation.teachingPoint}</p></div>}
-            {question.feedback.explanation.furtherDiscussion && <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{question.feedback.explanation.furtherDiscussion}</p>}
-            {question.feedback.optionExplanations.length > 0 && <div><h3 className="font-semibold text-foreground">Option explanations</h3><ul className="mt-1 space-y-1 text-sm text-foreground">{question.feedback.optionExplanations.map((item) => <li key={item.key}><strong>{item.key}.</strong> {item.explanation}</li>)}</ul></div>}
-            {question.feedback.references.length > 0 && <div><h3 className="font-semibold text-foreground">References</h3><ul className="mt-1 space-y-1 text-sm text-foreground">{question.feedback.references.map((reference, index) => <li key={`${reference.title}-${index}`}>{reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-accent underline">{reference.citationText || reference.title}</a> : reference.citationText || reference.title}{reference.year ? ` · ${reference.year}` : ""}</li>)}</ul></div>}
+            {question.feedback.optionExplanations.length > 0 && <div><h3 className="font-semibold text-foreground">Why the other options are wrong</h3><ul className="mt-2 space-y-2 text-sm leading-6 text-foreground">{question.feedback.optionExplanations.map((item) => <li key={item.key}><strong>{item.key}.</strong> {item.explanation}</li>)}</ul></div>}
+            {question.feedback.explanation.furtherDiscussion && <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer font-semibold text-foreground">Further discussion</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">{question.feedback.explanation.furtherDiscussion}</p></details>}
+            {question.feedback.references.length > 0 && <div><h3 className="font-semibold text-foreground">References</h3><ul className="mt-2 space-y-1 text-sm text-foreground">{question.feedback.references.map((reference, index) => <li key={`${reference.title}-${index}`}>{reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-accent underline">{reference.citationText || reference.title}</a> : reference.citationText || reference.title}{reference.year ? ` · ${reference.year}` : ""}</li>)}</ul></div>}
           </div>
         )}
+      </Card>
 
-        <details className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
+      <Card className="p-4 sm:p-5">
+        <details>
           <summary className="cursor-pointer text-sm font-semibold text-foreground">Personal note</summary>
           <div className="mt-3 space-y-3">
             <Textarea value={noteDraft} maxLength={5000} onChange={(event) => {
@@ -292,8 +291,8 @@ export function TeachingSessionPage() {
               setNoteDraftState({ questionId: question.questionId, text: event.target.value });
             }} aria-label="Personal note" placeholder="Private to your Teaching identity" />
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => noteMutation.mutate(noteDraft)} disabled={!noteDraft.trim() || !noteDirty || noteMutation.isPending}>Save note</Button>
-              <Button size="sm" variant="outline" onClick={() => clearNoteMutation.mutate()} disabled={!question.note || clearNoteMutation.isPending}>Clear note</Button>
+              <Button type="button" size="sm" onClick={() => noteMutation.mutate(noteDraft)} disabled={!noteDraft.trim() || !noteDirty || noteMutation.isPending}>Save note</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => clearNoteMutation.mutate()} disabled={!question.note || clearNoteMutation.isPending}>Clear note</Button>
               {noteMutation.isPending || clearNoteMutation.isPending ? <span className="self-center text-sm text-muted-foreground" role="status">Saving note…</span> : null}
               {noteDirty && !noteMutation.isPending && !clearNoteMutation.isPending ? <span className="self-center text-sm text-muted-foreground" role="status">Unsaved changes</span> : null}
               {noteMutation.isSuccess && !noteDirty && <span className="self-center text-sm text-muted-foreground" role="status">Note saved</span>}
@@ -320,8 +319,42 @@ export function TeachingSessionPage() {
           <p className="text-sm text-foreground">{session.questionCount} questions · {answeredCount} answered · {unansweredCount} unanswered</p>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setShowSubmitConfirm(false)}>Continue exam</Button>
-            <Button variant="destructive" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button>
+            <Button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending || examResponseUnresolved}>Submit exam</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQuestionNavigator} onClose={() => setShowQuestionNavigator(false)}>
+        <DialogContent maxWidth="min(calc(100vw - 32px), 680px)" aria-label="Question navigator">
+          <DialogHeader>
+            <DialogTitle>Questions</DialogTitle>
+            <DialogDescription>Choose a question. Check marks indicate answered questions; dashes indicate unanswered.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[62vh] overflow-y-auto pe-1">
+            <div className="grid grid-cols-5 gap-2 sm:grid-cols-8" role="group" aria-label="Questions in this session">
+              {session.questions.map((item) => {
+                const current = item.position === question.position;
+                return (
+                  <Button
+                    key={item.position}
+                    type="button"
+                    size="sm"
+                    variant={current ? "primary" : item.answered ? "secondary" : "outline"}
+                    className="!h-12 !min-w-0 !px-1"
+                    onClick={() => choosePosition(item.position)}
+                    disabled={examResponseUnresolved}
+                    aria-current={current ? "step" : undefined}
+                    aria-label={`Question ${item.position}, ${item.answered ? "answered" : "unanswered"}${current ? ", current" : ""}`}
+                  >
+                    <span className="flex min-w-0 flex-col items-center leading-4">
+                      <span>{item.position}</span>
+                      <span aria-hidden="true" className="text-[10px]">{item.answered ? "✓" : "–"}</span>
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </section>
