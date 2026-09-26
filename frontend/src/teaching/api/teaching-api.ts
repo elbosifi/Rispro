@@ -448,6 +448,7 @@ export interface TeachingBulkValidationResult {
   validWithWarnings: number;
   invalid: number;
   conflicts: number;
+  eligibleForPublish: number;
   questions: TeachingBulkQuestionResult[];
 }
 
@@ -474,6 +475,16 @@ export async function publishTeachingImportBatch(batchId: string): Promise<Teach
 
 export async function validateTeachingQuestionSelection(questionIds: number[]): Promise<TeachingBulkValidationResult> {
   return api("/teaching/admin/questions/bulk/validate", { method: "POST", body: JSON.stringify({ questionIds }) });
+}
+
+export type TeachingQuestionMatchingFilters = Record<string, string>;
+
+export async function validateTeachingQuestionMatching(filters: TeachingQuestionMatchingFilters): Promise<TeachingBulkValidationResult> {
+  return api("/teaching/admin/questions/bulk/validate-matching", { method: "POST", body: JSON.stringify({ filters }) });
+}
+
+export async function validateAndPublishTeachingQuestionMatching(filters: TeachingQuestionMatchingFilters): Promise<TeachingBulkPublishResult> {
+  return api("/teaching/admin/questions/bulk/validate-publish-matching", { method: "POST", body: JSON.stringify({ filters }) });
 }
 
 export function teachingAssetUrl(id: number): string {

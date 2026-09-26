@@ -149,6 +149,10 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(deniedLearner.status, 403);
     const deniedPublisherValidation = await request(`/api/teaching/qbank/import/batches/${batchId}/validate`, { method: "POST", subject: publisherSubject, body: {} });
     assert.equal(deniedPublisherValidation.status, 403);
+    const deniedMatchingPublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: learnerSubject, body: { filters: { tagCode, status: "draft" } },
+    });
+    assert.equal(deniedMatchingPublish.status, 403, "matching publication requires teaching.publish");
 
     const batchBefore = await request(`/api/teaching/qbank/import/batches/${batchId}`, { subject: authorSubject });
     assert.equal(batchBefore.status, 200);
@@ -173,11 +177,27 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(Object.hasOwn(resultItems[0]!, "options"), false);
     performanceMs.validation = Date.now() - validationStarted;
 
+    const matchingValidation = await request("/api/teaching/admin/questions/bulk/validate-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { tagCode, status: "draft", page: "42" } },
+    });
+    assert.equal(matchingValidation.status, 200, JSON.stringify(matchingValidation.data));
+    assert.equal(object(matchingValidation.data).total, 10, "matching validation resolves imported Draft questions server-side, independent of page");
+    assert.equal(object(matchingValidation.data).valid, 8);
+    assert.equal(object(matchingValidation.data).validWithWarnings, 1);
+    assert.equal(object(matchingValidation.data).invalid, 1);
+    assert.equal(object(matchingValidation.data).eligibleForPublish, 9);
+
     const manualValidation = await request("/api/teaching/admin/questions/bulk/validate", {
       method: "POST", subject: authorSubject, body: { questionIds: [manualQuestionId] },
     });
     assert.equal(manualValidation.status, 200);
     assert.equal(object(manualValidation.data).valid, 1);
+    const matchingManualPublish = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { search: `${marker}-MANUAL-001`, status: "draft" } },
+    });
+    assert.equal(matchingManualPublish.status, 200, JSON.stringify(matchingManualPublish.data));
+    assert.equal(object(matchingManualPublish.data).requested, 1);
+    assert.equal(object(matchingManualPublish.data).published, 1);
 
     const listAfterValidation = await request(`/api/teaching/admin/questions?importBatchId=${batchId}&pageSize=20`, { subject: authorSubject });
     assert.equal(listAfterValidation.status, 200);
@@ -254,6 +274,13 @@ test("Teaching import batches validate current drafts and publish eligible revis
     assert.equal(object(retryPublish.data).published, 0);
     assert.equal(object(retryPublish.data).alreadyPublished, 9);
     assert.equal(object(retryPublish.data).invalid, 1);
+    const matchingRetry = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { tagCode } },
+    });
+    assert.equal(matchingRetry.status, 200, JSON.stringify(matchingRetry.data));
+    assert.equal(object(matchingRetry.data).published, 0);
+    assert.equal(object(matchingRetry.data).alreadyPublished, 9, "repeating matching publication is idempotent");
+    assert.equal(object(matchingRetry.data).invalid, 1);
     const invalidQuestionDetail = await request(`/api/teaching/admin/questions/${questionIds[9]}`, { subject: authorSubject });
     const invalidRevision = (object(invalidQuestionDetail.data).revisions as Array<Record<string, unknown>>)[0]!;
     const corrected = await request(`/api/teaching/admin/questions/${questionIds[9]}/revisions/${invalidRevision.id}`, {
@@ -338,13 +365,17 @@ test("Teaching import batches validate current drafts and publish eligible revis
     }
 
     const largeValidationStart = Date.now();
-    const largeValidation = await request(`/api/teaching/qbank/import/batches/${syntheticBatchId}/validate`, { method: "POST", subject: authorSubject, body: {} });
+    const largeValidation = await request("/api/teaching/admin/questions/bulk/validate-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { importBatchId: syntheticBatchId, status: "draft" } },
+    });
     performanceMs.validation = Date.now() - largeValidationStart;
     assert.equal(largeValidation.status, 200, JSON.stringify(largeValidation.data));
     assert.equal(object(largeValidation.data).total, 500);
     assert.equal(object(largeValidation.data).validWithWarnings, 500);
     const largePublicationStart = Date.now();
-    const largePublication = await request(`/api/teaching/qbank/import/batches/${syntheticBatchId}/publish`, { method: "POST", subject: authorSubject, body: {} });
+    const largePublication = await request("/api/teaching/admin/questions/bulk/validate-publish-matching", {
+      method: "POST", subject: authorSubject, body: { filters: { importBatchId: syntheticBatchId, status: "draft" } },
+    });
     performanceMs.publication = Date.now() - largePublicationStart;
     assert.equal(largePublication.status, 200, JSON.stringify(largePublication.data));
     assert.equal(object(largePublication.data).requested, 500);

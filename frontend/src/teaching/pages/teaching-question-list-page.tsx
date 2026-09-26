@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownAZ, ArrowUpDown, Plus, Search } from "lucide-react";
-import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
+import { Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
 import { useTeachingAuth } from "../auth/teaching-auth-context";
-import { fetchTeachingCatalog, fetchTeachingQuestions, validateTeachingQuestionSelection, type TeachingCatalogItem, type TeachingQuestionStatus } from "../api/teaching-api";
+import { fetchTeachingCatalog, fetchTeachingQuestions, validateAndPublishTeachingQuestionMatching, validateTeachingQuestionMatching, type TeachingBulkPublishResult, type TeachingBulkValidationResult, type TeachingCatalogItem, type TeachingQuestionStatus } from "../api/teaching-api";
 
 const PAGE_SIZE = 20;
 
@@ -23,7 +23,11 @@ export function TeachingQuestionListPage() {
   const queryClient = useQueryClient();
   const { identity } = useTeachingAuth();
   const canAuthor = Boolean(identity?.permissions.includes("teaching.author") || identity?.permissions.includes("teaching.admin"));
+  const canPublish = Boolean(identity?.permissions.includes("teaching.publish") || identity?.permissions.includes("teaching.admin"));
   const [search, setSearch] = useState(searchParams.get("search") ?? "");
+  const [validationSummary, setValidationSummary] = useState<TeachingBulkValidationResult | null>(null);
+  const [publishSummary, setPublishSummary] = useState<TeachingBulkPublishResult | null>(null);
+  const [confirmPublish, setConfirmPublish] = useState(false);
   const catalog = useQuery({ queryKey: ["teaching", "catalog"], queryFn: fetchTeachingCatalog, staleTime: 60_000 });
   const query = useMemo(() => {
     const params = new URLSearchParams(searchParams);
@@ -37,9 +41,27 @@ export function TeachingQuestionListPage() {
     queryKey: ["teaching", "admin-questions", query.toString()],
     queryFn: () => fetchTeachingQuestions(query),
   });
-  const validatePage = useMutation({
-    mutationFn: () => validateTeachingQuestionSelection(questions.data?.items.map((item) => item.id) ?? []),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] }),
+  const matchingFilters = useMemo(() => {
+    const filters = new URLSearchParams(searchParams);
+    for (const key of ["page", "pageSize", "limit", "offset", "sort", "direction"]) filters.delete(key);
+    return Object.fromEntries(filters.entries());
+  }, [searchParams]);
+  const validateMatching = useMutation({
+    mutationFn: () => validateTeachingQuestionMatching(matchingFilters),
+    onSuccess: (result) => {
+      setValidationSummary(result);
+      setPublishSummary(null);
+      void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
+    },
+  });
+  const publishMatching = useMutation({
+    mutationFn: () => validateAndPublishTeachingQuestionMatching(matchingFilters),
+    onSuccess: (result) => {
+      setPublishSummary(result);
+      setValidationSummary(null);
+      setConfirmPublish(false);
+      void queryClient.invalidateQueries({ queryKey: ["teaching", "admin-questions"] });
+    },
   });
 
   const setFilter = (key: string, value: string) => {
@@ -76,6 +98,14 @@ export function TeachingQuestionListPage() {
     ? requestedPage
     : questions.data?.pagination.page ?? 1;
   const pagination = questions.data?.pagination;
+  const eligibleForPublish = validationSummary?.eligibleForPublish ?? 0;
+  const showAttention = () => {
+    const next = new URLSearchParams(searchParams);
+    next.set("status", "draft");
+    next.set("validationStatus", "invalid");
+    next.set("page", "1");
+    setSearchParams(next);
+  };
 
   const sortItems = [
     { value: "updated", label: "Recently updated" },
@@ -159,13 +189,24 @@ export function TeachingQuestionListPage() {
           <span>{pagination ? `${pagination.total} questions · page ${pagination.page} of ${Math.max(1, pagination.totalPages)}` : "Loading question count…"}</span>
           <div className="flex flex-wrap items-center gap-3">
             <span>Filters are saved in this page URL.</span>
-            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={!questions.data?.items.length || validatePage.isPending} onClick={() => validatePage.mutate()}>
-              {validatePage.isPending ? "Validating this page…" : "Validate current page"}
+            {canAuthor ? <Button type="button" size="sm" variant="secondary" disabled={validateMatching.isPending} onClick={() => validateMatching.mutate()}>
+              {validateMatching.isPending ? "Validating all matching…" : "Validate all matching"}
+            </Button> : null}
+            {canPublish ? <Button type="button" size="sm" disabled={validateMatching.isPending || !validationSummary || eligibleForPublish === 0} onClick={() => setConfirmPublish(true)}>
+              {validationSummary ? `Validate & publish all eligible (${eligibleForPublish})` : "Validate & publish all eligible"}
             </Button> : null}
           </div>
         </div>
-        {validatePage.error ? <p role="alert" className="text-sm text-destructive">{validatePage.error.message}</p> : null}
-        {validatePage.data ? <p role="status" className="text-sm text-muted-foreground">Validated {validatePage.data.draft} Drafts: {validatePage.data.valid} valid, {validatePage.data.validWithWarnings} with warnings, {validatePage.data.invalid} invalid.</p> : null}
+        {validateMatching.error ? <p role="alert" className="text-sm text-destructive">{validateMatching.error.message}</p> : null}
+        {publishMatching.error ? <p role="alert" className="text-sm text-destructive">{publishMatching.error.message}</p> : null}
+        {validationSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span>Matched {validationSummary.total}: {validationSummary.valid} valid, {validationSummary.validWithWarnings} with warnings, {validationSummary.invalid} invalid.</span>
+          {validationSummary.invalid || validationSummary.conflicts ? <Button type="button" size="sm" variant="ghost" onClick={showAttention}>View invalid Drafts</Button> : null}
+        </div> : null}
+        {publishSummary ? <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span>{publishSummary.requested} matched: {publishSummary.published} published, {publishSummary.warnings} published with warnings, {publishSummary.invalid} invalid / remain Draft, {publishSummary.conflicts} conflicts, {publishSummary.alreadyPublished} already published.</span>
+          {publishSummary.invalid || publishSummary.conflicts ? <Button type="button" size="sm" variant="ghost" onClick={showAttention}>View invalid Drafts</Button> : null}
+        </div> : null}
       </Card>
 
       {questions.isPending ? <LoadingState message="Loading Teaching questions…" /> : null}
@@ -209,6 +250,27 @@ export function TeachingQuestionListPage() {
           </div>
         </Card>
       ) : null}
+
+      <Dialog open={confirmPublish} onClose={() => { if (!publishMatching.isPending) setConfirmPublish(false); }}>
+        <DialogContent maxWidth="560px" aria-labelledby="teaching-matching-publish-title">
+          <DialogHeader>
+            <DialogTitle id="teaching-matching-publish-title">Publish all eligible matching questions?</DialogTitle>
+            <DialogDescription>The server will revalidate each matching Draft question before applying its existing lifecycle transitions.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-foreground">
+            <p><strong>{validationSummary?.total ?? 0} questions</strong> match the current filters.</p>
+            <p><strong>{eligibleForPublish} eligible questions</strong> will be published.</p>
+            <p><strong>{validationSummary?.validWithWarnings ?? 0} questions have warnings.</strong> Warnings do not block publication.</p>
+            <p><strong>{validationSummary?.invalid ?? 0} questions contain errors</strong> and will remain Draft.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" disabled={publishMatching.isPending} onClick={() => setConfirmPublish(false)}>Cancel</Button>
+            <Button disabled={publishMatching.isPending || eligibleForPublish === 0} onClick={() => publishMatching.mutate()}>
+              {publishMatching.isPending ? "Publishing…" : `Publish ${eligibleForPublish} eligible questions`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

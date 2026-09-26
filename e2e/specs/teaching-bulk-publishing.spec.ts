@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { signInWithSession } from "../helpers/auth";
 
-test("Teaching faculty validates and publishes eligible questions from an import batch", async ({ page }, testInfo) => {
+test("Teaching faculty validates and publishes all eligible matching Draft questions", async ({ page }, testInfo) => {
   const desktopWidth = 1440;
   const mobileWidth = 390;
   const marker = `E2E-BULK-${Date.now()}`;
@@ -15,10 +15,12 @@ test("Teaching faculty validates and publishes eligible questions from an import
   expect(templateResponse.ok()).toBeTruthy();
   const template = await templateResponse.json() as { _schemaExamples: { single_best_answer: Record<string, unknown> } };
   const example = template._schemaExamples.single_best_answer;
+  const learnerTag = "oncology";
   const questions = externalIds.map((externalId, index) => {
     const question = structuredClone(example);
     question.externalId = externalId;
     question.stem = `Synthetic bulk publication question ${externalId}.`;
+    (question.classification as Record<string, unknown>).tags = [learnerTag];
     if (index === 8) {
       question.source = null;
       question.provenance = null;
@@ -38,7 +40,7 @@ test("Teaching faculty validates and publishes eligible questions from an import
   await page.getByRole("button", { name: "Inspect upload" }).click();
   const inspectResponse = await inspectResponsePromise;
   expect(inspectResponse.ok()).toBeTruthy();
-  const inspection = await inspectResponse.json() as { batchId: string };
+  await inspectResponse.json();
   await expect(page.getByText("Structure valid")).toBeVisible();
   await page.getByRole("button", { name: "Validate and preview" }).click();
   await expect(page.getByRole("heading", { name: "3. Preview import" })).toBeVisible();
@@ -59,57 +61,42 @@ test("Teaching faculty validates and publishes eligible questions from an import
   await page.getByLabel("Question type").selectOption("image_based_sba");
   await page.getByRole("button", { name: "Save Draft" }).click();
   await expect(page.getByText("Teaching question updated.")).toBeVisible();
-  await page.getByRole("link", { name: "Open import batch" }).click();
-  await expect(page).toHaveURL(new RegExp(`/teaching/admin/import/batches/${inspection.batchId}$`));
-  await expect(page.getByRole("heading", { name: "Import batch" })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("teaching-bulk-batch-desktop.png"), fullPage: true });
+  await page.goto(`/teaching/admin/questions?search=${encodeURIComponent(marker)}&status=draft`);
+  await expect(page.getByRole("heading", { name: "Question Bank" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("teaching-bulk-matching-desktop.png"), fullPage: true });
+  const validatePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-matching" && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Validate all matching" }).click();
+  expect((await validatePromise).ok()).toBeTruthy();
+  await expect(page.getByText("Matched 10: 8 valid, 1 with warnings, 1 invalid.")).toBeVisible();
 
   await page.setViewportSize({ width: mobileWidth, height: 844 });
-  await page.getByRole("button", { name: "Validate All" }).click();
-  await expect(page.getByRole("button", { name: "Valid (8)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Warnings (1)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Invalid (1)" })).toBeVisible();
-  const invalidRow = page.getByRole("row").filter({ hasText: externalIds[9]! });
-  await expect(invalidRow).toContainText(/image-based question requires at least one image asset/i);
-  await expect(invalidRow.getByRole("link", { name: "Edit" })).toBeVisible();
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", mobileWidth);
-  await page.screenshot({ path: testInfo.outputPath("teaching-bulk-batch-mobile.png"), fullPage: true });
-
-  await page.getByRole("button", { name: "Publish All Eligible (9)" }).click();
-  const confirmation = page.getByRole("dialog", { name: "Publish imported questions?" });
-  await expect(confirmation).toContainText("9 questions are eligible for publication.");
-  await expect(confirmation).toContainText("1 question contains validation errors and will remain Draft.");
-  await expect(confirmation.getByText("View warnings")).toBeVisible();
-  const firstPublishPromise = page.waitForResponse((response) =>
-    new URL(response.url()).pathname.endsWith(`/qbank/import/batches/${inspection.batchId}/publish`) && response.request().method() === "POST",
+  await page.screenshot({ path: testInfo.outputPath("teaching-bulk-matching-mobile.png"), fullPage: true });
+  await page.getByRole("button", { name: "Validate & publish all eligible (9)" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Publish all eligible matching questions?" });
+  await expect(confirmation).toContainText("10 questions match the current filters.");
+  await expect(confirmation).toContainText("9 eligible questions will be published.");
+  await expect(confirmation).toContainText("1 questions have warnings.");
+  await expect(confirmation).toContainText("1 questions contain errors and will remain Draft.");
+  const publishPromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/teaching/admin/questions/bulk/validate-publish-matching" && response.request().method() === "POST",
   );
-  await confirmation.getByRole("button", { name: "Publish 9 questions" }).click();
-  const firstPublish = await firstPublishPromise;
-  expect(firstPublish.ok()).toBeTruthy();
-  const firstPublishResult = await firstPublish.json() as { published: number; invalid: number; warnings: number };
-  expect(firstPublishResult).toMatchObject({ published: 9, invalid: 1, warnings: 1 });
-  await expect(page.getByRole("button", { name: "Published (9)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Draft (1)" })).toBeVisible();
+  await confirmation.getByRole("button", { name: "Publish 9 eligible questions" }).click();
+  const publishResult = await publishPromise;
+  expect(publishResult.ok()).toBeTruthy();
+  expect(await publishResult.json()).toMatchObject({ requested: 10, published: 9, invalid: 1, warnings: 1 });
+  await expect(page.getByText("10 matched: 9 published, 1 published with warnings, 1 invalid / remain Draft, 0 conflicts, 0 already published.")).toBeVisible();
+  await page.getByRole("button", { name: "View invalid Drafts" }).click();
+  await expect(page).toHaveURL(new RegExp(`search=${encodeURIComponent(marker)}.*status=draft.*validationStatus=invalid`));
+  await expect(page.getByRole("link", { name: externalIds[9]!, exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Invalid (1)" }).click();
-  await invalidRow.getByRole("link", { name: "Edit" }).click();
-  await expect(page.getByLabel("Question type")).toHaveValue("image_based_sba");
-  await page.getByLabel("Question type").selectOption("single_best_answer");
-  await page.getByRole("button", { name: "Save Draft" }).click();
-  await expect(page.getByText("Teaching question updated.")).toBeVisible();
-  await page.getByRole("link", { name: "Open import batch" }).click();
-
-  await page.getByRole("button", { name: "Validate All" }).click();
-  await expect(page.getByRole("button", { name: "Invalid (0)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Publish All Eligible (1)" })).toBeVisible();
-  await page.getByRole("button", { name: "Publish All Eligible (1)" }).click();
-  const finalConfirmation = page.getByRole("dialog", { name: "Publish imported questions?" });
-  await finalConfirmation.getByRole("button", { name: "Publish 1 question" }).click();
-  await expect(page.getByRole("button", { name: "Published (10)" })).toBeVisible();
-
-  const batchResponse = await page.request.get(`http://127.0.0.1:3100/api/teaching/qbank/import/batches/${inspection.batchId}`);
-  expect(batchResponse.ok()).toBeTruthy();
-  const batch = await batchResponse.json() as { publication: { total: number; draft: number; published: number } };
-  expect(batch.publication).toMatchObject({ total: 10, draft: 0, published: 10 });
+  await page.getByRole("button", { name: "Sign out of Teaching" }).click();
+  await signInWithSession(page, "e2e_doctor");
+  await page.goto("/teaching/qbank");
+  await page.getByText("More filters").click();
+  await page.getByLabel("Tags").selectOption(learnerTag);
+  await expect(page.getByRole("status")).toHaveText("Available questions: 9");
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", mobileWidth);
 });

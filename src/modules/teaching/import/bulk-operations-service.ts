@@ -3,10 +3,16 @@ import { HttpError } from "../../../utils/http-error.js";
 import type { TeachingAuditIdentity } from "../domain/teaching-content.js";
 import type { TeachingValidationClassification, TeachingValidationIssue } from "../repositories/teaching-validation-repository.js";
 import { getTeachingImportBatch } from "./import-batch-repository.js";
-import { publishTeachingQuestionFromBulk, validateTeachingQuestionRevision } from "../services/teaching-content-service.js";
+import {
+  listAllTeachingQuestionBulkTargets,
+  publishTeachingQuestionFromBulk,
+  type TeachingQuestionListQuery,
+  validateTeachingQuestionRevision,
+} from "../services/teaching-content-service.js";
 
 const MAX_SELECTED_QUESTIONS = 100;
 const BULK_CONCURRENCY = 8;
+type TeachingBulkScope = { batchId: string } | { questionIds: number[] } | { filters: TeachingQuestionListQuery };
 
 interface BatchQuestionRow {
   id: string | number;
@@ -20,6 +26,7 @@ interface BatchQuestionRow {
   classification: TeachingValidationClassification | null;
   errors_json: TeachingValidationIssue[];
   warnings_json: TeachingValidationIssue[];
+  selection_conflict: boolean;
 }
 
 export interface TeachingBulkQuestionResult {
@@ -55,9 +62,16 @@ export function parseTeachingBulkQuestionIds(value: unknown): number[] {
   return ids;
 }
 
-async function listCurrentQuestions(scope: { batchId: string } | { questionIds: number[] }): Promise<BatchQuestionRow[]> {
+async function listCurrentQuestions(scope: TeachingBulkScope): Promise<BatchQuestionRow[]> {
   const byBatch = "batchId" in scope;
-  const ids = byBatch ? [scope.batchId] : [scope.questionIds];
+  let matchingTargets: Awaited<ReturnType<typeof listAllTeachingQuestionBulkTargets>> | null = null;
+  let ids: [string] | [number[]];
+  if (byBatch) ids = [scope.batchId];
+  else if ("filters" in scope) {
+    matchingTargets = await listAllTeachingQuestionBulkTargets(scope.filters);
+    ids = [matchingTargets.map((item) => item.questionId)];
+  }
+  else ids = [scope.questionIds];
   const result = await pool.query<BatchQuestionRow>(
     `with linked_questions as (
        ${byBatch
@@ -82,7 +96,17 @@ async function listCurrentQuestions(scope: { batchId: string } | { questionIds: 
      order by question.external_id, question.id`,
     ids,
   );
-  return result.rows;
+  if (!matchingTargets) return result.rows.map((row) => ({ ...row, selection_conflict: false }));
+  const expectedByQuestionId = new Map(matchingTargets.map((target) => [target.questionId, target]));
+  return result.rows.map((row) => {
+    const expected = expectedByQuestionId.get(safeNumber(row.id));
+    return {
+      ...row,
+      selection_conflict: !expected
+        || expected.revisionId !== safeNumber(row.revision_id)
+        || expected.revisionVersion !== Number(row.revision_version),
+    };
+  });
 }
 
 function shortPreview(stem: string): string {
@@ -132,7 +156,7 @@ function errorResult(row: BatchQuestionRow, error: unknown): TeachingBulkQuestio
   return { ...result, validationStatus: null, eligibleForPublish: false, errors: [{ code: "operation_failed", message: "This question could not be processed. Retry the operation." }], warnings: [], publishStatus: "failed" };
 }
 
-async function scopeQuestions(scope: { batchId: string } | { questionIds: number[] }): Promise<BatchQuestionRow[]> {
+async function scopeQuestions(scope: TeachingBulkScope): Promise<BatchQuestionRow[]> {
   if ("batchId" in scope) {
     const batch = await getTeachingImportBatch(scope.batchId);
     if (!batch) throw new HttpError(404, "Teaching import batch not found.");
@@ -159,10 +183,11 @@ function validationCounts(questions: TeachingBulkQuestionResult[]) {
   };
 }
 
-export async function validateTeachingQuestionScope(scope: { batchId: string } | { questionIds: number[] }, actor: TeachingAuditIdentity) {
+export async function validateTeachingQuestionScope(scope: TeachingBulkScope, actor: TeachingAuditIdentity) {
   const rows = await scopeQuestions(scope);
   const results = await mapConcurrent(rows, async (row) => {
     const item = toQuestionResult(row);
+    if (row.selection_conflict) return errorResult(row, new HttpError(409, "The question changed after the matching set was selected."));
     if (row.revision_status !== "draft" || row.retired_at) return item;
     try {
       const validation = await validateTeachingQuestionRevision(item.questionId, item.revisionId, item.revisionVersion, actor);
@@ -174,11 +199,15 @@ export async function validateTeachingQuestionScope(scope: { batchId: string } |
       return errorResult(row, error);
     }
   });
-  return { ...validationCounts(results), questions: results };
+  return {
+    ...validationCounts(results),
+    eligibleForPublish: results.filter((item) => item.revisionStatus === "draft" && item.eligibleForPublish).length,
+    questions: results,
+  };
 }
 
 export async function publishTeachingQuestionScope(
-  scope: { batchId: string } | { questionIds: number[] },
+  scope: TeachingBulkScope,
   actor: TeachingAuditIdentity,
   permissions: readonly string[],
 ) {
@@ -187,6 +216,7 @@ export async function publishTeachingQuestionScope(
     || (permissions.includes("teaching.author") && permissions.includes("teaching.review"));
   const results = await mapConcurrent(rows, async (row) => {
     const item = toQuestionResult(row);
+    if (row.selection_conflict) return errorResult(row, new HttpError(409, "The question changed after the matching set was selected."));
     try {
       const outcome = await publishTeachingQuestionFromBulk(
         item.questionId,

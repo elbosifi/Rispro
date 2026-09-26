@@ -761,6 +761,7 @@ export interface TeachingQuestionListQuery {
   sourceType?: string;
   hasImage?: boolean;
   imported?: boolean;
+  validationStatus?: string;
   importBatchId?: string;
   sort?: string;
   direction?: string;
@@ -768,6 +769,13 @@ export interface TeachingQuestionListQuery {
   pageSize?: number;
   limit?: number;
   offset?: number;
+}
+
+export interface TeachingQuestionBulkTarget {
+  questionId: number;
+  revisionId: number;
+  revisionVersion: number;
+  revisionStatus: string;
 }
 
 export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
@@ -818,6 +826,10 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
   }
   if (query.hasImage !== undefined) conditions.push(`${query.hasImage ? "" : "not "}exists (select 1 from teaching.question_revision_assets asset_link where asset_link.question_revision_id = revision.id)`);
   if (query.imported !== undefined) conditions.push(`${query.imported ? "" : "not "}exists (select 1 from teaching.question_revisions imported_revision where imported_revision.question_id = question.id and imported_revision.import_batch_id is not null)`);
+  if (query.validationStatus) {
+    if (!["valid", "valid_with_warnings", "invalid"].includes(query.validationStatus)) throw new HttpError(400, "validationStatus is invalid.");
+    add("summary.classification = ?", query.validationStatus);
+  }
   if (query.importBatchId !== undefined) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query.importBatchId)) throw new HttpError(400, "importBatchId is invalid.");
     add("revision.import_batch_id = ?::uuid", query.importBatchId);
@@ -909,6 +921,26 @@ export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
     })),
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize), limit: pageSize, offset },
   };
+}
+
+/**
+ * Resolves the same current-revision result set as the admin list, without
+ * loading a question's full editor payload. Bulk actions use these immutable
+ * identifiers and still re-check each revision inside its transaction.
+ */
+export async function listAllTeachingQuestionBulkTargets(query: TeachingQuestionListQuery): Promise<TeachingQuestionBulkTarget[]> {
+  const first = await listTeachingQuestions({ ...query, page: 1, pageSize: 100, limit: undefined, offset: undefined });
+  const items = [...first.items];
+  for (let page = 2; page <= first.pagination.totalPages; page += 1) {
+    const next = await listTeachingQuestions({ ...query, page, pageSize: 100, limit: undefined, offset: undefined });
+    items.push(...next.items);
+  }
+  return items.map((item) => ({
+    questionId: item.id,
+    revisionId: item.revision.id,
+    revisionVersion: item.revision.version,
+    revisionStatus: item.revision.status,
+  }));
 }
 
 export async function getTeachingQuestion(id: number) {

@@ -4,15 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TeachingQuestionListPage } from "../pages/teaching-question-list-page";
 
-const listApi = vi.hoisted(() => ({ fetchCatalog: vi.fn(), fetchQuestions: vi.fn(), validateSelection: vi.fn() }));
+const listApi = vi.hoisted(() => ({ fetchCatalog: vi.fn(), fetchQuestions: vi.fn(), validateMatching: vi.fn(), publishMatching: vi.fn() }));
 vi.mock("../api/teaching-api", () => ({
   fetchTeachingCatalog: listApi.fetchCatalog,
   fetchTeachingQuestions: listApi.fetchQuestions,
-  validateTeachingQuestionSelection: listApi.validateSelection,
+  validateTeachingQuestionMatching: listApi.validateMatching,
+  validateAndPublishTeachingQuestionMatching: listApi.publishMatching,
 }));
 
 vi.mock("../auth/teaching-auth-context", () => ({
-  useTeachingAuth: () => ({ identity: { permissions: ["teaching.access", "teaching.author"] } }),
+  useTeachingAuth: () => ({ identity: { permissions: ["teaching.access", "teaching.author", "teaching.publish"] } }),
 }));
 
 const catalog = {
@@ -70,7 +71,7 @@ describe("Teaching editorial question list", () => {
     });
   });
 
-  it("validates the visible worklist page with one bulk request and shows the saved status", async () => {
+  it("validates every matching question with one request, then confirms publication using server counts", async () => {
     listApi.fetchCatalog.mockResolvedValue(catalog);
     listApi.fetchQuestions.mockResolvedValueOnce({
       ...listResponse,
@@ -80,13 +81,36 @@ describe("Teaching editorial question list", () => {
       ...listResponse,
       items: [{ ...listResponse.items[0]!, validation: { classification: "valid", errorCount: 0, warningCount: 0 } }],
     });
-    listApi.validateSelection.mockResolvedValue({ total: 1, draft: 1, inReview: 0, published: 0, retired: 0, valid: 1, validWithWarnings: 0, invalid: 0, conflicts: 0, questions: [] });
-    renderList();
+    listApi.validateMatching.mockResolvedValue({ total: 21, draft: 21, inReview: 0, published: 0, retired: 0, valid: 17, validWithWarnings: 2, invalid: 2, conflicts: 1, eligibleForPublish: 19, questions: [] });
+    listApi.publishMatching.mockResolvedValue({ requested: 21, published: 19, warnings: 2, invalid: 2, conflicts: 1, alreadyPublished: 0, requiresReview: 0, retired: 0, failed: 0, results: [] });
+    renderList("/teaching/admin/questions?status=draft&tagCode=neuro&page=2");
 
     expect(await screen.findByText("Not validated")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Validate current page" }));
-    await waitFor(() => expect(listApi.validateSelection).toHaveBeenCalledWith([12]));
-    expect(await screen.findByText("Validated 1 Drafts: 1 valid, 0 with warnings, 0 invalid.")).toBeTruthy();
-    expect(await screen.findByText("Valid")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Validate all matching" }));
+    await waitFor(() => expect(listApi.validateMatching).toHaveBeenCalledWith({ status: "draft", tagCode: "neuro" }));
+    expect(await screen.findByText("Matched 21: 17 valid, 2 with warnings, 2 invalid.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Validate & publish all eligible (19)" }));
+    expect(await screen.findByText("21 questions", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("2 questions have warnings.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish 19 eligible questions" }));
+    await waitFor(() => expect(listApi.publishMatching).toHaveBeenCalledWith({ status: "draft", tagCode: "neuro" }));
+    expect(await screen.findByText("21 matched: 19 published, 2 published with warnings, 2 invalid / remain Draft, 1 conflicts, 0 already published.")).toBeTruthy();
+  });
+
+  it("offers an invalid-Draft filter after matching validation", async () => {
+    listApi.fetchCatalog.mockResolvedValue(catalog);
+    listApi.fetchQuestions.mockResolvedValue(listResponse);
+    listApi.validateMatching.mockResolvedValue({ total: 1, draft: 1, inReview: 0, published: 0, retired: 0, valid: 0, validWithWarnings: 0, invalid: 1, conflicts: 0, eligibleForPublish: 0, questions: [] });
+    renderList();
+
+    await screen.findByText("Not validated");
+    fireEvent.click(screen.getByRole("button", { name: "Validate all matching" }));
+    expect(await screen.findByRole("button", { name: "View invalid Drafts" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View invalid Drafts" }));
+    await waitFor(() => {
+      const latestParams = listApi.fetchQuestions.mock.calls.at(-1)?.[0] as URLSearchParams;
+      expect(latestParams.get("status")).toBe("draft");
+      expect(latestParams.get("validationStatus")).toBe("invalid");
+    });
   });
 });

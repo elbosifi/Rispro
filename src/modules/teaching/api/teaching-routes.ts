@@ -20,6 +20,7 @@ import {
   returnTeachingQuestionToDraft,
   submitTeachingQuestionForReview,
   validateTeachingQuestion,
+  type TeachingQuestionListQuery,
 } from "../services/teaching-content-service.js";
 import {
   parseTeachingCaseInput,
@@ -104,6 +105,37 @@ function positivePosition(value: unknown): number {
 function privateNoStore(res: Response): void {
   res.setHeader("Cache-Control", "no-store, private");
   res.setHeader("Vary", "Cookie");
+}
+
+function teachingQuestionListQuery(source: Record<string, unknown>): TeachingQuestionListQuery {
+  return {
+    search: queryText(source.search),
+    status: queryText(source.status),
+    specialtyCode: queryText(source.specialtyCode),
+    domainCode: queryText(source.domainCode),
+    topicCode: queryText(source.topicCode),
+    subtopicCode: queryText(source.subtopicCode),
+    type: queryText(source.type),
+    difficulty: strictQueryInteger(source.difficulty, "difficulty", 1),
+    trainingLevelCode: queryText(source.trainingLevelCode),
+    tagCode: queryText(source.tagCode),
+    sourceType: queryText(source.sourceType),
+    hasImage: queryBoolean(source.hasImage, "hasImage"),
+    imported: queryBoolean(source.imported, "imported"),
+    validationStatus: queryText(source.validationStatus),
+    importBatchId: queryText(source.importBatchId),
+    sort: queryText(source.sort),
+    direction: queryText(source.direction),
+    page: strictQueryInteger(source.page, "page", 1),
+    pageSize: strictQueryInteger(source.pageSize, "pageSize", 1),
+    limit: strictQueryInteger(source.limit, "limit", 1),
+    offset: strictQueryInteger(source.offset, "offset", 0),
+  };
+}
+
+function matchingQuestionFilters(value: unknown): TeachingQuestionListQuery {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new HttpError(400, "Bulk question filters are required.");
+  return teachingQuestionListQuery(value as Record<string, unknown>);
 }
 
 export function createTeachingRouter(): Router {
@@ -341,28 +373,7 @@ export function createTeachingRouter(): Router {
 
   router.get("/admin/questions", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     await requireTeachingCapabilities(req, ["teaching.author", "teaching.review", "teaching.publish"]);
-    res.json(await listTeachingQuestions({
-      search: queryText(req.query.search),
-      status: queryText(req.query.status),
-      specialtyCode: queryText(req.query.specialtyCode),
-      domainCode: queryText(req.query.domainCode),
-      topicCode: queryText(req.query.topicCode),
-      subtopicCode: queryText(req.query.subtopicCode),
-      type: queryText(req.query.type),
-      difficulty: strictQueryInteger(req.query.difficulty, "difficulty", 1),
-      trainingLevelCode: queryText(req.query.trainingLevelCode),
-      tagCode: queryText(req.query.tagCode),
-      sourceType: queryText(req.query.sourceType),
-      hasImage: queryBoolean(req.query.hasImage, "hasImage"),
-      imported: queryBoolean(req.query.imported, "imported"),
-      importBatchId: queryText(req.query.importBatchId),
-      sort: queryText(req.query.sort),
-      direction: queryText(req.query.direction),
-      page: strictQueryInteger(req.query.page, "page", 1),
-      pageSize: strictQueryInteger(req.query.pageSize, "pageSize", 1),
-      limit: strictQueryInteger(req.query.limit, "limit", 1),
-      offset: strictQueryInteger(req.query.offset, "offset", 0),
-    }));
+    res.json(await listTeachingQuestions(teachingQuestionListQuery(req.query)));
   }));
 
   router.get("/admin/sources", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
@@ -411,6 +422,18 @@ export function createTeachingRouter(): Router {
     const { actor } = await requireTeachingCapabilities(req, ["teaching.author"]);
     res.setHeader("Cache-Control", "no-store, private");
     res.json(await validateTeachingQuestionScope({ questionIds: parseTeachingBulkQuestionIds(req.body?.questionIds) }, actor));
+  }));
+
+  router.post("/admin/questions/bulk/validate-matching", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor } = await requireTeachingCapabilities(req, ["teaching.author"]);
+    res.setHeader("Cache-Control", "no-store, private");
+    res.json(await validateTeachingQuestionScope({ filters: matchingQuestionFilters(req.body?.filters) }, actor));
+  }));
+
+  router.post("/admin/questions/bulk/validate-publish-matching", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.publish"]);
+    res.setHeader("Cache-Control", "no-store, private");
+    res.json(await publishTeachingQuestionScope({ filters: matchingQuestionFilters(req.body?.filters) }, actor, teachingIdentity.permissions));
   }));
 
   router.patch("/admin/questions/:id/revisions/:revisionId", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
