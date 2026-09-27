@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
-import { __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectAssignmentAwareSonicDicomDocument, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
+import { __accessionFallbackStudyPredicateForTest, __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectAssignmentAwareSonicDicomDocument, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
   ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
@@ -71,6 +71,22 @@ describe("SonicDICOM active document SQL parameter binding", () => {
     ]);
     assert.match(predicate, /d\.Status not in \(@noReportStatus0, @noReportStatus1\)/);
     assert.deepEqual(calls.map((call) => typeof call.value), ["number", "number"]);
+  });
+});
+
+describe("SonicDICOM accession fallback StudyDate matching", () => {
+  it("parses the production YYYY/MM/DD nvarchar StudyDate before comparing it with the RISpro booking date", () => {
+    const sonicDicomStudyDate = "2026/06/20";
+    const risproBookingDate = "2026-06-20";
+    const predicate = __accessionFallbackStudyPredicateForTest();
+
+    assert.equal(sonicDicomStudyDate.replaceAll("/", ""), risproBookingDate.replaceAll("-", ""));
+    assert.match(predicate, /try_convert\(\s*date,\s*nullif\(ltrim\(rtrim\(s\.StudyDate\)\), ''\),\s*111\s*\)/i);
+    assert.match(predicate, /convert\(\s*char\(8\),\s*try_convert\([\s\S]*s\.StudyDate[\s\S]*111[\s\S]*\),\s*112\s*\)/i);
+    assert.doesNotMatch(predicate, /convert\(\s*char\(8\),\s*s\.StudyDate\s*,\s*112\s*\)/i);
+    assert.match(predicate, /nullif\(input\.BookingDate, ''\) is null or [\s\S]* = replace\(input\.BookingDate, '-', ''\)/i);
+    assert.match(predicate, /input\.ModalityCode = 'CT'[\s\S]*ModalitiesInStudy[\s\S]*'%CT%'/i);
+    assert.match(predicate, /input\.ModalityCode in \('MR', 'MRI'\)[\s\S]*ModalitiesInStudy[\s\S]*'%MR%'/i);
   });
 });
 

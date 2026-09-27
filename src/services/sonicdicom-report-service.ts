@@ -503,6 +503,26 @@ async function querySqlReportReadinessBatch(
   ]));
 }
 
+const SONICDICOM_STUDY_DATE_YMD_EXPRESSION = `convert(
+  char(8),
+  try_convert(
+    date,
+    nullif(ltrim(rtrim(s.StudyDate)), ''),
+    111
+  ),
+  112
+)`;
+
+function accessionFallbackStudyPredicate(): string {
+  return `s.AccessionNumber = input.AccessionNumber
+      and (nullif(input.BookingDate, '') is null or ${SONICDICOM_STUDY_DATE_YMD_EXPRESSION} = replace(input.BookingDate, '-', ''))
+      and (nullif(input.ModalityCode, '') is null
+        or (input.ModalityCode = 'CT' and upper(coalesce(s.ModalitiesInStudy, '')) like '%CT%')
+        or (input.ModalityCode in ('MR', 'MRI') and upper(coalesce(s.ModalitiesInStudy, '')) like '%MR%'))`;
+}
+
+export const __accessionFallbackStudyPredicateForTest = accessionFallbackStudyPredicate;
+
 async function querySqlDocumentHistoryBatch(
   pool: SqlConnectionPool,
   sql: SqlModule,
@@ -524,11 +544,7 @@ async function querySqlDocumentHistoryBatch(
   });
   const studyPredicate = method === "study_instance_uid"
     ? "s.StudyInstanceUID = input.StudyInstanceUID"
-    : `s.AccessionNumber = input.AccessionNumber
-      and (nullif(input.BookingDate, '') is null or convert(char(8), s.StudyDate, 112) = replace(input.BookingDate, '-', ''))
-      and (nullif(input.ModalityCode, '') is null
-        or (input.ModalityCode = 'CT' and upper(coalesce(s.ModalitiesInStudy, '')) like '%CT%')
-        or (input.ModalityCode in ('MR', 'MRI') and upper(coalesce(s.ModalitiesInStudy, '')) like '%MR%'))`;
+    : accessionFallbackStudyPredicate();
   const inputColumn = method === "study_instance_uid" ? "StudyInstanceUID" : "AccessionNumber";
   const rows = (await request.query<SqlDocumentHistoryRow>(`
     with InputContexts(LookupKey, StudyInstanceUID, AccessionNumber, BookingDate, ModalityCode) as (
