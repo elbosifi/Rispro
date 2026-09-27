@@ -39,6 +39,7 @@ export interface ReportingBoardSonicDicomCacheCandidate extends ReportLookupCont
   assignedDoctorEmail?: string | null;
   assignedAt?: string | null;
   assignmentOrigin?: "rispro" | "sonic_auto" | "sonic_reconciled" | null;
+  hasPriorReportingAssignment: boolean;
   priorityCode: string | null;
   cacheStatus: ReportingBoardCacheStatus | null;
   lastSuccessAt: string | null;
@@ -184,9 +185,12 @@ function primaryDocumentFromHistory(
   const accounts = [candidate.assignedDoctorUsername, candidate.assignedDoctorEmail];
   if (candidate.assigned) {
     if (!accounts.some((value) => String(value ?? "").trim())) return null;
+    const enforceAssignmentLowerBound =
+      candidate.assignmentOrigin === "rispro" &&
+      candidate.hasPriorReportingAssignment;
     return selectAssignmentAwareSonicDicomDocument(history, {
       allowedSonicAccounts: accounts,
-      assignmentLowerBound: candidate.assignmentOrigin === "rispro" ? candidate.assignedAt : null,
+      assignmentLowerBound: enforceAssignmentLowerBound ? candidate.assignedAt : null,
       excludedDocumentIds: excluded,
       noReportStatusCodes: settings.sonicDicomSqlNoReportStatusCodes,
       finalStatusCodes: settings.sonicDicomSqlFinalStatusCodes,
@@ -206,6 +210,8 @@ function primaryDocumentFromHistory(
   });
   return documents.find((document) => finals.has(Number(document.statusCode))) ?? documents[0] ?? null;
 }
+
+export const __primaryDocumentFromHistoryForTest = primaryDocumentFromHistory;
 
 function comparisonObservationFromHistory(
   candidate: ComparisonSonicDicomCacheCandidate,
@@ -365,6 +371,7 @@ function mapReportingBoardSonicDicomCacheCandidate(
     assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
     assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
     assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
+    hasPriorReportingAssignment: Boolean(row.hasPriorReportingAssignment),
     bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
     modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
   };
@@ -376,6 +383,19 @@ export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: nu
       b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
       cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
       assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin", rp.code as "priorityCode",
+      exists (
+        select 1
+        from doctor_portal.case_team_assignments prior_cta
+        where prior_cta.appointment_id = b.id
+          and prior_cta.assignment_type = 'reporting'
+          and (
+            prior_cta.assigned_at < cta.assigned_at
+            or (
+              prior_cta.assigned_at = cta.assigned_at
+              and prior_cta.id < cta.id
+            )
+          )
+      ) as "hasPriorReportingAssignment",
       cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
     from appointments_v2.bookings b
     left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
@@ -408,6 +428,19 @@ export async function selectReportingBoardSonicDicomCacheCandidatesByAppointment
       b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
       cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
       assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin", rp.code as "priorityCode",
+      exists (
+        select 1
+        from doctor_portal.case_team_assignments prior_cta
+        where prior_cta.appointment_id = b.id
+          and prior_cta.assignment_type = 'reporting'
+          and (
+            prior_cta.assigned_at < cta.assigned_at
+            or (
+              prior_cta.assigned_at = cta.assigned_at
+              and prior_cta.id < cta.id
+            )
+          )
+      ) as "hasPriorReportingAssignment",
       cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
     from appointments_v2.bookings b
     left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
@@ -852,6 +885,7 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
       bookingDate: comparison.bookingDate,
       modalityCode: comparison.modalityCode,
       assigned: false,
+      hasPriorReportingAssignment: false,
       priorityCode: null,
       cacheStatus: null,
       lastSuccessAt: null,

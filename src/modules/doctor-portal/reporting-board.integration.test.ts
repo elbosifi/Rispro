@@ -2173,7 +2173,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await assignComparisonDirectly(comparison, targetDoctor.doctorId);
     const assignmentId = Number((await pool.query<{ id: string }>(`select id::text from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active'`, [comparison])).rows[0].id);
     const username = (await pool.query<{ username: string }>(`select username from users where id = $1`, [targetDoctor.id])).rows[0].username;
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
     const comparisonCandidate = { ...primary, comparisonAssignmentId: assignmentId, comparisonRequestId: comparison, assignedDoctorSonicAccount: username, assignedDoctorUsername: username, assignedAt: `${date}T10:00:00.000Z`, storedDocumentId: null, storedDocumentUpdatedAt: null, primaryDocumentId: "A", primaryCachedReportStatus: "draft", primaryManualFinal: false };
     let documents = [
       { reportNo: 9284, documentId: "B", account: username, statusCode: 7, updatedAt: `${date}T11:00:00.000Z` },
@@ -2217,7 +2217,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const username = (await pool.query<{ username: string }>(`select username from users where id = $1`, [targetDoctor.id])).rows[0].username;
     await pool.query(`update doctor_portal.reporting_board_sonicdicom_cache set report_status = 'draft', sonicdicom_latest_document_id = 'B', last_success_at = now(), next_check_at = now() where appointment_id = $1`, [source]);
     await pool.query(`update doctor_portal.comparison_case_assignments set assigned_at = $2::timestamptz where id = $1`, [assignmentId, `${date}T10:00:00.000Z`]);
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
     const comparisonCandidate = { ...primary, comparisonAssignmentId: assignmentId, comparisonRequestId: comparison, assignedDoctorSonicAccount: username, assignedDoctorUsername: username, assignedAt: `${date}T10:00:00.000Z`, storedDocumentId: null, storedDocumentUpdatedAt: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft", primaryManualFinal: false };
     const documents = [
       { reportNo: 9284, documentId: "B", account: username, statusCode: 1, updatedAt: `${date}T11:00:00.000Z` },
@@ -2251,7 +2251,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const username = (await pool.query<{ username: string }>(`select username from users where id = $1`, [targetDoctor.id])).rows[0].username;
     await pool.query(`update doctor_portal.reporting_board_sonicdicom_cache set report_status = 'draft', sonicdicom_latest_document_id = 'B', last_success_at = now(), next_check_at = now() where appointment_id = $1`, [source]);
     await pool.query(`update doctor_portal.comparison_case_assignments set assigned_at = $2::timestamptz where id = $1`, [assignmentId, `${date}T10:00:00.000Z`]);
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
     const comparisonCandidate = { ...primary, comparisonAssignmentId: assignmentId, comparisonRequestId: comparison, assignedDoctorSonicAccount: username, assignedDoctorUsername: username, assignedAt: `${date}T10:00:00.000Z`, storedDocumentId: null, storedDocumentUpdatedAt: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft", primaryManualFinal: false };
     const documents = [{ reportNo: 9284, documentId: "B", account: username, statusCode: 1, updatedAt: `${date}T11:00:00.000Z` }];
     sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
@@ -2287,7 +2287,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const due = (await sonicDicomCacheService.selectDueComparisonSonicDicomCacheCandidates(20)).find((candidate) => candidate.comparisonAssignmentId === assignmentId);
     if (!due) throw new Error("Expected the missing-stored-document comparison candidate to be due.");
     assert.equal(new Date(due.storedDocumentUpdatedAt!).toISOString(), storedUpdatedAt);
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
     const documents = [
       { reportNo: 9284, documentId: "C", account: username, statusCode: 1, updatedAt: `${date}T12:00:00.000Z` },
       { reportNo: 9284, documentId: "X", account: username, statusCode: 1, updatedAt: `${date}T10:05:00.000Z` },
@@ -2324,7 +2324,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const username = (await pool.query<{ username: string }>(`select username from users where id = $1`, [targetDoctor.id])).rows[0].username;
     await pool.query(`update doctor_portal.reporting_board_sonicdicom_cache set report_status = 'draft', sonicdicom_latest_document_id = 'B', last_success_at = now(), next_check_at = now() where appointment_id = $1`, [source]);
     await pool.query(`update doctor_portal.comparison_case_assignments set assigned_at = $2::timestamptz where id = $1`, [assignmentId, `${date}T10:00:00.000Z`]);
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "draft" as const, lastSuccessAt: null };
     const comparisonCandidate = { ...primary, comparisonAssignmentId: assignmentId, comparisonRequestId: comparison, assignedDoctorSonicAccount: username, assignedDoctorUsername: username, assignedAt: `${date}T10:00:00.000Z`, storedDocumentId: null, storedDocumentUpdatedAt: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft", primaryManualFinal: false };
     const documents = [
       { reportNo: 9284, documentId: "X", account: "other@nccb.ly", statusCode: 7, updatedAt: `${date}T13:00:00.000Z` },
@@ -2373,7 +2373,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const assignmentId = Number((await pool.query<{ id: string }>(`select id::text from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active'`, [comparison])).rows[0].id);
     await pool.query(`update doctor_portal.reporting_board_sonicdicom_cache set report_status = 'final', sonicdicom_latest_document_id = 'A', last_success_at = now(), next_check_at = now() where appointment_id = $1`, [source]);
     await pool.query(`insert into doctor_portal.comparison_sonicdicom_cache (comparison_assignment_id, comparison_request_id, report_status, sonicdicom_document_id, last_success_at, last_attempt_at, next_check_at) values ($1, $2, 'draft', 'B', now(), now(), now())`, [assignmentId, comparison]);
-    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, priorityCode: null, cacheStatus: "final" as const, lastSuccessAt: new Date().toISOString() };
+    const primary = { bookingId: source, accessionNumber: `V2-${String(source).padStart(6, "0")}`, studyInstanceUid: null, requiresReport: true, status: "completed", assigned: false, hasPriorReportingAssignment: false, priorityCode: null, cacheStatus: "final" as const, lastSuccessAt: new Date().toISOString() };
     sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
       checkStatusesBatch: async (contexts) => new Map(contexts.map((context) => [context.bookingId, { state: "draft" as const, canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null, latestDocumentId: "B", finalizedByAccount: null, correlationMethod: "study_instance_uid" as const }])),
       fetchDocumentHistoriesBatch: async () => { throw new Error("history unavailable"); },
