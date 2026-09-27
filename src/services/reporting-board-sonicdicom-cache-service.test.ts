@@ -29,7 +29,7 @@ function candidate(overrides: Partial<ReportingBoardSonicDicomCacheCandidate> = 
     assignedDoctorEmail: "doctor@nccb.ly",
     assignedAt: "2026-06-21T10:00:00.000Z",
     assignmentOrigin: "rispro",
-    hasPriorReportingAssignment: false,
+    hasPriorDifferentDoctorReportingAssignment: false,
     priorityCode: null,
     cacheStatus: null,
     lastSuccessAt: null,
@@ -56,20 +56,36 @@ describe("Reporting Board primary SonicDICOM assignment history", () => {
     assert.equal(selected?.documentId, "final-before-assignment");
   });
 
-  it("rejects a current doctor's Final before a genuine RISpro reassignment", () => {
-    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
-      { documentId: "final-before-reassignment", account: "doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
+  it("accepts a current doctor's Final before a same-doctor cancel and reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: false }), history([
+      { documentId: "final-before-same-doctor-reassignment", account: "doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected?.documentId, "final-before-same-doctor-reassignment");
+  });
+
+  it("rejects a current doctor's Final before a different-doctor RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: true }), history([
+      { documentId: "final-before-different-doctor-reassignment", account: "doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
     ]), settings);
 
     assert.equal(selected, null);
   });
 
-  it("accepts a current doctor's Final after a genuine RISpro reassignment", () => {
-    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
-      { documentId: "final-after-reassignment", account: "doctor@nccb.ly", updatedAt: "2026-06-21T11:00:00.000Z" },
+  it("accepts a current doctor's Final after a different-doctor RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: true }), history([
+      { documentId: "final-after-different-doctor-reassignment", account: "doctor@nccb.ly", updatedAt: "2026-06-21T11:00:00.000Z" },
     ]), settings);
 
-    assert.equal(selected?.documentId, "final-after-reassignment");
+    assert.equal(selected?.documentId, "final-after-different-doctor-reassignment");
+  });
+
+  it("keeps the lower bound for an A-to-B-to-A reporting history", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: true }), history([
+      { documentId: "final-before-return-to-a", account: "doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected, null);
   });
 
   it("selects another doctor's Final over the assigned doctor's Draft", () => {
@@ -97,16 +113,16 @@ describe("Reporting Board primary SonicDICOM assignment history", () => {
     assert.equal(selected, null);
   });
 
-  it("rejects an other-doctor Final before a genuine RISpro reassignment", () => {
-    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
+  it("rejects an other-doctor Final before a different-doctor RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: true }), history([
       { documentId: "other-final-before-reassignment", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
     ]), settings);
 
     assert.equal(selected, null);
   });
 
-  it("selects an other-doctor Final after a genuine RISpro reassignment", () => {
-    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
+  it("selects an other-doctor Final after a different-doctor RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorDifferentDoctorReportingAssignment: true }), history([
       { documentId: "other-final-after-reassignment", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T11:00:00.000Z" },
     ]), settings);
 
@@ -129,21 +145,22 @@ describe("Reporting Board primary SonicDICOM candidate assignment history SQL", 
     const db = {
       query: async (query: string) => {
         queries.push(query);
-        return { rows: [candidate({ hasPriorReportingAssignment: queries.length === 1 })] };
+        return { rows: [candidate({ hasPriorDifferentDoctorReportingAssignment: queries.length === 1 })] };
       },
     };
 
     const due = await selectDueReportingBoardSonicDicomCacheCandidates(1, db as never);
     const byAppointmentId = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds([2367], db as never);
 
-    assert.deepEqual([due[0]?.hasPriorReportingAssignment, byAppointmentId[0]?.hasPriorReportingAssignment], [true, false]);
+    assert.deepEqual([due[0]?.hasPriorDifferentDoctorReportingAssignment, byAppointmentId[0]?.hasPriorDifferentDoctorReportingAssignment], [true, false]);
     assert.equal(queries.length, 2);
     for (const query of queries) {
       assert.match(query, /exists\s*\(\s*select 1\s*from doctor_portal\.case_team_assignments prior_cta/i);
       assert.match(query, /prior_cta\.assigned_at < cta\.assigned_at/i);
       assert.match(query, /prior_cta\.assigned_at = cta\.assigned_at\s*and prior_cta\.id < cta\.id/i);
+      assert.match(query, /prior_cta\.assigned_doctor_id is distinct from cta\.assigned_doctor_id/i);
       assert.doesNotMatch(query, /prior_cta\.status/i);
-      assert.match(query, /as "hasPriorReportingAssignment"/);
+      assert.match(query, /as "hasPriorDifferentDoctorReportingAssignment"/);
     }
   });
 });
