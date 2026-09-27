@@ -353,6 +353,23 @@ export async function getFullReportingBoardSonicDicomResyncStatus(requestedAt: s
   return { remaining: Number(result.rows[0]?.remaining ?? 0), failed: Number(result.rows[0]?.failed ?? 0) };
 }
 
+function mapReportingBoardSonicDicomCacheCandidate(
+  row: ReportingBoardSonicDicomCacheCandidate
+): ReportingBoardSonicDicomCacheCandidate {
+  return {
+    ...row,
+    bookingId: Number(row.bookingId),
+    assigned: Boolean(row.assigned),
+    assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
+    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
+    assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
+    assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
+    bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
+    modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
+  };
+}
+
 export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: number, db: Queryable = pool): Promise<ReportingBoardSonicDicomCacheCandidate[]> {
   const result = await db.query<ReportingBoardSonicDicomCacheCandidate>(`
     select b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
@@ -377,18 +394,36 @@ export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: nu
       cache.next_check_at asc nulls first, cache.last_success_at asc nulls first, b.id asc
     limit $1
   `, [Math.max(1, Math.min(limit, 200))]);
-  return result.rows.map((row) => ({
-    ...row,
-    bookingId: Number(row.bookingId),
-    assigned: Boolean(row.assigned),
-    assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
-    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
-    assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
-    assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
-    assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
-    bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
-    modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
-  }));
+  return result.rows.map(mapReportingBoardSonicDicomCacheCandidate);
+}
+
+export async function selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds(
+  appointmentIds: number[],
+  db: Queryable = pool
+): Promise<ReportingBoardSonicDicomCacheCandidate[]> {
+  const ids = [...new Set(appointmentIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return [];
+  const result = await db.query<ReportingBoardSonicDicomCacheCandidate>(`
+    select b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
+      cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
+      assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin", rp.code as "priorityCode",
+      cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
+    from appointments_v2.bookings b
+    left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+    left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
+    left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+    left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+    left join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
+    left join reporting_priorities rp on rp.id = b.reporting_priority_id
+    where b.id = any($1::bigint[])
+      and b.status = 'completed'
+      and b.requires_report = true
+      and manual.id is null
+    order by b.id asc
+  `, [ids]);
+  return result.rows.map(mapReportingBoardSonicDicomCacheCandidate);
 }
 
 export async function selectDueComparisonSonicDicomCacheCandidates(limit: number, db: Queryable = pool): Promise<ComparisonSonicDicomCacheCandidate[]> {
@@ -520,44 +555,6 @@ function mapComparisonSonicDicomCacheCandidate(row: ComparisonSonicDicomCacheCan
     modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
     assignedAt: String(row.assignedAt),
   };
-}
-
-async function hydratePrimarySonicDicomCacheCandidates(
-  candidates: ReportingBoardSonicDicomCacheCandidate[],
-  db: Queryable = pool
-): Promise<Map<number, ReportingBoardSonicDicomCacheCandidate>> {
-  const ids = [...new Set(candidates.map((candidate) => candidate.bookingId).filter((id) => Number.isInteger(id) && id > 0))];
-  if (!ids.length) return new Map();
-  const result = await db.query<ReportingBoardSonicDicomCacheCandidate>(`
-    select b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
-      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
-      cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
-      assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin",
-      rp.code as "priorityCode", cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
-    from appointments_v2.bookings b
-    left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
-    left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
-    left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
-    left join users assigned_user on assigned_user.id = assigned_doctor.user_id
-    left join modalities modality on modality.id = b.modality_id
-    left join reporting_priorities rp on rp.id = b.reporting_priority_id
-    where b.id = any($1::bigint[])
-  `, [ids]);
-  return new Map(result.rows.map((row) => {
-    const mapped: ReportingBoardSonicDicomCacheCandidate = {
-      ...row,
-      bookingId: Number(row.bookingId),
-      assigned: Boolean(row.assigned),
-      assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
-      assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
-      assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
-      assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
-      assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
-      bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
-      modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
-    };
-    return [mapped.bookingId, mapped];
-  }));
 }
 
 export async function persistReportingBoardSonicDicomCacheResult(
@@ -860,19 +857,20 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
       lastSuccessAt: null,
     })),
   ];
-  const hydratedPrimaryById = await hydratePrimarySonicDicomCacheCandidates(primarySeedCandidates);
-  const effectivePrimaryCandidates = candidates.map((candidate) => hydratedPrimaryById.get(candidate.bookingId) ?? candidate);
+  const hydratedPrimaryById = new Map((await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds(
+    primarySeedCandidates.map((candidate) => candidate.bookingId)
+  )).map((candidate) => [candidate.bookingId, candidate]));
+  const effectivePrimaryCandidates = candidates.flatMap((candidate) => {
+    const hydrated = hydratedPrimaryById.get(candidate.bookingId);
+    return hydrated ? [hydrated] : [];
+  });
   // A comparison source is refreshed with its comparison when it is not manual-final.
   // This avoids waiting for an unrelated primary due time to protect finality.
   const primaryContexts = new Map<number, ReportingBoardSonicDicomCacheCandidate>(effectivePrimaryCandidates.map((candidate) => [candidate.bookingId, candidate]));
   for (const comparison of effectiveComparisonCandidates) {
     if (!comparison.primaryManualFinal && !primaryContexts.has(comparison.bookingId)) {
-      primaryContexts.set(comparison.bookingId, hydratedPrimaryById.get(comparison.bookingId) ?? {
-        bookingId: comparison.bookingId, accessionNumber: comparison.accessionNumber,
-        studyInstanceUid: comparison.studyInstanceUid, requiresReport: comparison.requiresReport, status: comparison.status,
-        bookingDate: comparison.bookingDate, modalityCode: comparison.modalityCode,
-        assigned: false, priorityCode: null, cacheStatus: null, lastSuccessAt: null,
-      });
+      const hydrated = hydratedPrimaryById.get(comparison.bookingId);
+      if (hydrated) primaryContexts.set(comparison.bookingId, hydrated);
     }
   }
   const primary = [...primaryContexts.values()];

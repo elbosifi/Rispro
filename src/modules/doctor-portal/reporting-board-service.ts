@@ -6,7 +6,7 @@ import {
   buildSonicDicomStaffViewerUrl,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds, type ReportingBoardSonicDicomCacheCandidate } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, getFullReportingBoardSonicDicomResyncStatus, queueFullReportingBoardSonicDicomResync, refreshReportingBoardSonicDicomCacheCandidates, selectComparisonSonicDicomCacheCandidatesByRequestIds, selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, findComparisonRequestById, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -707,20 +707,6 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   return { filters, ...aggregateReportingBoardStats(rows) };
 }
 
-function reportingBoardSonicDicomCacheCandidate(row: ReportingBoardCaseRow): ReportingBoardSonicDicomCacheCandidate {
-  return {
-    bookingId: row.appointmentId,
-    accessionNumber: row.accessionNumber,
-    studyInstanceUid: row.studyInstanceUid,
-    requiresReport: row.requiresReport,
-    status: row.appointmentStatus,
-    assigned: row.assignmentStatus === "assigned",
-    priorityCode: row.reportingPriorityCode,
-    cacheStatus: row.reportStatus,
-    lastSuccessAt: row.reportStatusCheckedAt,
-  };
-}
-
 function cacheRefreshWasSuccessful(lastAttemptAt: string | null, lastSuccessAt: string | null): boolean {
   const attempt = lastAttemptAt ? new Date(lastAttemptAt).getTime() : NaN;
   const success = lastSuccessAt ? new Date(lastSuccessAt).getTime() : NaN;
@@ -735,9 +721,10 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
   checkedAt: string;
 }> {
   const { cases } = await getReportingBoardCases(actor, input);
-  const primaryCandidates = cases
+  const visiblePrimaryAppointmentIds = cases
     .filter((row) => row.caseType === "appointment" && row.appointmentStatus === "completed" && row.requiresReport && !row.manualFinalOverrideId)
-    .map(reportingBoardSonicDicomCacheCandidate);
+    .map((row) => row.appointmentId);
+  const primaryCandidates = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds(visiblePrimaryAppointmentIds);
 
   const comparisonRequestIds = [...new Set(cases
     .filter((row) => row.caseType === "comparison" && row.comparisonRequestId !== null && Number.isInteger(row.comparisonRequestId) && row.comparisonRequestId > 0)
@@ -801,7 +788,9 @@ export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, ap
   }
   if (row.manualFinalOverrideId) throw new HttpError(409, "This Reporting Board case has an active manual final override.");
 
-  const candidate = reportingBoardSonicDicomCacheCandidate(row);
+  const candidates = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds([appointmentId]);
+  const candidate = candidates[0];
+  if (!candidate) throw new HttpError(409, "Only completed Reporting Board appointments that require reports can be refreshed.");
   const previousStatus = row.reportStatus ?? "unavailable";
   await refreshReportingBoardSonicDicomCacheCandidates([candidate], []);
   const cacheResult = await pool.query<{ report_status: string; last_attempt_at: string | null; last_success_at: string | null }>(
@@ -2176,7 +2165,8 @@ interface AssignmentRevalidation { eligibleIds: Set<number>; finalIds: Set<numbe
 async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBoardCaseRow[]): Promise<AssignmentRevalidation> {
   const appointments = rows.filter((row) => row.caseType === "appointment");
   if (!appointments.length) return { eligibleIds: new Set(), finalIds: new Set(), unavailableIds: new Set() };
-  const candidates = appointments.map(reportingBoardSonicDicomCacheCandidate);
+  const appointmentIds = [...new Set(appointments.map((row) => row.appointmentId))];
+  const candidates = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds(appointmentIds);
   await refreshReportingBoardSonicDicomCacheCandidates(candidates, []);
   const cacheResult = await pool.query<{
     appointment_id: number;
@@ -2188,17 +2178,22 @@ async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBo
     [candidates.map((candidate) => candidate.bookingId)]
   );
   const cacheByAppointmentId = new Map(cacheResult.rows.map((row) => [Number(row.appointment_id), row]));
+  const candidateIds = new Set(candidates.map((candidate) => candidate.bookingId));
   const eligibleIds = new Set<number>(); const finalIds = new Set<number>(); const unavailableIds = new Set<number>();
-  for (const candidate of candidates) {
-    const cache = cacheByAppointmentId.get(candidate.bookingId);
+  for (const appointmentId of appointmentIds) {
+    if (!candidateIds.has(appointmentId)) {
+      unavailableIds.add(appointmentId);
+      continue;
+    }
+    const cache = cacheByAppointmentId.get(appointmentId);
     if (!cache || !cacheRefreshWasSuccessful(cache.last_attempt_at, cache.last_success_at)) {
-      unavailableIds.add(candidate.bookingId);
+      unavailableIds.add(appointmentId);
     } else if (cache.report_status === "final") {
-      finalIds.add(candidate.bookingId);
+      finalIds.add(appointmentId);
     } else if (cache.report_status === "draft" || cache.report_status === "no_report" || cache.report_status === "study_not_found") {
-      eligibleIds.add(candidate.bookingId);
+      eligibleIds.add(appointmentId);
     } else {
-      unavailableIds.add(candidate.bookingId);
+      unavailableIds.add(appointmentId);
     }
   }
   return { eligibleIds, finalIds, unavailableIds };

@@ -918,6 +918,169 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.ok(cache.rows[0]?.last_success_at && cache.rows[0].last_success_at > new Date("2026-05-01T08:00:00.000Z"));
   });
 
+  it("hydrates complete assigned and unassigned primary SonicDICOM candidates by explicit appointment ID", async () => {
+    guard();
+    const date = addDays(180);
+    const assignedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Explicit candidate assignment" });
+    const unassignedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Explicit candidate unassigned" });
+    const assignedAt = `${date}T10:00:00.000Z`;
+    await assignDirectly(assignedAppointmentId, doctor.doctorId, assignedAt);
+    const assignedIdentity = (await pool.query<{ username: string; email: string | null }>(
+      `select username, email from users where id = $1`,
+      [doctor.id]
+    )).rows[0]!;
+
+    const candidates = await sonicDicomCacheService.selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds([
+      assignedAppointmentId,
+      unassignedAppointmentId,
+      assignedAppointmentId,
+      0,
+      -1,
+    ]);
+    assert.equal(candidates.length, 2);
+    const assigned = candidates.find((candidate) => candidate.bookingId === assignedAppointmentId)!;
+    const unassigned = candidates.find((candidate) => candidate.bookingId === unassignedAppointmentId)!;
+    assert.equal(assigned.assigned, true);
+    assert.equal(assigned.assignedDoctorId, doctor.doctorId);
+    assert.equal(assigned.assignedDoctorUsername, assignedIdentity.username);
+    assert.equal(assigned.assignedDoctorEmail, assignedIdentity.email);
+    assert.equal(new Date(assigned.assignedAt!).toISOString(), assignedAt);
+    assert.equal(assigned.assignmentOrigin, "rispro");
+    assert.equal(assigned.bookingDate, date);
+    assert.equal(assigned.modalityCode, "CT");
+    assert.equal(unassigned.assigned, false);
+  });
+
+  it("keeps an assigned SonicDICOM Final through board-wide manual refresh with DB-hydrated identity", async () => {
+    guard();
+    const date = addDays(181);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Assigned Final board refresh" });
+    await assignDirectly(appointmentId, doctor.doctorId, `${date}T10:00:00.000Z`);
+    statusByAppointmentId.set(appointmentId, "final");
+    await statusByAppointmentId.flush();
+    installAssignmentAwareSonicDicomReader();
+
+    try {
+      const refresh = await api<{ checked: number; successful: number; failed: number }>(supervisor.cookie, "/api/doctor/reporting-board/refresh-sonicdicom", {
+        method: "POST",
+        body: { filters: { dateFrom: date, dateTo: date, reportStatus: "all" } },
+      });
+      assert.equal(refresh.status, 200, JSON.stringify(refresh.data));
+      assert.deepEqual(
+        { checked: refresh.data.checked, successful: refresh.data.successful, failed: refresh.data.failed },
+        { checked: 1, successful: 1, failed: 0 }
+      );
+
+      const cache = (await pool.query<{ report_status: string; sonicdicom_latest_document_id: string | null; finalized_by_doctor_id: string | null }>(`
+        select report_status, sonicdicom_latest_document_id, finalized_by_doctor_id::text
+        from doctor_portal.reporting_board_sonicdicom_cache
+        where appointment_id = $1
+      `, [appointmentId])).rows[0];
+      assert.deepEqual(cache, {
+        report_status: "final",
+        sonicdicom_latest_document_id: `default-${appointmentId}`,
+        finalized_by_doctor_id: String(doctor.doctorId),
+      });
+    } finally {
+      installDefaultSonicDicomReadersForTest();
+    }
+  });
+
+  it("keeps an assigned SonicDICOM Final through single-case manual refresh with DB-hydrated identity", async () => {
+    guard();
+    const date = addDays(182);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Assigned Final single refresh" });
+    await assignDirectly(appointmentId, doctor.doctorId, `${date}T10:00:00.000Z`);
+    statusByAppointmentId.set(appointmentId, "final");
+    await statusByAppointmentId.flush();
+    installAssignmentAwareSonicDicomReader();
+
+    try {
+      const refresh = await api<{ successful: boolean; previousStatus: string; reportStatus: string; changed: boolean; cachedStatusRetained: boolean }>(
+        supervisor.cookie,
+        `/api/doctor/reporting-board/cases/${appointmentId}/refresh-sonicdicom`,
+        { method: "POST" }
+      );
+      assert.equal(refresh.status, 200, JSON.stringify(refresh.data));
+      assert.deepEqual({
+        successful: refresh.data.successful,
+        previousStatus: refresh.data.previousStatus,
+        reportStatus: refresh.data.reportStatus,
+        changed: refresh.data.changed,
+        cachedStatusRetained: refresh.data.cachedStatusRetained,
+      }, {
+        successful: true,
+        previousStatus: "final",
+        reportStatus: "final",
+        changed: false,
+        cachedStatusRetained: false,
+      });
+
+      const cache = (await pool.query<{ report_status: string; sonicdicom_latest_document_id: string | null }>(
+        `select report_status, sonicdicom_latest_document_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`,
+        [appointmentId]
+      )).rows[0];
+      assert.deepEqual(cache, { report_status: "final", sonicdicom_latest_document_id: `default-${appointmentId}` });
+    } finally {
+      installDefaultSonicDicomReadersForTest();
+    }
+  });
+
+  it("uses only the assigned doctor's document during manual Reporting Board refresh", async () => {
+    guard();
+    const date = addDays(183);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Assigned doctor manual refresh" });
+    await assignDirectly(appointmentId, doctor.doctorId, `${date}T10:00:00.000Z`);
+    await seedSonicDicomCache(appointmentId, "final", `${date}T11:00:00.000Z`);
+    const identities = await pool.query<{ id: string; email: string | null; username: string }>(
+      `select id::text, email, username from users where id = any($1::bigint[])`,
+      [[doctor.id, otherDoctor.id]]
+    );
+    const identityById = new Map(identities.rows.map((row) => [Number(row.id), row]));
+    sonicDicomCacheService.__setReportingBoardSonicDicomReadersForTest({
+      checkStatusesBatch: async (contexts) => new Map(contexts.map((context) => [context.bookingId, {
+        state: "draft" as const,
+        canViewReport: false,
+        source: "sonicdicom" as const,
+        reportFinalAt: null,
+        latestDocumentId: "other-doctor-final",
+        finalizedByAccount: null,
+        correlationMethod: "study_instance_uid" as const,
+      }])),
+      fetchDocumentHistoriesBatch: async (contexts) => new Map(contexts.map((context) => {
+        const bookingId = Number(context.lookupKey.replace(/^study:/, ""));
+        return [context.lookupKey, {
+          foundStudy: true,
+          foundReport: true,
+          reportNo: bookingId,
+          correlationMethod: "study_instance_uid" as const,
+          documents: [
+            { reportNo: bookingId, documentId: "other-doctor-final", account: identityById.get(otherDoctor.id)?.email ?? identityById.get(otherDoctor.id)!.username, statusCode: 6, updatedAt: `${date}T12:00:00.000Z` },
+            { reportNo: bookingId, documentId: "assigned-doctor-draft", account: identityById.get(doctor.id)?.email ?? identityById.get(doctor.id)!.username, statusCode: 1, updatedAt: `${date}T11:00:00.000Z` },
+          ],
+        }];
+      })),
+    });
+    try {
+      const refresh = await api<{ checked: number; successful: number; failed: number }>(supervisor.cookie, "/api/doctor/reporting-board/refresh-sonicdicom", {
+        method: "POST",
+        body: { filters: { dateFrom: date, dateTo: date, reportStatus: "all" } },
+      });
+      assert.equal(refresh.status, 200, JSON.stringify(refresh.data));
+      assert.deepEqual(
+        { checked: refresh.data.checked, successful: refresh.data.successful, failed: refresh.data.failed },
+        { checked: 1, successful: 1, failed: 0 }
+      );
+      const cache = (await pool.query<{ report_status: string; sonicdicom_latest_document_id: string | null }>(
+        `select report_status, sonicdicom_latest_document_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`,
+        [appointmentId]
+      )).rows[0];
+      assert.deepEqual(cache, { report_status: "draft", sonicdicom_latest_document_id: "assigned-doctor-draft" });
+    } finally {
+      installDefaultSonicDicomReadersForTest();
+    }
+  });
+
   it("maps a trimmed case-insensitive SonicDICOM email when the RISpro username differs, while preserving the assigned doctor and schedules Final recheck near five minutes", async () => {
     guard();
     const date = addDays(84);
