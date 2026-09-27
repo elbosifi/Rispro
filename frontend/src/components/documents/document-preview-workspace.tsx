@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useState, type ReactNode } from "react";
 import { useLanguage } from "@/providers/language-provider";
 import type { TranslationKey } from "@/lib/i18n";
 import type { RequestDocument } from "@/lib/api-hooks";
+import { getRequestDocumentViewUrl } from "@/lib/api/documents-printing";
 import type { ProtocolDocumentAnnotation } from "@/types/api";
 import { DocumentAnnotationOverlay, type AnnotationTool } from "./document-annotation-overlay";
 
@@ -60,7 +61,7 @@ class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewE
 }
 
 function viewUrl(document: RequestDocument): string {
-  return `/api/documents/${document.id}/view`;
+  return getRequestDocumentViewUrl(document);
 }
 
 function previewKind(document: RequestDocument): "pdf" | "image" | "unsupported" {

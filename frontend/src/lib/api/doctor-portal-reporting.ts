@@ -640,10 +640,10 @@ export async function fetchReportingBoardMobileView(token: string, filters: Repo
   return api<ReportingBoardMobileResponse>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile${query ? `?${query}` : ""}`);
 }
 
-export async function fetchReportingBoardMobileCase(token: string, appointmentId: number, filters: ReportingBoardFilters = {}): Promise<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }> {
+export async function fetchReportingBoardMobileCase(token: string, caseId: number, filters: ReportingBoardFilters = {}): Promise<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }> {
   const params = reportingBoardParams(filters);
   const query = params.toString();
-  return api<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/cases/${appointmentId}${query ? `?${query}` : ""}`);
+  return api<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/cases/${caseId}${query ? `?${query}` : ""}`);
 }
 
 export async function fetchReportingBoardMobilePushConfig(token: string): Promise<ReportingBoardPushConfig> {

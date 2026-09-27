@@ -136,6 +136,9 @@ vi.mock("@/pages/doctor/doctor-page", () => ({
 vi.mock("@/pages/doctor/reporting-board-mobile-page", () => ({
   ReportingBoardMobilePage: () => <TestPage testId="reporting-board-mobile-page" label="Reporting Board Mobile Page" />,
 }));
+vi.mock("@/pages/doctor/reporting-worklist-documents-page", () => ({
+  ReportingWorklistDocumentsPage: () => <TestPage testId="reporting-worklist-documents-page" label="Reporting Worklist Documents Page" />,
+}));
 vi.mock("@/pages/print/print-page", () => ({
   default: () => <TestPage testId="print-page" label="Print Page" />,
 }));
@@ -246,6 +249,19 @@ describe("App route behavior", () => {
     expect(await screen.findByTestId("teaching-application")).toBeTruthy();
     expect(screen.queryByTestId("dashboard-page")).toBeNull();
     expect(screen.queryByRole("navigation", { name: "RISpro navigation" })).toBeNull();
+  });
+
+  it("protects and routes the contextual Personal Reporting Desk documents page", async () => {
+    testState.user = null;
+    renderAppAt("/reporting/worklist/token/cases/42/documents");
+
+    expect(await screen.findByTestId("login-page")).toBeTruthy();
+    expect(screen.queryByTestId("reporting-worklist-documents-page")).toBeNull();
+
+    cleanup();
+    testState.user = { id: 1, username: "reception", fullName: "Reception User", role: "receptionist" };
+    renderAppAt("/reporting/worklist/token/cases/42/documents");
+    expect(await screen.findByTestId("reporting-worklist-documents-page")).toBeTruthy();
   });
 
   it("uses English/LTR in Teaching and restores the active Arabic RISpro direction after leaving", async () => {

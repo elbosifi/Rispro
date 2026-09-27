@@ -8,6 +8,7 @@ import {
   deleteAppointmentDocument,
   fetchIntegrationStatus,
   listAppointmentDocuments,
+  listReportingBoardAppointmentDocuments,
   mapRequestDocument,
   fetchRequestDocumentProtocolPolicy,
   prepareScanSession,
@@ -33,6 +34,15 @@ describe("documents and printing API contracts", () => {
     vi.mocked(api).mockResolvedValueOnce({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
     await expect(fetchRequestDocumentProtocolPolicy(42)).resolves.toEqual({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
     expect(api).toHaveBeenCalledWith("/documents/protocol-eligibility-policy?appointmentId=42");
+  });
+
+  it("lists Reporting Desk documents and assigns a token and case scoped view URL", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ documents: [{ id: 12, original_filename: "request.pdf", v2_booking_id: 8 }] });
+
+    const documents = await listReportingBoardAppointmentDocuments("work list/token", 8);
+
+    expect(api).toHaveBeenCalledWith("/reporting/saved-views/public/work%20list%2Ftoken/mobile/cases/8/documents");
+    expect(documents[0]?.viewUrl).toBe("/reporting/saved-views/public/work%20list%2Ftoken/mobile/cases/8/documents/12/view");
   });
 
   it("preserves scan integration and administrative storage routes", async () => {

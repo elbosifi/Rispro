@@ -2374,6 +2374,133 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.notEqual(firstComparison, targetComparison);
   });
 
+  it("returns case-scoped protocol details only to an authorized appointment worklist reader", async () => {
+    guard();
+    const date = addDays(9);
+    const label = uniq("mobile_protocol_detail");
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} appointment` });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    statusByAppointmentId.set(appointmentId, "draft");
+    await statusByAppointmentId.flush();
+    await pool.query(
+      `insert into appointment_protocol_assignments (appointment_id, protocol_id, protocol_version_id, scanner_id, assigned_by, assigned_at, protocol_notes, contrast_notes, free_text_protocol, status)
+       values ($1, null, null, null, $2, now(), $3, $4, $5, 'ASSIGNED')`,
+      [appointmentId, doctor.id, `${label} protocol notes`, `${label} contrast notes`, `${label} free text`]
+    );
+    const worklist = await getDoctorWorklist(doctor, false);
+    const path = `/api/reporting/saved-views/public/${worklist.token}/mobile/cases/${appointmentId}`;
+
+    const owner = await api<{ case: Record<string, unknown> & { protocolAssignment?: Record<string, unknown> | null }; allowedActions: { authenticated: boolean; readOnly: boolean } }>(doctor.cookie, path);
+    assert.equal(owner.status, 200, JSON.stringify(owner.data));
+    assert.equal(owner.data.allowedActions.authenticated, true);
+    assert.equal(owner.data.allowedActions.readOnly, false);
+    assert.equal(owner.data.case.appointmentId, appointmentId);
+    assert.equal(owner.data.case.protocolAssignment?.freeTextProtocol, `${label} free text`);
+    assert.equal(owner.data.case.protocolAssignment?.protocolNotes, `${label} protocol notes`);
+    assert.equal(owner.data.case.protocolAssignment?.contrastNotes, `${label} contrast notes`);
+    assert.equal(typeof owner.data.case.protocolAssignment?.assignedByName, "string");
+    assert.equal("assignedBy" in (owner.data.case.protocolAssignment ?? {}), false);
+
+    const manager = await api<{ case: { protocolAssignment?: Record<string, unknown> | null }; allowedActions: { readOnly: boolean } }>(supervisor.cookie, path);
+    assert.equal(manager.status, 200, JSON.stringify(manager.data));
+    assert.equal(manager.data.allowedActions.readOnly, false);
+    assert.equal(manager.data.case.protocolAssignment?.freeTextProtocol, `${label} free text`);
+
+    const anonymous = await api<{ case: Record<string, unknown> }>("", path);
+    assert.equal(anonymous.status, 200, JSON.stringify(anonymous.data));
+    assert.equal("protocolAssignment" in anonymous.data.case, false);
+    assert.equal(JSON.stringify(anonymous.data.case).includes(`${label} free text`), false);
+
+    const wrongDoctor = await api<{ case: Record<string, unknown>; allowedActions: { authenticated: boolean; readOnly: boolean } }>(otherDoctor.cookie, path);
+    assert.equal(wrongDoctor.status, 200, JSON.stringify(wrongDoctor.data));
+    assert.equal(wrongDoctor.data.allowedActions.authenticated, true);
+    assert.equal(wrongDoctor.data.allowedActions.readOnly, true);
+    assert.equal("protocolAssignment" in wrongDoctor.data.case, false);
+
+    const priorId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(8), patientName: `${label} comparison prior` });
+    statusByAppointmentId.set(priorId, "draft");
+    await statusByAppointmentId.flush();
+    const comparisonId = await createComparisonRequestForBooking(priorId, `${date}T08:00:00.000Z`, `${label} comparison`);
+    const comparisonView = await createSavedView(admin, false, { q: label });
+    const comparison = await reportingBoardService.getPublicReportingBoardMobileCase(
+      { userId: supervisor.id, appRole: "supervisor" },
+      comparisonView.token,
+      { caseType: "comparison", comparisonRequestId: comparisonId },
+    );
+    assert.equal(comparison.case.caseType, "comparison");
+    assert.equal("protocolAssignment" in comparison.case, false);
+  });
+
+  it("scopes Reporting Desk document listing and viewing to authorized appointment cases", async () => {
+    guard();
+    const date = addDays(9);
+    const label = uniq("mobile_documents_scope");
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} owner` });
+    const outsideAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} outside` });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    await assignDirectly(outsideAppointmentId, otherDoctor.doctorId);
+    statusByAppointmentId.set(appointmentId, "draft");
+    statusByAppointmentId.set(outsideAppointmentId, "draft");
+    await statusByAppointmentId.flush();
+
+    const createDocument = async (bookingId: number, filename: string, body: string): Promise<number> => {
+      const content = Buffer.from(body);
+      const contentSha256 = createHash("sha256").update(content).digest("hex");
+      const result = await pool.query<{ id: string }>(
+        `insert into documents (patient_id, v2_booking_id, document_type, original_filename, stored_path, mime_type, file_size, content_sha256, storage_location_type, source)
+         select patient_id, $2, 'appointment_request', $3, $4, 'application/pdf', $5, $6, 'local_fallback', 'manual_upload'
+         from appointments_v2.bookings where id = $1 returning id::text as id`,
+        [bookingId, bookingId, filename, `missing-${randomUUID()}.pdf`, content.length, contentSha256]
+      );
+      const documentId = Number(result.rows[0].id);
+      await pool.query(
+        `insert into document_ha_blobs (document_id, content, byte_size, content_sha256, retention_due_at)
+         values ($1, $2, $3, $4, now() + interval '48 hours')`,
+        [documentId, content, content.length, contentSha256]
+      );
+      return documentId;
+    };
+
+    const documentBody = `${label} authorized document`;
+    const documentId = await createDocument(appointmentId, `${label}.pdf`, documentBody);
+    const otherDocumentId = await createDocument(outsideAppointmentId, `${label}-outside.pdf`, `${label} outside document`);
+    const worklist = await getDoctorWorklist(doctor, false);
+    const basePath = `/api/reporting/saved-views/public/${worklist.token}/mobile/cases`;
+    const listPath = (caseId: number) => `${basePath}/${caseId}/documents`;
+    const viewPath = (caseId: number, id: number) => `${basePath}/${caseId}/documents/${id}/view`;
+
+    try {
+      const ownerList = await api<{ documents: Array<{ id: number }> }>(doctor.cookie, listPath(appointmentId));
+      assert.equal(ownerList.status, 200, JSON.stringify(ownerList.data));
+      assert.deepEqual(ownerList.data.documents.map((document) => document.id), [documentId]);
+      for (const manager of [supervisor, admin]) {
+        const managerList = await api<{ documents: Array<{ id: number }> }>(manager.cookie, listPath(appointmentId));
+        assert.equal(managerList.status, 200, JSON.stringify(managerList.data));
+        assert.deepEqual(managerList.data.documents.map((document) => document.id), [documentId]);
+      }
+      assert.equal((await api("", listPath(appointmentId))).status, 401);
+      assert.equal((await api(otherDoctor.cookie, listPath(appointmentId))).status, 403);
+      assert.equal((await api(doctor.cookie, listPath(outsideAppointmentId))).status, 404);
+
+      const comparisonPriorId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} comparison prior` });
+      const comparisonRequestId = await createComparisonRequestForBooking(comparisonPriorId, `${date}T08:00:00.000Z`, `${label} comparison`);
+      const comparisonView = await createSavedView(admin, false, { q: label, caseSource: "comparisons" });
+      assert.equal((await api(supervisor.cookie, `/api/reporting/saved-views/public/${comparisonView.token}/mobile/cases/${comparisonRequestId}/documents`)).status, 404);
+
+      for (const reader of [doctor, supervisor, admin]) {
+        const response = await rawApi(reader.cookie, viewPath(appointmentId, documentId));
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), documentBody);
+      }
+      assert.equal((await rawApi("", viewPath(appointmentId, documentId))).status, 401);
+      assert.equal((await rawApi(otherDoctor.cookie, viewPath(appointmentId, documentId))).status, 403);
+      assert.equal((await rawApi(doctor.cookie, viewPath(outsideAppointmentId, otherDocumentId))).status, 404);
+      assert.equal((await rawApi(doctor.cookie, viewPath(appointmentId, otherDocumentId))).status, 404);
+    } finally {
+      await pool.query("delete from documents where id = any($1::bigint[])", [[documentId, otherDocumentId]]);
+    }
+  });
+
   it("rejects mobile reassignment and unassignment outside a restrictive saved-view case source", async () => {
     guard();
     const date = addDays(8);

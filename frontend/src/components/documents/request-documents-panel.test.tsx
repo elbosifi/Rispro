@@ -8,6 +8,7 @@ import { RequestDocumentsPanel } from "./request-documents-panel";
 import { saveWorkstationNaps2Settings, WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
 
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(async () => []);
+const mockListReportingDeskDocuments = vi.fn<(token: string, caseId: number) => Promise<unknown[]>>(async () => []);
 const mockFetchRequestDocumentProtocolPolicy = vi.fn<
   (appointmentId?: number) => Promise<{ requireRequestDocumentForProtocolQueue: boolean; protocolQueueAppliesToAppointment: boolean | null; hasQualifyingRequestDocument: boolean | null }>
 >(async () => ({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null }));
@@ -97,6 +98,11 @@ vi.mock("@/lib/api-hooks", () => ({
   deleteProtocolDocumentAnnotation: (documentId: number, annotationId: number) => mockDeleteProtocolDocumentAnnotation(documentId, annotationId),
 }));
 
+vi.mock("@/lib/api/documents-printing", () => ({
+  listReportingBoardAppointmentDocuments: (token: string, caseId: number) => mockListReportingDeskDocuments(token, caseId),
+  getRequestDocumentViewUrl: (document: { id: number; viewUrl?: string }) => document.viewUrl ?? `/api/documents/${document.id}/view`,
+}));
+
 vi.mock("@/lib/toast", () => ({ pushToast: mockPushToast }));
 vi.mock("@/services/printing/direct-print-service", () => ({ directPrint: (...args: unknown[]) => mockDirectPrint(...args) }));
 vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => mockLoadQzPrinterSettings() }));
@@ -105,7 +111,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document"; reportingBoardScope?: { token: string; caseId: number } } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -138,6 +144,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           readOnly={options.readOnly}
           onDocumentsChanged={options.onDocumentsChanged}
           newDocumentType={options.newDocumentType}
+          reportingBoardScope={options.reportingBoardScope}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -232,6 +239,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     localStorage.removeItem(WORKSTATION_NAPS2_SETTINGS_KEY);
     setMobileViewport(false);
     mockListAppointmentDocuments.mockReset();
+    mockListReportingDeskDocuments.mockReset().mockResolvedValue([]);
     mockFetchRequestDocumentProtocolPolicy.mockReset();
     mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     mockUploadAppointmentDocument.mockReset();
@@ -311,6 +319,18 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanSessionExpiryMinutes: "15",
       },
     });
+  });
+
+  it("uses scoped Reporting Desk list and view URLs without querying the generic protocol policy", async () => {
+    const document = { ...documentFixture(12, "scan.tiff", "image/tiff"), viewUrl: "/reporting/saved-views/public/token/mobile/cases/42/documents/12/view" };
+    mockListReportingDeskDocuments.mockResolvedValue([document]);
+
+    renderPanel({ previewMode: "inline", readOnly: true, reportingBoardScope: { token: "token", caseId: 42 } });
+
+    expect((await screen.findByRole("link", { name: "Open in new tab" })).getAttribute("href")).toBe(document.viewUrl);
+    expect(mockListReportingDeskDocuments).toHaveBeenCalledWith("token", 42);
+    expect(mockListAppointmentDocuments).not.toHaveBeenCalled();
+    expect(mockFetchRequestDocumentProtocolPolicy).not.toHaveBeenCalled();
   });
 
   it("prepares scan and uploads a NAPS2 scanned appointment request through existing document upload API", async () => {

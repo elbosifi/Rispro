@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -11,6 +11,7 @@ const testState = vi.hoisted(() => ({
   user: null as User | null,
   authLoading: false,
   fetchView: vi.fn(),
+  fetchCase: vi.fn(),
   fetchActiveRecall: vi.fn(),
   createRecall: vi.fn(),
   withdrawRecall: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock("@/lib/api-hooks", () => ({
   unsubscribeReportingBoardMobilePush: testState.unsubscribe,
   withdrawReportingBoardComplementaryRecall: testState.withdrawRecall,
 }));
+vi.mock("@/lib/api/doctor-portal-reporting", () => ({ fetchReportingBoardMobileCase: testState.fetchCase }));
 
 function viewData(): ReportingBoardMobileResponse {
   return {
@@ -163,6 +165,7 @@ describe("Personal Reporting Desk authentication and current-device notification
     testState.user = { id: 7, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.authLoading = false;
     testState.fetchView.mockResolvedValue(viewData());
+    testState.fetchCase.mockResolvedValue(scopedCaseResponse(makeCase()));
     testState.fetchActiveRecall.mockResolvedValue(null);
     testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
     testState.withdrawRecall.mockResolvedValue({ id: 101, status: "cancelled", recallAppointmentId: null });
@@ -409,10 +412,21 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
   };
 }
 
+function scopedCaseResponse(row: ReportingBoardMobileCase, allowedActions: Partial<ReportingBoardMobileResponse["allowedActions"]> = {}) {
+  const view = viewData();
+  return {
+    case: row,
+    savedView: view.savedView,
+    allowedActions: { ...view.allowedActions, ...allowedActions },
+    refreshedAt: "2026-09-02T00:00:00.000Z",
+  };
+}
+
 describe("Personal Reporting Desk case presentation", () => {
   beforeEach(() => {
     testState.user = { id: 501, username: "reporter", fullName: "Dr Reader", role: "doctor" };
     testState.fetchView.mockResolvedValue(viewData());
+    testState.fetchCase.mockResolvedValue(scopedCaseResponse(makeCase()));
     testState.fetchActiveRecall.mockResolvedValue(null);
     testState.createRecall.mockResolvedValue({ id: 101, status: "pending_scheduling", recallAppointmentId: null });
     testState.withdrawRecall.mockResolvedValue({ id: 101, status: "cancelled", recallAppointmentId: null });
@@ -911,6 +925,7 @@ describe("Personal Reporting Desk case presentation", () => {
     firstRender.unmount();
 
     testState.fetchView.mockResolvedValue({ ...viewData(), cases: [makeCase({ requiresReport: false, exclusionReason: "report_not_required" })] });
+    testState.fetchCase.mockResolvedValue(scopedCaseResponse(makeCase()));
     renderPage();
     await screen.findByText("Patient One");
     fireEvent.click(screen.getByRole("button", { name: "Open case details for Patient One" }));
@@ -923,6 +938,88 @@ describe("Personal Reporting Desk case presentation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
     return screen.getByRole("dialog");
   }
+
+  it("fetches scoped appointment details and shows full free-text protocol plus the new-tab documents action", async () => {
+    const row = makeCase({ modality: "MR" });
+    const protocolAssignment = {
+      protocolName: null, versionNumber: null, scannerName: "MRI 1", protocolNotes: "Use thin slices.",
+      contrastNotes: "No contrast.", freeTextProtocol: "Axial T1\nCoronal T2", assignedByName: "Dr Protocol Author",
+      assignedAt: "2026-09-01T08:15:00.000Z",
+    };
+    testState.fetchCase.mockResolvedValue(scopedCaseResponse({ ...row, protocolAssignment }));
+    await openCaseDetails(row);
+
+    expect(testState.fetchCase).toHaveBeenCalledWith("token", 42, expect.any(Object));
+    expect(await screen.findByRole("region", { name: "Protocol" })).toBeTruthy();
+    const protocolText = screen.getByText((_content, element) => element?.textContent === "Axial T1\nCoronal T2");
+    expect(protocolText.className).toContain("whitespace-pre-wrap");
+    expect(screen.getByText("Protocol by: Dr Protocol Author")).toBeTruthy();
+    expect(screen.getByText(/Protocolled:/)).toBeTruthy();
+    expect(screen.getByText("Scanner: MRI 1")).toBeTruthy();
+    expect(screen.getByText("Protocol instructions: Use thin slices.")).toBeTruthy();
+    expect(screen.getByText("Contrast instructions: No contrast.")).toBeTruthy();
+    const documentsLink = screen.getByRole("link", { name: "Request & clinical documents" });
+    expect(documentsLink.getAttribute("href")).toBe("/reporting/worklist/token/cases/42/documents");
+    expect(documentsLink.getAttribute("target")).toBe("_blank");
+  });
+
+  it("shows saved protocol metadata and a discreet no-protocol state", async () => {
+    const savedRow = makeCase({ modality: "CT" });
+    testState.fetchCase.mockResolvedValueOnce(scopedCaseResponse({ ...savedRow, protocolAssignment: {
+      protocolName: "Chest CT", versionNumber: "4", scannerName: "CT A", protocolNotes: "Routine chest.",
+      contrastNotes: null, freeTextProtocol: null, assignedByName: "Dr Protocol Author", assignedAt: "2026-09-01T08:15:00.000Z",
+    } }));
+    await openCaseDetails(savedRow);
+
+    expect(await screen.findByText((_content, element) => element?.textContent === "Chest CT v4")).toBeTruthy();
+    expect(screen.getByText("Scanner: CT A")).toBeTruthy();
+    expect(screen.getByText("Protocol instructions: Routine chest.")).toBeTruthy();
+    expect(screen.getByText("Protocol by: Dr Protocol Author")).toBeTruthy();
+    expect(screen.getByText(/Protocolled:/)).toBeTruthy();
+
+    cleanup();
+    const noProtocolRow = makeCase({ modality: "MRI" });
+    testState.fetchView.mockResolvedValue({ ...viewData(), cases: [noProtocolRow] });
+    testState.fetchCase.mockResolvedValue(scopedCaseResponse({ ...noProtocolRow, protocolAssignment: null }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    expect(await screen.findByText("No protocol assigned.")).toBeTruthy();
+  });
+
+  it("keeps case actions available when the scoped protocol-detail request fails", async () => {
+    testState.fetchCase.mockRejectedValue(new Error("Protocol detail unavailable"));
+    const view = await openCaseDetails(makeCase());
+
+    expect(await within(view).findByText("Protocol details unavailable.")).toBeTruthy();
+    expect(within(view).getByRole("button", { name: "Mark final in RISpro" })).toBeTruthy();
+    expect(within(view).getByRole("link", { name: "Request & clinical documents" })).toBeTruthy();
+    await userEvent.click(within(view).getByRole("button", { name: "Mark final in RISpro" }));
+    expect(await screen.findByRole("heading", { name: "Mark case final in RISpro" })).toBeTruthy();
+  });
+
+  it("does not request or show protocol details or documents for comparison, anonymous, or read-only cases", async () => {
+    const comparison = makeCase({ caseType: "comparison", caseKey: "comparison:9", appointmentId: 0, comparisonRequestId: 9 });
+    await openCaseDetails(comparison);
+    expect(testState.fetchCase).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Protocol" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Request & clinical documents" })).toBeNull();
+
+    cleanup();
+    testState.fetchView.mockResolvedValue({ ...viewData(), allowedActions: { ...viewData().allowedActions, authenticated: false, readOnly: true }, cases: [makeCase()] });
+    testState.user = null;
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open case details for Patient One" }));
+    expect(screen.queryByRole("region", { name: "Protocol" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Request & clinical documents" })).toBeNull();
+    expect(testState.fetchCase).not.toHaveBeenCalled();
+
+    cleanup();
+    testState.user = { id: 8, username: "other", fullName: "Dr Other", role: "doctor" };
+    await openCaseDetails(makeCase(), { readOnly: true });
+    expect(screen.queryByRole("region", { name: "Protocol" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Request & clinical documents" })).toBeNull();
+    expect(testState.fetchCase).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["available", makeCase({ assignedDoctor: null, assignedDoctorId: null, assignmentStatus: "unassigned", canAssignToMe: true }), true, {}],

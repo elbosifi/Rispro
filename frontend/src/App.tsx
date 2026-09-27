@@ -33,6 +33,7 @@ import ComparisonsPage from "@/pages/comparisons/comparisons-page";
 import IrReferralDetailPage from "@/pages/comparisons/ir-referral-detail-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
+import { ReportingWorklistDocumentsPage } from "@/pages/doctor/reporting-worklist-documents-page";
 import PrintPage from "@/pages/print/print-page";
 import DayListPrintPage from "@/pages/print/day-list-print-page";
 import ReportingBoardPrintPage from "@/pages/print/reporting-board-print-page";
@@ -416,6 +417,7 @@ function RouterConfig() {
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
+      <Route path="/reporting/worklist/:token/cases/:caseId/documents" element={<ProtectedRoute><EnglishOnlyRoute><ReportingWorklistDocumentsPage /></EnglishOnlyRoute></ProtectedRoute>} />
       <Route path="/mobile/reporting-view/:token" element={<LegacyReportingWorklistRedirect />} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />

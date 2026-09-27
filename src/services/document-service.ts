@@ -367,6 +367,23 @@ export async function getDocumentById(documentId: UserId, executor: DocumentData
   return document;
 }
 
+export async function getDocumentByIdForV2Booking(
+  documentId: UserId,
+  bookingId: UserId,
+  executor: DocumentDatabaseExecutor = pool
+): Promise<DocumentRow> {
+  const document = await getDocumentById(documentId, executor);
+  const cleanBookingId = normalizePositiveInteger(bookingId, "appointmentId");
+  if (document.v2_booking_id != null && Number(document.v2_booking_id) === cleanBookingId) return document;
+
+  const { rows } = await executor.query(
+    `select 1 from document_appointment_links where document_id = $1 and appointment_id = $2 limit 1`,
+    [document.id, cleanBookingId]
+  );
+  if (!rows.length) throw new HttpError(404, "Document not found.");
+  return document;
+}
+
 export function getDocumentAbsolutePath(document: { stored_path?: string }): string {
   return resolveStoredPath(document.stored_path);
 }

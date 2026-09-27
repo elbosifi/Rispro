@@ -18,6 +18,7 @@ import {
   type AppointmentRefType,
   type RequestDocument,
 } from "@/lib/api-hooks";
+import { getRequestDocumentViewUrl, listReportingBoardAppointmentDocuments } from "@/lib/api/documents-printing";
 import type { ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType } from "@/types/api";
 import type { AnnotationTool } from "./document-annotation-overlay";
 import { scanAppointmentRequest } from "@/lib/naps2-webscan";
@@ -65,6 +66,7 @@ interface RequestDocumentsPanelProps {
   readOnly?: boolean;
   onDocumentsChanged?: () => void;
   newDocumentType?: "appointment_request" | "clinical_document";
+  reportingBoardScope?: { token: string; caseId: number };
 }
 
 export function RequestDocumentsPanel({
@@ -89,6 +91,7 @@ export function RequestDocumentsPanel({
   readOnly = false,
   onDocumentsChanged,
   newDocumentType = "appointment_request",
+  reportingBoardScope,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -126,7 +129,7 @@ export function RequestDocumentsPanel({
     setPrintingDocumentId(document.id);
     try {
       const settings = loadQzPrinterSettings();
-      const browserFallback = () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") != null;
+      const browserFallback = () => window.open(getRequestDocumentViewUrl(document), "_blank", "noopener,noreferrer") != null;
       const showBrowserPrintBlocked = () => pushToast({ type: "error", title: t("print.browserBlocked"), message: t("print.browserBlockedMessage"), placement: "center" }, 10_000);
       if (shouldUseBrowserPrint(settings, profile)) { if (!browserFallback()) showBrowserPrintBlocked(); return; }
       const directProfile = settings.profiles?.find((item) => item.documentType === profile);
@@ -163,18 +166,22 @@ export function RequestDocumentsPanel({
   }, []);
 
   const queryKey = useMemo(
-    () => ["appointment-documents", appointmentRefType, appointmentId],
-    [appointmentId, appointmentRefType]
+    () => reportingBoardScope
+      ? ["reporting-board-appointment-documents", reportingBoardScope.token, reportingBoardScope.caseId]
+      : ["appointment-documents", appointmentRefType, appointmentId],
+    [appointmentId, appointmentRefType, reportingBoardScope?.token, reportingBoardScope?.caseId]
   );
   const { data: documents = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => listAppointmentDocuments(appointmentId, appointmentRefType),
+    queryFn: () => reportingBoardScope
+      ? listReportingBoardAppointmentDocuments(reportingBoardScope.token, reportingBoardScope.caseId)
+      : listAppointmentDocuments(appointmentId, appointmentRefType),
     enabled: Number.isFinite(appointmentId) && appointmentId > 0,
   });
   const { data: protocolPolicy } = useQuery({
     queryKey: ["documents", "protocol-eligibility-policy", appointmentId],
     queryFn: () => fetchRequestDocumentProtocolPolicy(appointmentId),
-    enabled: Number.isFinite(appointmentId) && appointmentId > 0,
+    enabled: !reportingBoardScope && Number.isFinite(appointmentId) && appointmentId > 0,
     staleTime: 60_000,
   });
   const hasQualifyingRequestDocument = protocolPolicy?.hasQualifyingRequestDocument === true;
@@ -979,7 +986,7 @@ export function RequestDocumentsPanel({
                     </button>
                   ) : (
                     <a
-                      href={`/api/documents/${doc.id}/view`}
+                      href={getRequestDocumentViewUrl(doc)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="rounded bg-stone-100 px-2 py-1 text-xs dark:bg-stone-700"
@@ -1019,7 +1026,7 @@ export function RequestDocumentsPanel({
               <div className="text-sm font-semibold">{selectedPreview.originalFilename}</div>
               <div className="flex gap-2">
                 <a
-                  href={`/api/documents/${selectedPreview.id}/view`}
+                  href={getRequestDocumentViewUrl(selectedPreview)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"

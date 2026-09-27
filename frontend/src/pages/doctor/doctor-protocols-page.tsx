@@ -1909,7 +1909,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
         <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
         <label className="text-sm font-medium">Appointment status<select value={appointmentStatus} onChange={(event) => setAppointmentStatus(event.target.value as "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All statuses</option><option value="scheduled">Scheduled</option><option value="arrived">Arrived</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="no-show">No-show</option></select></label>
         <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={waitingFirst} onCheckedChange={(value) => setWaitingFirst(Boolean(value))} disabled={appointmentStatus !== ""} />Waiting patients first</label>
-        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearchValue(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
+        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearchValue(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Name, MRN, Primary ID, accession, phone, exam…" /></label>
       </section> : null}
 
       {!canAssign ? null : appointmentsQuery.isLoading ? (
@@ -1961,7 +1961,15 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
                 </div>
               </Cell>
               <Cell><div className="flex flex-wrap items-center gap-1"><ProtocolStatusBadge assigned={appointment.assignment !== null} />{appointment.latestComplementaryRecall ? <Badge variant={appointment.latestComplementaryRecall.status === "completed" ? "success" : appointment.latestComplementaryRecall.status === "cancelled" ? "neutral" : appointment.latestComplementaryRecall.status === "pending_scheduling" ? "warning" : "info"} size="sm" className={appointment.latestComplementaryRecall.status === "pending_scheduling" ? "border-amber-300 bg-amber-50 text-amber-800" : ""}>{appointment.latestComplementaryRecall.status === "pending_scheduling" ? "Additional imaging pending · Needs booking" : appointment.latestComplementaryRecall.status === "scheduled" ? "Additional imaging pending · Scheduled" : appointment.latestComplementaryRecall.status === "completed" ? "Additional imaging completed" : "Additional imaging withdrawn"}</Badge> : null}{appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreeningResult} /> : null}</div></Cell>
-              <Cell>{appointment.assignment ? (appointment.assignment.freeTextProtocol ? "Free-text protocol" : `${appointment.assignment.protocolName ?? "Saved protocol"} v${appointment.assignment.versionNumber ?? "-"}`) + (appointment.assignment.scannerName ? ` · Protocol scanner: ${appointment.assignment.scannerName}` : "") : "-"}</Cell>
+              <Cell>{appointment.assignment ? <>
+                <div>{(appointment.assignment.freeTextProtocol ? "Free-text protocol" : `${appointment.assignment.protocolName ?? "Saved protocol"} v${appointment.assignment.versionNumber ?? "-"}`) + (appointment.assignment.scannerName ? ` · Protocol scanner: ${appointment.assignment.scannerName}` : "")}</div>
+                {(() => {
+                  const author = appointment.assignment.assignedByName?.trim();
+                  const assignedAt = appointment.assignment.assignedAt ? formatDateTimeLy(appointment.assignment.assignedAt) : null;
+                  const attribution = [author ? `Protocol by ${author}` : null, assignedAt ? (author ? assignedAt : `Protocolled ${assignedAt}`) : null].filter(Boolean).join(" · ");
+                  return attribution ? <div className="mt-0.5 text-[11px] text-muted-foreground">{attribution}</div> : null;
+                })()}
+              </> : "-"}</Cell>
               <Cell>{appointment.acquisitionSummary?.equipmentName ? <p data-testid="protocoling-performed-acquisition" className="mb-1 max-w-[13rem] truncate text-[11px] text-muted-foreground" title={appointment.acquisitionSummary.equipmentName}>{`Performed on: ${appointment.acquisitionSummary.equipmentName}${appointment.acquisitionSummary.durationSeconds != null ? ` · ${Math.floor(appointment.acquisitionSummary.durationSeconds / 60)} min` : ""}`}</p> : null}<button type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
             </tr>
           ))}
@@ -2870,6 +2878,8 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
   const assignmentDetail = detail.assignmentDetail;
   if (!assignmentDetail) return null;
   const assignment = assignmentDetail.assignment;
+  const assignedByName = assignment.assignedByName?.trim() || null;
+  const assignedAt = assignment.assignedAt ? formatDateTimeLy(assignment.assignedAt) : null;
   const hasCtPhases = detail.appointment.modalityCode === "CT" && assignmentDetail.ctPhases.length > 0;
   const hasMriSequences = detail.appointment.modalityCode !== "CT" && assignmentDetail.mriSequences.length > 0;
 
@@ -2877,6 +2887,7 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
     <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
       <h4 className="font-semibold">Assigned protocol summary</h4>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{assignment.freeTextProtocol ? "Free-text protocol" : `${assignment.protocolName ?? "Saved protocol"} v${assignment.versionNumber ?? "-"}`}{assignment.scannerName ? ` · ${assignment.scannerName}` : ""}</p>
+      {assignedByName || assignedAt ? <div className="mt-1 space-y-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{assignedByName ? <p>Protocol by: {assignedByName}</p> : null}{assignedAt ? <p>Protocolled: {assignedAt}</p> : null}</div> : null}
       {assignment.freeTextProtocol && <p className="mt-2 whitespace-pre-wrap text-sm">{assignment.freeTextProtocol}</p>}
       {assignment.protocolNotes && <p className="mt-2 text-sm">Protocol instructions: {assignment.protocolNotes}</p>}
       {assignment.contrastNotes && <p className="mt-1 text-sm">Contrast instructions: {assignment.contrastNotes}</p>}

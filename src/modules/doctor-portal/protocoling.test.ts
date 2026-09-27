@@ -149,8 +149,11 @@ describe("Doctor Portal protocoling worklist backend", () => {
     const queries: Array<{ sql: string; params: unknown[] }> = [];
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
       if (String(sql).includes("system_settings")) return { rows: [] };
-      queries.push({ sql, params: params ?? [] });
-      return { rows: [protocolingAppointmentRow({ modality_code: "MRI" })] };
+      if (String(sql).includes("as accession_number")) {
+        queries.push({ sql, params: params ?? [] });
+        return { rows: [protocolingAppointmentRow({ modality_code: "MRI" })] };
+      }
+      return { rows: [] };
     });
 
     try {
@@ -175,8 +178,11 @@ describe("Doctor Portal protocoling worklist backend", () => {
     const queries: Array<{ sql: string; params: unknown[] }> = [];
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
       if (String(sql).includes("system_settings")) return { rows: [] };
-      queries.push({ sql, params: params ?? [] });
-      return { rows: [protocolingAppointmentRow()] };
+      if (String(sql).includes("as accession_number")) {
+        queries.push({ sql, params: params ?? [] });
+        return { rows: [protocolingAppointmentRow()] };
+      }
+      return { rows: [] };
     });
 
     try {
@@ -202,6 +208,119 @@ describe("Doctor Portal protocoling worklist backend", () => {
 
     assert.match(repo, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) as accession_number/);
     assert.match(repo, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) ilike/);
+  });
+
+  it("maps the resolved current protocol author and joins doctor then user names as fallbacks", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    const queries: string[] = [];
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string) => {
+      if (String(sql).includes("system_settings")) return { rows: [] };
+      queries.push(String(sql));
+      return { rows: [protocolingAppointmentRow({
+        assignment_id: 77,
+        protocol_id: 11,
+        protocol_version_id: 12,
+        protocol_name: "CT Abdomen",
+        version_number: "3",
+        assignment_status: "MODIFIED",
+        assigned_by: 9,
+        assigned_by_name: "Dr Protocol Author",
+        assigned_at: "2026-09-21T07:47:00.000Z",
+      })] };
+    });
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      const rows = await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03" });
+
+      assert.equal(rows[0]?.assignment?.assignedBy, 9);
+      assert.equal(rows[0]?.assignment?.assignedByName, "Dr Protocol Author");
+      assert.equal(rows[0]?.assignment?.assignedAt, "2026-09-21T07:47:00.000Z");
+      assert.match(queries[0]!, /left join users assigned_user on assigned_user\.id = assignment\.assigned_by/);
+      assert.match(queries[0]!, /left join doctor_portal\.doctor_profiles assigned_doctor on assigned_doctor\.user_id = assigned_user\.id/);
+      assert.match(queries[0]!, /coalesce\(\s*nullif\(trim\(assigned_doctor\.display_name\), ''\),\s*nullif\(trim\(assigned_user\.full_name\), ''\),\s*nullif\(trim\(assigned_user\.username\), ''\)\s*\) as assigned_by_name/);
+      assert.match(queries[0]!, /order by assignment\.updated_at desc, assignment\.id desc/);
+      assert.match(queries[0]!, /assignment\.status <> 'CANCELLED'/);
+    } finally {
+      queryMock.mock.restore();
+    }
+  });
+
+  it("searches canonical and legacy identifiers, phones, exam names, and any patient identifier without multiplying rows", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    let searchSql = "";
+    let searchParams: unknown[] = [];
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes("system_settings")) return { rows: [] };
+      if (String(sql).includes("as accession_number")) {
+        searchSql = String(sql);
+        searchParams = params ?? [];
+      }
+      return { rows: [] };
+    });
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", search: "  Patient  " });
+
+      assert.match(searchSql, /p\.english_full_name ilike/);
+      assert.match(searchSql, /p\.arabic_full_name ilike/);
+      assert.match(searchSql, /p\.mrn ilike/);
+      assert.match(searchSql, /primary_identifier\.value ilike/);
+      assert.match(searchSql, /p\.identifier_value ilike/);
+      assert.match(searchSql, /p\.national_id ilike/);
+      assert.match(searchSql, /exists \([\s\S]*?from patient_identifiers pi_search[\s\S]*?pi_search\.value ilike/);
+      assert.doesNotMatch(searchSql, /join patient_identifiers pi_search/i);
+      assert.match(searchSql, /p\.phone_1 ilike/);
+      assert.match(searchSql, /p\.phone_2 ilike/);
+      assert.match(searchSql, /et\.name_en ilike/);
+      assert.match(searchSql, /et\.name_ar ilike/);
+      assert.match(searchSql, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) ilike/);
+      assert.match(searchSql, /p\.english_full_name ilike \$3/);
+      assert.doesNotMatch(searchSql, /b\.id::text = \$3/);
+      assert.deepEqual(searchParams, ["2026-07-03", "2026-07-03", "%Patient%"]);
+    } finally {
+      queryMock.mock.restore();
+    }
+  });
+
+  it("uses a separate numeric booking ID parameter and normalized phone digits only when useful", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes("system_settings")) return { rows: [] };
+      queries.push({ sql: String(sql), params: params ?? [] });
+      return { rows: [] };
+    });
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", search: " 123 " });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", search: " 00123 " });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", search: " +218 (91) 2345 " });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", search: "MRN-123" });
+
+      assert.deepEqual(queries[0]!.params, ["2026-07-03", "2026-07-03", "%123%", 123]);
+      assert.match(queries[0]!.sql, /b\.id = \$4/);
+      assert.doesNotMatch(queries[0]!.sql, /b\.id::text = \$3/);
+      assert.deepEqual(queries[1]!.params, ["2026-07-03", "2026-07-03", "%00123%", 123, "%00123%"]);
+      assert.match(queries[1]!.sql, /b\.id = \$4/);
+      assert.match(queries[1]!.sql, /regexp_replace\(coalesce\(p\.phone_1, ''\), '\[\^0-9\]\+', '', 'g'\) like \$5/);
+      assert.deepEqual(queries[2]!.params, ["2026-07-03", "2026-07-03", "%+218 (91) 2345%", "%218912345%"]);
+      assert.match(queries[2]!.sql, /regexp_replace\(coalesce\(p\.phone_1, ''\), '\[\^0-9\]\+', '', 'g'\) like \$4/);
+      assert.match(queries[2]!.sql, /regexp_replace\(coalesce\(p\.phone_2, ''\), '\[\^0-9\]\+', '', 'g'\) like \$4/);
+      assert.doesNotMatch(queries[3]!.sql, /b\.id = \$\d+/);
+      assert.equal(queries[3]!.params.length, 3);
+      assert.ok(queries[3]!.params.every((value) => typeof value !== "number"));
+    } finally {
+      queryMock.mock.restore();
+    }
   });
 
   it("validates active protocol version, appointment modality, scanner modality, and single active assignment", () => {

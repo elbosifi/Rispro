@@ -959,6 +959,16 @@ export interface ReportingBoardMobileCase {
   sonicDicomStudyNote?: string | null;
   sonicDicomStudyNoteCheckedAt?: string | null;
   sonicDicomStudyNoteSource?: "sonicdicom" | null;
+  protocolAssignment?: {
+    protocolName: string | null;
+    versionNumber: string | null;
+    scannerName: string | null;
+    protocolNotes: string | null;
+    contrastNotes: string | null;
+    freeTextProtocol: string | null;
+    assignedByName: string | null;
+    assignedAt: string | null;
+  } | null;
 }
 
 export interface ReportingBoardMobileResponse {
@@ -1105,6 +1115,7 @@ export interface ProtocolAssignment {
   freeTextProtocol: string | null;
   status: ProtocolAssignmentStatus;
   assignedBy: number | null;
+  assignedByName?: string | null;
   assignedAt: string | null;
 }
 

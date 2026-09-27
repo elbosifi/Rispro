@@ -12,6 +12,8 @@ import { assignComparisonRequest, findComparisonRequestById, listComparisonRepor
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
+import { getProtocolingAppointmentDetail } from "./protocoling-repository.js";
+import { getDocumentByIdForV2Booking, listDocuments, type DocumentRow } from "../../services/document-service.js";
 import {
   bulkAssignReportingCases,
   bulkPlaceReportingBoardCaseHolds,
@@ -1769,7 +1771,74 @@ export async function getPublicReportingBoardMobileCase(actor: Actor | null, tok
       : row.caseType === "comparison" && row.comparisonRequestId === identity.comparisonRequestId
   );
   if (!found) throw new HttpError(404, "Case not found.");
-  return { savedView: view.savedView, case: found, allowedActions: view.allowedActions, refreshedAt: view.refreshedAt };
+  let caseWithScopedProtocol: typeof found & {
+    protocolAssignment?: {
+      protocolName: string | null;
+      versionNumber: string | null;
+      scannerName: string | null;
+      protocolNotes: string | null;
+      contrastNotes: string | null;
+      freeTextProtocol: string | null;
+      assignedByName: string | null;
+      assignedAt: string | null;
+    } | null;
+  } = found;
+  if (identity.caseType === "appointment" && view.allowedActions.authenticated && !view.allowedActions.readOnly) {
+    let protocolAssignment: {
+      protocolName: string | null;
+      versionNumber: string | null;
+      scannerName: string | null;
+      protocolNotes: string | null;
+      contrastNotes: string | null;
+      freeTextProtocol: string | null;
+      assignedByName: string | null;
+      assignedAt: string | null;
+    } | null = null;
+    if (["CT", "MR", "MRI"].includes(found.modality.trim().toUpperCase())) {
+      const detail = await getProtocolingAppointmentDetail(identity.appointmentId);
+      const assignment = detail?.appointment.assignment;
+      if (assignment) {
+        protocolAssignment = {
+          protocolName: assignment.protocolName,
+          versionNumber: assignment.versionNumber,
+          scannerName: assignment.scannerName,
+          protocolNotes: assignment.protocolNotes,
+          contrastNotes: assignment.contrastNotes,
+          freeTextProtocol: assignment.freeTextProtocol,
+          assignedByName: assignment.assignedByName,
+          assignedAt: assignment.assignedAt,
+        };
+      }
+    }
+    caseWithScopedProtocol = { ...found, protocolAssignment };
+  }
+  return { savedView: view.savedView, case: caseWithScopedProtocol, allowedActions: view.allowedActions, refreshedAt: view.refreshedAt };
+}
+
+async function requireReportingBoardAppointmentDocumentAccess(actor: Actor | null, token: string, appointmentId: number): Promise<void> {
+  if (!actor) throw new HttpError(401, "Authentication required.");
+  const scopedCase = await getPublicReportingBoardMobileCase(actor, token, { caseType: "appointment", appointmentId });
+  if (scopedCase.case.caseType !== "appointment" || scopedCase.case.appointmentId !== appointmentId) {
+    throw new HttpError(404, "Case not found.");
+  }
+  if (!scopedCase.allowedActions.authenticated || scopedCase.allowedActions.readOnly) {
+    throw new HttpError(403, "You are not allowed to view documents for this case.");
+  }
+}
+
+export async function listReportingBoardAppointmentDocuments(actor: Actor | null, token: string, appointmentId: number): Promise<DocumentRow[]> {
+  await requireReportingBoardAppointmentDocumentAccess(actor, token, appointmentId);
+  return listDocuments({ appointmentId, appointmentRefType: "v2_booking" });
+}
+
+export async function getReportingBoardAppointmentDocument(
+  actor: Actor | null,
+  token: string,
+  appointmentId: number,
+  documentId: number
+): Promise<DocumentRow> {
+  await requireReportingBoardAppointmentDocumentAccess(actor, token, appointmentId);
+  return getDocumentByIdForV2Booking(documentId, appointmentId);
 }
 
 async function ensureCaseInSavedViewScope(token: string, identity: MobileCaseIdentity): Promise<void> {

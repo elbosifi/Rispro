@@ -16,6 +16,7 @@ export interface ProtocolAssignmentSummary {
   freeTextProtocol: string | null;
   status: ProtocolAssignmentStatus;
   assignedBy: number | null;
+  assignedByName: string | null;
   assignedAt: string | null;
 }
 

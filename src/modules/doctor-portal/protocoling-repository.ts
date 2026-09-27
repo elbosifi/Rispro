@@ -101,6 +101,7 @@ function mapAssignment(row: RawRecord): ProtocolAssignmentSummary | null {
     freeTextProtocol: stringOrNull(row.free_text_protocol),
     status: String(row.assignment_status) as ProtocolAssignmentStatus,
     assignedBy: numberOrNull(row.assigned_by),
+    assignedByName: stringOrNull(row.assigned_by_name),
     assignedAt: stringOrNull(row.assigned_at),
   };
 }
@@ -232,6 +233,7 @@ const APPOINTMENT_SELECT = `
     apa.free_text_protocol,
     apa.status as assignment_status,
     apa.assigned_by,
+    apa.assigned_by_name,
     apa.assigned_at,
     recall.id as complementary_recall_id,
     recall.status as complementary_recall_status,
@@ -266,11 +268,18 @@ const APPOINTMENT_SELECT = `
       assignment.free_text_protocol,
       assignment.status,
       assignment.assigned_by,
+      coalesce(
+        nullif(trim(assigned_doctor.display_name), ''),
+        nullif(trim(assigned_user.full_name), ''),
+        nullif(trim(assigned_user.username), '')
+      ) as assigned_by_name,
       assignment.assigned_at
     from appointment_protocol_assignments assignment
     left join protocols protocol on protocol.id = assignment.protocol_id
     left join protocol_versions version on version.id = assignment.protocol_version_id
     left join equipment scanner on scanner.id = assignment.scanner_id
+    left join users assigned_user on assigned_user.id = assignment.assigned_by
+    left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.user_id = assigned_user.id
     where assignment.appointment_id = b.id
       and assignment.status <> 'CANCELLED'
     order by assignment.updated_at desc, assignment.id desc
@@ -317,15 +326,46 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
     values.push(filters.appointmentStatus);
     where.push(`b.status = $${values.length}`);
   }
-  if (filters.search) {
-    values.push(`%${filters.search}%`);
-    where.push(`(
-      p.english_full_name ilike $${values.length}
-      or p.arabic_full_name ilike $${values.length}
-      or p.mrn ilike $${values.length}
-      or ('V2-' || lpad(b.id::text, 6, '0')) ilike $${values.length}
-      or b.id::text = $${values.length}
-    )`);
+  const search = typeof filters.search === "string" ? filters.search.trim() : "";
+  if (search) {
+    values.push(`%${search}%`);
+    const textPattern = `$${values.length}`;
+    const predicates = [
+      `p.english_full_name ilike ${textPattern}`,
+      `p.arabic_full_name ilike ${textPattern}`,
+      `p.mrn ilike ${textPattern}`,
+      `primary_identifier.value ilike ${textPattern}`,
+      `p.identifier_value ilike ${textPattern}`,
+      `p.national_id ilike ${textPattern}`,
+      `('V2-' || lpad(b.id::text, 6, '0')) ilike ${textPattern}`,
+      `exists (
+        select 1
+        from patient_identifiers pi_search
+        where pi_search.patient_id = p.id
+          and pi_search.value ilike ${textPattern}
+      )`,
+      `p.phone_1 ilike ${textPattern}`,
+      `p.phone_2 ilike ${textPattern}`,
+      `et.name_en ilike ${textPattern}`,
+      `et.name_ar ilike ${textPattern}`,
+    ];
+
+    if (/^\d+$/.test(search)) {
+      const bookingId = Number(search);
+      if (bookingId > 0 && Number.isSafeInteger(bookingId)) {
+        values.push(bookingId);
+        predicates.push(`b.id = $${values.length}`);
+      }
+    }
+
+    const phoneDigits = search.replace(/\D/g, "");
+    if (phoneDigits.length >= 4) {
+      values.push(`%${phoneDigits}%`);
+      predicates.push(`regexp_replace(coalesce(p.phone_1, ''), '[^0-9]+', '', 'g') like $${values.length}`);
+      predicates.push(`regexp_replace(coalesce(p.phone_2, ''), '[^0-9]+', '', 'g') like $${values.length}`);
+    }
+
+    where.push(`(${predicates.join("\n      or ")})`);
   }
 
   const result = await pool.query<RawRecord>(

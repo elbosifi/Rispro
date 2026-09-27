@@ -1,10 +1,11 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { optionalAuth, requireAuth } from "../../middleware/auth.js";
 import { createRateLimiter } from "../../middleware/rate-limit.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { asOptionalString } from "../../utils/request-coercion.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
+import { getDocumentAbsolutePath, readDocumentContent, toPublicDocumentResponse } from "../../services/document-service.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import type { ReportingBoardFilters } from "./reporting-board-types.js";
 import {
@@ -13,6 +14,8 @@ import {
   getPublicReportingBoardMobilePushStatus,
   getPublicReportingBoardMobileCase,
   getPublicReportingBoardMobileView,
+  getReportingBoardAppointmentDocument,
+  listReportingBoardAppointmentDocuments,
   reassignReportingBoardMobileCase,
   sendPublicReportingBoardMobileTestPush,
   subscribePublicReportingBoardMobilePush,
@@ -126,6 +129,50 @@ router.get(
       { caseType: "appointment", appointmentId: requiredPositiveInteger(req.params.caseId, "caseId") },
       mobileFilters(req.query)
     ));
+  })
+);
+
+router.get(
+  "/saved-views/public/:token/mobile/cases/:caseId/documents",
+  mobileLimiter,
+  optionalAuth,
+  asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
+    const documents = await listReportingBoardAppointmentDocuments(
+      actor(req),
+      String(req.params.token || ""),
+      requiredPositiveInteger(req.params.caseId, "caseId")
+    );
+    res.json({ documents: documents.map(toPublicDocumentResponse) });
+  })
+);
+
+router.get(
+  "/saved-views/public/:token/mobile/cases/:caseId/documents/:documentId/view",
+  mobileLimiter,
+  optionalAuth,
+  asyncRoute(async (req: ReportingPublicRequest, res: Response, next: NextFunction) => {
+    const document = await getReportingBoardAppointmentDocument(
+      actor(req),
+      String(req.params.token || ""),
+      requiredPositiveInteger(req.params.caseId, "caseId"),
+      requiredPositiveInteger(req.params.documentId, "documentId")
+    );
+    const absolutePath = getDocumentAbsolutePath(document);
+    res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${String(document.original_filename || "document").replace(/"/g, "")}"`
+    );
+    res.sendFile(absolutePath, (error) => {
+      if (!error) return;
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+      void readDocumentContent(document)
+        .then((content) => res.send(content))
+        .catch(next);
+    });
   })
 );
 

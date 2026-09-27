@@ -23,6 +23,11 @@ export interface RequestDocument {
   lastMoveAttemptAt: string | null;
   lastMoveError: string | null;
   createdAt: string;
+  viewUrl?: string;
+}
+
+export function getRequestDocumentViewUrl(document: RequestDocument): string {
+  return document.viewUrl ?? `/api/documents/${document.id}/view`;
 }
 
 export interface IntegrationStatus {
@@ -89,6 +94,16 @@ export async function listAppointmentDocuments(
   params.set("appointmentRefType", appointmentRefType);
   const raw = await api<{ documents: RawRecord[] }>(`/documents?${params.toString()}`);
   return (raw.documents ?? []).map(mapRequestDocument);
+}
+
+export async function listReportingBoardAppointmentDocuments(token: string, appointmentId: number): Promise<RequestDocument[]> {
+  const encodedToken = encodeURIComponent(token);
+  const basePath = `/reporting/saved-views/public/${encodedToken}/mobile/cases/${appointmentId}/documents`;
+  const raw = await api<{ documents: RawRecord[] }>(basePath);
+  return (raw.documents ?? []).map((record) => {
+    const document = mapRequestDocument(record);
+    return { ...document, viewUrl: `${basePath}/${document.id}/view` };
+  });
 }
 
 export type RequestDocumentProtocolPolicy = {

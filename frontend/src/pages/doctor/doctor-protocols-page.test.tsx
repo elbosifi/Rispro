@@ -339,6 +339,7 @@ describe("Doctor protocoling request documents", () => {
         freeTextProtocol: null,
         status: "ASSIGNED" as const,
         assignedBy: 3,
+        assignedByName: "Dr Current Author",
         assignedAt: "2026-07-22T08:00:00Z",
       },
       acquisitionSummary: {
@@ -357,7 +358,7 @@ describe("Doctor protocoling request documents", () => {
       },
     };
     mockFetchAppointments.mockResolvedValue([acquiredAppointment]);
-    mockFetchAppointmentDetail.mockResolvedValue({ appointment: acquiredAppointment, assignmentDetail: null });
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: acquiredAppointment, assignmentDetail: { assignment: acquiredAppointment.assignment, ctPhases: [], mriSequences: [] } });
 
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 
@@ -365,6 +366,35 @@ describe("Doctor protocoling request documents", () => {
     expect(performed.textContent).toContain("Performed on: Performed CT");
     expect(performed.textContent).toContain("27 min");
     expect(screen.getByText(/Protocol scanner: Planned CT/)).toBeTruthy();
+    expect(screen.getByText(/Protocol by Dr Current Author/).textContent).toContain("·");
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    const summary = screen.getByRole("heading", { name: "Assigned protocol summary" }).parentElement!;
+    expect(within(summary).getByText(/Chest routine v2/)).toBeTruthy();
+    expect(within(summary).getByText("Protocol by: Dr Current Author")).toBeTruthy();
+    expect(within(summary).getByText(/Protocolled:/)).toBeTruthy();
+  });
+
+  it("shows a protocol timestamp on its own and the expanded search placeholder", async () => {
+    const timestampOnlyAppointment = {
+      ...appointment,
+      assignment: {
+        assignmentId: 78, protocolId: null, protocolVersionId: null, protocolName: null, versionNumber: null,
+        scannerId: null, scannerName: null, protocolNotes: null, contrastNotes: null, freeTextProtocol: "Axial CT",
+        status: "ASSIGNED" as const, assignedBy: null, assignedByName: null, assignedAt: "2026-07-22T08:00:00Z",
+      },
+    };
+    mockFetchAppointments.mockResolvedValue([timestampOnlyAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: timestampOnlyAppointment, assignmentDetail: { assignment: timestampOnlyAppointment.assignment, ctPhases: [], mriSequences: [] } });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    expect((await screen.findByRole("textbox", { name: "Search protocoling appointments" })).getAttribute("placeholder")).toBe("Name, MRN, Primary ID, accession, phone, exam…");
+    expect(await screen.findByText("Free-text protocol")).toBeTruthy();
+    expect(screen.getByText(/Protocolled /)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    const summary = screen.getByRole("heading", { name: "Assigned protocol summary" }).parentElement!;
+    expect(within(summary).getByText("Axial CT")).toBeTruthy();
+    expect(within(summary).queryByText(/Protocol by:/)).toBeNull();
+    expect(within(summary).getByText(/Protocolled:/)).toBeTruthy();
   });
 
   it("uses the standard DD/MM/YYYY date input while sending ISO date filters", async () => {
