@@ -84,9 +84,25 @@ describe("SonicDICOM accession fallback StudyDate matching", () => {
     assert.match(predicate, /try_convert\(\s*date,\s*nullif\(ltrim\(rtrim\(s\.StudyDate\)\), ''\),\s*111\s*\)/i);
     assert.match(predicate, /convert\(\s*char\(8\),\s*try_convert\([\s\S]*s\.StudyDate[\s\S]*111[\s\S]*\),\s*112\s*\)/i);
     assert.doesNotMatch(predicate, /convert\(\s*char\(8\),\s*s\.StudyDate\s*,\s*112\s*\)/i);
-    assert.match(predicate, /nullif\(input\.BookingDate, ''\) is null or [\s\S]* = replace\(input\.BookingDate, '-', ''\)/i);
+    assert.match(predicate, /nullif\(input\.BookingDate, ''\) is null\s+or [\s\S]* = replace\(input\.BookingDate, '-', ''\)/i);
     assert.match(predicate, /input\.ModalityCode = 'CT'[\s\S]*ModalitiesInStudy[\s\S]*'%CT%'/i);
     assert.match(predicate, /input\.ModalityCode in \('MR', 'MRI'\)[\s\S]*ModalitiesInStudy[\s\S]*'%MR%'/i);
+  });
+
+  it("allows a blank Sonic StudyDate only for one exact-accession, modality-compatible Study", () => {
+    const matchingStudyDate = "2026/08/19";
+    const wrongStudyDate = "2026/08/20";
+    const risproBookingDate = "2026-08-19";
+    const predicate = __accessionFallbackStudyPredicateForTest("validated_dicom");
+
+    assert.equal(matchingStudyDate.replaceAll("/", ""), risproBookingDate.replaceAll("-", ""));
+    assert.notEqual(wrongStudyDate.replaceAll("/", ""), risproBookingDate.replaceAll("-", ""));
+    assert.match(predicate, /or \(\s*nullif\(ltrim\(rtrim\(s\.StudyDate\)\), ''\) is null[\s\S]*select count\(\*\)[\s\S]*from \[validated_dicom\]\.\[dbo\]\.\[Studies\] sx/i);
+    assert.match(predicate, /sx\.AccessionNumber = input\.AccessionNumber/i);
+    assert.match(predicate, /input\.ModalityCode = 'CT'[\s\S]*sx\.ModalitiesInStudy[\s\S]*'%CT%'/i);
+    assert.match(predicate, /input\.ModalityCode in \('MR', 'MRI'\)[\s\S]*sx\.ModalitiesInStudy[\s\S]*'%MR%'/i);
+    assert.match(predicate, /\) = 1/);
+    assert.match(predicate, /try_convert\(\s*date,\s*nullif\(ltrim\(rtrim\(s\.StudyDate\)\), ''\),\s*111\s*\)/i);
   });
 });
 

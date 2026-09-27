@@ -513,15 +513,31 @@ const SONICDICOM_STUDY_DATE_YMD_EXPRESSION = `convert(
   112
 )`;
 
-function accessionFallbackStudyPredicate(): string {
-  return `s.AccessionNumber = input.AccessionNumber
-      and (nullif(input.BookingDate, '') is null or ${SONICDICOM_STUDY_DATE_YMD_EXPRESSION} = replace(input.BookingDate, '-', ''))
-      and (nullif(input.ModalityCode, '') is null
-        or (input.ModalityCode = 'CT' and upper(coalesce(s.ModalitiesInStudy, '')) like '%CT%')
-        or (input.ModalityCode in ('MR', 'MRI') and upper(coalesce(s.ModalitiesInStudy, '')) like '%MR%'))`;
+function accessionFallbackModalityPredicate(studyAlias: "s" | "sx"): string {
+  return `(nullif(input.ModalityCode, '') is null
+        or (input.ModalityCode = 'CT' and upper(coalesce(${studyAlias}.ModalitiesInStudy, '')) like '%CT%')
+        or (input.ModalityCode in ('MR', 'MRI') and upper(coalesce(${studyAlias}.ModalitiesInStudy, '')) like '%MR%'))`;
 }
 
-export const __accessionFallbackStudyPredicateForTest = accessionFallbackStudyPredicate;
+function accessionFallbackStudyPredicate(dicomDb: string): string {
+  return `s.AccessionNumber = input.AccessionNumber
+      and ${accessionFallbackModalityPredicate("s")}
+      and (
+        nullif(input.BookingDate, '') is null
+        or ${SONICDICOM_STUDY_DATE_YMD_EXPRESSION} = replace(input.BookingDate, '-', '')
+        or (
+          nullif(ltrim(rtrim(s.StudyDate)), '') is null
+          and (
+            select count(*)
+            from [${dicomDb}].[dbo].[Studies] sx
+            where sx.AccessionNumber = input.AccessionNumber
+              and ${accessionFallbackModalityPredicate("sx")}
+          ) = 1
+        )
+      )`;
+}
+
+export const __accessionFallbackStudyPredicateForTest = (dicomDb = "dicom") => accessionFallbackStudyPredicate(dicomDb);
 
 async function querySqlDocumentHistoryBatch(
   pool: SqlConnectionPool,
@@ -544,7 +560,7 @@ async function querySqlDocumentHistoryBatch(
   });
   const studyPredicate = method === "study_instance_uid"
     ? "s.StudyInstanceUID = input.StudyInstanceUID"
-    : accessionFallbackStudyPredicate();
+    : accessionFallbackStudyPredicate(dicomDb);
   const inputColumn = method === "study_instance_uid" ? "StudyInstanceUID" : "AccessionNumber";
   const rows = (await request.query<SqlDocumentHistoryRow>(`
     with InputContexts(LookupKey, StudyInstanceUID, AccessionNumber, BookingDate, ModalityCode) as (
