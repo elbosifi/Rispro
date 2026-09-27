@@ -188,13 +188,36 @@ function primaryDocumentFromHistory(
     const enforceAssignmentLowerBound =
       candidate.assignmentOrigin === "rispro" &&
       candidate.hasPriorReportingAssignment;
-    return selectAssignmentAwareSonicDicomDocument(history, {
+    const selected = selectAssignmentAwareSonicDicomDocument(history, {
       allowedSonicAccounts: accounts,
       assignmentLowerBound: enforceAssignmentLowerBound ? candidate.assignedAt : null,
       excludedDocumentIds: excluded,
       noReportStatusCodes: settings.sonicDicomSqlNoReportStatusCodes,
       finalStatusCodes: settings.sonicDicomSqlFinalStatusCodes,
     }).document;
+    const finals = new Set(settings.sonicDicomSqlFinalStatusCodes.filter(Number.isInteger));
+    if (finals.has(Number(selected?.statusCode)) || candidate.assignmentOrigin !== "rispro") return selected;
+
+    const assignedAccounts = new Set(accounts.map((account) => String(account ?? "").trim().toLowerCase()).filter(Boolean));
+    const lowerBound = enforceAssignmentLowerBound ? Date.parse(candidate.assignedAt ?? "") : null;
+    const hasLowerBound = lowerBound !== null && Number.isFinite(lowerBound);
+    const noReport = new Set(settings.sonicDicomSqlNoReportStatusCodes.filter(Number.isInteger));
+    const fallbackFinal = history.documents.filter((document) => {
+      const account = String(document.account ?? "").trim().toLowerCase();
+      const updatedAt = Date.parse(document.updatedAt ?? "");
+      return Boolean(account) &&
+        !assignedAccounts.has(account) &&
+        !excluded.has(normalizeSonicDicomDocumentId(document.documentId)) &&
+        !noReport.has(Number(document.statusCode)) &&
+        finals.has(Number(document.statusCode)) &&
+        (!hasLowerBound || (Number.isFinite(updatedAt) && updatedAt >= lowerBound!));
+    }).sort((left, right) => {
+      const leftAt = Date.parse(left.updatedAt ?? "");
+      const rightAt = Date.parse(right.updatedAt ?? "");
+      if (leftAt !== rightAt) return rightAt - leftAt;
+      return normalizeSonicDicomDocumentId(right.documentId).localeCompare(normalizeSonicDicomDocumentId(left.documentId));
+    }).at(0) ?? null;
+    return fallbackFinal ?? selected;
   }
 
   const noReport = new Set(settings.sonicDicomSqlNoReportStatusCodes.filter(Number.isInteger));

@@ -37,13 +37,13 @@ function candidate(overrides: Partial<ReportingBoardSonicDicomCacheCandidate> = 
   };
 }
 
-function history(documents: Array<{ documentId: string; account: string; updatedAt: string }>) {
+function history(documents: Array<{ documentId: string; account: string; updatedAt: string; statusCode?: number }>) {
   return {
     foundStudy: true,
     foundReport: true,
     reportNo: 1,
     correlationMethod: "study_instance_uid" as const,
-    documents: documents.map((document) => ({ reportNo: 1, statusCode: 6, ...document })),
+    documents: documents.map(({ statusCode = 6, ...document }) => ({ reportNo: 1, statusCode, ...document })),
   };
 }
 
@@ -72,12 +72,54 @@ describe("Reporting Board primary SonicDICOM assignment history", () => {
     assert.equal(selected?.documentId, "final-after-reassignment");
   });
 
-  it("does not accept another doctor's Final for a first RISpro assignment", () => {
+  it("selects another doctor's Final over the assigned doctor's Draft", () => {
     const selected = __primaryDocumentFromHistoryForTest(candidate(), history([
-      { documentId: "other-doctor-final", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
+      { documentId: "assigned-draft", account: "doctor@nccb.ly", statusCode: 1, updatedAt: "2026-06-21T11:00:00.000Z" },
+      { documentId: "other-final", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T10:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected?.documentId, "other-final");
+  });
+
+  it("selects another doctor's Final when the assigned doctor has no document", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate(), history([
+      { documentId: "other-final", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T10:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected?.documentId, "other-final");
+  });
+
+  it("never selects a comparison-correlated other-doctor Final", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate(), history([
+      { documentId: "comparison-final", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T10:00:00.000Z" },
+    ]), settings, ["comparison-final"]);
+
+    assert.equal(selected, null);
+  });
+
+  it("rejects an other-doctor Final before a genuine RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
+      { documentId: "other-final-before-reassignment", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T09:00:00.000Z" },
     ]), settings);
 
     assert.equal(selected, null);
+  });
+
+  it("selects an other-doctor Final after a genuine RISpro reassignment", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate({ hasPriorReportingAssignment: true }), history([
+      { documentId: "other-final-after-reassignment", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T11:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected?.documentId, "other-final-after-reassignment");
+  });
+
+  it("keeps the assigned doctor's Final authoritative over another doctor's Final", () => {
+    const selected = __primaryDocumentFromHistoryForTest(candidate(), history([
+      { documentId: "assigned-final", account: "doctor@nccb.ly", updatedAt: "2026-06-21T10:00:00.000Z" },
+      { documentId: "other-final", account: "other-doctor@nccb.ly", updatedAt: "2026-06-21T11:00:00.000Z" },
+    ]), settings);
+
+    assert.equal(selected?.documentId, "assigned-final");
   });
 });
 
