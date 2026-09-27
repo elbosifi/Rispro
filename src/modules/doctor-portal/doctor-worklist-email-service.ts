@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
-import { getPublicAppBaseUrl } from "../appointments-v2/public/utils/public-cancel-config.js";
+import { getPublicAppBaseUrl } from "../../config/public-app-url.js";
 import { enqueueEmail } from "../../services/email-outbox-service.js";
 import { getEmailSettings } from "../../services/email-settings-service.js";
 import { HttpError } from "../../utils/http-error.js";

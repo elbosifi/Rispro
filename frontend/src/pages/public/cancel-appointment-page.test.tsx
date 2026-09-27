@@ -45,7 +45,6 @@ vi.mock("@/lib/print-utils", () => ({
 function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
     enabled: true,
-    risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
     qrSlipPaperMode: "blank",
     qrSlipPaperSize: "a4",
@@ -188,6 +187,7 @@ function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSett
 function preview(overrides: Partial<PublicAppointmentCancelPreview> = {}): PublicAppointmentCancelPreview {
   return {
     bookingId: 12,
+    publicUrl: "https://canonical.example.test/public/appointment?t=test-token",
     patientDisplayName: "Test Patient",
     bookingDate: "2026-07-01",
     bookingTime: "10:30:00",
@@ -692,10 +692,17 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.getByText("10:30")).toBeTruthy();
   });
 
-  it("generates an ICS file when add-to-calendar is enabled", async () => {
+  it("uses the preview canonical public URL rather than the browser origin in calendar links", async () => {
     const user = userEvent.setup();
-    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake");
+    let generatedObject: Blob | MediaSource | undefined;
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      generatedObject = blob;
+      return "blob:fake";
+    });
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({ publicUrl: "https://canonical.example.test/public/appointment?t=test-token" })
+    );
 
     renderPage();
 
@@ -704,6 +711,10 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(createObjectUrl).toHaveBeenCalled();
     expect(clickSpy).toHaveBeenCalled();
+    expect(generatedObject).toBeInstanceOf(Blob);
+    const calendarText = await (generatedObject as Blob).text();
+    expect(calendarText).toContain("URL:https://canonical.example.test/public/appointment?t=test-token");
+    expect(calendarText).not.toContain(window.location.origin);
   });
 
   it("builds calendar entries with the patient page link and reminder", async () => {

@@ -20,7 +20,6 @@ type PatientQrDraftOverride = {
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
-  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   qrSlipPaperMode: "blank",
   qrSlipPaperSize: "a4",
@@ -279,7 +278,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
 
   const canSave = useMemo(() => {
     const nextErrors: Record<string, string> = {};
-    if (!isValidUrl(draft.risproPublicBaseUrl)) nextErrors.risproPublicBaseUrl = "Public RISpro URL is invalid.";
     if (!Number.isInteger(Number(draft.publicLinkValidityDays)) || Number(draft.publicLinkValidityDays) < 0 || Number(draft.publicLinkValidityDays) > 3650) {
       nextErrors.publicLinkValidityDays = "QR link validity must be between 0 and 3650 days.";
     }
@@ -395,7 +393,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
     if (!canSave.ok) return;
     mutation.mutate({
       ...draft,
-      risproPublicBaseUrl: draft.risproPublicBaseUrl.trim(),
       documentsChecklistAr: draft.documentsChecklistAr.map((item) => item.trim()).filter(Boolean),
       documentsChecklistEn: draft.documentsChecklistEn.map((item) => item.trim()).filter(Boolean),
       contact: {
@@ -457,18 +454,12 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
         <p className="mt-1 text-sm leading-7 text-slate-600">
           {chooseLocalized(language, "تحكم في ظهور الصفحة، قسم الإلغاء، التقويم، التعليمات، قائمة المستندات، ومعلومات التواصل والموقع.", "Control page visibility, cancellation section, calendar, instructions, documents checklist, and contact/location information.")}
         </p>
+        <p className="mt-1 text-sm leading-7 text-slate-600">The public RISpro URL is managed by the deployment setting PUBLIC_APP_BASE_URL.</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <FieldCard title={chooseLocalized(language, "التحكم العام", "General Controls")}>
           <ToggleRow label={chooseLocalized(language, "تفعيل صفحة QR للمرضى", "Enable QR Page for Patients")} checked={draft.enabled} onChange={(checked) => setDraft((current) => ({ ...current, enabled: checked }))} />
-          <Input
-            dir="ltr"
-            label={chooseLocalized(language, "رابط RISpro العام", "Public RISpro Base URL")}
-            value={draft.risproPublicBaseUrl}
-            onChange={(value) => setDraft((current) => ({ ...current, risproPublicBaseUrl: value }))}
-            error={errors.risproPublicBaseUrl}
-          />
           <ToggleRow label={chooseLocalized(language, "طباعة رمز QR على ورقة الموعد", "Print QR Code on Appointment Slip")} checked={draft.printQrOnAppointmentSlip} onChange={(checked) => setDraft((current) => ({ ...current, printQrOnAppointmentSlip: checked }))} />
           <SelectField
             label={chooseLocalized(language, "نمط ورقة الموعد في صفحة QR", "QR appointment slip paper mode")}

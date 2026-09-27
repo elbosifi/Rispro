@@ -452,10 +452,8 @@ settingsRouter.post(
   "/patient-web-push/ensure-config",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
-    const settings = await readPatientQrSettings();
     const config = await ensurePatientWebPushConfig({
       updatedByUserId: request.user.sub as UserId,
-      settings,
     });
     res.json({
       enabled: config.enabled,

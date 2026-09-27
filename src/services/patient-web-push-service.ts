@@ -2,10 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
 import { env } from "../config/env.js";
+import { tryGetPublicAppBaseUrl } from "../config/public-app-url.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { issuePublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
-import { buildPublicAppointmentUrlFromSettings } from "../modules/appointments-v2/public/utils/public-appointment-url-core.js";
+import { buildPublicAppointmentUrl } from "../modules/appointments-v2/public/utils/public-appointment-url.js";
 import { readPatientQrSettings, type PatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 
 export const PATIENT_NOTIFICATION_EVENT_TYPES = [
@@ -157,10 +158,8 @@ function readStoredValue(settingValue: unknown): Record<string, unknown> {
   return asRecord(record.value ?? record);
 }
 
-function defaultVapidSubject(settings?: PatientQrSettings): string {
-  const publicBaseUrl = String(settings?.risproPublicBaseUrl || "").trim();
-  if (/^https?:\/\//i.test(publicBaseUrl)) return publicBaseUrl;
-  return "mailto:admin@rispro.local";
+function defaultVapidSubject(): string {
+  return tryGetPublicAppBaseUrl() ?? "mailto:admin@rispro.local";
 }
 
 async function readStoredWebPushConfig(): Promise<ResolvedWebPushConfig | null> {
@@ -221,7 +220,7 @@ export async function configurePatientWebPushVapid(): Promise<boolean> {
   return configureVapidIfNeeded();
 }
 
-export async function ensurePatientWebPushConfig(options: { updatedByUserId?: number | string | null; settings?: PatientQrSettings } = {}): Promise<{ enabled: boolean; generated: boolean; publicKey: string; source: string }> {
+export async function ensurePatientWebPushConfig(options: { updatedByUserId?: number | string | null } = {}): Promise<{ enabled: boolean; generated: boolean; publicKey: string; source: string }> {
   const envConfig = envWebPushConfig();
   if (envConfig) return { enabled: true, generated: false, publicKey: envConfig.publicKey, source: envConfig.source };
 
@@ -229,7 +228,7 @@ export async function ensurePatientWebPushConfig(options: { updatedByUserId?: nu
   if (existing) return { enabled: true, generated: false, publicKey: existing.publicKey, source: existing.source };
 
   const keys = webPush.generateVAPIDKeys();
-  const subject = defaultVapidSubject(options.settings);
+  const subject = defaultVapidSubject();
   const settingValue = {
     value: {
       enabled: true,
@@ -265,7 +264,7 @@ export async function getPatientWebPushPublicConfig(settings: PatientQrSettings)
 }> {
   let config = await resolveWebPushConfig(settings);
   if (settings.webPushEnabled && !config.enabled) {
-    await ensurePatientWebPushConfig({ settings });
+    await ensurePatientWebPushConfig();
     config = await resolveWebPushConfig(settings);
   }
   const enabled = Boolean(settings.webPushEnabled && config.enabled && config.publicKey);
@@ -593,10 +592,9 @@ export async function safeEnqueuePatientNotificationEvent(input: {
 }
 
 async function buildFreshClickUrl(bookingId: number): Promise<string | null> {
-  const settings = await readPatientQrSettings();
   const token = await issuePublicCancelToken(bookingId);
   if (!token) return null;
-  return buildPublicAppointmentUrlFromSettings(token, settings);
+  return buildPublicAppointmentUrl(token);
 }
 
 export function sanitizePushPayload(input: {

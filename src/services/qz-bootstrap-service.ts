@@ -3,6 +3,7 @@ import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { env } from "../config/env.js";
+import { getPublicAppOrigin } from "../config/public-app-url.js";
 import { getQzCertificate, getQzRootCertificate, loadValidatedQzIdentity } from "./qz-signing-service.js";
 
 export const QZ_BOOTSTRAP_VERSION = "2.2.6";
@@ -18,12 +19,7 @@ let installerValidationInFlight: { key: string; promise: Promise<QzInstallerSnap
 function sha256(value: Buffer | string): string { return createHash("sha256").update(value).digest("hex"); }
 
 export function qzPublicOrigin(): string {
-  const configured = String(process.env.PUBLIC_APP_BASE_URL || "").trim();
-  let url: URL;
-  try { url = new URL(configured); } catch { throw new Error("PUBLIC_APP_BASE_URL is not a valid absolute URL."); }
-  if (url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) throw new Error("PUBLIC_APP_BASE_URL must contain only an origin.");
-  if (url.protocol !== "https:" && (env.isProduction || url.protocol !== "http:")) throw new Error("PUBLIC_APP_BASE_URL must use HTTPS.");
-  return url.origin;
+  return getPublicAppOrigin({ requireHttps: env.isProduction });
 }
 
 export function qzInstallerPath(): string { return resolve(env.qzInstallerFile); }

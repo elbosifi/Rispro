@@ -171,25 +171,6 @@ describe("appointment slip settings api hooks", () => {
     expect(api).toHaveBeenCalledWith("/settings/patient_qr_self_service");
   });
 
-  it("normalizes patient QR public RISpro base URL", async () => {
-    vi.mocked(api).mockResolvedValue({
-      settings: [
-        {
-          setting_key: "config",
-          setting_value: {
-            value: {
-              risproPublicBaseUrl: "https://custom.rispro.example",
-            },
-          },
-        },
-      ],
-    });
-
-    const settings = await fetchPatientQrSettings();
-
-    expect(settings.risproPublicBaseUrl).toBe("https://custom.rispro.example");
-  });
-
   it("normalizes patient QR slip paper defaults", async () => {
     vi.mocked(api).mockResolvedValue({
       settings: [{ setting_key: "config", setting_value: { value: {} } }],

@@ -8,7 +8,6 @@ import {
   hashPushSubscription,
   type BrowserPushSubscriptionInput,
 } from "./patient-web-push-service.js";
-import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { SchedulingOverrideRequestRow } from "../modules/appointments-v2/scheduling-override-requests/models/scheduling-override-request.js";
 import { buildInternalNotificationPatientLabel, buildSchedulingOverrideNotification } from "./internal-notification-formatters.js";
 
@@ -58,8 +57,7 @@ async function readUserWebPushConfig(userId: number): Promise<{ enabled: boolean
   let config = await getPatientWebPushSharedConfig();
   if (config.enabled && config.publicKey) return config;
 
-  const settings = await readPatientQrSettings().catch(() => undefined);
-  const ensured = await ensurePatientWebPushConfig({ updatedByUserId: userId, settings });
+  const ensured = await ensurePatientWebPushConfig({ updatedByUserId: userId });
   config = { enabled: ensured.enabled, publicKey: ensured.publicKey };
   return config;
 }

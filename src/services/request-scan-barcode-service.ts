@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
+import { tryGetPublicAppBaseUrl } from "../config/public-app-url.js";
 import { normalizeV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 const execFile = promisify(execFileCallback);
@@ -26,7 +27,6 @@ export type RequestScanRecognitionMetrics = {
   rssBeforeBytes: number; rssAfterBytes: number; peakObservedRssBytes?: number;
 };
 export type RequestScanQrOriginConfiguration = {
-  risproPublicBaseUrl?: string;
   publicAppBaseUrl?: string;
   explicitAllowedOrigins?: string;
   onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
@@ -76,8 +76,7 @@ function configuredHttpsOrigin(value: string, allowExplicitPort = false): string
 
 export function trustedRequestScanQrOrigins(configuration: RequestScanQrOriginConfiguration = {}): Set<string> {
   const configured = [
-    configuration.risproPublicBaseUrl,
-    configuration.publicAppBaseUrl ?? process.env.PUBLIC_APP_BASE_URL,
+    configuration.publicAppBaseUrl ?? tryGetPublicAppBaseUrl(),
   ];
   const explicit = (configuration.explicitAllowedOrigins ?? process.env.REQUEST_SCAN_QR_ALLOWED_ORIGINS ?? "").split(",");
   return new Set([

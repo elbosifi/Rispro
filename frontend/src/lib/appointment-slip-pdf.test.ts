@@ -143,7 +143,6 @@ function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): Pati
   return {
     ...DEFAULT_PATIENT_QR_SETTINGS,
     enabled: true,
-    risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
     allowCancellation: true,
     allowAddToCalendar: true,

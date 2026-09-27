@@ -62,6 +62,7 @@ export async function getV2AppointmentPrintDetails(bookingId: number) {
 
 export interface PublicAppointmentCancelPreview {
   bookingId: number;
+  publicUrl: string;
   patientDisplayName: string;
   bookingDate: string;
   bookingTime?: string;
@@ -137,6 +138,7 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
 
   return {
     bookingId: Number(preview.bookingId ?? preview.booking_id ?? 0),
+    publicUrl: String(preview.publicUrl ?? preview.public_url ?? ""),
     patientDisplayName: String(preview.patientDisplayName ?? preview.patient_display_name ?? ""),
     bookingDate: String(preview.bookingDate ?? preview.booking_date ?? ""),
     bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
@@ -306,7 +308,6 @@ export interface PatientQrLocationSettings {
 
 export interface PatientQrSettings {
   enabled: boolean;
-  risproPublicBaseUrl: string;
   printQrOnAppointmentSlip: boolean;
   qrSlipPaperMode: AppointmentSlipPaperMode;
   qrSlipPaperSize: AppointmentSlipPaperSize;
@@ -423,7 +424,6 @@ export interface PatientQrSettings {
 
 export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   enabled: true,
-  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   qrSlipPaperMode: "blank",
   qrSlipPaperSize: "a4",
@@ -756,7 +756,6 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
 
   return {
     enabled: bool(record.enabled, true),
-    risproPublicBaseUrl: str(record.risproPublicBaseUrl, DEFAULT_PATIENT_QR_SETTINGS.risproPublicBaseUrl),
     printQrOnAppointmentSlip: bool(record.printQrOnAppointmentSlip, true),
     qrSlipPaperMode: paperMode(record.qrSlipPaperMode),
     qrSlipPaperSize: paperSize(record.qrSlipPaperSize),

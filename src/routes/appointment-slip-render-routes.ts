@@ -6,7 +6,7 @@ import { verifyAppointmentSlipRenderToken } from "../services/appointment-slip-r
 import { readAppointmentSlipSettings } from "../modules/appointments-v2/public/utils/appointment-slip-settings.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import { issuePublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
-import { buildPublicAppointmentUrlFromSettings } from "../modules/appointments-v2/public/utils/public-appointment-url-core.js";
+import { buildPublicAppointmentUrl } from "../modules/appointments-v2/public/utils/public-appointment-url.js";
 import { assertCompleteRegistrationListRows, contextFromRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
 
 export const appointmentSlipRenderRouter = express.Router();
@@ -17,9 +17,9 @@ function tokenFrom(req: Request): string {
   return token;
 }
 
-function safePublicAppointmentUrl(token: string | null, settings: { risproPublicBaseUrl: string }): string | null {
+function safePublicAppointmentUrl(token: string | null): string | null {
   if (!token) return null;
-  try { return buildPublicAppointmentUrlFromSettings(token, settings); }
+  try { return buildPublicAppointmentUrl(token); }
   catch { return null; }
 }
 
@@ -57,7 +57,7 @@ appointmentSlipRenderRouter.get("/data", asyncRoute(async (req: Request, res: Re
     appointment: {
       ...appointment,
       public_cancel_token: publicCancelToken,
-      public_appointment_url: safePublicAppointmentUrl(publicCancelToken, patientQrSettings),
+      public_appointment_url: safePublicAppointmentUrl(publicCancelToken),
     },
     slipSettings: settings,
     patientQrSettings,

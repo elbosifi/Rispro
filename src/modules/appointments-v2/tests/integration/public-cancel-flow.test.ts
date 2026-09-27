@@ -87,6 +87,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   let authCookie: string;
   let originalSecret: string | undefined;
   let originalServiceUserId: string | undefined;
+  let originalPublicAppBaseUrl: string | undefined;
   let restoreWeekendAppointmentSettings: (() => Promise<void>) | undefined;
 
   before(async () => {
@@ -98,13 +99,14 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     restoreWeekendAppointmentSettings = await enableWeekendAppointmentsForSuite(testData.userId);
-    app = await createTestApp();
-    authCookie = createTestAuthCookie(testData.userId, "supervisor");
-
     originalSecret = process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET;
     originalServiceUserId = process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
+    originalPublicAppBaseUrl = process.env.PUBLIC_APP_BASE_URL;
     process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET = "integration-public-cancel-secret";
     process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = String(testData.userId);
+    process.env.PUBLIC_APP_BASE_URL = "https://public.integration.test";
+    app = await createTestApp();
+    authCookie = createTestAuthCookie(testData.userId, "supervisor");
   });
 
   after(async () => {
@@ -118,6 +120,11 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
       delete process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
     } else {
       process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = originalServiceUserId;
+    }
+    if (originalPublicAppBaseUrl == null) {
+      delete process.env.PUBLIC_APP_BASE_URL;
+    } else {
+      process.env.PUBLIC_APP_BASE_URL = originalPublicAppBaseUrl;
     }
 
     await restoreWeekendAppointmentSettings?.();
@@ -280,6 +287,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(Number(response.data.preview.bookingId), bookingId);
+    assert.equal(response.data.preview.publicUrl, `https://public.integration.test/public/appointment?t=${token}`);
     assert.equal(String(response.data.preview.currentStatus), "scheduled");
     assert.ok(String(response.data.preview.modalityName).length > 0);
   });
@@ -350,7 +358,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
           modality: String(response.data.otherAppointments?.[0]?.modality),
           examName: String(response.data.otherAppointments?.[0]?.examName),
           status: "scheduled",
-          publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${samePatientOtherToken}`,
+          publicUrl: `https://public.integration.test/public/appointment?t=${samePatientOtherToken}`,
           canCancel: true,
         },
         {
@@ -359,7 +367,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
           modality: String(response.data.otherAppointments?.[1]?.modality),
           examName: String(response.data.otherAppointments?.[1]?.examName),
           status: "scheduled",
-          publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${generatedToken.rows[0]?.token}`,
+          publicUrl: `https://public.integration.test/public/appointment?t=${generatedToken.rows[0]?.token}`,
           canCancel: true,
         },
       ]

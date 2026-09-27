@@ -11,7 +11,7 @@ import express from "express";
 import { env } from "../config/env.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { __publicPrintingBootstrapTestables, publicPrintingBootstrapRouter } from "../routes/public-printing-bootstrap-routes.js";
-import { __qzBootstrapTestables, getQzBootstrapManifest, qzWindowsScriptSha256, renderQzWindowsLauncher, renderQzWindowsScript } from "./qz-bootstrap-service.js";
+import { __qzBootstrapTestables, getQzBootstrapManifest, qzPublicOrigin, qzWindowsScriptSha256, renderQzWindowsLauncher, renderQzWindowsScript } from "./qz-bootstrap-service.js";
 import { loadValidatedQzIdentity } from "./qz-signing-service.js";
 
 const directory = mkdtempSync(join(tmpdir(), "rispro-qz-bootstrap-"));
@@ -46,6 +46,19 @@ after(() => {
 });
 
 describe("QZ Phase 1 identity and bootstrap", () => {
+  it("retains strict origin-only public URL validation through the canonical resolver", () => {
+    const previous = process.env.PUBLIC_APP_BASE_URL;
+    try {
+      process.env.PUBLIC_APP_BASE_URL = "https://rispro.example.test/path";
+      assert.throws(() => qzPublicOrigin(), /must contain only an origin/);
+      process.env.PUBLIC_APP_BASE_URL = "http://rispro.example.test";
+      assert.throws(() => qzPublicOrigin(), /must use HTTPS/);
+    } finally {
+      if (previous === undefined) delete process.env.PUBLIC_APP_BASE_URL;
+      else process.env.PUBLIC_APP_BASE_URL = previous;
+    }
+  });
+
   it("loads file-mounted PKCS#8 RSA identity, matches the key, and validates the internal chain", () => {
     const loaded = loadValidatedQzIdentity();
     assert.equal(loaded.trustMode, "internal_ca");

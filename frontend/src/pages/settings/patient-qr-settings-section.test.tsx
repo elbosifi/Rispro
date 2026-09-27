@@ -26,7 +26,6 @@ vi.mock("@/lib/api-hooks", async (importOriginal) => {
 const baseSettings: PatientQrSettings = {
   ...DEFAULT_PATIENT_QR_SETTINGS,
   enabled: true,
-  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
@@ -143,7 +142,7 @@ describe("PatientQrSettingsSection", () => {
 
     expect((await screen.findAllByRole("heading", { name: /QR/i })).length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR")).toBeTruthy();
-    expect(screen.getByDisplayValue("https://rispro.nccb.com.ly")).toBeTruthy();
+    expect(screen.queryByLabelText(/Public RISpro Base URL/i)).toBeNull();
     expect(screen.getByDisplayValue("ÙˆØ±Ù‚Ø© Ø§Ù„Ø¥Ø­Ø§Ù„Ø©")).toBeTruthy();
     expect(screen.getByDisplayValue("Ø§Ù„Ø·Ø§Ø¨Ù‚ Ø§Ù„Ø£ÙˆÙ„ / ØºØ±ÙØ© 3")).toBeTruthy();
     expect(screen.getByDisplayValue("Ø´Ø§Ø±Ø¹ Ø§Ù„Ù…Ø³ØªØ´ÙÙ‰")).toBeTruthy();
@@ -166,7 +165,7 @@ describe("PatientQrSettingsSection", () => {
     });
     const payload = vi.mocked(savePatientQrSettings).mock.calls[0][0];
     expect(payload.introTextAr).toBe("Ù…Ù‚Ø¯Ù…Ø© Ø¬Ø¯ÙŠØ¯Ø©");
-    expect(payload.risproPublicBaseUrl).toBe("https://rispro.nccb.com.ly");
+    expect(payload).not.toHaveProperty("risproPublicBaseUrl");
     expect(payload.showLocationDirections).toBe(false);
     expect(payload.showBookingTime).toBe(true);
     expect(payload.location.roomUnitFloorAr).toBe("Ø§Ù„Ø·Ø§Ø¨Ù‚ Ø§Ù„Ø£ÙˆÙ„ / ØºØ±ÙØ© 3");
@@ -195,16 +194,14 @@ describe("PatientQrSettingsSection", () => {
     expect(payload.documentsChecklistAr).toEqual(["ÙˆØ±Ù‚Ø© Ø§Ù„Ø¥Ø­Ø§Ù„Ø©", "ØªØ­Ø§Ù„ÙŠÙ„ Ø­Ø¯ÙŠØ«Ø©", "Ø¥Ø«Ø¨Ø§Øª Ø§Ù„Ù‡ÙˆÙŠØ©"]);
   });
 
-  it("shows validation errors for invalid phone and URL values", async () => {
+  it("shows validation errors for invalid phone and map URL values", async () => {
     renderComponent();
 
     await screen.findAllByRole("heading", { name: /QR/i });
     fireEvent.change(screen.getByLabelText("رقم الهاتف الرئيسي"), { target: { value: "abc" } });
     fireEvent.change(screen.getByLabelText("رابط خرائط Google"), { target: { value: "bad-url" } });
-    fireEvent.change(screen.getByLabelText("رابط RISpro العام"), { target: { value: "bad-url" } });
     fireEvent.click(screen.getByRole("button", { name: "حفظ" }));
 
-    expect(await screen.findByText("Public RISpro URL is invalid.")).toBeTruthy();
     expect(await screen.findByText("رقم الهاتف غير صالح.")).toBeTruthy();
     expect(screen.getByText("رابط خرائط Google غير صالح.")).toBeTruthy();
   });

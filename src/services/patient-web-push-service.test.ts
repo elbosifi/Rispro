@@ -34,7 +34,7 @@ test("event and delivery statuses are explicit", () => {
 test("push payload is generic and click URL uses a freshly minted token", () => {
   const sanitizeBody = pushService.slice(pushService.indexOf("export function sanitizePushPayload"), pushService.indexOf("async function createDeliveriesForEvent"));
   assert.match(pushService, /issuePublicCancelToken\(bookingId\)/);
-  assert.match(pushService, /buildPublicAppointmentUrlFromSettings\(token, settings\)/);
+  assert.match(pushService, /buildPublicAppointmentUrl\(token\)/);
   assert.match(sanitizeBody, /eventType: input\.eventType/);
   assert.match(sanitizeBody, /title: String\(input\.title/);
   assert.match(sanitizeBody, /body: String\(input\.body/);
@@ -42,10 +42,16 @@ test("push payload is generic and click URL uses a freshly minted token", () => 
   assert.doesNotMatch(sanitizeBody, /patientDisplayName|patientName|accessionNumber|modalityName|examName|diagnosis|oncology|reportText/);
 });
 
+test("generated VAPID defaults use the canonical public app URL without Patient QR settings", () => {
+  assert.match(pushService, /import \{ tryGetPublicAppBaseUrl \} from "\.\.\/config\/public-app-url\.js"/);
+  assert.match(pushService, /function defaultVapidSubject\(\): string \{\s*return tryGetPublicAppBaseUrl\(\) \?\? "mailto:admin@rispro\.local";/);
+  assert.doesNotMatch(pushService, /risproPublicBaseUrl/);
+});
+
 test("public push config self-heals VAPID settings when the QR card is enabled", () => {
   const configBody = pushService.slice(pushService.indexOf("export async function getPatientWebPushPublicConfig"), pushService.indexOf("function templateForEvent"));
   assert.match(configBody, /settings\.webPushEnabled && !config\.enabled/);
-  assert.match(configBody, /ensurePatientWebPushConfig\(\{ settings \}\)/);
+  assert.match(configBody, /ensurePatientWebPushConfig\(\)/);
   assert.match(configBody, /vapidPublicKey: enabled \? config\.publicKey : ""/);
 });
 

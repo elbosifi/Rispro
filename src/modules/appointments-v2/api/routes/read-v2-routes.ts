@@ -13,7 +13,7 @@ import { fetchSonicDicomStudyNotes } from "../../../../services/sonicdicom-repor
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
-import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public-appointment-url-core.js";
+import { buildPublicAppointmentUrl } from "../../public/utils/public-appointment-url.js";
 import {
   arriveSameDayQueueBookings,
   cleanupActiveQueuePatientRequirementViolations,
@@ -107,11 +107,10 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
 
 function safeBuildPublicAppointmentUrl(
   token: string,
-  settings: Awaited<ReturnType<typeof readPatientQrSettings>>,
   context: string
 ): string | null {
   try {
-    return buildPublicAppointmentUrlFromSettings(token, settings);
+    return buildPublicAppointmentUrl(token);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? "unknown_error");
     console.error(
@@ -524,7 +523,7 @@ router.get(
         acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
-          ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_list")
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_list")
           : null,
       };
     }));
@@ -727,7 +726,7 @@ router.get(
         } : null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
-          ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_details")
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_details")
           : null,
       },
     });

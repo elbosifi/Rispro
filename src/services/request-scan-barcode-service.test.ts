@@ -69,9 +69,9 @@ test("accepts only configured RISpro public appointment origins and preserves th
   assert.deepEqual(interpretRequestScanBarcodes(`QR-Code:${QR_URL}`), { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
   assert.deepEqual(interpretRequestScanBarcodes("QR-Code:https://example.com/unrelated?t=private"), { ok: false, reason: "no_valid_accession", ignoredQrCount: 1 });
 });
-test("builds trusted QR origins from configured public URLs and an explicit exact-origin allowlist", () => {
-  const origins = trustedRequestScanQrOrigins({ risproPublicBaseUrl: "https://rispro.nccb.com.ly", publicAppBaseUrl: "https://ignored.example", explicitAllowedOrigins: "https://dev.nccb.com.ly, https://rispro.nccb.com.ly:443" });
-  assert.deepEqual([...origins].sort(), ["https://dev.nccb.com.ly", "https://ignored.example", "https://rispro.nccb.com.ly"]);
+test("builds trusted QR origins from the canonical public URL and an explicit exact-origin allowlist", () => {
+  const origins = trustedRequestScanQrOrigins({ explicitAllowedOrigins: "https://dev.nccb.com.ly, https://rispro.nccb.com.ly:443" });
+  assert.deepEqual([...origins].sort(), ["https://dev.nccb.com.ly", "https://rispro.nccb.com.ly"]);
   assert.equal(extractRisproPublicAppointmentToken(`https://dev.nccb.com.ly/public/appointment?t=${QR_TOKEN}`, origins), QR_TOKEN);
   assert.equal(extractRisproPublicAppointmentToken(`https://dev.nccb.com.ly:444/public/appointment?t=${QR_TOKEN}`, origins), null);
 });

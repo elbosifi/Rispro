@@ -22,7 +22,6 @@ import {
   X,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
-import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
   fetchPublicPushConfig,
@@ -49,7 +48,6 @@ const INST_AR = "المركز الوطني للأورام بنغازي";
 const DEPT_AR = "قسم الأشعة التشخيصية";
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
-  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   qrSlipPaperMode: "blank",
   qrSlipPaperSize: "a4",
@@ -1043,7 +1041,7 @@ export default function PublicCancelAppointmentPage() {
 
   const preview = previewQuery.data;
   const settings = preview?.patientQrSettings ?? DEFAULT_SETTINGS;
-  const patientPageUrl = useMemo(() => buildPatientAppointmentUrl(token, window.location.origin), [token]);
+  const patientPageUrl = preview?.publicUrl ?? "";
   const canCancel = Boolean(
     preview &&
       settings.enabled &&

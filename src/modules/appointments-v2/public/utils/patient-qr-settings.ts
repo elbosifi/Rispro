@@ -29,7 +29,6 @@ export interface PatientQrLocationSettings {
 
 export interface PatientQrSettings {
   enabled: boolean;
-  risproPublicBaseUrl: string;
   printQrOnAppointmentSlip: boolean;
   qrSlipPaperMode: "blank" | "preprinted";
   qrSlipPaperSize: "a5" | "a4";
@@ -146,7 +145,6 @@ export interface PatientQrSettings {
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
-  risproPublicBaseUrl: "",
   printQrOnAppointmentSlip: true,
   qrSlipPaperMode: "blank",
   qrSlipPaperSize: "a4",
@@ -378,7 +376,6 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
 
   return {
     enabled: asBoolean(record.enabled, DEFAULT_SETTINGS.enabled),
-    risproPublicBaseUrl: asString(record.risproPublicBaseUrl, DEFAULT_SETTINGS.risproPublicBaseUrl),
     printQrOnAppointmentSlip: asBoolean(record.printQrOnAppointmentSlip, DEFAULT_SETTINGS.printQrOnAppointmentSlip),
     qrSlipPaperMode: asPaperMode(record.qrSlipPaperMode, DEFAULT_SETTINGS.qrSlipPaperMode),
     qrSlipPaperSize: asPaperSize(record.qrSlipPaperSize, DEFAULT_SETTINGS.qrSlipPaperSize),
