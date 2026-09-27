@@ -316,7 +316,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
 
   if (!reportStatus || reportStatus === "all") return resolved;
   if (reportStatus === "required_not_final") {
-    return resolved.filter((row) => row.requiresReport && (row.caseType === "comparison" ? row.appointmentStatus !== "finalized" : row.reportStatus !== "final"));
+    return resolved.filter((row) => row.requiresReport && row.reportStatus !== "final");
   }
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
@@ -502,7 +502,6 @@ function statsReportStatus(row: ReportingBoardStatsInputRow): ReportingBoardCase
 }
 
 function statsRequiredNotFinal(row: ReportingBoardStatsInputRow): boolean {
-  if (row.caseType === "comparison") return row.appointmentStatus !== "finalized";
   return row.requiresReport && statsReportStatus(row) !== "final";
 }
 
@@ -2717,26 +2716,25 @@ export async function assignReportingBoardCaseToDoctor(
 ) {
   await requireRosterManager(actor);
   const rows = await listReportingBoardCasesByAppointmentIds([input.appointmentId]);
-  const existing = rows.find((row) => row.caseType === "appointment" && row.appointmentId === input.appointmentId);
+  const currentAssignment = rows.find((row) => row.caseType === "appointment" && row.appointmentId === input.appointmentId);
+  if (currentAssignment?.assignmentStatus === "assigned" && !String(input.reason ?? "").trim()) {
+    throw new HttpError(400, "Reassignment reason is required.");
+  }
   const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
   if (verification.unavailableIds.has(input.appointmentId)) throw new HttpError(503, "Report finality could not be verified. Please try again.");
-  const retrospectiveFinalAssignment = verification.finalIds.has(input.appointmentId) && existing?.assignmentStatus === "unassigned";
-  if (verification.finalIds.has(input.appointmentId) && !retrospectiveFinalAssignment) {
+  if (verification.finalIds.has(input.appointmentId)) {
     throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
   }
   const result = await assignDoctorCase(actor, {
     appointmentId: input.appointmentId,
     doctorId: input.doctorId,
     reason: input.reason ?? null,
-    expectedUnassigned: retrospectiveFinalAssignment,
   });
-  if (!retrospectiveFinalAssignment) {
-    await createAssignedToMeNotifications({
-      doctorId: input.doctorId,
-      appointmentIds: [input.appointmentId],
-      appointmentNotes: { [input.appointmentId]: input.reason ?? null },
-    });
-  }
+  await createAssignedToMeNotifications({
+    doctorId: input.doctorId,
+    appointmentIds: [input.appointmentId],
+    appointmentNotes: { [input.appointmentId]: input.reason ?? null },
+  });
   return result;
 }
 

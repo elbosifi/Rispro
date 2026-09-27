@@ -121,6 +121,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function needsResolvedPostFiltering")), /checkSonicDicomReportStatus\(/);
     assert.match(service, /reportStatus === "required_not_final"/);
     assert.match(service, /row\.reportStatus !== "final"/);
+    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function needsResolvedPostFiltering")), /row\.caseType === "comparison" \? row\.appointmentStatus !== "finalized"/);
   });
 
   it("persists SonicDICOM finalizer attribution without changing reporting assignment authority", () => {
@@ -137,7 +138,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /where report_status = 'final'/);
 
     assert.match(cacheService, /lower\(btrim\(u\.username\)\) = lower\(btrim\(input\."finalizedByAccount"\)\)/);
-    assert.match(cacheService, /case when count\(\*\) = 1 then min\(dp\.id\) else null end/);
+    assert.match(cacheService, /lower\(btrim\(u\.email\)\) = lower\(btrim\(input\."finalizedByAccount"\)\)/);
+    assert.match(cacheService, /case when count\(distinct dp\.id\) = 1 then min\(dp\.id\) else null end/);
     assert.doesNotMatch(cacheService, /dp\.active\s*=\s*true/);
     assert.match(repository, /left join doctor_portal\.doctor_profiles assigned_doctor on assigned_doctor\.id = cta\.assigned_doctor_id/);
     assert.match(repository, /left join doctor_portal\.doctor_profiles finalized_doctor on finalized_doctor\.id = cache\.finalized_by_doctor_id/);

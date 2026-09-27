@@ -19,6 +19,9 @@ export interface ReportLookupContext {
   studyInstanceUid: string | null;
   requiresReport: boolean;
   status: string;
+  /** Reporting Board supplies these for accession fallback; generic callers remain optional. */
+  bookingDate?: string | null;
+  modalityCode?: string | null;
 }
 
 export interface ReportStatusResult {
@@ -91,6 +94,8 @@ export interface SonicDicomDocumentHistoryLookupContext {
   lookupKey: string;
   accessionNumber: string;
   studyInstanceUid: string | null;
+  bookingDate?: string | null;
+  modalityCode?: string | null;
 }
 
 export interface SonicDicomReportDocument {
@@ -115,7 +120,8 @@ export interface SonicDicomComparisonDocumentSelection {
   storedDocumentStatusCode?: number | null;
   primaryDocumentId: string | null;
   primaryCachedReportStatus?: string | null;
-  assignedDoctorSonicAccount: string | null;
+  assignedDoctorSonicAccount?: string | null;
+  assignedDoctorSonicAccounts?: string[];
   assignedAt: string;
 }
 
@@ -183,7 +189,37 @@ function newerDocumentFirst(left: SonicDicomReportDocument, right: SonicDicomRep
   return normalizeSonicDicomDocumentId(right.documentId).localeCompare(normalizeSonicDicomDocumentId(left.documentId));
 }
 
-/** Account and assignment time constrain correlation; a tombstoned current document can be replaced. */
+export interface SonicDicomAssignmentDocumentSelection {
+  allowedSonicAccounts: Array<string | null | undefined>;
+  assignmentLowerBound?: string | null;
+  excludedDocumentIds?: Iterable<string | null | undefined>;
+  noReportStatusCodes?: number[];
+  finalStatusCodes?: number[];
+}
+
+/** Stored cache IDs are audit state, never a permanent correlation binding. */
+export function selectAssignmentAwareSonicDicomDocument(
+  history: SonicDicomDocumentHistoryResult,
+  selection: SonicDicomAssignmentDocumentSelection
+): { document: SonicDicomReportDocument | null; multipleCandidates: boolean } {
+  const allowedAccounts = new Set(selection.allowedSonicAccounts.map(normalizedSonicAccount).filter(Boolean));
+  const excludedIds = new Set([...selection.excludedDocumentIds ?? []].map(normalizeSonicDicomDocumentId).filter(Boolean));
+  const tombstones = new Set((selection.noReportStatusCodes ?? [7]).filter(Number.isInteger));
+  const finals = new Set((selection.finalStatusCodes ?? [6]).filter(Number.isInteger));
+  const lowerBound = selection.assignmentLowerBound == null ? null : Date.parse(selection.assignmentLowerBound);
+  const hasLowerBound = lowerBound !== null && Number.isFinite(lowerBound);
+  const candidates = history.documents.filter((document) => {
+    const updatedAt = Date.parse(document.updatedAt ?? "");
+    return !excludedIds.has(normalizeSonicDicomDocumentId(document.documentId)) &&
+      !tombstones.has(Number(document.statusCode)) &&
+      allowedAccounts.has(normalizedSonicAccount(document.account)) &&
+      (!hasLowerBound || (Number.isFinite(updatedAt) && updatedAt >= lowerBound!));
+  }).sort(newerDocumentFirst);
+  const final = candidates.find((document) => finals.has(Number(document.statusCode))) ?? null;
+  return { document: final ?? candidates[0] ?? null, multipleCandidates: candidates.length > 1 };
+}
+
+/** Account and assignment time constrain comparison correlation. */
 export function selectSonicDicomComparisonDocument(
   candidate: SonicDicomComparisonDocumentSelection,
   history: SonicDicomDocumentHistoryResult,
@@ -192,43 +228,21 @@ export function selectSonicDicomComparisonDocument(
   const storedId = normalizeSonicDicomDocumentId(candidate.storedDocumentId);
   const primaryId = normalizeSonicDicomDocumentId(candidate.primaryDocumentId);
   const storedDocument = storedId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === storedId) ?? null : null;
-  const tombstones = new Set((options.noReportStatusCodes ?? [7]).filter(Number.isInteger));
-  const finals = new Set(options.finalStatusCodes ?? [6]);
-  const isActive = (document: SonicDicomReportDocument) => document.statusCode == null || !tombstones.has(document.statusCode);
-  if (storedDocument && isActive(storedDocument)) {
-    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
-  }
-  const storedUpdatedAt = Date.parse(storedDocument?.updatedAt ?? candidate.storedDocumentUpdatedAt ?? "");
-  if (storedId && !Number.isFinite(storedUpdatedAt)) {
-    return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: true };
-  }
-  const assignedAccount = normalizedSonicAccount(candidate.assignedDoctorSonicAccount);
+  const assignedAccounts = candidate.assignedDoctorSonicAccounts?.length
+    ? candidate.assignedDoctorSonicAccounts
+    : [candidate.assignedDoctorSonicAccount];
   const assignedAt = Date.parse(candidate.assignedAt);
-  if (!assignedAccount || !Number.isFinite(assignedAt)) return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
-  const matches = history.documents.filter((document) => {
-    const updatedAt = Date.parse(document.updatedAt ?? "");
-    const documentId = normalizeSonicDicomDocumentId(document.documentId);
-    return documentId !== storedId && documentId !== primaryId &&
-      normalizedSonicAccount(document.account) === assignedAccount &&
-      Number.isFinite(updatedAt) && updatedAt >= assignedAt;
-  }).filter((document) => !storedId || isActive(document))
-    .filter((document) => !storedId || Date.parse(document.updatedAt ?? "") > storedUpdatedAt)
-    .sort(newerDocumentFirst);
-  if (matches.length) return { document: matches[0], multipleCandidates: matches.length > 1, storedDocument, bootstrapRejected: false, failClosed: false };
-
-  const cachedPrimary = primaryId ? history.documents.find((document) => normalizeSonicDicomDocumentId(document.documentId) === primaryId) ?? null : null;
-  const primaryWasNonFinal = candidate.primaryCachedReportStatus !== "final";
-  const primaryUpdatedAt = Date.parse(cachedPrimary?.updatedAt ?? "");
-  const alternatePrimary = history.documents.some((document) => {
-    const updatedAt = Date.parse(document.updatedAt ?? "");
-    return normalizeSonicDicomDocumentId(document.documentId) !== primaryId && finals.has(Number(document.statusCode)) &&
-      Number.isFinite(updatedAt) && (updatedAt < assignedAt || updatedAt < primaryUpdatedAt);
+  if (!assignedAccounts.map(normalizedSonicAccount).some(Boolean) || !Number.isFinite(assignedAt)) {
+    return { document: null, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
+  }
+  const selected = selectAssignmentAwareSonicDicomDocument(history, {
+    allowedSonicAccounts: assignedAccounts,
+    assignmentLowerBound: candidate.assignedAt,
+    excludedDocumentIds: [primaryId],
+    noReportStatusCodes: options.noReportStatusCodes,
+    finalStatusCodes: options.finalStatusCodes,
   });
-  const bootstrapCandidate = cachedPrimary && primaryWasNonFinal &&
-    (!storedId || isActive(cachedPrimary)) &&
-    normalizedSonicAccount(cachedPrimary.account) === assignedAccount && Number.isFinite(primaryUpdatedAt) && primaryUpdatedAt >= assignedAt;
-  if (bootstrapCandidate && alternatePrimary) return { document: cachedPrimary, multipleCandidates: false, storedDocument, bootstrapRejected: false, failClosed: false };
-  return { document: storedDocument, multipleCandidates: false, storedDocument, bootstrapRejected: Boolean(bootstrapCandidate), failClosed: false };
+  return { ...selected, storedDocument, bootstrapRejected: false, failClosed: false };
 }
 
 function validateDatabaseName(name: string, fallback: string): string {
@@ -494,35 +508,43 @@ async function querySqlDocumentHistoryBatch(
   sql: SqlModule,
   dicomDb: string,
   reportDb: string,
-  identifiers: string[],
+  contexts: SonicDicomDocumentHistoryLookupContext[],
   method: "study_instance_uid" | "accession_fallback"
 ): Promise<Map<string, Omit<SonicDicomDocumentHistoryResult, "correlationMethod">>> {
-  const uniqueIdentifiers = [...new Set(identifiers.map((value) => value.trim()).filter(Boolean))];
-  if (!uniqueIdentifiers.length) return new Map();
+  const uniqueContexts = [...new Map(contexts.map((context) => [context.lookupKey, context])).values()];
+  if (!uniqueContexts.length) return new Map();
   const request = pool.request();
-  const parameterPrefix = method === "study_instance_uid" ? "studyInstanceUid" : "accession";
-  const valueRows = uniqueIdentifiers.map((identifier, index) => {
-    request.input(`${parameterPrefix}${index}`, sql.NVarChar(128), identifier);
-    return `(@${parameterPrefix}${index})`;
+  const valueRows = uniqueContexts.map((context, index) => {
+    request.input(`lookupKey${index}`, sql.NVarChar(128), context.lookupKey);
+    request.input(`studyInstanceUid${index}`, sql.NVarChar(128), String(context.studyInstanceUid ?? "").trim());
+    request.input(`accession${index}`, sql.NVarChar(128), String(context.accessionNumber ?? "").trim());
+    request.input(`bookingDate${index}`, sql.NVarChar(16), String(context.bookingDate ?? "").trim());
+    request.input(`modalityCode${index}`, sql.NVarChar(16), String(context.modalityCode ?? "").trim().toUpperCase());
+    return `(@lookupKey${index}, @studyInstanceUid${index}, @accession${index}, @bookingDate${index}, @modalityCode${index})`;
   });
-  const inputColumn = method === "study_instance_uid" ? "StudyInstanceUID" : "AccessionNumber";
   const studyPredicate = method === "study_instance_uid"
     ? "s.StudyInstanceUID = input.StudyInstanceUID"
-    : "s.AccessionNumber = input.AccessionNumber";
-  const studyOrder = method === "study_instance_uid" ? "s.StudyInstanceUID" : "s.StudyDate desc, s.StudyTime desc";
+    : `s.AccessionNumber = input.AccessionNumber
+      and (nullif(input.BookingDate, '') is null or convert(char(8), s.StudyDate, 112) = replace(input.BookingDate, '-', ''))
+      and (nullif(input.ModalityCode, '') is null
+        or (input.ModalityCode = 'CT' and upper(coalesce(s.ModalitiesInStudy, '')) like '%CT%')
+        or (input.ModalityCode in ('MR', 'MRI') and upper(coalesce(s.ModalitiesInStudy, '')) like '%MR%'))`;
+  const inputColumn = method === "study_instance_uid" ? "StudyInstanceUID" : "AccessionNumber";
   const rows = (await request.query<SqlDocumentHistoryRow>(`
-    with InputIdentifiers(${inputColumn}) as (select * from (values ${valueRows.join(", ")}) v(${inputColumn}))
-    select input.${inputColumn},
+    with InputContexts(LookupKey, StudyInstanceUID, AccessionNumber, BookingDate, ModalityCode) as (
+      select * from (values ${valueRows.join(", ")}) v(LookupKey, StudyInstanceUID, AccessionNumber, BookingDate, ModalityCode)
+    )
+    select input.LookupKey as ${inputColumn},
       case when study.StudyInstanceUID is null then 0 else 1 end as FoundStudy,
       case when report.ReportNo is null then 0 else 1 end as FoundReport,
       report.ReportNo, document.Id, document.Account, document.Status, document.UpdatedAt
-    from InputIdentifiers input
-    outer apply (select top 1 s.StudyInstanceUID from [${dicomDb}].[dbo].[Studies] s where ${studyPredicate} order by ${studyOrder}) study
-    outer apply (select top 1 r.No as ReportNo from [${reportDb}].[dbo].[Reports] r where r.StudyInstanceUID = study.StudyInstanceUID order by r.No desc) report
+    from InputContexts input
+    outer apply (select s.StudyInstanceUID from [${dicomDb}].[dbo].[Studies] s where ${studyPredicate}) study
+    outer apply (select r.No as ReportNo from [${reportDb}].[dbo].[Reports] r where r.StudyInstanceUID = study.StudyInstanceUID) report
     outer apply (select d.Id, d.Account, d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo) document
     order by document.UpdatedAt desc, document.Id desc
   `)).recordset ?? [];
-  return documentHistoriesFromSqlRows(uniqueIdentifiers, method, rows);
+  return documentHistoriesFromSqlRows(uniqueContexts.map((context) => context.lookupKey), method, rows);
 }
 
 function documentHistoriesFromSqlRows(
@@ -543,7 +565,7 @@ function documentHistoriesFromSqlRows(
     if (row.Id != null) {
       const numericStatus = Number(row.Status);
       history.documents.push({
-        reportNo: history.reportNo ?? Math.trunc(reportNo),
+        reportNo: Math.trunc(reportNo),
         documentId: String(row.Id).trim(),
         account: String(row.Account ?? "").trim() || null,
         statusCode: row.Status == null || !Number.isFinite(numericStatus) ? null : Math.trunc(numericStatus),
@@ -553,10 +575,7 @@ function documentHistoriesFromSqlRows(
     histories.set(key, history);
   }
   for (const history of histories.values()) {
-    history.documents.sort((left, right) => {
-      const byUpdatedAt = String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
-      return byUpdatedAt || right.documentId.localeCompare(left.documentId);
-    });
+    history.documents.sort(newerDocumentFirst);
   }
   return histories;
 }
@@ -570,9 +589,9 @@ export function __documentHistoriesFromSqlRowsForTest(
 }
 
 /**
- * Resolves all metadata-only Documents rows for the same latest Reports.No
- * used by readiness. This is deliberately separate from the normal readiness
- * API so non-comparison callers retain their existing single-document path.
+ * Resolves all metadata-only Documents rows for Reporting Board correlation.
+ * Exact StudyInstanceUID remains authoritative; accession fallback evaluates
+ * the full date/modality-compatible study set rather than one arbitrary study.
  */
 export async function fetchSonicDicomDocumentHistoriesBatch(
   contexts: SonicDicomDocumentHistoryLookupContext[]
@@ -588,17 +607,16 @@ export async function fetchSonicDicomDocumentHistoriesBatch(
   const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
   await withSqlConnection(settings, async ({ sql, pool }) => {
     const byUid = await querySqlDocumentHistoryBatch(pool, sql, dicomDb, reportDb,
-      unique.map((context) => String(context.studyInstanceUid ?? "").trim()), "study_instance_uid");
+      unique.filter((context) => String(context.studyInstanceUid ?? "").trim()), "study_instance_uid");
     const fallbackContexts = unique.filter((context) => {
       const uid = String(context.studyInstanceUid ?? "").trim();
-      return !uid || !byUid.get(uid)?.foundStudy;
+      return (!uid || !byUid.get(context.lookupKey)?.foundStudy) && String(context.accessionNumber ?? "").trim();
     });
-    const byAccession = await querySqlDocumentHistoryBatch(pool, sql, dicomDb, reportDb,
-      fallbackContexts.map((context) => String(context.accessionNumber ?? "").trim()), "accession_fallback");
+    const byAccession = await querySqlDocumentHistoryBatch(pool, sql, dicomDb, reportDb, fallbackContexts, "accession_fallback");
     for (const context of unique) {
       const uid = String(context.studyInstanceUid ?? "").trim();
-      const byUidResult = uid ? byUid.get(uid) : null;
-      const selected = byUidResult?.foundStudy ? byUidResult : byAccession.get(String(context.accessionNumber ?? "").trim());
+      const byUidResult = uid ? byUid.get(context.lookupKey) : null;
+      const selected = byUidResult?.foundStudy ? byUidResult : byAccession.get(context.lookupKey);
       result.set(context.lookupKey, selected
         ? { ...selected, correlationMethod: byUidResult?.foundStudy ? "study_instance_uid" : "accession_fallback" }
         : { foundStudy: false, foundReport: false, reportNo: null, correlationMethod: null, documents: [] });

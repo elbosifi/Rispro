@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
-import { __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
+import { __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectAssignmentAwareSonicDicomDocument, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
   ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
@@ -98,6 +98,17 @@ describe("SonicDICOM SQL document status mapping", () => {
       { StudyInstanceUID: "1.2.3", FoundStudy: 1, FoundReport: 1, ReportNo: 9284, Id: "A", Account: "doctor.a", Status: 6, UpdatedAt: "2026-09-01T10:00:00.000Z" },
     ]).get("1.2.3");
     assert.deepEqual(history?.documents.map((document) => ({ id: document.documentId, status: document.statusCode })), [{ id: "B", status: 7 }, { id: "A", status: 6 }]);
+  });
+
+  it("retains every ReportNo on a multi-study accession history", () => {
+    const history = __documentHistoriesFromSqlRowsForTest(["ACC"], "accession_fallback", [
+      { AccessionNumber: "ACC", FoundStudy: 1, FoundReport: 1, ReportNo: 100, Id: "CT-final", Account: "doctor", Status: 6, UpdatedAt: "2026-09-01T10:00:00.000Z" },
+      { AccessionNumber: "ACC", FoundStudy: 1, FoundReport: 1, ReportNo: 200, Id: "MR-draft", Account: "doctor", Status: 1, UpdatedAt: "2026-09-01T11:00:00.000Z" },
+    ]).get("ACC");
+    assert.deepEqual(history?.documents.map((document) => ({ id: document.documentId, reportNo: document.reportNo })), [
+      { id: "MR-draft", reportNo: 200 },
+      { id: "CT-final", reportNo: 100 },
+    ]);
   });
 
   it("uses a found StudyInstanceUID result without calling accession fallback", async () => {
@@ -206,14 +217,14 @@ describe("SonicDICOM comparison document correlation", () => {
     assert.equal(selected.document, null);
   });
 
-  it("keeps a durable DocumentId correlation even when another matching document is newer", () => {
+  it("dynamically replaces a stored Draft when a newer matching document is available", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: "B", primaryDocumentId: "A", assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([
       { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" },
       { documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:01:00.000Z" },
     ]));
-    assert.equal(selected.document?.documentId, "B");
+    assert.equal(selected.document?.documentId, "C");
   });
 
   it("matches durable DocumentId correlation case-insensitively", () => {
@@ -263,7 +274,7 @@ describe("SonicDICOM comparison document correlation", () => {
     assert.equal(selected.document?.documentId, "C");
   });
 
-  it("fails closed when stored B is missing and has no trustworthy cached timestamp", () => {
+  it("does not give a missing stored DocumentId special authority", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: "B", storedDocumentUpdatedAt: null, primaryDocumentId: "A",
       assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
@@ -271,16 +282,54 @@ describe("SonicDICOM comparison document correlation", () => {
       { documentId: "C", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T12:00:00.000Z" },
       { documentId: "X", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T10:05:00.000Z" },
     ]));
-    assert.equal(selected.document, null);
-    assert.equal(selected.failClosed, true);
+    assert.equal(selected.document?.documentId, "C");
+    assert.equal(selected.failClosed, false);
   });
 
-  it("rejects an ambiguous polluted primary bootstrap without an alternate Final", () => {
+  it("does not reuse the primary document as a comparison document", () => {
     const selected = selectSonicDicomComparisonDocument({
       storedDocumentId: null, primaryDocumentId: "B", primaryCachedReportStatus: "draft",
       assignedDoctorSonicAccount: "doctor.b@nccb.ly", assignedAt: "2026-09-01T10:00:00.000Z",
     }, history([{ documentId: "B", account: "doctor.b@nccb.ly", updatedAt: "2026-09-01T11:00:00.000Z" }]));
     assert.equal(selected.document, null);
-    assert.equal(selected.bootstrapRejected, true);
+    assert.equal(selected.bootstrapRejected, false);
+  });
+});
+
+describe("SonicDICOM assignment-aware document selection", () => {
+  const history = (documents: Array<{ documentId: string; account: string; statusCode: number; updatedAt: string }>) => ({
+    foundStudy: true,
+    foundReport: true,
+    reportNo: 1,
+    correlationMethod: "accession_fallback" as const,
+    documents: documents.map((document, index) => ({ ...document, reportNo: index + 1 })),
+  });
+
+  it("keeps an assigned doctor's Final over a newer Draft and chooses the newest Final", () => {
+    const selected = selectAssignmentAwareSonicDicomDocument(history([
+      { documentId: "final-old", account: "doctor", statusCode: 6, updatedAt: "2026-09-01T10:00:00.000Z" },
+      { documentId: "draft-new", account: "doctor", statusCode: 1, updatedAt: "2026-09-01T12:00:00.000Z" },
+      { documentId: "final-new", account: "doctor", statusCode: 6, updatedAt: "2026-09-01T11:00:00.000Z" },
+    ]), { allowedSonicAccounts: [" DOCTOR "], assignmentLowerBound: "2026-09-01T09:00:00.000Z", finalStatusCodes: [6], noReportStatusCodes: [7] });
+    assert.equal(selected.document?.documentId, "final-new");
+  });
+
+  it("matches either assigned username or email, excludes other doctors and enforces assignment time", () => {
+    const selected = selectAssignmentAwareSonicDicomDocument(history([
+      { documentId: "other-final", account: "other", statusCode: 6, updatedAt: "2026-09-01T12:00:00.000Z" },
+      { documentId: "before", account: "superadmin", statusCode: 6, updatedAt: "2026-09-01T08:00:00.000Z" },
+      { documentId: "email-draft", account: "seraj.alsaifi@nccb.ly", statusCode: 1, updatedAt: "2026-09-01T10:00:00.000Z" },
+    ]), { allowedSonicAccounts: ["superadmin", " SERAJ.ALSAIFI@nccb.ly "], assignmentLowerBound: "2026-09-01T09:00:00.000Z", finalStatusCodes: [6], noReportStatusCodes: [7] });
+    assert.equal(selected.document?.documentId, "email-draft");
+  });
+
+  it("excludes known comparison documents and tombstones with deterministic DocumentId ties", () => {
+    const selected = selectAssignmentAwareSonicDicomDocument(history([
+      { documentId: "comparison", account: "doctor", statusCode: 6, updatedAt: "2026-09-01T11:00:00.000Z" },
+      { documentId: "B", account: "doctor", statusCode: 6, updatedAt: "2026-09-01T10:00:00.000Z" },
+      { documentId: "A", account: "doctor", statusCode: 6, updatedAt: "2026-09-01T10:00:00.000Z" },
+      { documentId: "tombstone", account: "doctor", statusCode: 7, updatedAt: "2026-09-01T12:00:00.000Z" },
+    ]), { allowedSonicAccounts: ["doctor"], excludedDocumentIds: [" COMPARISON "], finalStatusCodes: [6], noReportStatusCodes: [7] });
+    assert.equal(selected.document?.documentId, "B");
   });
 });

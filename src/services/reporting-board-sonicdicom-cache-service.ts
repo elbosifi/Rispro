@@ -6,6 +6,7 @@ import {
   fetchSonicDicomDocumentHistoriesBatch,
   mapSonicDicomDocumentStatus,
   normalizeSonicDicomDocumentId,
+  selectAssignmentAwareSonicDicomDocument,
   selectSonicDicomComparisonDocument,
   type ReportLookupContext,
   type ReportStatusResult,
@@ -33,6 +34,11 @@ export type ReportingBoardCacheStatus = "final" | "draft" | "no_report" | "study
 
 export interface ReportingBoardSonicDicomCacheCandidate extends ReportLookupContext {
   assigned: boolean;
+  assignedDoctorId?: number | null;
+  assignedDoctorUsername?: string | null;
+  assignedDoctorEmail?: string | null;
+  assignedAt?: string | null;
+  assignmentOrigin?: "rispro" | "sonic_auto" | "sonic_reconciled" | null;
   priorityCode: string | null;
   cacheStatus: ReportingBoardCacheStatus | null;
   lastSuccessAt: string | null;
@@ -64,6 +70,8 @@ export interface ComparisonSonicDicomCacheCandidate extends ReportLookupContext 
   comparisonAssignmentId: number;
   comparisonRequestId: number;
   assignedDoctorSonicAccount: string | null;
+  assignedDoctorUsername?: string | null;
+  assignedDoctorEmail?: string | null;
   assignedAt: string;
   storedDocumentId: string | null;
   storedDocumentUpdatedAt: string | null;
@@ -166,15 +174,56 @@ function normalizedState(state: string): ReportingBoardCacheStatus {
   return state === "final" || state === "draft" || state === "no_report" || state === "study_not_found" ? state : "unavailable";
 }
 
+function primaryDocumentFromHistory(
+  candidate: ReportingBoardSonicDicomCacheCandidate,
+  history: SonicDicomDocumentHistoryResult,
+  settings: SonicDicomReportSettings,
+  excludedDocumentIds: Iterable<string | null | undefined> = []
+) {
+  const excluded = new Set([...excludedDocumentIds].map(normalizeSonicDicomDocumentId).filter(Boolean));
+  const accounts = [candidate.assignedDoctorUsername, candidate.assignedDoctorEmail];
+  if (candidate.assigned) {
+    if (!accounts.some((value) => String(value ?? "").trim())) return null;
+    return selectAssignmentAwareSonicDicomDocument(history, {
+      allowedSonicAccounts: accounts,
+      assignmentLowerBound: candidate.assignmentOrigin === "rispro" ? candidate.assignedAt : null,
+      excludedDocumentIds: excluded,
+      noReportStatusCodes: settings.sonicDicomSqlNoReportStatusCodes,
+      finalStatusCodes: settings.sonicDicomSqlFinalStatusCodes,
+    }).document;
+  }
+
+  const noReport = new Set(settings.sonicDicomSqlNoReportStatusCodes.filter(Number.isInteger));
+  const finals = new Set(settings.sonicDicomSqlFinalStatusCodes.filter(Number.isInteger));
+  const documents = history.documents.filter((document) =>
+    !excluded.has(normalizeSonicDicomDocumentId(document.documentId)) &&
+    (document.statusCode == null || !noReport.has(document.statusCode))
+  ).sort((left, right) => {
+    const leftAt = Date.parse(left.updatedAt ?? "");
+    const rightAt = Date.parse(right.updatedAt ?? "");
+    if (leftAt !== rightAt) return rightAt - leftAt;
+    return normalizeSonicDicomDocumentId(right.documentId).localeCompare(normalizeSonicDicomDocumentId(left.documentId));
+  });
+  return documents.find((document) => finals.has(Number(document.statusCode))) ?? documents[0] ?? null;
+}
+
 function comparisonObservationFromHistory(
   candidate: ComparisonSonicDicomCacheCandidate,
   history: SonicDicomDocumentHistoryResult | null,
-  settings: SonicDicomReportSettings
+  settings: SonicDicomReportSettings,
+  primaryDocumentId: string | null
 ): ComparisonDocumentObservation {
   const noObservation = { statusCode: null, documentUpdatedAt: null, correlatedDocuments: [] };
   if (!history) return { status: "unavailable", successful: false, reportNo: null, documentId: candidate.storedDocumentId, account: null, reportFinalAt: null, correlationMethod: null, ...noObservation };
   if (!history.foundStudy) return { status: "study_not_found", successful: true, reportNo: null, documentId: candidate.storedDocumentId, account: null, reportFinalAt: null, correlationMethod: null, ...noObservation };
-  const selected = selectSonicDicomComparisonDocument(candidate, history, {
+  const selected = selectSonicDicomComparisonDocument({
+    ...candidate,
+    // The cached primary document ID can be polluted by a prior generic lookup.
+    // Exclude the primary correlated from this refresh, not that stale cache value.
+    primaryDocumentId,
+    assignedDoctorSonicAccounts: [candidate.assignedDoctorUsername, candidate.assignedDoctorEmail, candidate.assignedDoctorSonicAccount]
+      .filter((value): value is string => typeof value === "string"),
+  }, history, {
     noReportStatusCodes: settings.sonicDicomSqlNoReportStatusCodes,
     finalStatusCodes: settings.sonicDicomSqlFinalStatusCodes,
   });
@@ -196,25 +245,43 @@ function comparisonObservationFromHistory(
     account: null, reportFinalAt: null, correlationMethod: history.correlationMethod, ...noObservation,
   };
   if (!selected.document) return {
-    status: "no_report", successful: true, reportNo: history.reportNo, documentId: candidate.storedDocumentId,
-    account: null, reportFinalAt: null, correlationMethod: history.correlationMethod, ...noObservation,
+    status: "no_report", successful: true, reportNo: null, documentId: null,
+    account: null, reportFinalAt: null, correlationMethod: history.correlationMethod,
+    statusCode: null, documentUpdatedAt: null,
+    correlatedDocuments: comparisonHistoryDocuments(candidate, history.documents, primaryDocumentId),
   };
   const mapped = mapSonicDicomDocumentStatus(
     settings, selected.document.statusCode, selected.document.updatedAt, selected.document.documentId,
     selected.document.account, history.correlationMethod
   );
-  const correlated = [selected.storedDocument, selected.document].filter((document): document is NonNullable<typeof document> => Boolean(document));
-  const correlatedDocuments = [...new Map(correlated.map((document) => [normalizeSonicDicomDocumentId(document.documentId), {
-    reportNo: document.reportNo ?? history.reportNo, documentId: document.documentId, account: document.account,
-    statusCode: document.statusCode, documentUpdatedAt: document.updatedAt,
-  }])).values()];
+  const correlatedDocuments = comparisonHistoryDocuments(candidate, history.documents, primaryDocumentId);
   return {
-    status: normalizedState(mapped.state), successful: mapped.state !== "unavailable", reportNo: history.reportNo,
+    status: normalizedState(mapped.state), successful: mapped.state !== "unavailable", reportNo: selected.document.reportNo,
     documentId: selected.document.documentId, account: selected.document.account,
     reportFinalAt: mapped.state === "final" ? mapped.reportFinalAt : null,
     correlationMethod: history.correlationMethod, statusCode: selected.document.statusCode,
     documentUpdatedAt: selected.document.updatedAt, correlatedDocuments,
   };
+}
+
+function comparisonHistoryDocuments(
+  candidate: ComparisonSonicDicomCacheCandidate,
+  documents: SonicDicomDocumentHistoryResult["documents"],
+  primaryDocumentId: string | null
+): ComparisonDocumentObservation["correlatedDocuments"] {
+  const assignedAccounts = new Set([candidate.assignedDoctorUsername, candidate.assignedDoctorEmail, candidate.assignedDoctorSonicAccount]
+    .map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean));
+  const assignedAt = Date.parse(candidate.assignedAt);
+  const primaryId = normalizeSonicDicomDocumentId(primaryDocumentId);
+  return [...new Map(documents.filter((document) => {
+    const updatedAt = Date.parse(document.updatedAt ?? "");
+    return assignedAccounts.has(String(document.account ?? "").trim().toLowerCase()) &&
+      Number.isFinite(updatedAt) && Number.isFinite(assignedAt) && updatedAt >= assignedAt &&
+      (!primaryId || normalizeSonicDicomDocumentId(document.documentId) !== primaryId);
+  }).map((document) => [normalizeSonicDicomDocumentId(document.documentId), {
+    reportNo: document.reportNo, documentId: document.documentId, account: document.account,
+    statusCode: document.statusCode, documentUpdatedAt: document.updatedAt,
+  }])).values()];
 }
 export async function enqueueReportingBoardSonicDicomCacheRows(appointmentIds: number[], db: Queryable = pool, options: { force?: boolean } = {}): Promise<void> {
   const ids = [...new Set(appointmentIds.filter((id) => Number.isInteger(id) && id > 0))];
@@ -289,12 +356,17 @@ export async function getFullReportingBoardSonicDicomResyncStatus(requestedAt: s
 export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: number, db: Queryable = pool): Promise<ReportingBoardSonicDicomCacheCandidate[]> {
   const result = await db.query<ReportingBoardSonicDicomCacheCandidate>(`
     select b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
-      b.requires_report as "requiresReport", b.status, cta.id is not null as assigned, rp.code as "priorityCode",
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
+      cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
+      assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin", rp.code as "priorityCode",
       cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
     from appointments_v2.bookings b
     left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
     left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
     left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+    left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+    left join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
     left join reporting_priorities rp on rp.id = b.reporting_priority_id
     where b.status = 'completed' and b.requires_report = true and manual.id is null
       and (cache.appointment_id is null or cache.next_check_at <= now()
@@ -305,15 +377,27 @@ export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: nu
       cache.next_check_at asc nulls first, cache.last_success_at asc nulls first, b.id asc
     limit $1
   `, [Math.max(1, Math.min(limit, 200))]);
-  return result.rows.map((row) => ({ ...row, bookingId: Number(row.bookingId) }));
+  return result.rows.map((row) => ({
+    ...row,
+    bookingId: Number(row.bookingId),
+    assigned: Boolean(row.assigned),
+    assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
+    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
+    assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
+    assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
+    bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
+    modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
+  }));
 }
 
 export async function selectDueComparisonSonicDicomCacheCandidates(limit: number, db: Queryable = pool): Promise<ComparisonSonicDicomCacheCandidate[]> {
   const result = await db.query<ComparisonSonicDicomCacheCandidate>(`
     select
       b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
-      b.requires_report as "requiresReport", b.status,
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
+      assigned_user.username as "assignedDoctorUsername", assigned_user.email as "assignedDoctorEmail",
       coalesce(nullif(btrim(assigned_user.email), ''), nullif(btrim(assigned_user.username), '')) as "assignedDoctorSonicAccount", comparison_cache.sonicdicom_document_id as "storedDocumentId",
       comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
@@ -323,6 +407,7 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
     join appointments_v2.bookings b on b.id = cr.linked_previous_booking_id
     join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
     join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
     left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
     left join doctor_portal.reporting_board_sonicdicom_cache primary_cache on primary_cache.appointment_id = b.id
     left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
@@ -343,6 +428,10 @@ export async function selectDueComparisonSonicDicomCacheCandidates(limit: number
     primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
     primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
     assignedDoctorSonicAccount: row.assignedDoctorSonicAccount == null ? null : String(row.assignedDoctorSonicAccount),
+    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
+    bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
+    modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
     assignedAt: String(row.assignedAt),
   }));
 }
@@ -356,8 +445,9 @@ export async function selectComparisonSonicDicomCacheCandidatesByRequestIds(
   const result = await db.query<ComparisonSonicDicomCacheCandidate>(`
     select
       b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
-      b.requires_report as "requiresReport", b.status,
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
+      assigned_user.username as "assignedDoctorUsername", assigned_user.email as "assignedDoctorEmail",
       coalesce(nullif(btrim(assigned_user.email), ''), nullif(btrim(assigned_user.username), '')) as "assignedDoctorSonicAccount", comparison_cache.sonicdicom_document_id as "storedDocumentId",
       comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
@@ -367,6 +457,7 @@ export async function selectComparisonSonicDicomCacheCandidatesByRequestIds(
     join appointments_v2.bookings b on b.id = cr.linked_previous_booking_id
     join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
     join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
     left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
     left join doctor_portal.reporting_board_sonicdicom_cache primary_cache on primary_cache.appointment_id = b.id
     left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
@@ -387,8 +478,9 @@ export async function selectComparisonSonicDicomCacheCandidatesByAppointmentIds(
   const result = await db.query<ComparisonSonicDicomCacheCandidate>(`
     select
       b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
-      b.requires_report as "requiresReport", b.status,
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
       cca.id as "comparisonAssignmentId", cca.comparison_request_id as "comparisonRequestId", cca.assigned_at as "assignedAt",
+      assigned_user.username as "assignedDoctorUsername", assigned_user.email as "assignedDoctorEmail",
       coalesce(nullif(btrim(assigned_user.email), ''), nullif(btrim(assigned_user.username), '')) as "assignedDoctorSonicAccount", comparison_cache.sonicdicom_document_id as "storedDocumentId",
       comparison_cache.sonicdicom_document_updated_at as "storedDocumentUpdatedAt",
       primary_cache.sonicdicom_latest_document_id as "primaryDocumentId", primary_cache.report_status as "primaryCachedReportStatus",
@@ -398,6 +490,7 @@ export async function selectComparisonSonicDicomCacheCandidatesByAppointmentIds(
     join appointments_v2.bookings b on b.id = cr.linked_previous_booking_id
     join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cca.assigned_doctor_id
     join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
     left join doctor_portal.comparison_sonicdicom_cache comparison_cache on comparison_cache.comparison_assignment_id = cca.id
     left join doctor_portal.reporting_board_sonicdicom_cache primary_cache on primary_cache.appointment_id = b.id
     left join doctor_portal.reporting_board_manual_final_overrides manual on manual.appointment_id = b.id and manual.cleared_at is null
@@ -421,8 +514,50 @@ function mapComparisonSonicDicomCacheCandidate(row: ComparisonSonicDicomCacheCan
     primaryDocumentId: row.primaryDocumentId == null ? null : String(row.primaryDocumentId),
     primaryCachedReportStatus: row.primaryCachedReportStatus == null ? null : String(row.primaryCachedReportStatus),
     assignedDoctorSonicAccount: row.assignedDoctorSonicAccount == null ? null : String(row.assignedDoctorSonicAccount),
+    assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+    assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
+    bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
+    modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
     assignedAt: String(row.assignedAt),
   };
+}
+
+async function hydratePrimarySonicDicomCacheCandidates(
+  candidates: ReportingBoardSonicDicomCacheCandidate[],
+  db: Queryable = pool
+): Promise<Map<number, ReportingBoardSonicDicomCacheCandidate>> {
+  const ids = [...new Set(candidates.map((candidate) => candidate.bookingId).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return new Map();
+  const result = await db.query<ReportingBoardSonicDicomCacheCandidate>(`
+    select b.id as "bookingId", ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber", b.study_instance_uid as "studyInstanceUid",
+      b.requires_report as "requiresReport", b.status, b.booking_date::text as "bookingDate", modality.code as "modalityCode",
+      cta.id is not null as assigned, cta.assigned_doctor_id as "assignedDoctorId", assigned_user.username as "assignedDoctorUsername",
+      assigned_user.email as "assignedDoctorEmail", cta.assigned_at as "assignedAt", cta.assignment_origin as "assignmentOrigin",
+      rp.code as "priorityCode", cache.report_status as "cacheStatus", cache.last_success_at as "lastSuccessAt"
+    from appointments_v2.bookings b
+    left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+    left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+    left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+    left join users assigned_user on assigned_user.id = assigned_doctor.user_id
+    left join modalities modality on modality.id = b.modality_id
+    left join reporting_priorities rp on rp.id = b.reporting_priority_id
+    where b.id = any($1::bigint[])
+  `, [ids]);
+  return new Map(result.rows.map((row) => {
+    const mapped: ReportingBoardSonicDicomCacheCandidate = {
+      ...row,
+      bookingId: Number(row.bookingId),
+      assigned: Boolean(row.assigned),
+      assignedDoctorId: row.assignedDoctorId == null ? null : Number(row.assignedDoctorId),
+      assignedDoctorUsername: row.assignedDoctorUsername == null ? null : String(row.assignedDoctorUsername),
+      assignedDoctorEmail: row.assignedDoctorEmail == null ? null : String(row.assignedDoctorEmail),
+      assignedAt: row.assignedAt == null ? null : String(row.assignedAt),
+      assignmentOrigin: row.assignmentOrigin == null ? null : String(row.assignmentOrigin) as ReportingBoardSonicDicomCacheCandidate["assignmentOrigin"],
+      bookingDate: row.bookingDate == null ? null : String(row.bookingDate),
+      modalityCode: row.modalityCode == null ? null : String(row.modalityCode),
+    };
+    return [mapped.bookingId, mapped];
+  }));
 }
 
 export async function persistReportingBoardSonicDicomCacheResult(
@@ -472,15 +607,18 @@ export async function persistReportingBoardSonicDicomCacheResults(
         cache.report_status as previous_status
       from input left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = input."appointmentId"
       left join lateral (
-        select case when count(*) = 1 then min(dp.id) else null end as doctor_id,
-          case when count(*) = 1 then min(u.full_name) else null end as name_ar,
-          case when count(*) = 1 then min(u.english_name) else null end as name_en,
-          case when count(*) = 1 then min(u.username) else null end as username
+        select case when count(distinct dp.id) = 1 then min(dp.id) else null end as doctor_id,
+          case when count(distinct dp.id) = 1 then min(u.full_name) else null end as name_ar,
+          case when count(distinct dp.id) = 1 then min(u.english_name) else null end as name_en,
+          case when count(distinct dp.id) = 1 then min(u.username) else null end as username
         from users u
         join doctor_portal.doctor_profiles dp on dp.user_id = u.id
         where input.successful and input.status = 'final'
           and nullif(btrim(input."finalizedByAccount"), '') is not null
-          and lower(btrim(u.username)) = lower(btrim(input."finalizedByAccount"))
+          and (
+            lower(btrim(u.username)) = lower(btrim(input."finalizedByAccount"))
+            or lower(btrim(u.email)) = lower(btrim(input."finalizedByAccount"))
+          )
       ) finalizer on true
     ), upserted as (
       insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status, report_final_at, sonicdicom_latest_document_id, sonicdicom_finalized_by_account, finalized_by_doctor_id, finalized_by_name_ar_snapshot, finalized_by_name_en_snapshot, finalized_by_username_snapshot, correlation_method, sonicdicom_study_note, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, last_error, study_instance_uid_snapshot, accession_number_snapshot)
@@ -622,7 +760,7 @@ async function persistComparisonSonicDicomCacheObservations(
       comparison_request_id = excluded.comparison_request_id,
       report_status = case when excluded.last_success_at is not null then excluded.report_status else doctor_portal.comparison_sonicdicom_cache.report_status end,
       sonicdicom_report_no = case when excluded.last_success_at is not null then excluded.sonicdicom_report_no else doctor_portal.comparison_sonicdicom_cache.sonicdicom_report_no end,
-      sonicdicom_document_id = coalesce(excluded.sonicdicom_document_id, doctor_portal.comparison_sonicdicom_cache.sonicdicom_document_id),
+      sonicdicom_document_id = case when excluded.last_success_at is not null then excluded.sonicdicom_document_id else doctor_portal.comparison_sonicdicom_cache.sonicdicom_document_id end,
       sonicdicom_account = case when excluded.last_success_at is not null then excluded.sonicdicom_account else doctor_portal.comparison_sonicdicom_cache.sonicdicom_account end,
       sonicdicom_status_code = case when excluded.last_success_at is not null then excluded.sonicdicom_status_code else doctor_portal.comparison_sonicdicom_cache.sonicdicom_status_code end,
       sonicdicom_document_updated_at = case when excluded.last_success_at is not null then excluded.sonicdicom_document_updated_at else doctor_portal.comparison_sonicdicom_cache.sonicdicom_document_updated_at end,
@@ -706,14 +844,34 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
   ];
   if (!candidates.length && !effectiveComparisonCandidates.length) return { candidates: 0, successful: 0, changedStatus: 0, final: 0, failed: 0 };
   const settings = await readSonicDicomReportSettings();
+  const primarySeedCandidates: ReportingBoardSonicDicomCacheCandidate[] = [
+    ...candidates,
+    ...effectiveComparisonCandidates.map((comparison) => ({
+      bookingId: comparison.bookingId,
+      accessionNumber: comparison.accessionNumber,
+      studyInstanceUid: comparison.studyInstanceUid,
+      requiresReport: comparison.requiresReport,
+      status: comparison.status,
+      bookingDate: comparison.bookingDate,
+      modalityCode: comparison.modalityCode,
+      assigned: false,
+      priorityCode: null,
+      cacheStatus: null,
+      lastSuccessAt: null,
+    })),
+  ];
+  const hydratedPrimaryById = await hydratePrimarySonicDicomCacheCandidates(primarySeedCandidates);
+  const effectivePrimaryCandidates = candidates.map((candidate) => hydratedPrimaryById.get(candidate.bookingId) ?? candidate);
   // A comparison source is refreshed with its comparison when it is not manual-final.
   // This avoids waiting for an unrelated primary due time to protect finality.
-  const primaryContexts = new Map<number, ReportLookupContext>(candidates.map((candidate) => [candidate.bookingId, candidate]));
+  const primaryContexts = new Map<number, ReportingBoardSonicDicomCacheCandidate>(effectivePrimaryCandidates.map((candidate) => [candidate.bookingId, candidate]));
   for (const comparison of effectiveComparisonCandidates) {
     if (!comparison.primaryManualFinal && !primaryContexts.has(comparison.bookingId)) {
-      primaryContexts.set(comparison.bookingId, {
+      primaryContexts.set(comparison.bookingId, hydratedPrimaryById.get(comparison.bookingId) ?? {
         bookingId: comparison.bookingId, accessionNumber: comparison.accessionNumber,
         studyInstanceUid: comparison.studyInstanceUid, requiresReport: comparison.requiresReport, status: comparison.status,
+        bookingDate: comparison.bookingDate, modalityCode: comparison.modalityCode,
+        assigned: false, priorityCode: null, cacheStatus: null, lastSuccessAt: null,
       });
     }
   }
@@ -736,6 +894,7 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
   try {
     const historyContexts = [...new Map(primary.map((context) => [context.bookingId, {
       lookupKey: `study:${context.bookingId}`, accessionNumber: context.accessionNumber, studyInstanceUid: context.studyInstanceUid,
+      bookingDate: context.bookingDate, modalityCode: context.modalityCode,
     }])).values()];
     for (let index = 0; index < historyContexts.length; index += 200) {
       const batch = await sonicDicomReaders.fetchDocumentHistoriesBatch(historyContexts.slice(index, index + 200));
@@ -745,27 +904,53 @@ export async function refreshReportingBoardSonicDicomCacheCandidates(
     historyError = error;
   }
 
+  // Correlate the primary from this history before comparison selection. A prior
+  // primary cache ID may be polluted by a comparison document, so it is not a
+  // reliable comparison exclusion; historical/current comparison IDs still are.
+  const priorComparisonDocumentIds = await knownComparisonDocumentIdsByAppointment(primary.map((context) => context.bookingId));
+  const correlatedPrimaryDocumentIds = new Map<number, string | null>();
+  for (const context of primary) {
+    const history = histories.get(`study:${context.bookingId}`);
+    correlatedPrimaryDocumentIds.set(context.bookingId, history
+      ? primaryDocumentFromHistory(context, history, settings, priorComparisonDocumentIds.get(context.bookingId) ?? [])?.documentId ?? null
+      : null);
+  }
+
   const comparisonObservations = effectiveComparisonCandidates.map((candidate) => {
-    const observation = comparisonObservationFromHistory(candidate, histories.get(`study:${candidate.bookingId}`) ?? null, settings);
+    const observation = comparisonObservationFromHistory(
+      candidate,
+      histories.get(`study:${candidate.bookingId}`) ?? null,
+      settings,
+      correlatedPrimaryDocumentIds.get(candidate.bookingId) ?? null
+    );
     return { candidate, observation, error: historyError ?? (!observation.successful ? "SonicDICOM comparison correlation was not safely established" : null) };
   });
   await persistComparisonSonicDicomCacheObservations(comparisonObservations, settings);
 
+  // Re-read after persistence so newly correlated comparison history, including
+  // tombstones, excludes those IDs from the primary in this same refresh.
   const comparisonDocumentIds = await knownComparisonDocumentIdsByAppointment(primary.map((context) => context.bookingId));
+  // Persisted comparison history may lag this refresh; protect the primary from
+  // documents correlated to a comparison in the same batch as well.
+  for (const { candidate, observation } of comparisonObservations) {
+    const documentIds = [observation.documentId, ...observation.correlatedDocuments.map((document) => document.documentId)]
+      .map(normalizeSonicDicomDocumentId)
+      .filter(Boolean);
+    if (!documentIds.length) continue;
+    const known = comparisonDocumentIds.get(candidate.bookingId) ?? new Set<string>();
+    documentIds.forEach((documentId) => known.add(documentId));
+    comparisonDocumentIds.set(candidate.bookingId, known);
+  }
   const primaryInputs = primary.map((context) => {
     const history = histories.get(`study:${context.bookingId}`);
     const excluded = comparisonDocumentIds.get(context.bookingId);
     const normal = resolved.get(context.bookingId) ?? null;
     if (!history) {
-      if (excluded?.size) return { context, result: null, error: historyError ?? "SonicDICOM document history unavailable" };
+      if (context.assigned || excluded?.size) return { context, result: null, error: historyError ?? "SonicDICOM document history unavailable" };
       return { context, result: normal, error: normal?.state === "unavailable" ? "SonicDICOM unavailable" : null };
     }
-    if (!excluded?.size) return { context, result: normal, error: normal?.state === "unavailable" ? "SonicDICOM unavailable" : null };
-    const noReportStatuses = new Set(settings.sonicDicomSqlNoReportStatusCodes.filter(Number.isInteger));
-    const document = history.documents.find((candidate) =>
-      !excluded.has(normalizeSonicDicomDocumentId(candidate.documentId)) &&
-      (candidate.statusCode == null || !noReportStatuses.has(candidate.statusCode))
-    ) ?? null;
+    const excludedIds = excluded ?? new Set<string>();
+    const document = primaryDocumentFromHistory(context, history, settings, excludedIds);
     const result = document
       ? mapSonicDicomDocumentStatus(settings, document.statusCode, document.updatedAt, document.documentId, document.account, history.correlationMethod)
       : {
