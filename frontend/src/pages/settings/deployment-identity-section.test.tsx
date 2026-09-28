@@ -22,10 +22,10 @@ it("loads, populates from the current browser without saving, and saves the norm
   const user = userEvent.setup();
   renderSection();
   const input = await screen.findByLabelText("Public RISpro URL");
-  expect(input).toHaveValue("https://rispro.nccb.com.ly");
+  expect((input as HTMLInputElement).value).toBe("https://rispro.nccb.com.ly");
   await user.click(screen.getByRole("button", { name: "Use current browser address" }));
   expect(saveDeploymentIdentitySettings).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saveDeploymentIdentitySettings).toHaveBeenCalledTimes(1));
-  expect(input).toHaveValue("http://localhost:3000");
+  expect((input as HTMLInputElement).value).toBe("http://localhost:3000");
 });
