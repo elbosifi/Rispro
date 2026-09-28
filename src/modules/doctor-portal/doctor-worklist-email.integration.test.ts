@@ -94,14 +94,13 @@ describe("Doctor worklist link email", { skip: skipEnv }, () => {
       [worklistId]
     );
     await pool.query("update email_smtp_configuration set enabled = true, smtp_password_secret = $1 where id = 1", [{}]);
-    process.env.PUBLIC_APP_BASE_URL = "https://public.example.test/";
+    await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', '{\"value\":\"https://public.example.test\"}'::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value");
   }
 
   before(async () => {
     if (!await canReachDatabase()) return;
-    originalPublicBaseUrl = process.env.PUBLIC_APP_BASE_URL;
     originalEmailConfig = (await pool.query<typeof originalEmailConfig>("select enabled, smtp_password_secret from email_smtp_configuration where id = 1")).rows[0]!;
-    process.env.PUBLIC_APP_BASE_URL = "https://public.example.test/";
+    await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', '{\"value\":\"https://public.example.test\"}'::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value");
     await pool.query("update email_smtp_configuration set enabled = true, smtp_password_secret = $1 where id = 1", [{}]);
 
     const express = (await import("express")).default;
@@ -159,8 +158,6 @@ describe("Doctor worklist link email", { skip: skipEnv }, () => {
     if (originalEmailConfig) {
       await pool.query("update email_smtp_configuration set enabled = $1, smtp_password_secret = $2 where id = 1", [originalEmailConfig.enabled, originalEmailConfig.smtp_password_secret]);
     }
-    if (originalPublicBaseUrl === undefined) delete process.env.PUBLIC_APP_BASE_URL;
-    else process.env.PUBLIC_APP_BASE_URL = originalPublicBaseUrl;
     if (app) await app.close();
   });
 
@@ -239,7 +236,7 @@ describe("Doctor worklist link email", { skip: skipEnv }, () => {
     assert.equal((await api(manager.cookie, `/api/doctor/reporting-board/doctor-worklists/${worklistId}/email-link`, { method: "POST" })).status, 409);
     await pool.query("update doctor_portal.reporting_board_saved_views set expires_at = null where id = $1", [worklistId]);
 
-    delete process.env.PUBLIC_APP_BASE_URL;
+    await pool.query("delete from system_settings where category = 'deployment_identity' and setting_key = 'public_app_base_url'");
     const missingUrl = await api(manager.cookie, `/api/doctor/reporting-board/doctor-worklists/${worklistId}/email-link`, { method: "POST" });
     assert.equal(missingUrl.status, 409);
     assert.match(JSON.stringify(missingUrl.data), /public application URL is not configured/i);

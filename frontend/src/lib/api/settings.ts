@@ -6,6 +6,22 @@ import type { SchedulingEngineConfig, User } from "@/types/api";
 
 type RawRecord = Record<string, unknown>;
 
+export interface DeploymentIdentitySettings {
+  publicAppBaseUrl: string;
+  updatedAt: string;
+}
+
+export async function fetchDeploymentIdentitySettings(): Promise<DeploymentIdentitySettings> {
+  return api<DeploymentIdentitySettings>("/settings/deployment-identity");
+}
+
+export async function saveDeploymentIdentitySettings(publicAppBaseUrl: string): Promise<DeploymentIdentitySettings> {
+  return api<DeploymentIdentitySettings>("/settings/deployment-identity", {
+    method: "PUT",
+    body: JSON.stringify({ publicAppBaseUrl }),
+  });
+}
+
 // -- Settings --
 export async function fetchSettings(category: string) {
   const raw = await api<{ settings: RawRecord[] }>(`/settings/${category}`);

@@ -7,6 +7,7 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { findDocumentByIdempotencyKey, getDocumentById, readDocumentContent, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks, type DocumentRow } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
+import { getPublicAppBaseUrl } from "../config/public-app-url.js";
 import {
   decideRequestScanFilenameEvidence,
   parseRequestScanFilenameIdentifiers,
@@ -606,7 +607,8 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
       });
       await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
-      await stage({ stage: "verifying_identifier" }); const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
+      await stage({ stage: "verifying_identifier" }); const publicAppBaseUrl = await getPublicAppBaseUrl(); const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
+        publicAppBaseUrl,
         onProgress: (processingStage, current, total) => stage({ stage: processingStage, current, total }),
         signal: cancellationController.signal,
       });

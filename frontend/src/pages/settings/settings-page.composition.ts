@@ -24,6 +24,7 @@ export type SettingsSection =
   | "not_allowed_name_words"
   | "appointment_slip"
   | "qz_tray"
+  | "deployment_identity"
   | "patient_qr_self_service"
   | "passkey_configuration"
   | "sonicdicom_reports"
@@ -62,6 +63,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "not_allowed_name_words",
   "appointment_slip",
   "qz_tray",
+  "deployment_identity",
   "patient_qr_self_service",
   "passkey_configuration",
   "sonicdicom_reports",
@@ -86,6 +88,7 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   not_allowed_name_words: "clinical",
   appointment_slip: "clinical",
   qz_tray: "system",
+  deployment_identity: "system",
   patient_qr_self_service: "clinical",
   passkey_configuration: "admin",
   scheduling_and_capacity: "scheduling",
@@ -126,7 +129,7 @@ export function initialSettingsSection(search: string): SettingsSection {
 
 export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?: string): boolean {
   if (section === "mobile_widget" && role !== "supervisor" && role !== "super_admin") return false;
-  if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications") && role !== "super_admin") {
+  if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications" || section === "deployment_identity") && role !== "super_admin") {
     return false;
   }
   return true;

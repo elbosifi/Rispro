@@ -1316,6 +1316,7 @@ export const en = {
   "settings.section.passkey_configuration": "Passkey Configuration",
   "settings.section.appointment_slip": "Appointment Slip Settings",
   "settings.section.qz_tray": "Printing → QZ Tray",
+  "settings.section.deployment_identity": "Deployment & Application Identity",
   "settings.section.sonicdicom_reports": "SonicDICOM Reports",
   "settings.section.ohif_viewer": "OHIF Viewer",
   "settings.section.action_pin_policy": "Action PIN Policy",

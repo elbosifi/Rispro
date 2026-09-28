@@ -454,7 +454,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
         <p className="mt-1 text-sm leading-7 text-slate-600">
           {chooseLocalized(language, "تحكم في ظهور الصفحة، قسم الإلغاء، التقويم، التعليمات، قائمة المستندات، ومعلومات التواصل والموقع.", "Control page visibility, cancellation section, calendar, instructions, documents checklist, and contact/location information.")}
         </p>
-        <p className="mt-1 text-sm leading-7 text-slate-600">The public RISpro URL is managed by the deployment setting PUBLIC_APP_BASE_URL.</p>
+        <p className="mt-1 text-sm leading-7 text-slate-600">{chooseLocalized(language, "يتم إعداد عنوان RISpro العام ضمن النشر وهوية التطبيق.", "The public RISpro URL is configured under Deployment & Application Identity.")}</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

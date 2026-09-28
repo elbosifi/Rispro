@@ -8,7 +8,6 @@ import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpr
 function noSymbol(): Error & { code: number } { return Object.assign(new Error("no symbols found"), { code: 4 }); }
 const QR_TOKEN = "pa_ab_CD-12_ef";
 const QR_URL = `https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`;
-process.env.PUBLIC_APP_BASE_URL ??= "https://rispro.nccb.com.ly";
 type Decode = (filePath: string) => string | Error;
 type Options = { preprocessError?: boolean; rotateError?: number; derivativePaths?: string[]; renderedPaths?: string[]; calls?: string[]; renders?: number[]; diagnostics?: Record<string, string | number | boolean>[]; pageNumbers?: number[] };
 function dependencies(decode: Decode, options: Options = {}): RequestScanBarcodeDependencies {

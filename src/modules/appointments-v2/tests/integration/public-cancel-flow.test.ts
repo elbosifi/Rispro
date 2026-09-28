@@ -87,7 +87,6 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   let authCookie: string;
   let originalSecret: string | undefined;
   let originalServiceUserId: string | undefined;
-  let originalPublicAppBaseUrl: string | undefined;
   let restoreWeekendAppointmentSettings: (() => Promise<void>) | undefined;
 
   before(async () => {
@@ -101,10 +100,9 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     restoreWeekendAppointmentSettings = await enableWeekendAppointmentsForSuite(testData.userId);
     originalSecret = process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET;
     originalServiceUserId = process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
-    originalPublicAppBaseUrl = process.env.PUBLIC_APP_BASE_URL;
     process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET = "integration-public-cancel-secret";
     process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = String(testData.userId);
-    process.env.PUBLIC_APP_BASE_URL = "https://public.integration.test";
+    await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', '{\"value\":\"https://public.integration.test\"}'::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value");
     app = await createTestApp();
     authCookie = createTestAuthCookie(testData.userId, "supervisor");
   });
@@ -120,11 +118,6 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
       delete process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
     } else {
       process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = originalServiceUserId;
-    }
-    if (originalPublicAppBaseUrl == null) {
-      delete process.env.PUBLIC_APP_BASE_URL;
-    } else {
-      process.env.PUBLIC_APP_BASE_URL = originalPublicAppBaseUrl;
     }
 
     await restoreWeekendAppointmentSettings?.();

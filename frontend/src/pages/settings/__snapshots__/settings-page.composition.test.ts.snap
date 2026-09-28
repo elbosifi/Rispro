@@ -95,6 +95,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "system",
   ],
   [
+    "deployment_identity",
+    "system",
+  ],
+  [
     "patient_qr_self_service",
     "clinical",
   ],

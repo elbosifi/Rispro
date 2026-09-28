@@ -26,6 +26,7 @@ import RequestScanAutomationSection from "./request-scan-automation-section";
 import EmailNotificationsSection from "./email-notifications-section";
 import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import QzTrayPrintingSection from "./qz-tray-printing-section";
+import DeploymentIdentitySection from "./deployment-identity-section";
 import ExamTypesSection from "./exam-types-section";
 import UsersSection from "./users-section";
 import ModalitiesSection from "./modalities-section";
@@ -237,6 +238,7 @@ export default function SettingsPage() {
             {section === "not_allowed_name_words" && <NotAllowedNameWordsSection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "qz_tray" && <QzTrayPrintingSection />}
+            {section === "deployment_identity" && user?.role === "super_admin" && <DeploymentIdentitySection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "passkey_configuration" && user?.role === "super_admin" && <PasskeyConfigurationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}

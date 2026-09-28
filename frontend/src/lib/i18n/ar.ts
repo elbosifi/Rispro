@@ -1358,6 +1358,7 @@ export const ar = {
   "settings.section.passkey_configuration": "إعداد مفاتيح المرور",
   "settings.section.appointment_slip": "إعدادات إيصال الموعد",
   "settings.section.qz_tray": "الطباعة عبر QZ Tray",
+  "settings.section.deployment_identity": "النشر وهوية التطبيق",
   "settings.section.sonicdicom_reports": "تقارير SonicDICOM",
   "settings.section.ohif_viewer": "عارض OHIF",
   "settings.section.action_pin_policy": "سياسة رمز PIN للإجراءات",

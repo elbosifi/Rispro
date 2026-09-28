@@ -1423,7 +1423,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   });
 
   describe("Public appointment URL resilience", () => {
-    it("read appointments endpoints still return rows when PUBLIC_APP_BASE_URL is missing, with null public_appointment_url", async () => {
+    it("read appointments endpoints still return rows when the persisted public URL is missing, with null public_appointment_url", async () => {
       guard();
       const createResult = await fetch("/api/v2/appointments", {
         method: "POST",
@@ -1437,8 +1437,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         },
       });
       const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
-      const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
-      process.env.PUBLIC_APP_BASE_URL = "";
+      const previousBaseUrl = await pool.query<{ setting_value: unknown }>("select setting_value from system_settings where category = 'deployment_identity' and setting_key = 'public_app_base_url'");
+      await pool.query("delete from system_settings where category = 'deployment_identity' and setting_key = 'public_app_base_url'");
       try {
         const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-11&dateTo=2026-06-11`);
         assert.equal(readList.status, 200);
@@ -1459,15 +1459,11 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
         assert.equal(modalityRes.status, 200);
       } finally {
-        if (previousBaseUrl == null) {
-          delete process.env.PUBLIC_APP_BASE_URL;
-        } else {
-          process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
-        }
+        if (previousBaseUrl.rows[0]) await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', $1::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value", [JSON.stringify(previousBaseUrl.rows[0].setting_value)]);
       }
     });
 
-    it("read appointments list still returns rows when PUBLIC_APP_BASE_URL is invalid", async () => {
+    it("read appointments list still returns rows when the persisted public URL is invalid", async () => {
       guard();
       const createResult = await fetch("/api/v2/appointments", {
         method: "POST",
@@ -1481,8 +1477,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         },
       });
       const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
-      const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
-      process.env.PUBLIC_APP_BASE_URL = "not-a-valid-absolute-url";
+      const previousBaseUrl = await pool.query<{ setting_value: unknown }>("select setting_value from system_settings where category = 'deployment_identity' and setting_key = 'public_app_base_url'");
+      await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', '{\"value\":\"not-a-valid-absolute-url\"}'::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value");
       try {
         const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-12&dateTo=2026-06-12`);
         assert.equal(readList.status, 200);
@@ -1491,11 +1487,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         assert.ok(row, "created booking should still be present in read list");
         assert.equal(row?.public_appointment_url ?? null, null);
       } finally {
-        if (previousBaseUrl == null) {
-          delete process.env.PUBLIC_APP_BASE_URL;
-        } else {
-          process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
-        }
+        if (previousBaseUrl.rows[0]) await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', $1::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value", [JSON.stringify(previousBaseUrl.rows[0].setting_value)]);
       }
     });
   });

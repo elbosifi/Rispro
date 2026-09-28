@@ -9,14 +9,16 @@ import { join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import express from "express";
 import { env } from "../config/env.js";
+import { normalizePublicAppBaseUrl } from "../config/public-app-url.js";
+import { pool } from "../db/pool.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { __publicPrintingBootstrapTestables, publicPrintingBootstrapRouter } from "../routes/public-printing-bootstrap-routes.js";
-import { __qzBootstrapTestables, getQzBootstrapManifest, qzPublicOrigin, qzWindowsScriptSha256, renderQzWindowsLauncher, renderQzWindowsScript } from "./qz-bootstrap-service.js";
+import { __qzBootstrapTestables, getQzBootstrapManifest, qzWindowsScriptSha256, renderQzWindowsLauncher, renderQzWindowsScript } from "./qz-bootstrap-service.js";
 import { loadValidatedQzIdentity } from "./qz-signing-service.js";
 
 const directory = mkdtempSync(join(tmpdir(), "rispro-qz-bootstrap-"));
 const identity = join(directory, "identity");
-const original = { mode: env.qzTrustMode, production: env.isProduction, base: process.env.PUBLIC_APP_BASE_URL };
+const original = { mode: env.qzTrustMode, production: env.isProduction };
 const names = ["QZ_ROOT_CERTIFICATE_FILE", "QZ_CERTIFICATE_FILE", "QZ_PRIVATE_KEY_FILE", "QZ_CERTIFICATE", "QZ_PRIVATE_KEY"] as const;
 const originalValues = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 
@@ -25,11 +27,11 @@ function bashExecutable(): string {
   return process.platform === "win32" && existsSync(gitBash) ? gitBash : "bash";
 }
 
-before(() => {
+before(async () => {
   execFileSync(bashExecutable(), [resolve("scripts/qz/generate-qz-signing-identity.sh")], { env: { ...process.env, QZ_IDENTITY_DIR: identity }, stdio: "pipe" });
   env.qzTrustMode = "internal_ca";
   env.isProduction = true;
-  process.env.PUBLIC_APP_BASE_URL = "https://rispro.example.test";
+  await pool.query("insert into system_settings (category, setting_key, setting_value) values ('deployment_identity', 'public_app_base_url', '{\"value\":\"https://rispro.example.test\"}'::jsonb) on conflict (category, setting_key) do update set setting_value = excluded.setting_value");
   process.env.QZ_ROOT_CERTIFICATE_FILE = join(identity, "qz-root-ca.crt");
   process.env.QZ_CERTIFICATE_FILE = join(identity, "qz-signing-certificate.pem");
   process.env.QZ_PRIVATE_KEY_FILE = join(identity, "qz-signing-private-key.pem");
@@ -40,23 +42,14 @@ before(() => {
 after(() => {
   env.qzTrustMode = original.mode;
   env.isProduction = original.production;
-  if (original.base === undefined) delete process.env.PUBLIC_APP_BASE_URL; else process.env.PUBLIC_APP_BASE_URL = original.base;
   for (const name of names) { const value = originalValues[name]; if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   rmSync(directory, { recursive: true, force: true });
 });
 
 describe("QZ Phase 1 identity and bootstrap", () => {
   it("retains strict origin-only public URL validation through the canonical resolver", () => {
-    const previous = process.env.PUBLIC_APP_BASE_URL;
-    try {
-      process.env.PUBLIC_APP_BASE_URL = "https://rispro.example.test/path";
-      assert.throws(() => qzPublicOrigin(), /must contain only an origin/);
-      process.env.PUBLIC_APP_BASE_URL = "http://rispro.example.test";
-      assert.throws(() => qzPublicOrigin(), /must use HTTPS/);
-    } finally {
-      if (previous === undefined) delete process.env.PUBLIC_APP_BASE_URL;
-      else process.env.PUBLIC_APP_BASE_URL = previous;
-    }
+    assert.throws(() => normalizePublicAppBaseUrl("https://rispro.example.test/path"), /must contain only an origin/);
+    assert.throws(() => normalizePublicAppBaseUrl("https://rispro.example.test?query=1"), /must contain only an origin/);
   });
 
   it("loads file-mounted PKCS#8 RSA identity, matches the key, and validates the internal chain", () => {
@@ -102,23 +95,23 @@ describe("QZ Phase 1 identity and bootstrap", () => {
     assert.equal(manifest.qzInstallerSha256, digest);
     assert.deepEqual(manifest.securePorts, [8181, 8282, 8383, 8484]);
     assert.equal(manifest.windowsScriptUrl, "https://rispro.example.test/api/public/printing-bootstrap/windows-script");
-    assert.equal(manifest.windowsScriptSha256, qzWindowsScriptSha256());
+    assert.equal(manifest.windowsScriptSha256, await qzWindowsScriptSha256());
     assert.equal(manifest.windowsLauncherUrl, "https://rispro.example.test/api/public/printing-bootstrap/windows-launcher");
     assert.equal((await getQzBootstrapManifest({ installerPath: installer, expectedInstallerSha256: "0".repeat(64) })).ready, false);
   });
 
-  it("hashes the rendered script and embeds its exact origin and digest in an auditable launcher", () => {
-    const firstScript = renderQzWindowsScript();
-    const firstHash = qzWindowsScriptSha256();
-    const launcher = renderQzWindowsLauncher();
+  it("hashes the rendered script and embeds its exact origin and digest in an auditable launcher", async () => {
+    const firstScript = await renderQzWindowsScript();
+    const firstHash = await qzWindowsScriptSha256();
+    const launcher = await renderQzWindowsLauncher();
     assert.equal(firstHash, createHash("sha256").update(Buffer.from(firstScript, "utf8")).digest("hex"));
     assert.match(launcher, new RegExp(firstHash));
     assert.match(launcher, /https:\/\/rispro\.example\.test\/api\/public\/printing-bootstrap\/windows-script/);
     assert.doesNotMatch(launcher, /http:\/\//);
     assert.deepEqual([...launcher.matchAll(/https:\/\/[^/"']+/g)].map((match) => match[0]).filter((value, index, values) => values.indexOf(value) === index), ["https://rispro.example.test"]);
     assert.doesNotMatch(launcher, /__RISPRO_BASE_URL__|BEGIN (?:RSA )?PRIVATE KEY|Invoke-Expression|\biex\b|Set-ExecutionPolicy/i);
-    process.env.PUBLIC_APP_BASE_URL = "https://other.example.test";
-    try { assert.notEqual(qzWindowsScriptSha256(), firstHash); } finally { process.env.PUBLIC_APP_BASE_URL = "https://rispro.example.test"; }
+    await pool.query("update system_settings set setting_value = '{\"value\":\"https://other.example.test\"}'::jsonb where category = 'deployment_identity' and setting_key = 'public_app_base_url'");
+    try { assert.notEqual(await qzWindowsScriptSha256(), firstHash); } finally { await pool.query("update system_settings set setting_value = '{\"value\":\"https://rispro.example.test\"}'::jsonb where category = 'deployment_identity' and setting_key = 'public_app_base_url'"); }
   });
 
   it("streams installer validation once for concurrent requests, caches success, and invalidates after modification", async () => {
@@ -209,7 +202,7 @@ describe("QZ Phase 1 identity and bootstrap", () => {
       const launcher = await fetch(`${base}/windows-launcher`);
       assert.equal(launcher.headers.get("content-type"), "application/octet-stream");
       assert.equal(launcher.headers.get("content-disposition"), 'attachment; filename="RISpro-Printing-Setup.cmd"');
-      assert.match(await launcher.text(), new RegExp(qzWindowsScriptSha256()));
+      assert.match(await launcher.text(), new RegExp(await qzWindowsScriptSha256()));
     } finally { await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose())); }
   });
 });

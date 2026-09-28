@@ -79,7 +79,7 @@ export async function queueDoctorReportingWorklistLinkEmail(actor: Actor, workli
 
     let publicBaseUrl: string;
     try {
-      publicBaseUrl = getPublicAppBaseUrl();
+      publicBaseUrl = await getPublicAppBaseUrl();
     } catch {
       throw new HttpError(409, "The RISpro public application URL is not configured.");
     }

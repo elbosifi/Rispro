@@ -7,7 +7,8 @@ import { cancelBooking } from "../../booking/services/cancel-booking.service.js"
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { getPublicCancelServiceUserId } from "../../public/utils/public-cancel-config.js";
 import { issuePublicCancelToken, verifyPublicCancelToken } from "../../public/utils/public-cancel-token.js";
-import { buildPublicAppointmentUrl } from "../../public/utils/public-appointment-url.js";
+import { buildPublicAppointmentUrlForBaseUrl } from "../../public/utils/public-appointment-url.js";
+import { getPublicAppBaseUrl } from "../../../../config/public-app-url.js";
 import { isModalityAllowed, readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { readAppointmentSlipSettings } from "../../public/utils/appointment-slip-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
@@ -106,7 +107,7 @@ function isPublicCancellableStatus(status: string): boolean {
   return ["scheduled", "arrived", "waiting"].includes(status);
 }
 
-async function loadOtherPublicAppointments(booking: BookingDetails, patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>) {
+async function loadOtherPublicAppointments(booking: BookingDetails, patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>, publicBaseUrl: string) {
   const result = await pool.query<OtherPublicAppointmentRow>(
     `
       select
@@ -139,7 +140,7 @@ async function loadOtherPublicAppointments(booking: BookingDetails, patientQrSet
       modality: row.modality_name_ar || row.modality_name_en || "—",
       examName: row.exam_name_ar || row.exam_name_en || "—",
       status: row.status,
-      publicUrl: buildPublicAppointmentUrl(token),
+      publicUrl: buildPublicAppointmentUrlForBaseUrl(token, publicBaseUrl),
       canCancel: patientQrSettings.allowCancellation && isPublicCancellableStatus(row.status),
     });
   }
@@ -252,12 +253,13 @@ router.get(
     }
 
     const booking = await getBookingDetails(payload.bookingId);
-    const otherAppointments = await loadOtherPublicAppointments(booking, patientQrSettings);
+    const publicBaseUrl = await getPublicAppBaseUrl();
+    const otherAppointments = await loadOtherPublicAppointments(booking, patientQrSettings, publicBaseUrl);
 
     res.json({
       preview: {
         bookingId: booking.id,
-        publicUrl: buildPublicAppointmentUrl(token),
+        publicUrl: buildPublicAppointmentUrlForBaseUrl(token, publicBaseUrl),
         patientDisplayName: makePatientDisplayName({
           arabicName: booking.arabic_full_name ?? null,
           englishName: booking.english_full_name ?? null,

@@ -32,16 +32,16 @@ publicPrintingBootstrapRouter.get("/signing-certificate", (_req, res) => {
   res.setHeader("Content-Disposition", "attachment; filename=\"NCCB-RISpro-QZ-Signing-Certificate.pem\"");
   res.send(getQzCertificate());
 });
-publicPrintingBootstrapRouter.get("/windows-script", (_req, res) => {
+publicPrintingBootstrapRouter.get("/windows-script", asyncRoute(async (_req, res) => {
   res.type("text/plain; charset=utf-8");
   res.setHeader("Content-Disposition", "attachment; filename=\"RISpro-Printing-Setup.ps1\"");
-  res.send(renderQzWindowsScript());
-});
-publicPrintingBootstrapRouter.get("/windows-launcher", (_req, res) => {
+  res.send(await renderQzWindowsScript());
+}));
+publicPrintingBootstrapRouter.get("/windows-launcher", asyncRoute(async (_req, res) => {
   res.setHeader("Content-Type", "application/octet-stream");
   res.setHeader("Content-Disposition", "attachment; filename=\"RISpro-Printing-Setup.cmd\"");
-  res.send(Buffer.from(renderQzWindowsLauncher(), "utf8"));
-});
+  res.send(Buffer.from(await renderQzWindowsLauncher(), "utf8"));
+}));
 async function sendQzInstaller(res: Response, next: (error?: unknown) => void, dependencies: InstallerRouteDependencies = { manifest: getQzBootstrapManifest, validate: validateQzInstaller, fileStat: stat }): Promise<void> {
   const manifest = await dependencies.manifest();
   if (manifest.ready !== true) { res.status(503).json(manifest); return; }

@@ -18,8 +18,8 @@ let installerValidationInFlight: { key: string; promise: Promise<QzInstallerSnap
 
 function sha256(value: Buffer | string): string { return createHash("sha256").update(value).digest("hex"); }
 
-export function qzPublicOrigin(): string {
-  return getPublicAppOrigin({ requireHttps: env.isProduction });
+export async function qzPublicOrigin(): Promise<string> {
+  return await getPublicAppOrigin({ requireHttps: env.isProduction });
 }
 
 export function qzInstallerPath(): string { return resolve(env.qzInstallerFile); }
@@ -57,17 +57,17 @@ export async function validateQzInstaller(options: { installerPath?: string; exp
   try { return await promise; } finally { if (installerValidationInFlight?.promise === promise) installerValidationInFlight = null; }
 }
 
-export function renderQzWindowsScript(): string {
-  const origin = qzPublicOrigin().replace(/'/g, "''");
+export async function renderQzWindowsScript(): Promise<string> {
+  const origin = (await qzPublicOrigin()).replace(/'/g, "''");
   return readFileSync(resolve(env.qzWindowsScriptFile), "utf8").replaceAll("__RISPRO_BASE_URL__", origin);
 }
 
-export function qzWindowsScriptSha256(): string { return sha256(Buffer.from(renderQzWindowsScript(), "utf8")); }
+export async function qzWindowsScriptSha256(): Promise<string> { return sha256(Buffer.from(await renderQzWindowsScript(), "utf8")); }
 
-export function renderQzWindowsLauncher(): string {
-  const origin = qzPublicOrigin();
+export async function renderQzWindowsLauncher(): Promise<string> {
+  const origin = await qzPublicOrigin();
   const scriptUrl = `${origin}/api/public/printing-bootstrap/windows-script`;
-  const scriptHash = qzWindowsScriptSha256();
+  const scriptHash = await qzWindowsScriptSha256();
   return `@echo off\r
 setlocal EnableExtensions DisableDelayedExpansion\r
 set "RISPRO_ORIGIN=${origin}"\r
@@ -90,7 +90,7 @@ export async function getQzBootstrapManifest(options: { installerPath?: string; 
   try {
     if (env.qzTrustMode !== "internal_ca") throw new Error("The workstation bootstrap requires QZ_TRUST_MODE=internal_ca.");
     const identity = loadValidatedQzIdentity();
-    const origin = qzPublicOrigin();
+    const origin = await qzPublicOrigin();
     const expectedInstallerSha256 = options.expectedInstallerSha256 || QZ_INSTALLER_SHA256;
     await validateQzInstaller({ ...options, expectedInstallerSha256 });
     const root = getQzRootCertificate();
@@ -103,7 +103,7 @@ export async function getQzBootstrapManifest(options: { installerPath?: string; 
       rootCertificateSha256: sha256(root), rootCertificateFingerprint: identity.root!.fingerprint256,
       signingCertificateUrl: `${origin}/api/public/printing-bootstrap/signing-certificate`, signingCertificateSha256: sha256(signing),
       signingCertificateFingerprint: identity.signing.fingerprint256,
-      windowsScriptUrl: `${origin}/api/public/printing-bootstrap/windows-script`, windowsScriptSha256: qzWindowsScriptSha256(),
+      windowsScriptUrl: `${origin}/api/public/printing-bootstrap/windows-script`, windowsScriptSha256: await qzWindowsScriptSha256(),
       windowsLauncherUrl: `${origin}/api/public/printing-bootstrap/windows-launcher`, securePorts: [...QZ_SECURE_PORTS],
     };
   } catch (error) {

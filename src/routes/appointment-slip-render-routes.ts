@@ -17,9 +17,9 @@ function tokenFrom(req: Request): string {
   return token;
 }
 
-function safePublicAppointmentUrl(token: string | null): string | null {
+async function safePublicAppointmentUrl(token: string | null): Promise<string | null> {
   if (!token) return null;
-  try { return buildPublicAppointmentUrl(token); }
+  try { return await buildPublicAppointmentUrl(token); }
   catch { return null; }
 }
 
@@ -57,7 +57,7 @@ appointmentSlipRenderRouter.get("/data", asyncRoute(async (req: Request, res: Re
     appointment: {
       ...appointment,
       public_cancel_token: publicCancelToken,
-      public_appointment_url: safePublicAppointmentUrl(publicCancelToken),
+      public_appointment_url: await safePublicAppointmentUrl(publicCancelToken),
     },
     slipSettings: settings,
     patientQrSettings,

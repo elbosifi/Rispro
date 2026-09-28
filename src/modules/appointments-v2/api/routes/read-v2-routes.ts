@@ -13,7 +13,8 @@ import { fetchSonicDicomStudyNotes } from "../../../../services/sonicdicom-repor
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
-import { buildPublicAppointmentUrl } from "../../public/utils/public-appointment-url.js";
+import { buildPublicAppointmentUrlForBaseUrl } from "../../public/utils/public-appointment-url.js";
+import { getPublicAppBaseUrl } from "../../../../config/public-app-url.js";
 import {
   arriveSameDayQueueBookings,
   cleanupActiveQueuePatientRequirementViolations,
@@ -107,10 +108,12 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
 
 function safeBuildPublicAppointmentUrl(
   token: string,
-  context: string
+  context: string,
+  publicBaseUrl: string | null
 ): string | null {
+  if (!publicBaseUrl) return null;
   try {
-    return buildPublicAppointmentUrl(token);
+    return buildPublicAppointmentUrlForBaseUrl(token, publicBaseUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? "unknown_error");
     console.error(
@@ -513,6 +516,8 @@ router.get(
       attachSonicDicomStudyNotesToAppointments(result.rows),
       loadAppointmentAcquisitionSummaries(result.rows.map((row) => Number(row.id))),
     ]);
+    let publicBaseUrl: string | null = null;
+    try { publicBaseUrl = await getPublicAppBaseUrl(); } catch { /* URL field remains unavailable until configured. */ }
     const appointments = await Promise.all(rowsWithNotes.map(async (row) => {
       const publicCancelToken =
         patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
@@ -523,7 +528,7 @@ router.get(
         acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
-          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_list")
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_list", publicBaseUrl)
           : null,
       };
     }));
@@ -711,6 +716,8 @@ router.get(
         ? await issuePublicCancelToken(bookingId)
         : null;
 
+    let publicBaseUrl: string | null = null;
+    try { publicBaseUrl = await getPublicAppBaseUrl(); } catch { /* URL field remains unavailable until configured. */ }
     res.json({
       appointment: {
         ...appointmentWithNote,
@@ -726,7 +733,7 @@ router.get(
         } : null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
-          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_details")
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_details", publicBaseUrl)
           : null,
       },
     });

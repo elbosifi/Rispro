@@ -158,8 +158,8 @@ function readStoredValue(settingValue: unknown): Record<string, unknown> {
   return asRecord(record.value ?? record);
 }
 
-function defaultVapidSubject(): string {
-  return tryGetPublicAppBaseUrl() ?? "mailto:admin@rispro.local";
+async function defaultVapidSubject(): Promise<string> {
+  return (await tryGetPublicAppBaseUrl()) ?? "mailto:admin@rispro.local";
 }
 
 async function readStoredWebPushConfig(): Promise<ResolvedWebPushConfig | null> {
@@ -228,7 +228,7 @@ export async function ensurePatientWebPushConfig(options: { updatedByUserId?: nu
   if (existing) return { enabled: true, generated: false, publicKey: existing.publicKey, source: existing.source };
 
   const keys = webPush.generateVAPIDKeys();
-  const subject = defaultVapidSubject();
+  const subject = await defaultVapidSubject();
   const settingValue = {
     value: {
       enabled: true,
@@ -594,7 +594,7 @@ export async function safeEnqueuePatientNotificationEvent(input: {
 async function buildFreshClickUrl(bookingId: number): Promise<string | null> {
   const token = await issuePublicCancelToken(bookingId);
   if (!token) return null;
-  return buildPublicAppointmentUrl(token);
+  return await buildPublicAppointmentUrl(token);
 }
 
 export function sanitizePushPayload(input: {

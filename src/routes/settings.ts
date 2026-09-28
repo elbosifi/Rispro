@@ -93,6 +93,7 @@ import type { AuthenticatedUserContext, UserId } from "../types/http.js";
 import { readRequestScanSettingsForDisplay, saveRequestScanSettings, resolveRequestScanSettingsForTest } from "../services/request-scan-settings-service.js";
 import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
 import { MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY } from "../services/mwl-eligibility-service.js";
+import { normalizePublicAppBaseUrl, PUBLIC_APP_URL_CATEGORY, PUBLIC_APP_URL_KEY } from "../config/public-app-url.js";
 
 function settingScalar(value: unknown): string {
   if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
@@ -273,6 +274,35 @@ settingsRouter.get(
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.get(
+  "/deployment-identity",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can view Deployment & Application Identity.");
+    const setting = (await getSettingsByCategory(PUBLIC_APP_URL_CATEGORY)).find((entry) => entry.setting_key === PUBLIC_APP_URL_KEY);
+    if (!setting) throw new HttpError(409, "The RISpro public application URL is not configured.");
+    const raw = setting.setting_value && typeof setting.setting_value === "object" && "value" in (setting.setting_value as Record<string, unknown>)
+      ? (setting.setting_value as Record<string, unknown>).value
+      : setting.setting_value;
+    res.json({ publicAppBaseUrl: normalizePublicAppBaseUrl(String(raw ?? "")), updatedAt: setting.updated_at });
+  })
+);
+
+settingsRouter.put(
+  "/deployment-identity",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Deployment & Application Identity.");
+    const body = asUnknownRecord(request.body ?? {});
+    if (Object.keys(body).length !== 1 || typeof body.publicAppBaseUrl !== "string") {
+      throw new HttpError(400, "publicAppBaseUrl is required.");
+    }
+    const publicAppBaseUrl = normalizePublicAppBaseUrl(body.publicAppBaseUrl);
+    const [saved] = await upsertSettings(PUBLIC_APP_URL_CATEGORY, [{ key: PUBLIC_APP_URL_KEY, value: publicAppBaseUrl }], request.user.sub as UserId);
+    res.json({ publicAppBaseUrl, updatedAt: saved.updated_at });
+  })
+);
 
 settingsRouter.put("/request-scan-automation", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Request Scan Automation settings."); res.json({ settings: await saveRequestScanSettings(asUnknownRecord(request.body ?? {}), request.user.sub as UserId) }); }));
 settingsRouter.post("/request-scan-automation/test", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can test Request Scan Automation settings."); await testRequestScanSmb(await resolveRequestScanSettingsForTest(asUnknownRecord(request.body ?? {}))); res.json({ ok: true, archiveWorkflowVerified: true, checkedAt: new Date().toISOString() }); }));
@@ -845,7 +875,9 @@ settingsRouter.get(
   "/:category",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
-    const settings = await getSettingsByCategory(asString(request.params?.category));
+    const category = asString(request.params?.category);
+    if (category === PUBLIC_APP_URL_CATEGORY) throw new HttpError(404, "This settings category has a dedicated endpoint.");
+    const settings = await getSettingsByCategory(category);
     res.json({ settings });
   })
 );
@@ -855,6 +887,7 @@ settingsRouter.put(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const category = asString(request.params?.category);
+    if (category === PUBLIC_APP_URL_CATEGORY) throw new HttpError(404, "This settings category has a dedicated endpoint.");
     const body = asUnknownRecord(request.body);
     const rawEntries = body.entries;
     let entries: Array<{ key: string; value?: unknown }> = Array.isArray(rawEntries) ? rawEntries : [];

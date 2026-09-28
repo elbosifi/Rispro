@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
-import { tryGetPublicAppBaseUrl } from "../config/public-app-url.js";
 import { normalizeV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 const execFile = promisify(execFileCallback);
@@ -75,9 +74,7 @@ function configuredHttpsOrigin(value: string, allowExplicitPort = false): string
 }
 
 export function trustedRequestScanQrOrigins(configuration: RequestScanQrOriginConfiguration = {}): Set<string> {
-  const configured = [
-    configuration.publicAppBaseUrl ?? tryGetPublicAppBaseUrl(),
-  ];
+  const configured = [configuration.publicAppBaseUrl];
   const explicit = (configuration.explicitAllowedOrigins ?? process.env.REQUEST_SCAN_QR_ALLOWED_ORIGINS ?? "").split(",");
   return new Set([
     ...configured.map((value) => configuredHttpsOrigin(String(value ?? ""))),
