@@ -1,6 +1,6 @@
 import { pool } from "../../db/pool.js";
 import type { DbExecutor } from "../../types/db.js";
-import type { SopDocument, SopFilters, SopSummary, SopVersion } from "./types.js";
+import type { SopDocument, SopFilters, SopSummary, SopUserOption, SopVersion } from "./types.js";
 
 interface SopRow {
   id: number;
@@ -11,6 +11,9 @@ interface SopRow {
   current_version: string | null;
   draft_version: string | null;
   current_effective_date: string | null;
+  current_next_review_date: string | null;
+  owner_user_id: number | null;
+  owner_name: string | null;
   created_by_user_id: number;
   created_by_name: string | null;
   created_by_username: string | null;
@@ -28,6 +31,7 @@ interface SopVersionRow {
   content_json: SopDocument;
   change_summary: string;
   effective_date: string | null;
+  next_review_date: string | null;
   created_by_user_id: number;
   created_by_name: string | null;
   created_by_username: string | null;
@@ -45,6 +49,9 @@ const SOP_SELECT = `
   select s.id, s.code, s.title, s.category, s.status, s.current_version,
          draft.version as draft_version,
          to_char(current_version.effective_date, 'YYYY-MM-DD') as current_effective_date,
+         to_char(current_version.next_review_date, 'YYYY-MM-DD') as current_next_review_date,
+         s.owner_user_id,
+         owner_user.full_name as owner_name,
          s.created_by_user_id,
          created_by.full_name as created_by_name,
          created_by.username as created_by_username,
@@ -54,13 +61,16 @@ const SOP_SELECT = `
   from sops s
   join users created_by on created_by.id = s.created_by_user_id
   left join users updated_by on updated_by.id = s.updated_by_user_id
+  left join users owner_user on owner_user.id = s.owner_user_id
   left join sop_versions draft on draft.sop_id = s.id and draft.status = 'draft'
   left join sop_versions current_version on current_version.sop_id = s.id and current_version.version = s.current_version
 `;
 
 const VERSION_SELECT = `
   select v.id, v.sop_id, v.version, v.status, v.content_json, v.change_summary,
-         to_char(v.effective_date, 'YYYY-MM-DD') as effective_date, v.created_by_user_id,
+         to_char(v.effective_date, 'YYYY-MM-DD') as effective_date,
+         to_char(v.next_review_date, 'YYYY-MM-DD') as next_review_date,
+         v.created_by_user_id,
          created_by.full_name as created_by_name,
          created_by.username as created_by_username,
          v.created_at, v.updated_by_user_id,
@@ -77,21 +87,47 @@ const VERSION_SELECT = `
 
 function toSummary(row: SopRow, exposeDraftVersion = true): SopSummary {
   return {
-    id: Number(row.id), code: row.code, title: row.title, category: row.category as SopSummary["category"],
-    status: row.status as SopSummary["status"], currentVersion: row.current_version, draftVersion: exposeDraftVersion ? row.draft_version : null,
-    currentEffectiveDate: row.current_effective_date, createdByUserId: Number(row.created_by_user_id), createdByName: row.created_by_name,
-    createdAt: row.created_at, updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id), updatedByName: row.updated_by_name, updatedAt: row.updated_at,
+    id: Number(row.id),
+    code: row.code,
+    title: row.title,
+    category: row.category as SopSummary["category"],
+    status: row.status as SopSummary["status"],
+    currentVersion: row.current_version,
+    draftVersion: exposeDraftVersion ? row.draft_version : null,
+    currentEffectiveDate: row.current_effective_date,
+    currentNextReviewDate: row.current_next_review_date,
+    ownerUserId: row.owner_user_id == null ? null : Number(row.owner_user_id),
+    ownerName: row.owner_name,
+    createdByUserId: Number(row.created_by_user_id),
+    createdByName: row.created_by_name,
+    createdAt: row.created_at,
+    updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id),
+    updatedByName: row.updated_by_name,
+    updatedAt: row.updated_at,
   };
 }
 
 function toVersion(row: SopVersionRow): SopVersion {
   return {
-    id: Number(row.id), sopId: Number(row.sop_id), version: row.version, status: row.status as SopVersion["status"],
-    contentJson: row.content_json, changeSummary: row.change_summary, effectiveDate: row.effective_date,
-    createdByUserId: Number(row.created_by_user_id), createdByName: row.created_by_name, createdByUsername: row.created_by_username,
-    createdAt: row.created_at, updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id), updatedByName: row.updated_by_name,
-    updatedAt: row.updated_at, publishedByUserId: row.published_by_user_id == null ? null : Number(row.published_by_user_id), publishedByName: row.published_by_name,
-    publishedByUsername: row.published_by_username, publishedAt: row.published_at,
+    id: Number(row.id),
+    sopId: Number(row.sop_id),
+    version: row.version,
+    status: row.status as SopVersion["status"],
+    contentJson: row.content_json,
+    changeSummary: row.change_summary,
+    effectiveDate: row.effective_date,
+    nextReviewDate: row.next_review_date,
+    createdByUserId: Number(row.created_by_user_id),
+    createdByName: row.created_by_name,
+    createdByUsername: row.created_by_username,
+    createdAt: row.created_at,
+    updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id),
+    updatedByName: row.updated_by_name,
+    updatedAt: row.updated_at,
+    publishedByUserId: row.published_by_user_id == null ? null : Number(row.published_by_user_id),
+    publishedByName: row.published_by_name,
+    publishedByUsername: row.published_by_username,
+    publishedAt: row.published_at,
   };
 }
 
@@ -135,18 +171,18 @@ export async function getSopDetail(sopId: number, includeAll: boolean, executor:
   return { sop, versions: await listSopVersions(sopId, includeAll, executor) };
 }
 
-export async function insertSop(input: { code: string; title: string; category: string; version: string; contentJson: SopDocument; changeSummary: string; effectiveDate: string | null; actorUserId: number }, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
-  const sopResult = await executor.query<{ id: number }>(`insert into sops(code, title, category, status, created_by_user_id, updated_by_user_id) values($1, $2, $3, 'draft', $4, $4) returning id`, [input.code, input.title, input.category, input.actorUserId]);
+export async function insertSop(input: { code: string; title: string; category: string; version: string; contentJson: SopDocument; changeSummary: string; effectiveDate: string | null; nextReviewDate?: string | null; ownerUserId?: number | null; actorUserId: number }, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
+  const sopResult = await executor.query<{ id: number }>(`insert into sops(code, title, category, status, owner_user_id, created_by_user_id, updated_by_user_id) values($1, $2, $3, 'draft', $4, $5, $5) returning id`, [input.code, input.title, input.category, input.ownerUserId ?? null, input.actorUserId]);
   const sopId = Number(sopResult.rows[0]!.id);
-  await executor.query(`insert into sop_versions(sop_id, version, content_json, change_summary, effective_date, created_by_user_id, updated_by_user_id) values($1, $2, $3::jsonb, $4, $5, $6, $6)`, [sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.actorUserId]);
+  await executor.query(`insert into sop_versions(sop_id, version, content_json, change_summary, effective_date, next_review_date, created_by_user_id, updated_by_user_id) values($1, $2, $3::jsonb, $4, $5, $6, $7, $7)`, [sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.nextReviewDate ?? null, input.actorUserId]);
   const detail = await getSopDetail(sopId, true, executor);
   if (!detail) throw new Error("Created SOP could not be reloaded.");
   return { sop: detail.sop, version: detail.versions[0]! };
 }
 
-export async function updateSopDraft(input: { sopId: number; version: string; title: string; category: string; contentJson: SopDocument; changeSummary: string; effectiveDate: string | null; actorUserId: number }, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
-  await executor.query(`update sops set title=$2, category=$3, updated_by_user_id=$4, updated_at=now() where id=$1`, [input.sopId, input.title, input.category, input.actorUserId]);
-  await executor.query(`update sop_versions set content_json=$3::jsonb, change_summary=$4, effective_date=$5, updated_by_user_id=$6, updated_at=now() where sop_id=$1 and version=$2 and status='draft'`, [input.sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.actorUserId]);
+export async function updateSopDraft(input: { sopId: number; version: string; title: string; category: string; contentJson: SopDocument; changeSummary: string; effectiveDate: string | null; nextReviewDate?: string | null; ownerUserId?: number | null; actorUserId: number }, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
+  await executor.query(`update sops set title=$2, category=$3, owner_user_id=$4, updated_by_user_id=$5, updated_at=now() where id=$1`, [input.sopId, input.title, input.category, input.ownerUserId ?? null, input.actorUserId]);
+  await executor.query(`update sop_versions set content_json=$3::jsonb, change_summary=$4, effective_date=$5, next_review_date=$6, updated_by_user_id=$7, updated_at=now() where sop_id=$1 and version=$2 and status='draft'`, [input.sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.nextReviewDate ?? null, input.actorUserId]);
   const detail = await getSopDetail(input.sopId, true, executor);
   if (!detail) throw new Error("Updated SOP could not be reloaded.");
   const version = detail.versions.find((item) => item.version === input.version);
@@ -154,16 +190,23 @@ export async function updateSopDraft(input: { sopId: number; version: string; ti
   return { sop: detail.sop, version };
 }
 
-export async function insertSopRevision(input: { sopId: number; version: string; changeSummary: string; effectiveDate: string | null; actorUserId: number; contentJson: SopDocument }, executor: DbExecutor = pool): Promise<SopVersion> {
-  await executor.query(`insert into sop_versions(sop_id, version, status, content_json, change_summary, effective_date, created_by_user_id, updated_by_user_id) values($1, $2, 'draft', $3::jsonb, $4, $5, $6, $6)`, [input.sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.actorUserId]);
+export async function updateSopOwner(sopId: number, ownerUserId: number | null, actorUserId: number, executor: DbExecutor = pool): Promise<SopSummary> {
+  await executor.query(`update sops set owner_user_id=$2, updated_by_user_id=$3, updated_at=now() where id=$1`, [sopId, ownerUserId, actorUserId]);
+  const sop = await findSop(sopId, executor);
+  if (!sop) throw new Error("Updated SOP could not be reloaded.");
+  return sop;
+}
+
+export async function insertSopRevision(input: { sopId: number; version: string; changeSummary: string; effectiveDate: string | null; nextReviewDate?: string | null; actorUserId: number; contentJson: SopDocument }, executor: DbExecutor = pool): Promise<SopVersion> {
+  await executor.query(`insert into sop_versions(sop_id, version, status, content_json, change_summary, effective_date, next_review_date, created_by_user_id, updated_by_user_id) values($1, $2, 'draft', $3::jsonb, $4, $5, $6, $7, $7)`, [input.sopId, input.version, JSON.stringify(input.contentJson), input.changeSummary, input.effectiveDate, input.nextReviewDate ?? null, input.actorUserId]);
   const version = await findSopVersion(input.sopId, input.version, true, executor);
   if (!version) throw new Error("Created SOP revision could not be reloaded.");
   return version;
 }
 
-export async function publishSopVersion(sopId: number, version: string, actorUserId: number, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
+export async function publishSopVersion(sopId: number, version: string, nextReviewDate: string, actorUserId: number, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
   await executor.query(`update sop_versions set status='superseded' where sop_id=$1 and status='published'`, [sopId]);
-  await executor.query(`update sop_versions set status='published', published_by_user_id=$3, published_at=now(), updated_by_user_id=$3, updated_at=now() where sop_id=$1 and version=$2 and status='draft'`, [sopId, version, actorUserId]);
+  await executor.query(`update sop_versions set status='published', next_review_date=$3, published_by_user_id=$4, published_at=now(), updated_by_user_id=$4, updated_at=now() where sop_id=$1 and version=$2 and status='draft'`, [sopId, version, nextReviewDate, actorUserId]);
   await executor.query(`update sops set status='published', current_version=$2, updated_by_user_id=$3, updated_at=now() where id=$1`, [sopId, version, actorUserId]);
   const detail = await getSopDetail(sopId, true, executor);
   if (!detail) throw new Error("Published SOP could not be reloaded.");
@@ -172,9 +215,30 @@ export async function publishSopVersion(sopId: number, version: string, actorUse
   return { sop: detail.sop, version: published };
 }
 
+export async function reviewSopNoChanges(sopId: number, version: string, nextReviewDate: string, actorUserId: number, executor: DbExecutor = pool): Promise<{ sop: SopSummary; version: SopVersion }> {
+  await executor.query(`update sop_versions set next_review_date=$3, updated_by_user_id=$4, updated_at=now() where sop_id=$1 and version=$2 and status='published'`, [sopId, version, nextReviewDate, actorUserId]);
+  await executor.query(`update sops set updated_by_user_id=$2, updated_at=now() where id=$1`, [sopId, actorUserId]);
+  const detail = await getSopDetail(sopId, true, executor);
+  if (!detail) throw new Error("Reviewed SOP could not be reloaded.");
+  const updatedVersion = detail.versions.find((item) => item.version === version);
+  if (!updatedVersion) throw new Error("Reviewed SOP version could not be reloaded.");
+  return { sop: detail.sop, version: updatedVersion };
+}
+
 export async function archiveSop(sopId: number, actorUserId: number, executor: DbExecutor = pool): Promise<SopSummary> {
   await executor.query(`update sops set status='archived', updated_by_user_id=$2, updated_at=now() where id=$1`, [sopId, actorUserId]);
   const sop = await findSop(sopId, executor);
   if (!sop) throw new Error("Archived SOP could not be reloaded.");
   return sop;
+}
+
+export async function listSopUserOptions(executor: DbExecutor = pool): Promise<SopUserOption[]> {
+  const result = await executor.query<{ id: string | number; full_name: string | null; username: string; role: string }>(
+    `select id, full_name, username, role from users where is_active = true order by full_name asc, username asc`
+  );
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    displayName: row.full_name?.trim() ? `${row.full_name} (${row.role})` : `${row.username} (${row.role})`,
+    role: row.role,
+  }));
 }

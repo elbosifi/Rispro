@@ -27,8 +27,36 @@ function validateSopNode(value: unknown): void {
 export function requiredText(value: unknown, field: string): string { const text = String(value ?? "").trim(); if (!text) throw new HttpError(400, `${field} is required.`); return text; }
 export function normalizeSopCode(value: unknown): string { const code = String(value ?? "").trim().toUpperCase(); if (!code) throw new HttpError(400, "SOP code is required."); if (!/^[A-Z0-9]+(?:-[A-Z0-9]+){1,5}$/.test(code)) throw new HttpError(400, "SOP code must use uppercase letters/numbers separated by hyphens, for example RAD-MRI-001."); return code; }
 export function normalizeSopVersion(value: unknown): string { const version = String(value ?? "").trim(); if (!/^\d+\.\d+$/.test(version)) throw new HttpError(400, "Version must use the form 1.0."); return version; }
-export function normalizeSopDate(value: unknown): string | null { const date = String(value ?? "").trim(); if (!date) return null; if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())) throw new HttpError(400, "Effective date must use YYYY-MM-DD."); return date; }
+export function normalizeSopDate(value: unknown, fieldName = "Effective date"): string | null {
+  const date = String(value ?? "").trim();
+  if (!date) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())) {
+    throw new HttpError(400, `${fieldName} must use YYYY-MM-DD.`);
+  }
+  return date;
+}
 export function normalizeSopCategory(value: unknown): SopCategory { const parsed = requiredText(value, "Category"); if (!(SOP_CATEGORIES as readonly string[]).includes(parsed)) throw new HttpError(400, "Category is invalid."); return parsed as SopCategory; }
+
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+}
+
+export function addCalendarYears(dateString: string, years: number): string {
+  const parts = dateString.split("-");
+  if (parts.length !== 3) throw new HttpError(400, "Date must use YYYY-MM-DD.");
+  const year = parseInt(parts[0]!, 10);
+  const month = parseInt(parts[1]!, 10);
+  const day = parseInt(parts[2]!, 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
+    throw new HttpError(400, "Date must use YYYY-MM-DD.");
+  }
+  const targetYear = year + years;
+  let targetDay = day;
+  if (month === 2 && day === 29 && !isLeapYear(targetYear)) {
+    targetDay = 28;
+  }
+  return `${targetYear}-${String(month).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}`;
+}
 
 export function validateSopDocument(value: unknown, requireMeaningfulRequiredSections = false): SopDocument {
   if (!isRecord(value) || value.type !== "sop" || value.version !== 1 || !Array.isArray(value.sections) || value.sections.length !== SOP_SECTION_DEFINITIONS.length) throw new HttpError(400, "SOP content must contain the standard eight sections in order.");

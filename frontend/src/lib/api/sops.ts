@@ -13,6 +13,7 @@ export interface SopVersion {
   contentJson: SopDocument;
   changeSummary: string;
   effectiveDate: string | null;
+  nextReviewDate: string | null;
   createdByUserId: number;
   createdByName: string | null;
   createdByUsername: string | null;
@@ -31,9 +32,12 @@ export interface SopSummary {
   title: string;
   category: string;
   status: SopStatus;
+  ownerUserId: number | null;
+  ownerName: string | null;
   currentVersion: string | null;
   draftVersion: string | null;
   currentEffectiveDate: string | null;
+  currentNextReviewDate: string | null;
   createdByUserId: number;
   createdByName: string | null;
   createdAt: string;
@@ -41,8 +45,17 @@ export interface SopSummary {
   updatedByName: string | null;
   updatedAt: string;
 }
+export interface SopUserOption {
+  id: number;
+  displayName: string;
+  role: string;
+}
 export interface SopDetail { sop: SopSummary; versions: SopVersion[]; }
-export interface SopMeta { categories: string[]; sections: SopSectionDefinition[]; }
+export interface SopMeta {
+  categories: string[];
+  sections: SopSectionDefinition[];
+  users?: SopUserOption[];
+}
 export interface SopXlsxSectionPreview {
   sectionKey: string;
   sectionTitle: string;
@@ -115,8 +128,10 @@ export const fetchSops = (filters: { search?: string; category?: string; status?
 };
 export const fetchSop = (id: number) => api<SopDetail>(`/sops/${id}`);
 export const fetchSopVersion = (id: number, version: string) => api<{ version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}`);
-export const createSop = (payload: { title: string; code: string; category: string; version: string; effectiveDate: string; changeSummary: string; contentJson: SopDocument }) => api<{ sop: SopSummary; version: SopVersion }>("/sops", { method: "POST", body: JSON.stringify(payload) });
-export const updateSopDraft = (id: number, version: string, payload: { title: string; category: string; effectiveDate: string; changeSummary: string; contentJson: SopDocument }) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const createSop = (payload: { title: string; code: string; category: string; version: string; effectiveDate: string; nextReviewDate?: string | null; ownerUserId?: number | null; changeSummary: string; contentJson: SopDocument }) => api<{ sop: SopSummary; version: SopVersion }>("/sops", { method: "POST", body: JSON.stringify(payload) });
+export const updateSopDraft = (id: number, version: string, payload: { title: string; category: string; effectiveDate: string; nextReviewDate?: string | null; ownerUserId?: number | null; changeSummary: string; contentJson: SopDocument }) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const updateSopOwner = (id: number, payload: { ownerUserId: number | null }) => api<{ sop: SopSummary }>(`/sops/${id}/owner`, { method: "PATCH", body: JSON.stringify(payload) });
+export const reviewSopNoChanges = (id: number, version: string) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}/review-no-changes`, { method: "POST", body: JSON.stringify({}) });
 export const createSopRevision = (id: number, payload: { version: string; changeSummary: string; effectiveDate?: string }) => api<{ version: SopVersion }>(`/sops/${id}/revisions`, { method: "POST", body: JSON.stringify(payload) });
 export const publishSopVersion = (id: number, version: string) => api<{ sop: SopSummary; version: SopVersion }>(`/sops/${id}/versions/${encodeURIComponent(version)}/publish`, { method: "POST", body: JSON.stringify({}) });
 export const archiveSop = (id: number) => api<{ sop: SopSummary }>(`/sops/${id}/archive`, { method: "POST", body: JSON.stringify({}) });

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   BookOpen,
+  CheckCircle2,
   CirclePlus,
   Download,
   Eye,
@@ -12,6 +13,7 @@ import {
   Pencil,
   Printer,
   ShieldCheck,
+  UserCheck,
 } from "lucide-react";
 import {
   useLocation,
@@ -49,10 +51,13 @@ import {
   navigateSopPrintWindow,
   openSopPrintWindow,
   publishSopVersion,
+  reviewSopNoChanges,
   updateSopDraft,
+  updateSopOwner,
   type SopDocument,
   type SopSectionDefinition,
   type SopSummary,
+  type SopUserOption,
   type SopVersion,
   type SopXlsxConfirmResult,
   type SopJsonConfirmResult,
@@ -93,12 +98,60 @@ const FALLBACK_CATEGORIES = [
 ];
 const isManagement = (role?: string) =>
   role === "supervisor" || role === "super_admin";
-const dateLabel = (value: string | null | undefined) =>
-  value
-    ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(
-        new Date(value),
-      )
-    : "—";
+function parseIsoDateOnly(value: string): [number, number, number] | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function getLocalDateOnlyString(d = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function daysBetweenDates(fromIso: string, toIso: string): number | null {
+  const fromParts = parseIsoDateOnly(fromIso);
+  const toParts = parseIsoDateOnly(toIso);
+  if (!fromParts || !toParts) return null;
+  const fromUtc = Date.UTC(fromParts[0], fromParts[1] - 1, fromParts[2]);
+  const toUtc = Date.UTC(toParts[0], toParts[1] - 1, toParts[2]);
+  return Math.round((toUtc - fromUtc) / (24 * 60 * 60 * 1000));
+}
+
+type ReviewStatusKind = "normal" | "due_soon" | "overdue" | "missing";
+
+function getReviewStatus(
+  nextReviewDate: string | null | undefined,
+  todayIso = getLocalDateOnlyString(),
+): ReviewStatusKind {
+  if (!nextReviewDate) return "missing";
+  const diffDays = daysBetweenDates(todayIso, nextReviewDate);
+  if (diffDays === null) return "missing";
+  if (diffDays < 0) return "overdue";
+  if (diffDays <= 90) return "due_soon";
+  return "normal";
+}
+
+function suggestNextMinorVersion(currentVersion: string | null | undefined): string {
+  if (!currentVersion || !/^\d+\.\d+$/.test(currentVersion.trim())) return "1.1";
+  const [majorStr, minorStr] = currentVersion.trim().split(".");
+  const major = parseInt(majorStr!, 10);
+  const minor = parseInt(minorStr!, 10);
+  if (Number.isNaN(major) || Number.isNaN(minor)) return "1.1";
+  return `${major}.${minor + 1}`;
+}
+
+const dateLabel = (value: string | null | undefined) => {
+  if (!value) return "—";
+  const parts = parseIsoDateOnly(value);
+  if (parts) {
+    const utcDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+    return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(utcDate);
+  }
+  return value;
+};
 const dateTimeLabel = (value: string | null | undefined) =>
   value
     ? new Intl.DateTimeFormat("en-GB", {
@@ -137,10 +190,21 @@ function draftSignature(input: {
   category: string;
   version: string;
   effectiveDate: string;
+  nextReviewDate?: string | null;
+  ownerUserId?: number | null;
   changeSummary: string;
   document: SopDocument;
 }): string {
-  return JSON.stringify(input);
+  return JSON.stringify({
+    title: input.title.trim(),
+    category: input.category.trim(),
+    version: input.version.trim(),
+    effectiveDate: input.effectiveDate.trim(),
+    nextReviewDate: (input.nextReviewDate ?? "").trim(),
+    ownerUserId: input.ownerUserId ?? null,
+    changeSummary: input.changeSummary.trim(),
+    document: input.document,
+  });
 }
 
 function pdfActionError(value: unknown, translate: (key: "sops.pdfRendererBusy" | "sops.unableGeneratePdf") => string): string {
@@ -153,11 +217,13 @@ function publishValidationError(input: {
   category: string;
   version: string;
   effectiveDate: string;
+  ownerUserId: number | null;
   document: SopDocument;
 }): string | null {
   if (!input.title.trim()) return "Title is required before publishing.";
   if (!input.category) return "Category is required before publishing.";
   if (!input.version.trim()) return "Version is required before publishing.";
+  if (!input.ownerUserId) return "SOP Owner is required before publishing.";
   if (!input.effectiveDate) return "Effective date is required before publishing.";
   const missing = input.document.sections.find(
     (section) => section.required && !editorNodeText(section.content).trim(),
@@ -187,6 +253,7 @@ function LibraryPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("published");
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<"all" | "due_soon" | "overdue">("all");
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [jsonExampleBusy, setJsonExampleBusy] = useState(false);
   const [jsonExampleError, setJsonExampleError] = useState<string | null>(null);
@@ -204,6 +271,16 @@ function LibraryPage() {
         status: management ? status : "published",
       }),
   });
+  const displayedSops = useMemo(() => {
+    let items = list.data?.sops ?? [];
+    if (management && reviewStatusFilter !== "all") {
+      items = items.filter((sop) => {
+        if (sop.status !== "published") return false;
+        return getReviewStatus(sop.currentNextReviewDate) === reviewStatusFilter;
+      });
+    }
+    return items;
+  }, [list.data?.sops, management, reviewStatusFilter]);
   const categories = meta.data?.categories ?? FALLBACK_CATEGORIES;
   const downloadJsonExample = async () => {
     setJsonExampleBusy(true);
@@ -235,7 +312,7 @@ function LibraryPage() {
         <h2 id="sop-filter-heading" className="text-sm font-semibold">
           Find an SOP
         </h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)_minmax(10rem,0.8fr)]">
+        <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <label className="grid gap-1 text-sm font-medium">
             Search
             <Input
@@ -281,6 +358,25 @@ function LibraryPage() {
               ) : null}
             </select>
           </label>
+          {management ? (
+            <label className="grid gap-1 text-sm font-medium">
+              Review status
+              <select
+                aria-label="Review status"
+                className="input-premium h-10"
+                value={reviewStatusFilter}
+                onChange={(event) =>
+                  setReviewStatusFilter(
+                    event.target.value as "all" | "due_soon" | "overdue",
+                  )
+                }
+              >
+                <option value="all">All review statuses</option>
+                <option value="due_soon">Due soon</option>
+                <option value="overdue">Overdue</option>
+              </select>
+            </label>
+          ) : null}
         </div>
       </section>
       <section
@@ -293,7 +389,7 @@ function LibraryPage() {
           </h2>
           {list.data ? (
             <Badge variant="neutral" size="sm">
-              {list.data.sops.length}
+              {displayedSops.length}
             </Badge>
           ) : null}
         </div>
@@ -311,7 +407,7 @@ function LibraryPage() {
               Retry
             </Button>
           </div>
-        ) : !list.data?.sops.length ? (
+        ) : !displayedSops.length ? (
           <EmptyState
             message={
               management
@@ -327,15 +423,20 @@ function LibraryPage() {
                   <th className="p-3 text-start">Code</th>
                   <th className="p-3 text-start">Title</th>
                   <th className="p-3 text-start">Category</th>
+                  {management ? <th className="p-3 text-start">Owner</th> : null}
                   <th className="p-3 text-start">Version</th>
                   <th className="p-3 text-start">Status</th>
                   <th className="p-3 text-start">Effective date</th>
-                  <th className="p-3 text-start">Last updated</th>
+                  {management ? (
+                    <th className="p-3 text-start">Review Due</th>
+                  ) : (
+                    <th className="p-3 text-start">Last updated</th>
+                  )}
                   <th className="p-3 text-end">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {list.data.sops.map((sop) => (
+                {displayedSops.map((sop) => (
                   <LibraryRow
                     key={sop.id}
                     sop={sop}
@@ -382,6 +483,9 @@ function LibraryRow({
       </td>
       <td className="max-w-[20rem] p-3 font-semibold">{sop.title}</td>
       <td className="p-3 text-muted-foreground">{sop.category}</td>
+      {management ? (
+        <td className="p-3 text-muted-foreground">{sop.ownerName ?? "—"}</td>
+      ) : null}
       <td className="p-3" dir="ltr">
         {version ?? "—"}
       </td>
@@ -393,9 +497,50 @@ function LibraryRow({
       <td className="p-3 text-muted-foreground">
         {dateLabel(sop.currentEffectiveDate)}
       </td>
-      <td className="p-3 text-muted-foreground">
-        {dateTimeLabel(sop.updatedAt)}
-      </td>
+      {management ? (
+        <td className="p-3">
+          {sop.status === "published" && sop.currentNextReviewDate ? (
+            (() => {
+              const revStatus = getReviewStatus(sop.currentNextReviewDate);
+              if (revStatus === "overdue") {
+                return (
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                      {dateLabel(sop.currentNextReviewDate)}
+                    </span>
+                    <Badge variant="error" size="sm">
+                      Review overdue
+                    </Badge>
+                  </div>
+                );
+              }
+              if (revStatus === "due_soon") {
+                return (
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                      {dateLabel(sop.currentNextReviewDate)}
+                    </span>
+                    <Badge variant="warning" size="sm">
+                      Review due soon
+                    </Badge>
+                  </div>
+                );
+              }
+              return (
+                <span className="text-muted-foreground">
+                  {dateLabel(sop.currentNextReviewDate)}
+                </span>
+              );
+            })()
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+      ) : (
+        <td className="p-3 text-muted-foreground">
+          {dateTimeLabel(sop.updatedAt)}
+        </td>
+      )}
       <td className="p-3 text-end">
         <Button type="button" size="sm" variant="secondary" onClick={onOpen}>
           <Eye className="h-4 w-4" />
@@ -423,6 +568,11 @@ function MetadataFields({
   setVersion,
   effectiveDate,
   setEffectiveDate,
+  nextReviewDate,
+  setNextReviewDate,
+  ownerUserId,
+  setOwnerUserId,
+  users,
   changeSummary,
   setChangeSummary,
   categories,
@@ -440,6 +590,11 @@ function MetadataFields({
   setVersion: (value: string) => void;
   effectiveDate: string;
   setEffectiveDate: (value: string) => void;
+  nextReviewDate: string;
+  setNextReviewDate: (value: string) => void;
+  ownerUserId: number | null;
+  setOwnerUserId: (value: number | null) => void;
+  users?: SopUserOption[];
   changeSummary: string;
   setChangeSummary: (value: string) => void;
   categories: string[];
@@ -486,6 +641,24 @@ function MetadataFields({
         </select>
       </label>
       <label className="grid gap-1 text-sm font-medium">
+        SOP Owner
+        <select
+          aria-label="SOP Owner"
+          className="input-premium h-10"
+          value={ownerUserId ?? ""}
+          onChange={(event) =>
+            setOwnerUserId(event.target.value ? Number(event.target.value) : null)
+          }
+        >
+          <option value="">Select owner…</option>
+          {users?.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.displayName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="grid gap-1 text-sm font-medium">
         Version
         <Input
           aria-label="Version"
@@ -502,6 +675,15 @@ function MetadataFields({
           type="date"
           value={effectiveDate}
           onChange={(event) => setEffectiveDate(event.target.value)}
+        />
+      </label>
+      <label className="grid gap-1 text-sm font-medium">
+        Next review date
+        <Input
+          aria-label="Next review date"
+          type="date"
+          value={nextReviewDate}
+          onChange={(event) => setNextReviewDate(event.target.value)}
         />
       </label>
       <label className="grid gap-1 text-sm font-medium md:col-span-2">
@@ -529,7 +711,7 @@ function EditorForm({
 }: {
   existingSop?: SopSummary;
   existingVersion?: SopVersion;
-  meta: { categories: string[]; sections: SopSectionDefinition[] };
+  meta: { categories: string[]; sections: SopSectionDefinition[]; users?: SopUserOption[] };
   onSaved: (sopId: number, version: string) => void;
   onCancel: () => void;
   onPublish?: (version: string) => Promise<void> | void;
@@ -541,9 +723,13 @@ function EditorForm({
   const [category, setCategory] = useState(
     existingSop?.category ?? meta.categories[0] ?? "General",
   );
+  const [ownerUserId, setOwnerUserId] = useState<number | null>(existingSop?.ownerUserId ?? null);
   const [version, setVersion] = useState(existingVersion?.version ?? "1.0");
   const [effectiveDate, setEffectiveDate] = useState(
     existingVersion?.effectiveDate ?? "",
+  );
+  const [nextReviewDate, setNextReviewDate] = useState(
+    existingVersion?.nextReviewDate ?? "",
   );
   const [changeSummary, setChangeSummary] = useState(
     existingVersion?.changeSummary ?? "Initial SOP version",
@@ -557,6 +743,8 @@ function EditorForm({
       category: existingSop?.category ?? meta.categories[0] ?? "General",
       version: existingVersion?.version ?? "1.0",
       effectiveDate: existingVersion?.effectiveDate ?? "",
+      nextReviewDate: existingVersion?.nextReviewDate ?? "",
+      ownerUserId: existingSop?.ownerUserId ?? null,
       changeSummary: existingVersion?.changeSummary ?? "Initial SOP version",
       document: existingVersion?.contentJson ?? createEmptySopDocument(meta.sections),
     }),
@@ -581,6 +769,8 @@ function EditorForm({
     category,
     version,
     effectiveDate,
+    nextReviewDate,
+    ownerUserId,
     changeSummary,
     document,
   });
@@ -618,6 +808,8 @@ function EditorForm({
             title,
             category,
             effectiveDate,
+            nextReviewDate: nextReviewDate || null,
+            ownerUserId,
             changeSummary,
             contentJson: document,
           })
@@ -627,6 +819,8 @@ function EditorForm({
             category,
             version,
             effectiveDate,
+            nextReviewDate: nextReviewDate || null,
+            ownerUserId,
             changeSummary,
             contentJson: document,
           }),
@@ -650,6 +844,7 @@ function EditorForm({
       category,
       version,
       effectiveDate,
+      ownerUserId,
       document,
     });
     if (validationError) {
@@ -736,6 +931,8 @@ function EditorForm({
     setCategory(result.sop.category);
     setVersion(result.version.version);
     setEffectiveDate(result.version.effectiveDate ?? "");
+    setNextReviewDate(result.version.nextReviewDate ?? "");
+    setOwnerUserId(result.sop.ownerUserId ?? null);
     setChangeSummary(result.version.changeSummary);
     setDocument(result.version.contentJson);
     setSavedSignature(draftSignature({
@@ -743,6 +940,8 @@ function EditorForm({
       category: result.sop.category,
       version: result.version.version,
       effectiveDate: result.version.effectiveDate ?? "",
+      nextReviewDate: result.version.nextReviewDate ?? "",
+      ownerUserId: result.sop.ownerUserId ?? null,
       changeSummary: result.version.changeSummary,
       document: result.version.contentJson,
     }));
@@ -793,6 +992,11 @@ function EditorForm({
           setVersion={setVersion}
           effectiveDate={effectiveDate}
           setEffectiveDate={setEffectiveDate}
+          nextReviewDate={nextReviewDate}
+          setNextReviewDate={setNextReviewDate}
+          ownerUserId={ownerUserId}
+          setOwnerUserId={setOwnerUserId}
+          users={meta.users}
           changeSummary={changeSummary}
           setChangeSummary={setChangeSummary}
           categories={meta.categories}
@@ -1087,21 +1291,30 @@ function DetailPage({ id }: { id: number }) {
   const [revisionSummary, setRevisionSummary] = useState("");
   const [revisionDate, setRevisionDate] = useState("");
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [ownerOpen, setOwnerOpen] = useState(false);
+  const [selectedOwnerUserId, setSelectedOwnerUserId] = useState<number | null>(null);
+  const [reviewNoChangesOpen, setReviewNoChangesOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const { t } = useLanguage();
+
+  const metaQuery = useQuery({
+    queryKey: ["sops", "meta"],
+    queryFn: fetchSopMeta,
+    staleTime: Infinity,
+  });
+  const categories = metaQuery.data?.categories ?? FALLBACK_CATEGORIES;
+  const sections = metaQuery.data?.sections ?? FALLBACK_SECTIONS;
+  const users = metaQuery.data?.users;
+  const meta = { categories, sections, users };
+
   // The detail query arrives asynchronously; seed the next revision field when it does.
   useEffect(() => {
     if (!data) return;
-    const numbers = data.versions
-      .map((version) => Number(version.version))
-      .filter(Number.isFinite);
-    const next = (Math.max(...numbers, 1) + 0.1).toFixed(1);
-    // This state mirrors asynchronously loaded version data for the revision dialog.
-    setRevisionVersion(next);
-  }, [data]);
+    setRevisionVersion(suggestNextMinorVersion(data.sop.currentVersion ?? selectedVersion?.version));
+  }, [data, selectedVersion]);
   const revision = useMutation({
     mutationFn: () =>
       createSopRevision(id, {
@@ -1146,6 +1359,33 @@ function DetailPage({ id }: { id: number }) {
     onError: (value) =>
       setActionError(
         value instanceof Error ? value.message : "Unable to archive the SOP.",
+      ),
+  });
+  const changeOwner = useMutation({
+    mutationFn: (newOwnerUserId: number | null) =>
+      updateSopOwner(id, { ownerUserId: newOwnerUserId }),
+    onSuccess: async () => {
+      setOwnerOpen(false);
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["sops"] });
+      await detail.refetch();
+    },
+    onError: (value) =>
+      setActionError(
+        value instanceof Error ? value.message : "Unable to update the SOP owner.",
+      ),
+  });
+  const reviewNoChanges = useMutation({
+    mutationFn: () => reviewSopNoChanges(id, selectedVersion!.version),
+    onSuccess: async () => {
+      setReviewNoChangesOpen(false);
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["sops"] });
+      await detail.refetch();
+    },
+    onError: (value) =>
+      setActionError(
+        value instanceof Error ? value.message : "Unable to record review.",
       ),
   });
   const exportSelectedVersion = async () => {
@@ -1228,7 +1468,6 @@ function DetailPage({ id }: { id: number }) {
     management &&
     selectedVersion.status === "draft" &&
     data.sop.status !== "archived";
-  const meta = { categories: FALLBACK_CATEGORIES, sections: FALLBACK_SECTIONS };
   return editing ? (
     <EditorForm
       existingSop={data.sop}
@@ -1270,6 +1509,13 @@ function DetailPage({ id }: { id: number }) {
             <span>{data.sop.category}</span>
             <span dir="ltr">Version {selectedVersion.version}</span>
             <span>Effective {dateLabel(selectedVersion.effectiveDate)}</span>
+            <span>Owner: {data.sop.ownerName ?? "—"}</span>
+            <span>
+              Next review:{" "}
+              {selectedVersion.nextReviewDate
+                ? dateLabel(selectedVersion.nextReviewDate)
+                : "—"}
+            </span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1291,6 +1537,29 @@ function DetailPage({ id }: { id: number }) {
           </Button>
           {management && data.sop.status === "published" ? (
             <>
+              {selectedVersion.status === "published" ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setSelectedOwnerUserId(data.sop.ownerUserId ?? null);
+                      setOwnerOpen(true);
+                    }}
+                  >
+                    <UserCheck className="h-4 w-4" />
+                    Change Owner
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setReviewNoChangesOpen(true)}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Reviewed – No Changes
+                  </Button>
+                </>
+              ) : null}
               <Button
                 type="button"
                 variant="secondary"
@@ -1462,6 +1731,110 @@ function DetailPage({ id }: { id: number }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={ownerOpen}
+        onClose={() => {
+          if (!changeOwner.isPending) setOwnerOpen(false);
+        }}
+      >
+        <DialogContent maxWidth="480px">
+          <DialogHeader>
+            <DialogTitle>Change SOP Owner</DialogTitle>
+            <DialogDescription>
+              Assign the RISpro user responsible for maintaining this SOP.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <label className="grid gap-1 text-sm font-medium">
+              SOP Owner
+              <select
+                aria-label="Change SOP Owner"
+                className="input-premium h-10"
+                value={selectedOwnerUserId ?? ""}
+                onChange={(event) =>
+                  setSelectedOwnerUserId(
+                    event.target.value ? Number(event.target.value) : null,
+                  )
+                }
+              >
+                <option value="">Select owner…</option>
+                {users?.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {changeOwner.isError ? (
+              <p role="alert" className="text-sm text-red-700">
+                {changeOwner.error instanceof Error
+                  ? changeOwner.error.message
+                  : "Unable to update the SOP owner."}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setOwnerOpen(false)}
+              disabled={changeOwner.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => changeOwner.mutate(selectedOwnerUserId)}
+              disabled={changeOwner.isPending}
+            >
+              {changeOwner.isPending ? "Saving…" : "Save Owner"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={reviewNoChangesOpen}
+        onClose={() => {
+          if (!reviewNoChanges.isPending) setReviewNoChangesOpen(false);
+        }}
+      >
+        <DialogContent maxWidth="520px">
+          <DialogHeader>
+            <DialogTitle>Reviewed – No Changes</DialogTitle>
+            <DialogDescription>
+              Confirm that this SOP has been reviewed and no revision is required.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>The SOP version and effective date will remain unchanged.</p>
+            <p>The next review date will be moved forward by two years.</p>
+          </div>
+          {reviewNoChanges.isError ? (
+            <p role="alert" className="text-sm text-red-700">
+              {reviewNoChanges.error instanceof Error
+                ? reviewNoChanges.error.message
+                : "Unable to record review."}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setReviewNoChangesOpen(false)}
+              disabled={reviewNoChanges.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => reviewNoChanges.mutate()}
+              disabled={reviewNoChanges.isPending}
+            >
+              {reviewNoChanges.isPending ? "Confirming…" : "Confirm Review"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
@@ -1475,9 +1848,10 @@ function NewSopPage() {
   });
   const categories = meta.data?.categories ?? FALLBACK_CATEGORIES;
   const sections = meta.data?.sections ?? FALLBACK_SECTIONS;
+  const users = meta.data?.users;
   return (
     <EditorForm
-      meta={{ categories, sections }}
+      meta={{ categories, sections, users }}
       onSaved={(id, version) =>
         navigate(`/sops/${id}?version=${encodeURIComponent(version)}`)
       }

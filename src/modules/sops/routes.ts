@@ -6,7 +6,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { confirmSopXlsxImport, exportSopVersionXlsx, inspectSopXlsxImport, previewSopXlsxImport } from "./sop-import-export-service.js";
 import { confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopJsonExample, exportSopVersionJson, inspectDraftSopJsonImport, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport } from "./sop-json-import-export-service.js";
-import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopPrintDocumentForUser, getSopVersionForUser, listSops, publishSopVersionForUser, SOP_META, updateSopDraftForUser, validateSopFilters } from "./sop-service.js";
+import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopMeta, getSopPrintDocumentForUser, getSopVersionForUser, listSops, publishSopVersionForUser, reviewSopNoChangesForUser, updateSopDraftForUser, updateSopOwnerForUser, validateSopFilters } from "./sop-service.js";
 import { ChromiumPdfRenderError, renderChromiumPdf } from "../../services/chromium-pdf-service.js";
 import { buildSopPdfFooterTemplate, buildSopPrintHtml } from "./sop-print-service.js";
 
@@ -14,7 +14,7 @@ export const sopsRouter = express.Router();
 const MANAGEMENT = ["supervisor", "super_admin"] as const;
 sopsRouter.use(requireAuth);
 
-sopsRouter.get("/meta", asyncRoute(async (_req: Request, res: Response) => { res.json(SOP_META); }));
+sopsRouter.get("/meta", asyncRoute(async (req: Request, res: Response) => { res.json(await getSopMeta(req.user?.role)); }));
 sopsRouter.get("/", asyncRoute(async (req: Request, res: Response) => { res.json({ sops: await listSops(validateSopFilters(req.query), req.user?.role) }); }));
 sopsRouter.get("/import/json/example", requireAnyRole([...MANAGEMENT]), asyncRoute(async (_req: Request, res: Response) => {
   const payload = exportSopJsonExample();
@@ -90,3 +90,9 @@ sopsRouter.post("/:id/versions/:version/import/json/confirm", requireAnyRole([..
 sopsRouter.post("/:id/revisions", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.status(201).json({ version: await createSopRevisionForUser(req.params.id, asUnknownRecord(req.body), req.user!.sub, req.user?.role) }); }));
 sopsRouter.post("/:id/versions/:version/publish", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json(await publishSopVersionForUser(req.params.id, req.params.version, req.user!.sub, req.user?.role)); }));
 sopsRouter.post("/:id/archive", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => { res.json({ sop: await archiveSopForUser(req.params.id, req.user!.sub, req.user?.role) }); }));
+sopsRouter.patch("/:id/owner", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
+  res.json({ sop: await updateSopOwnerForUser(req.params.id, asUnknownRecord(req.body), req.user!.sub, req.user?.role) });
+}));
+sopsRouter.post("/:id/versions/:version/review-no-changes", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
+  res.json(await reviewSopNoChangesForUser(req.params.id, req.params.version, req.user!.sub, req.user?.role));
+}));

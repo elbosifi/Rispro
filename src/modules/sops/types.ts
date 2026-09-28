@@ -1,4 +1,4 @@
-import type { SopCategory, SopStatus, SopSectionKey, SopVersionStatus } from "./constants.js";
+import type { SopCategory, SopStatus, SopSectionKey, SopVersionStatus, SOP_SECTION_DEFINITIONS } from "./constants.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -23,6 +23,7 @@ export interface SopVersion {
   contentJson: SopDocument;
   changeSummary: string;
   effectiveDate: string | null;
+  nextReviewDate: string | null;
   createdByUserId: number;
   createdByName: string | null;
   createdByUsername: string | null;
@@ -45,6 +46,9 @@ export interface SopSummary {
   currentVersion: string | null;
   draftVersion: string | null;
   currentEffectiveDate: string | null;
+  currentNextReviewDate: string | null;
+  ownerUserId: number | null;
+  ownerName: string | null;
   createdByUserId: number;
   createdByName: string | null;
   createdAt: string;
@@ -62,4 +66,22 @@ export interface SopFilters {
   search?: string | null;
   category?: string | null;
   status?: string | null;
+}
+
+export interface SopUserOption {
+  id: number;
+  displayName: string;
+  role: string;
+}
+
+export interface SopSectionDefinition {
+  key: SopSectionKey;
+  title: string;
+  required: boolean;
+}
+
+export interface SopMeta {
+  categories: SopCategory[];
+  sections: SopSectionDefinition[];
+  users?: SopUserOption[];
 }

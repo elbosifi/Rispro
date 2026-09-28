@@ -51,7 +51,7 @@ test("SOP XLSX round trip preserves unchanged rich JSON and imports Arabic/list 
   const actor = Number(user.rows[0]!.id);
   let sopId: number | null = null;
   try {
-    const created = await createSop({ title: "MRI Safety XLSX", code, category: "MRI", version: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial bilingual SOP", contentJson: documentWithRichContent() }, actor, "supervisor");
+    const created = await createSop({ title: "MRI Safety XLSX", code, category: "MRI", version: "1.0", effectiveDate: "2026-10-01", ownerUserId: actor, changeSummary: "Initial bilingual SOP", contentJson: documentWithRichContent() }, actor, "supervisor");
     sopId = created.sop.id;
     const draftExport = await exportSopVersionXlsx(sopId, "1.0", "supervisor");
     assert.match(draftExport.filename, new RegExp(`^${code}-v1\\.0\\.xlsx$`));

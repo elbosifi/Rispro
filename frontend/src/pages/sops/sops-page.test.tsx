@@ -7,7 +7,35 @@ import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import SopsPage from "./sops-page";
 
-const { api } = vi.hoisted(() => ({ api: { fetchSopMeta: vi.fn(), fetchSops: vi.fn(), fetchSop: vi.fn(), createSop: vi.fn(), updateSopDraft: vi.fn(), createSopRevision: vi.fn(), publishSopVersion: vi.fn(), archiveSop: vi.fn(), downloadSopXlsx: vi.fn(), downloadSopJson: vi.fn(), downloadSopJsonExample: vi.fn(), downloadSopPdf: vi.fn(), openSopPrintWindow: vi.fn(), navigateSopPrintWindow: vi.fn(), inspectSopXlsxImport: vi.fn(), previewSopXlsxImport: vi.fn(), confirmSopXlsxImport: vi.fn(), inspectNewSopJsonImport: vi.fn(), previewNewSopJsonImport: vi.fn(), confirmNewSopJsonImport: vi.fn(), inspectDraftSopJsonImport: vi.fn(), previewDraftSopJsonImport: vi.fn(), confirmDraftSopJsonImport: vi.fn() } }));
+const { api } = vi.hoisted(() => ({
+  api: {
+    fetchSopMeta: vi.fn(),
+    fetchSops: vi.fn(),
+    fetchSop: vi.fn(),
+    createSop: vi.fn(),
+    updateSopDraft: vi.fn(),
+    updateSopOwner: vi.fn(),
+    reviewSopNoChanges: vi.fn(),
+    createSopRevision: vi.fn(),
+    publishSopVersion: vi.fn(),
+    archiveSop: vi.fn(),
+    downloadSopXlsx: vi.fn(),
+    downloadSopJson: vi.fn(),
+    downloadSopJsonExample: vi.fn(),
+    downloadSopPdf: vi.fn(),
+    openSopPrintWindow: vi.fn(),
+    navigateSopPrintWindow: vi.fn(),
+    inspectSopXlsxImport: vi.fn(),
+    previewSopXlsxImport: vi.fn(),
+    confirmSopXlsxImport: vi.fn(),
+    inspectNewSopJsonImport: vi.fn(),
+    previewNewSopJsonImport: vi.fn(),
+    confirmNewSopJsonImport: vi.fn(),
+    inspectDraftSopJsonImport: vi.fn(),
+    previewDraftSopJsonImport: vi.fn(),
+    confirmDraftSopJsonImport: vi.fn(),
+  },
+}));
 vi.mock("@/lib/api/sops", () => api);
 vi.mock("./sop-editor", () => ({
   createEmptySopDocument: (definitions: Array<{ key: string; title: string; required: boolean }>) => ({ type: "sop", version: 1, sections: definitions.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph" }] } })) }),
@@ -18,14 +46,18 @@ vi.mock("./sop-editor", () => ({
 const sections = [
   { key: "purpose", title: "Purpose", required: true }, { key: "scope", title: "Scope", required: true }, { key: "responsibilities", title: "Responsibilities", required: true }, { key: "definitions", title: "Definitions / Abbreviations", required: false }, { key: "safety", title: "Safety / Precautions", required: false }, { key: "procedure", title: "Procedure", required: true }, { key: "documentation", title: "Documentation / Records", required: false }, { key: "references", title: "References", required: false },
 ];
-const meta = { categories: ["General", "MRI", "Patient Safety"], sections };
+const users = [
+  { id: 1, username: "supervisor", fullName: "Supervisor User", role: "supervisor", displayName: "Supervisor User" },
+  { id: 2, username: "admin", fullName: "Admin User", role: "super_admin", displayName: "Admin User" },
+];
+const meta = { categories: ["General", "MRI", "Patient Safety"], sections, users };
 const documentJson = { type: "sop" as const, version: 1 as const, sections: sections.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph", attrs: { dir: section.key === "purpose" ? "rtl" : "ltr" }, content: section.required ? [{ type: "text", text: section.key === "purpose" ? "إجراء MRI" : "Content" }] : undefined }] } })) };
-const draftVersion = { id: 11, sopId: 7, version: "1.0", status: "draft" as const, contentJson: documentJson, changeSummary: "Initial draft", effectiveDate: "2026-10-01", createdByUserId: 1, createdByName: "Supervisor", createdByUsername: "supervisor", createdAt: "2026-09-18T10:00:00.000Z", updatedByUserId: 1, updatedByName: "Supervisor", updatedAt: "2026-09-18T10:00:00.000Z", publishedByUserId: null, publishedByName: null, publishedByUsername: null, publishedAt: null };
+const draftVersion = { id: 11, sopId: 7, version: "1.0", status: "draft" as const, contentJson: documentJson, changeSummary: "Initial draft", effectiveDate: "2026-10-01", nextReviewDate: "2028-10-01", createdByUserId: 1, createdByName: "Supervisor", createdByUsername: "supervisor", createdAt: "2026-09-18T10:00:00.000Z", updatedByUserId: 1, updatedByName: "Supervisor", updatedAt: "2026-09-18T10:00:00.000Z", publishedByUserId: null, publishedByName: null, publishedByUsername: null, publishedAt: null };
 const publishedVersion = { ...draftVersion, id: 12, status: "published" as const, publishedByUserId: 1, publishedByName: "Supervisor", publishedByUsername: "supervisor", publishedAt: "2026-09-18T11:00:00.000Z" };
-const oldVersion = { ...publishedVersion, id: 10, version: "0.9", status: "superseded" as const, changeSummary: "Previous version" };
+const oldVersion = { ...publishedVersion, id: 10, version: "0.9", status: "superseded" as const, changeSummary: "Previous version", nextReviewDate: "2026-10-01" };
 const revisionVersion = { ...draftVersion, id: 13, version: "1.1", changeSummary: "Revision draft" };
-const draftSop = { id: 7, code: "RAD-MRI-001", title: "MRI Safety", category: "MRI", status: "draft" as const, currentVersion: null, draftVersion: "1.0", currentEffectiveDate: null, createdByUserId: 1, createdByName: "Supervisor", createdAt: "2026-09-18T10:00:00.000Z", updatedByUserId: 1, updatedByName: "Supervisor", updatedAt: "2026-09-18T10:00:00.000Z" };
-const publishedSop = { ...draftSop, status: "published" as const, currentVersion: "1.0", draftVersion: null, currentEffectiveDate: "2026-10-01" };
+const draftSop = { id: 7, code: "RAD-MRI-001", title: "MRI Safety", category: "MRI", status: "draft" as const, currentVersion: null, draftVersion: "1.0", currentEffectiveDate: null, currentNextReviewDate: null, ownerUserId: 1, ownerName: "Supervisor User", createdByUserId: 1, createdByName: "Supervisor", createdAt: "2026-09-18T10:00:00.000Z", updatedByUserId: 1, updatedByName: "Supervisor", updatedAt: "2026-09-18T10:00:00.000Z" };
+const publishedSop = { ...draftSop, status: "published" as const, currentVersion: "1.0", draftVersion: null, currentEffectiveDate: "2026-10-01", currentNextReviewDate: "2028-10-01" };
 const publishedSopWithDraft = { ...publishedSop, draftVersion: "1.1" };
 
 function renderPage(role = "supervisor", entry = "/sops") {
@@ -49,6 +81,8 @@ describe("SopsPage", () => {
     api.updateSopDraft.mockResolvedValue({ sop: draftSop, version: draftVersion });
     api.createSopRevision.mockResolvedValue({ version: draftVersion });
     api.publishSopVersion.mockResolvedValue({ sop: publishedSop, version: publishedVersion });
+    api.updateSopOwner.mockResolvedValue({ sop: publishedSop });
+    api.reviewSopNoChanges.mockResolvedValue({ sop: publishedSop, version: { ...publishedVersion, nextReviewDate: "2030-10-01" } });
     api.archiveSop.mockResolvedValue({ sop: { ...publishedSop, status: "archived" } });
     api.downloadSopXlsx.mockResolvedValue(undefined);
     api.downloadSopJson.mockResolvedValue(undefined);
@@ -309,6 +343,7 @@ describe("SopsPage", () => {
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Unsaved MRI Safety");
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
     await waitFor(() => expect(api.updateSopDraft).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", false));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "SOP Library" })).toBeTruthy());
     expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
@@ -392,6 +427,56 @@ describe("SopsPage", () => {
     expect(historyGo).not.toHaveBeenCalled();
   });
 
+  it("renders owner and review due in the register for management and filters by review status", async () => {
+    const user = userEvent.setup();
+    renderPage("supervisor");
+    expect(await screen.findByRole("heading", { name: "SOP Library" })).toBeTruthy();
+    expect(await screen.findByRole("columnheader", { name: "Owner" })).toBeTruthy();
+    expect(await screen.findByRole("columnheader", { name: "Review Due" })).toBeTruthy();
+    expect(await screen.findByText("Supervisor User")).toBeTruthy();
+
+    const reviewSelect = screen.getByLabelText("Review status");
+    expect(reviewSelect).toBeTruthy();
+    await user.selectOptions(reviewSelect, "overdue");
+    expect((reviewSelect as HTMLSelectElement).value).toBe("overdue");
+  });
+
+  it("shows owner and next review date in details and allows changing owner", async () => {
+    const user = userEvent.setup();
+    renderPage("supervisor", "/sops/7");
+    expect(await screen.findByText("Owner: Supervisor User")).toBeTruthy();
+    expect(screen.getByText(/Next review:/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Change Owner" }));
+    expect(await screen.findByRole("heading", { name: "Change SOP Owner" })).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Change SOP Owner"), "2");
+    await user.click(screen.getByRole("button", { name: "Save Owner" }));
+    await waitFor(() => expect(api.updateSopOwner).toHaveBeenCalledWith(7, { ownerUserId: 2 }));
+  });
+
+  it("confirms and records 'Reviewed – No Changes'", async () => {
+    const user = userEvent.setup();
+    renderPage("supervisor", "/sops/7");
+    expect(await screen.findByRole("button", { name: "Reviewed – No Changes" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Reviewed – No Changes" }));
+    expect(await screen.findByRole("heading", { name: "Reviewed – No Changes" })).toBeTruthy();
+    expect(screen.getByText(/The SOP version and effective date will remain unchanged/)).toBeTruthy();
+    expect(screen.getByText(/The next review date will be moved forward by two years/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Confirm Review" }));
+    await waitFor(() => expect(api.reviewSopNoChanges).toHaveBeenCalledWith(7, "1.0"));
+  });
+
+  it("auto-suggests next minor version when creating a revision", async () => {
+    const user = userEvent.setup();
+    renderPage("supervisor", "/sops/7");
+    await user.click(await screen.findByRole("button", { name: "Create New Revision" }));
+    expect(await screen.findByRole("heading", { name: "Create a new SOP revision" })).toBeTruthy();
+    const versionInput = screen.getByLabelText("New version") as HTMLInputElement;
+    expect(versionInput.value).toBe("1.1");
+  });
+
   it("exposes revision and archive actions only to management users", async () => {
     const user = userEvent.setup();
     const management = renderPage("supervisor", "/sops/7");
@@ -408,3 +493,4 @@ describe("SopsPage", () => {
     expect(screen.queryByRole("button", { name: "Archive SOP" })).toBeNull();
   });
 });
+

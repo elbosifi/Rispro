@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
-import { normalizeSopCode, validateSopDocument } from "./sop-validation.js";
+import { addCalendarYears, normalizeSopCode, normalizeSopDate, validateSopDocument } from "./sop-validation.js";
 
 function documentWith(requiredText = "MRI safety"): any {
   return {
@@ -32,3 +32,23 @@ test("SOP validation rejects missing, reordered, and empty required sections", (
   empty.sections[5]!.content = { type: "doc", content: [{ type: "paragraph" }] };
   assert.throws(() => validateSopDocument(empty, true), /Procedure/);
 });
+
+test("addCalendarYears calculates dates deterministically including leap years", () => {
+  // Normal date
+  assert.equal(addCalendarYears("2026-10-01", 2), "2028-10-01");
+  assert.equal(addCalendarYears("2028-09-15", 2), "2030-09-15");
+  // Leap-year boundary: Feb 29 + 2 years in non-leap year clamps to Feb 28
+  assert.equal(addCalendarYears("2024-02-29", 2), "2026-02-28");
+  assert.equal(addCalendarYears("2024-02-29", 4), "2028-02-29");
+  assert.equal(addCalendarYears("2024-02-28", 2), "2026-02-28");
+});
+
+test("normalizeSopDate validates date format and rejects invalid dates", () => {
+  assert.equal(normalizeSopDate("2026-10-01"), "2026-10-01");
+  assert.equal(normalizeSopDate(""), null);
+  assert.equal(normalizeSopDate(null), null);
+  assert.equal(normalizeSopDate(undefined), null);
+  assert.throws(() => normalizeSopDate("2026/10/01"));
+  assert.throws(() => normalizeSopDate("invalid-date"));
+});
+

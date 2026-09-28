@@ -5,7 +5,7 @@ import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
 import { buildSopJsonExample, confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopJsonExample, exportSopVersionJson, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport, SOP_JSON_EXAMPLE_FILENAME } from "./sop-json-import-export-service.js";
-import { archiveSopForUser, createSopRevisionForUser, publishSopVersionForUser, updateSopDraftForUser } from "./sop-service.js";
+import { archiveSopForUser, createSopRevisionForUser, publishSopVersionForUser, updateSopDraftForUser, updateSopOwnerForUser } from "./sop-service.js";
 import type { SopDocument } from "./types.js";
 
 function documentWithRichContent(): SopDocument {
@@ -36,6 +36,7 @@ test("SOP JSON import creates a draft, preserves rich content, exports canonical
     const created = await confirmNewSopJsonImport(input, actor, "supervisor"); sopId = created.sop.id; assert.equal(created.sop.status, "draft"); assert.match(JSON.stringify(created.version.contentJson), /سلامة MRI/); assert.match(JSON.stringify(created.version.contentJson), /tableHeader/);
     const exported = await exportSopVersionJson(sopId, "1.0", "supervisor"); assert.equal(exported.filename, `${code}-v1.0.json`); const exportedBody = JSON.parse(exported.buffer.toString("utf8")); assert.deepEqual(Object.keys(exportedBody), ["format", "formatVersion", "sop"]); assert.equal(JSON.stringify(exportedBody).includes("createdAt"), false); assert.deepEqual(exportedBody.sop.document, created.version.contentJson);
     const duplicate = await previewNewSopJsonImport(input, "supervisor"); assert.equal(duplicate.canConfirm, false); await assert.rejects(() => confirmNewSopJsonImport(input, actor, "supervisor"), (error: unknown) => error instanceof HttpError && error.statusCode === 409);
+    await updateSopOwnerForUser(sopId, { ownerUserId: actor }, actor, "supervisor");
     await publishSopVersionForUser(sopId, "1.0", actor, "supervisor"); const revision = await createSopRevisionForUser(sopId, { version: "1.1", changeSummary: "Revision draft", effectiveDate: "2026-11-01" }, actor, "supervisor");
     const revisedDocument = documentWithRichContent(); revisedDocument.sections[5]!.content = { type: "doc", content: [{ type: "bulletList", attrs: { dir: "rtl" }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [{ type: "paragraph", attrs: { dir: "rtl" }, content: [{ type: "text", text: "تأكيد الفحص" }] }] }] }] };
     const revisedInput = payload(code, revisedDocument); const preview = await previewDraftSopJsonImport(sopId, revision.version, revisedInput, "supervisor"); assert.equal(preview.canConfirm, true); assert.equal(preview.sections.find((section) => section.sectionKey === "procedure")?.action, "changed");
