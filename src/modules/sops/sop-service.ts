@@ -26,6 +26,7 @@ import {
   normalizeSopDate,
   normalizeSopVersion,
   requiredText,
+  validateSopReviewDate,
   validateSopDocument,
 } from "./sop-validation.js";
 import { deriveSopPrintStatus } from "./sop-print-service.js";
@@ -131,6 +132,7 @@ export async function createSop(body: unknown, actorUserIdValue: unknown, actorR
   requireSopManagement(actorRole);
   const actorUserId = positiveId(actorUserIdValue, "acting user");
   const input = parseInput(body);
+  validateSopReviewDate(input.effectiveDate, input.nextReviewDate);
   if (!input.contentJson) throw new HttpError(400, "SOP content is required.");
   const client = await pool.connect();
   try {
@@ -191,6 +193,7 @@ export async function updateSopDraftForUser(sopIdValue: unknown, versionValue: u
     }
 
     const effectiveNextReviewDate = input.nextReviewDate !== undefined ? input.nextReviewDate : lockedDraft.nextReviewDate;
+    validateSopReviewDate(input.effectiveDate, effectiveNextReviewDate);
     const updated = await updateSopDraft({
       sopId,
       version,
@@ -324,6 +327,7 @@ export async function createSopRevisionForUser(sopIdValue: unknown, body: unknow
   const changeSummary = requiredText(input.changeSummary ?? input.change_summary, "Change summary");
   const effectiveDate = normalizeSopDate(input.effectiveDate ?? input.effective_date, "Effective date");
   const nextReviewDate = normalizeSopDate(input.nextReviewDate ?? input.next_review_date, "Next review date");
+  validateSopReviewDate(effectiveDate, nextReviewDate);
   const actorUserId = positiveId(actorUserIdValue, "acting user");
 
   const client = await pool.connect();
@@ -384,7 +388,7 @@ export async function publishSopVersionForUser(sopIdValue: unknown, versionValue
   if (!draft.effectiveDate) {
     throw new HttpError(400, "Effective date is required before publishing.");
   }
-  const resolvedNextReviewDate = draft.nextReviewDate || addCalendarYears(draft.effectiveDate, 2);
+  validateSopReviewDate(draft.effectiveDate, draft.nextReviewDate);
 
   const client = await pool.connect();
   try {
@@ -397,6 +401,9 @@ export async function publishSopVersionForUser(sopIdValue: unknown, versionValue
     }
     const lockedDraft = await findSopVersion(sopId, version, true, client);
     if (!lockedDraft || lockedDraft.status !== "draft") throw new HttpError(409, "This draft has already been published or changed.");
+    if (!lockedDraft.effectiveDate) throw new HttpError(400, "Effective date is required before publishing.");
+    const resolvedNextReviewDate = lockedDraft.nextReviewDate || addCalendarYears(lockedDraft.effectiveDate, 2);
+    validateSopReviewDate(lockedDraft.effectiveDate, resolvedNextReviewDate);
     const published = await publishSopVersion(sopId, version, resolvedNextReviewDate, actorUserId, client);
     await logAuditEntry({
       entityType: "sop",

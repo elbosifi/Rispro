@@ -88,7 +88,7 @@ test("SOP XLSX round trip preserves unchanged rich JSON and imports Arabic/list 
     );
 
     await publishSopVersionForUser(sopId, "1.0", actor, "supervisor");
-    const revision = await createSopRevisionForUser(sopId, { version: "1.1", changeSummary: "XLSX revision", effectiveDate: "2026-11-01" }, actor, "supervisor");
+    const revision = await createSopRevisionForUser(sopId, { version: "1.1", changeSummary: "XLSX revision", effectiveDate: "2026-11-01", nextReviewDate: "2026-11-01" }, actor, "supervisor");
     const revisionExport = await exportSopVersionXlsx(sopId, revision.version, "supervisor");
     const modifiedBase64 = await workbookWithChanges(draftExport.buffer.toString("base64"), {
       content: "Purpose updated: يجب التأكد من هوية المريض قبل بدء الفحص.\nMRI safety screening يجب إكماله قبل دخول المريض.",
@@ -102,6 +102,13 @@ test("SOP XLSX round trip preserves unchanged rich JSON and imports Arabic/list 
     assert.equal(preview.sections.find((section) => section.sectionKey === "procedure")?.action, "changed");
     assert.equal(preview.changeSummary.changed, true);
     assert.equal(preview.canConfirm, true);
+    const reviewDateConflict = await workbookWithChanges(draftExport.buffer.toString("base64"), { effective_date: "2026-11-02" });
+    const conflictPreview = await previewSopXlsxImport(sopId, revision.version, { fileContentBase64: reviewDateConflict, fileName: revisionExport.filename }, "supervisor");
+    assert.equal(conflictPreview.canConfirm, true);
+    await assert.rejects(
+      () => confirmSopXlsxImport(sopId, revision.version, { fileContentBase64: reviewDateConflict, fileName: revisionExport.filename, expectedDraftUpdatedAt: preview.targetUpdatedAt }, actor, "supervisor"),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 400 && error.message === "Next review date cannot be before the effective date.",
+    );
     const confirmed = await confirmSopXlsxImport(sopId, revision.version, { fileContentBase64: modifiedBase64, fileName: revisionExport.filename, expectedDraftUpdatedAt: preview.targetUpdatedAt }, actor, "supervisor");
     assert.deepEqual(confirmed.summary.changedSectionKeys, ["purpose", "procedure"]);
     assert.equal(confirmed.version.status, "draft");

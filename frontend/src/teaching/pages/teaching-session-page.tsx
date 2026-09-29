@@ -30,8 +30,11 @@ export function TeachingSessionPage() {
   const queryClient = useQueryClient();
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showQuestionNavigator, setShowQuestionNavigator] = useState(false);
-  const [timerAnchor, setTimerAnchor] = useState<{ sessionId: number; serverRemainingSeconds: number; receivedAt: number } | null>(null);
-  const [timerNow, setTimerNow] = useState(() => Date.now());
+  const [timer, setTimer] = useState(() => {
+    const now = Date.now();
+    return { sessionId, mountedAt: now, now };
+  });
+  if (timer.sessionId !== sessionId) setTimer({ sessionId, mountedAt: timer.now, now: timer.now });
   const [noteDraftState, setNoteDraftState] = useState<{ questionId: number; text: string } | null>(null);
   const [choiceState, setChoiceState] = useState<{ questionId: number; key: string | null } | null>(null);
   const [examResponseState, setExamResponseState] = useState<{ questionId: number; pendingKey: string | null; failedKey: string | null } | null>(null);
@@ -55,8 +58,10 @@ export function TeachingSessionPage() {
     staleTime: 0,
   });
   const question = questionQuery.data;
+  const timerBaseline = Math.max(timer.mountedAt, sessionQuery.dataUpdatedAt);
+  const elapsedSeconds = Math.max(0, Math.floor((timer.now - timerBaseline) / 1000));
   const remainingSeconds = session?.timed
-    ? Math.max(0, (timerAnchor?.sessionId === session.id ? timerAnchor.serverRemainingSeconds - Math.floor((timerNow - timerAnchor.receivedAt) / 1000) : session.remainingSeconds ?? 0))
+    ? Math.max(0, (session.remainingSeconds ?? 0) - elapsedSeconds)
     : null;
   const noteDraft = question && noteDraftState?.questionId === question.questionId ? noteDraftState.text : question?.note ?? "";
   const noteDirty = Boolean(question && noteDraft !== question.note);
@@ -69,17 +74,12 @@ export function TeachingSessionPage() {
       : question?.selectedOptionKey ?? null;
 
   useEffect(() => {
-    if (!session?.timed) return;
-    const receivedAt = Date.now();
-    setTimerAnchor({ sessionId: session.id, serverRemainingSeconds: Math.max(0, session.remainingSeconds ?? 0), receivedAt });
-    setTimerNow(receivedAt);
-  }, [session?.id, session?.timed, session?.status, session?.remainingSeconds, sessionQuery.dataUpdatedAt]);
-
-  useEffect(() => {
     if (!session?.timed || session.status !== "active") return;
-    setTimerNow(Date.now());
-    const timer = window.setInterval(() => setTimerNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    const intervalId = window.setInterval(() => {
+      const now = Date.now();
+      setTimer((current) => ({ ...current, now }));
+    }, 1000);
+    return () => window.clearInterval(intervalId);
   }, [session?.id, session?.status, session?.timed]);
 
   useEffect(() => {

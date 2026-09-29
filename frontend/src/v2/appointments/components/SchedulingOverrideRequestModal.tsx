@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import { t } from "@/lib/i18n";
@@ -26,7 +26,21 @@ interface Props {
   onSubmit: (requesterReason: string, requestedApproverUserId?: number) => Promise<void> | void;
 }
 
-export function SchedulingOverrideRequestModal({
+export function SchedulingOverrideRequestModal(props: Props) {
+  const overrideTypes = props.overrideTypes?.length ? props.overrideTypes : props.overrideType ? [props.overrideType] : [];
+  const resetKey = JSON.stringify([
+    props.open,
+    props.requestType,
+    props.modalityId ?? null,
+    props.requestedDate,
+    props.requestedTime ?? null,
+    props.requiresDirectedApprover ?? false,
+    [...new Set(overrideTypes)].sort(),
+  ]);
+  return <SchedulingOverrideRequestModalContent key={resetKey} {...props} />;
+}
+
+function SchedulingOverrideRequestModalContent({
   open,
   requestType,
   overrideTypes: overrideTypesProp,
@@ -49,22 +63,6 @@ export function SchedulingOverrideRequestModal({
   const [localError, setLocalError] = useState<string | null>(null);
   const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
   const overrideTypes = overrideTypesProp?.length ? overrideTypesProp : overrideType ? [overrideType] : [];
-  const requestContextKey = JSON.stringify([
-    requestType,
-    modalityId ?? null,
-    requestedDate,
-    requestedTime ?? null,
-    requiresDirectedApprover,
-    [...new Set(overrideTypes)].sort(),
-  ]);
-
-  useEffect(() => {
-    if (!open) return;
-    setReason("");
-    setRequestedApproverUserId("");
-    setLocalError(null);
-  }, [open, requestContextKey]);
-
   const approversQuery = useQuery({
     queryKey: ["v2-scheduling-override-eligible-doctor-approvers", modalityId] as const,
     queryFn: () => listEligibleDoctorOverbookingApprovers(Number(modalityId)),

@@ -5,7 +5,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { SOP_SECTION_DEFINITIONS, type SopSectionKey } from "./constants.js";
 import { findSop, findSopByCode, findSopVersion, insertSop, updateSopDraft } from "./sop-repository.js";
 import { requireSopManagement } from "./sop-service.js";
-import { normalizeSopCategory, normalizeSopCode, normalizeSopDate, normalizeSopVersion, requiredText, validateSopDocument } from "./sop-validation.js";
+import { normalizeSopCategory, normalizeSopCode, normalizeSopDate, normalizeSopVersion, requiredText, validateSopReviewDate, validateSopDocument } from "./sop-validation.js";
 import type { JsonRecord, SopDocument, SopSummary, SopVersion } from "./types.js";
 
 export const SOP_JSON_FORMAT = "rispro-sop" as const;
@@ -17,6 +17,21 @@ export interface SopJsonInterchangeV1 {
   format: typeof SOP_JSON_FORMAT;
   formatVersion: typeof SOP_JSON_FORMAT_VERSION;
   sop: { code: string; title: string; category: string; version: string; effectiveDate: string | null; changeSummary: string; document: SopDocument };
+}
+
+export interface SopJsonExampleConfig {
+  code: string;
+  title: string;
+  category: string;
+  version: string;
+  effectiveDate: string;
+  changeSummary: string;
+  document: SopDocument;
+}
+
+export interface SopJsonExampleConfigResult {
+  config: SopJsonExampleConfig;
+  source: "custom" | "default";
 }
 
 export interface SopJsonSectionPreview {
@@ -138,46 +153,180 @@ function serializeSopJsonPayload(payload: SopJsonInterchangeV1): Buffer {
   return Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-function exampleParagraph(value: string, dir: "auto" | "ltr" | "rtl" = "auto"): JsonRecord {
+function exampleParagraph(value: string, dir: "ltr" | "rtl"): JsonRecord {
   return { type: "paragraph", attrs: { dir }, content: [{ type: "text", text: value }] };
+}
+
+function exampleBilingualParagraph(arabic: string, english: string): JsonRecord[] {
+  return [exampleParagraph(arabic, "rtl"), exampleParagraph(english, "ltr")];
+}
+
+function exampleBilingualList(arabicItems: string[], englishItems: string[], ordered = false): JsonRecord[] {
+  const makeList = (items: string[], dir: "rtl" | "ltr"): JsonRecord => ({
+    type: ordered ? "orderedList" : "bulletList",
+    attrs: { dir, ...(ordered ? { start: 1 } : {}) },
+    content: items.map((item) => ({
+      type: "listItem",
+      attrs: { dir },
+      content: [exampleParagraph(item, dir)],
+    })),
+  });
+  return [makeList(arabicItems, "rtl"), makeList(englishItems, "ltr")];
 }
 
 function exampleSectionContent(key: SopSectionKey): JsonRecord {
   switch (key) {
-    case "purpose": return { type: "doc", content: [exampleParagraph("Verify patient identity and complete MRI safety screening before scanning.", "ltr"), exampleParagraph("يجب التحقق من هوية المريض وإكمال فحص السلامة قبل التصوير بالرنين المغناطيسي.", "rtl")] };
-    case "scope": return { type: "doc", content: [exampleParagraph("Applies to all staff involved in MRI patient preparation and scanning.")] };
-    case "responsibilities": return { type: "doc", content: [{ type: "bulletList", attrs: { dir: "ltr" }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Confirm two patient identifiers.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Escalate any safety concern before the scan.")] }] }] };
-    case "definitions": return { type: "doc", content: [exampleParagraph("MRI: magnetic resonance imaging.")] };
-    case "safety": return { type: "doc", content: [exampleParagraph("Do not proceed until the MRI screening form is complete and reviewed.")] };
-    case "procedure": return { type: "doc", content: [{ type: "orderedList", attrs: { dir: "ltr", start: 1 }, content: [{ type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Verify the patient using two identifiers.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Review the MRI safety screening responses.")] }, { type: "listItem", attrs: { dir: "auto" }, content: [exampleParagraph("Document clearance before the examination begins.")] }] }] };
-    case "documentation": return { type: "doc", content: [exampleParagraph("Record patient identity verification and completed MRI safety screening in the RIS workflow.")] };
-    case "references": return { type: "doc", content: [exampleParagraph("Local MRI safety policy and current MRI screening form.")] };
+    case "purpose": return { type: "doc", content: exampleBilingualParagraph("يهدف هذا الإجراء إلى التحقق من هوية المريض وإتمام فحص سلامة الرنين المغناطيسي قبل الفحص.", "This procedure ensures patient identity is verified and MRI safety screening is completed before scanning.") };
+    case "scope": return { type: "doc", content: exampleBilingualParagraph("يطبق هذا الإجراء على العاملين المشاركين في تجهيز مرضى الرنين المغناطيسي وفحصهم.", "This procedure applies to staff involved in MRI patient preparation and scanning.") };
+    case "responsibilities": return { type: "doc", content: exampleBilingualList(["التحقق من معرفين للمريض.", "مراجعة إجابات فحص السلامة.", "إبلاغ مسؤول الرنين المغناطيسي عن أي مخاوف قبل بدء الفحص."], ["Confirm two patient identifiers.", "Review the safety screening responses.", "Escalate any concern to the MRI lead before scanning."]) };
+    case "definitions": return { type: "doc", content: exampleBilingualParagraph("التصوير بالرنين المغناطيسي: تصوير تشخيصي يستخدم مجالاً مغناطيسياً وموجات راديوية.", "MRI: magnetic resonance imaging, a diagnostic technique using a magnetic field and radio waves.") };
+    case "safety": return { type: "doc", content: exampleBilingualList(["لا تبدأ الفحص قبل استكمال نموذج السلامة ومراجعته.", "أبعد الأجسام المعدنية غير المصرح بها عن غرفة الفحص.", "أوقف الإجراء وصعّد أي إجابة أو حالة غير واضحة."], ["Do not scan until the safety form is complete and reviewed.", "Keep non-approved metal objects outside the scan room.", "Pause and escalate any unclear response or condition."]) };
+    case "procedure": return { type: "doc", content: exampleBilingualList(["طابق هوية المريض باستخدام معرفين.", "راجع إجابات فحص السلامة مع المريض.", "وثق اكتمال التحقق والموافقة قبل بدء الفحص."], ["Match the patient using two identifiers.", "Review the safety screening responses with the patient.", "Document completion and clearance before scanning."], true) };
+    case "documentation": return { type: "doc", content: exampleBilingualParagraph("سجل التحقق من الهوية وإكمال فحص السلامة في سير عمل نظام المعلومات الإشعاعية.", "Record identity verification and completed safety screening in the RIS workflow.") };
+    case "references": return { type: "doc", content: exampleBilingualList(["سياسة السلامة المحلية للتصوير بالرنين المغناطيسي.", "نموذج فحص سلامة الرنين المغناطيسي المعتمد."], ["Local MRI safety policy.", "Current approved MRI safety screening form."]) };
   }
 }
 
-export function buildSopJsonExample(): SopJsonInterchangeV1 {
+export function buildDefaultSopJsonExample(): SopJsonExampleConfig {
   const document = validateSopDocument({
     type: "sop",
     version: 1,
     sections: SOP_SECTION_DEFINITIONS.map((section) => ({ ...section, content: exampleSectionContent(section.key) })),
   }, true);
   return {
-    format: SOP_JSON_FORMAT,
-    formatVersion: SOP_JSON_FORMAT_VERSION,
-    sop: {
-      code: "RAD-MRI-001",
-      title: "MRI Patient Identification and Safety Screening",
-      category: "MRI",
-      version: "1.0",
-      effectiveDate: "2026-10-01",
-      changeSummary: "Initial issue",
-      document,
-    },
+    code: "RAD-MRI-001",
+    title: "MRI Patient Identification and Safety Screening",
+    category: "MRI",
+    version: "1.0",
+    effectiveDate: "2026-10-01",
+    changeSummary: "Initial issue",
+    document,
   };
 }
 
-export function exportSopJsonExample(): { buffer: Buffer; filename: string } {
-  return { buffer: serializeSopJsonPayload(buildSopJsonExample()), filename: SOP_JSON_EXAMPLE_FILENAME };
+export function buildSopJsonExample(config: SopJsonExampleConfig = buildDefaultSopJsonExample()): SopJsonInterchangeV1 {
+  return {
+    format: SOP_JSON_FORMAT,
+    formatVersion: SOP_JSON_FORMAT_VERSION,
+    sop: { ...config, document: validateSopDocument(config.document, true) },
+  };
+}
+
+const SOP_JSON_EXAMPLE_CATEGORY = "sops";
+const SOP_JSON_EXAMPLE_SETTING_KEY = "json_example_v1";
+const SOP_JSON_EXAMPLE_CONFIG_KEYS = ["code", "title", "category", "version", "effectiveDate", "changeSummary", "document"] as const;
+
+function settingObject(value: unknown): JsonRecord | null {
+  if (typeof value === "string") {
+    try { return record(JSON.parse(value)); } catch { return null; }
+  }
+  return record(value);
+}
+
+export function validateSopJsonExampleConfig(value: unknown): SopJsonExampleConfig {
+  const input = settingObject(value);
+  if (!input || Object.keys(input).length !== SOP_JSON_EXAMPLE_CONFIG_KEYS.length || Object.keys(input).some((key) => !(SOP_JSON_EXAMPLE_CONFIG_KEYS as readonly string[]).includes(key))) {
+    throw new HttpError(400, "JSON example must contain only the editable SOP metadata and document fields.");
+  }
+  const effectiveDate = normalizeSopDate(input.effectiveDate, "Effective date");
+  if (effectiveDate === null || typeof input.effectiveDate !== "string") throw new HttpError(400, "Effective date is required.");
+  if (new Date(`${effectiveDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== effectiveDate) throw new HttpError(400, "Effective date must be a valid calendar date in YYYY-MM-DD format.");
+  return {
+    code: normalizeSopCode(input.code),
+    title: requiredText(input.title, "Title"),
+    category: normalizeSopCategory(input.category),
+    version: normalizeSopVersion(input.version),
+    effectiveDate,
+    changeSummary: requiredText(input.changeSummary, "Change summary"),
+    document: validateSopDocument(input.document, true),
+  };
+}
+
+function exampleMetadata(value: unknown): JsonRecord {
+  const input = settingObject(value);
+  if (!input) return {};
+  const metadata: JsonRecord = {};
+  for (const key of ["code", "title", "category", "version", "effectiveDate"] as const) {
+    if (typeof input[key] === "string") metadata[key] = input[key];
+  }
+  return metadata;
+}
+
+async function readSopJsonExampleSetting(executor: DbExecutor): Promise<unknown | null> {
+  const result = await executor.query<{ setting_value: unknown }>(
+    "select setting_value from system_settings where category = $1 and setting_key = $2 limit 1",
+    [SOP_JSON_EXAMPLE_CATEGORY, SOP_JSON_EXAMPLE_SETTING_KEY],
+  );
+  return result.rows[0]?.setting_value ?? null;
+}
+
+export async function getSopJsonExampleConfig(role: string | undefined): Promise<SopJsonExampleConfigResult> {
+  requireSopManagement(role);
+  const saved = await readSopJsonExampleSetting(pool);
+  return saved === null
+    ? { config: buildDefaultSopJsonExample(), source: "default" }
+    : { config: validateSopJsonExampleConfig(saved), source: "custom" };
+}
+
+function positiveActorId(value: unknown): number {
+  const actorUserId = Number(value);
+  if (!Number.isInteger(actorUserId) || actorUserId <= 0) throw new HttpError(400, "acting user must be a positive integer.");
+  return actorUserId;
+}
+
+export async function updateSopJsonExampleConfig(value: unknown, actorUserIdValue: unknown, role: string | undefined): Promise<SopJsonExampleConfigResult> {
+  requireSopManagement(role);
+  const actorUserId = positiveActorId(actorUserIdValue);
+  const config = validateSopJsonExampleConfig(value);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const previousValue = await readSopJsonExampleSetting(client);
+    await client.query(
+      `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+       values ($1, $2, $3::jsonb, $4)
+       on conflict (category, setting_key)
+       do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()`,
+      [SOP_JSON_EXAMPLE_CATEGORY, SOP_JSON_EXAMPLE_SETTING_KEY, JSON.stringify(config), actorUserId],
+    );
+    await logAuditEntry({ entityType: "sop_json_example", actionType: "sop_json_example_updated", oldValues: exampleMetadata(previousValue ?? buildDefaultSopJsonExample()), newValues: exampleMetadata(config), changedByUserId: actorUserId }, client);
+    await client.query("commit");
+    return { config, source: "custom" };
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function resetSopJsonExampleConfig(actorUserIdValue: unknown, role: string | undefined): Promise<SopJsonExampleConfigResult> {
+  requireSopManagement(role);
+  const actorUserId = positiveActorId(actorUserIdValue);
+  const defaultConfig = buildDefaultSopJsonExample();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const previousValue = await readSopJsonExampleSetting(client);
+    await client.query(
+      "delete from system_settings where category = $1 and setting_key = $2",
+      [SOP_JSON_EXAMPLE_CATEGORY, SOP_JSON_EXAMPLE_SETTING_KEY],
+    );
+    await logAuditEntry({ entityType: "sop_json_example", actionType: "sop_json_example_reset", oldValues: exampleMetadata(previousValue ?? defaultConfig), newValues: exampleMetadata(defaultConfig), changedByUserId: actorUserId }, client);
+    await client.query("commit");
+    return { config: defaultConfig, source: "default" };
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function exportSopJsonExample(): Promise<{ buffer: Buffer; filename: string }> {
+  const saved = await readSopJsonExampleSetting(pool);
+  const config = saved === null ? buildDefaultSopJsonExample() : validateSopJsonExampleConfig(saved);
+  return { buffer: serializeSopJsonPayload(buildSopJsonExample(config)), filename: SOP_JSON_EXAMPLE_FILENAME };
 }
 
 export async function exportSopVersionJson(sopIdValue: unknown, versionValue: unknown, role: string | undefined): Promise<{ buffer: Buffer; filename: string }> {
@@ -200,5 +349,5 @@ export async function inspectDraftSopJsonImport(sopId: unknown, version: unknown
 export async function previewDraftSopJsonImport(sopId: unknown, version: unknown, input: ImportInput, role: string | undefined): Promise<SopJsonPreview> { requireSopManagement(role); return preview(parseJson(input), "draft_update", await loadDraft(sopId, version)); }
 export async function confirmDraftSopJsonImport(sopIdValue: unknown, versionValue: unknown, input: ImportInput & { expectedDraftUpdatedAt?: string | null }, actorUserIdValue: unknown, role: string | undefined): Promise<SopJsonConfirmResult> {
   requireSopManagement(role); const actorUserId = positiveId(actorUserIdValue, "acting user"); const expected = String(input.expectedDraftUpdatedAt ?? "").trim(); if (!expected) throw new HttpError(400, "expectedDraftUpdatedAt is required."); const parsed = parseJson(input);
-  const client = await pool.connect(); try { await client.query("begin"); const sopId = positiveId(sopIdValue, "sopId"); await client.query("select id from sops where id=$1 for update", [sopId]); const target = await loadDraft(sopId, versionValue, client); if (timestamp(target.version.updatedAt) !== timestamp(expected)) throw new HttpError(409, "SOP draft changed after preview. Preview the import again."); const plan = preview(parsed, "draft_update", target); if (!plan.canConfirm) throw new HttpError(400, "SOP JSON import has validation errors.", plan); const imported = canonical(parsed); const changedSectionKeys = plan.sections.filter((section) => section.action === "changed").map((section) => section.sectionKey); const changed = changedSectionKeys.length > 0 || plan.effectiveDate.changed || plan.changeSummary.changed || target.sop.title !== imported.sop.title || target.sop.category !== imported.sop.category; const result = changed ? await updateSopDraft({ sopId, version: target.version.version, title: imported.sop.title, category: imported.sop.category, contentJson: imported.sop.document, changeSummary: imported.sop.changeSummary, effectiveDate: imported.sop.effectiveDate, actorUserId }, client) : { sop: target.sop, version: target.version }; await logAuditEntry({ entityType: "sop", entityId: sopId, actionType: "sop_json_imported", newValues: { sop_id: sopId, sop_code: target.sop.code, format_version: SOP_JSON_FORMAT_VERSION, import_type: "draft_update", changed_section_keys: changedSectionKeys, source_version: imported.sop.version, target_version: target.version.version }, changedByUserId: actorUserId }, client); await client.query("commit"); return { ...result, summary: { importType: "draft_update", changedSectionKeys, sourceVersion: imported.sop.version, targetVersion: target.version.version } }; } catch (error) { await client.query("rollback").catch(() => undefined); throw error; } finally { client.release(); }
+  const client = await pool.connect(); try { await client.query("begin"); const sopId = positiveId(sopIdValue, "sopId"); await client.query("select id from sops where id=$1 for update", [sopId]); const target = await loadDraft(sopId, versionValue, client); if (timestamp(target.version.updatedAt) !== timestamp(expected)) throw new HttpError(409, "SOP draft changed after preview. Preview the import again."); const plan = preview(parsed, "draft_update", target); if (!plan.canConfirm) throw new HttpError(400, "SOP JSON import has validation errors.", plan); const imported = canonical(parsed); validateSopReviewDate(imported.sop.effectiveDate, target.version.nextReviewDate); const changedSectionKeys = plan.sections.filter((section) => section.action === "changed").map((section) => section.sectionKey); const changed = changedSectionKeys.length > 0 || plan.effectiveDate.changed || plan.changeSummary.changed || target.sop.title !== imported.sop.title || target.sop.category !== imported.sop.category; const result = changed ? await updateSopDraft({ sopId, version: target.version.version, title: imported.sop.title, category: imported.sop.category, contentJson: imported.sop.document, changeSummary: imported.sop.changeSummary, effectiveDate: imported.sop.effectiveDate, actorUserId }, client) : { sop: target.sop, version: target.version }; await logAuditEntry({ entityType: "sop", entityId: sopId, actionType: "sop_json_imported", newValues: { sop_id: sopId, sop_code: target.sop.code, format_version: SOP_JSON_FORMAT_VERSION, import_type: "draft_update", changed_section_keys: changedSectionKeys, source_version: imported.sop.version, target_version: target.version.version }, changedByUserId: actorUserId }, client); await client.query("commit"); return { ...result, summary: { importType: "draft_update", changedSectionKeys, sourceVersion: imported.sop.version, targetVersion: target.version.version } }; } catch (error) { await client.query("rollback").catch(() => undefined); throw error; } finally { client.release(); }
 }

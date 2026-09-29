@@ -6,7 +6,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { SOP_SECTION_DEFINITIONS, type SopSectionKey } from "./constants.js";
 import { requireSopManagement } from "./sop-service.js";
 import { findSop, findSopVersion, updateSopDraft } from "./sop-repository.js";
-import { normalizeSopCategory, normalizeSopCode, normalizeSopDate, normalizeSopVersion, validateSopDocument } from "./sop-validation.js";
+import { normalizeSopCategory, normalizeSopCode, normalizeSopDate, normalizeSopVersion, validateSopReviewDate, validateSopDocument } from "./sop-validation.js";
 import type { JsonRecord, SopDocument, SopSectionDocument, SopSummary, SopVersion } from "./types.js";
 
 export const SOP_XLSX_SHEET = "SOP";
@@ -541,6 +541,7 @@ export async function confirmSopXlsxImport(
     if (!plan.preview.canConfirm) throw new HttpError(400, "SOP Excel import has validation errors.", plan.preview);
     const changedSectionKeys = plan.preview.sections.filter((section) => section.action === "changed").map((section) => section.sectionKey);
     const effectiveDate = plan.preview.effectiveDate.imported;
+    validateSopReviewDate(effectiveDate, target.version.nextReviewDate);
     const changeSummary = plan.preview.changeSummary.imported;
     const metadataChanged = plan.preview.effectiveDate.changed || plan.preview.changeSummary.changed;
     let result: { sop: SopSummary; version: SopVersion } = { sop: target.sop, version: target.version };

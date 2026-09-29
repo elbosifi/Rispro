@@ -66,12 +66,14 @@ import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
 import { SopXlsxImportDialog } from "./sop-xlsx-import-dialog";
 import { SopJsonImportDialog } from "./sop-json-import-dialog";
+import SopJsonExamplePage from "./sop-json-example-page";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import {
   proceedWithUnsavedNavigation,
   registerUnsavedNavigationGuard,
 } from "@/lib/unsaved-navigation-guard";
+import { todayIsoDateLy } from "@/lib/date-format";
 
 const FALLBACK_SECTIONS: SopSectionDefinition[] = [
   { key: "purpose", title: "Purpose", required: true },
@@ -104,13 +106,6 @@ function parseIsoDateOnly(value: string): [number, number, number] | null {
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-function getLocalDateOnlyString(d = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function daysBetweenDates(fromIso: string, toIso: string): number | null {
   const fromParts = parseIsoDateOnly(fromIso);
   const toParts = parseIsoDateOnly(toIso);
@@ -124,7 +119,7 @@ type ReviewStatusKind = "normal" | "due_soon" | "overdue" | "missing";
 
 function getReviewStatus(
   nextReviewDate: string | null | undefined,
-  todayIso = getLocalDateOnlyString(),
+  todayIso = todayIsoDateLy(),
 ): ReviewStatusKind {
   if (!nextReviewDate) return "missing";
   const diffDays = daysBetweenDates(todayIso, nextReviewDate);
@@ -302,7 +297,7 @@ function LibraryPage() {
             operational standards.
           </p>
         </div>
-        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" variant="secondary" onClick={() => void downloadJsonExample()} disabled={jsonExampleBusy}><Download className="h-4 w-4" />{jsonExampleBusy ? "Downloading…" : "Download JSON Example"}</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
+        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" variant="secondary" onClick={() => void downloadJsonExample()} disabled={jsonExampleBusy}><Download className="h-4 w-4" />{jsonExampleBusy ? "Downloading…" : "Download JSON Example"}</Button><Button type="button" variant="secondary" onClick={() => navigate("/sops/json-example")}><Pencil className="h-4 w-4" />Edit JSON Example</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
       </header>
       {jsonExampleError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{jsonExampleError}</div> : null}
       <section
@@ -1275,14 +1270,14 @@ function DetailPage({ id }: { id: number }) {
   const selectedVersion = useMemo(
     () =>
       data?.versions.find((version) => version.version === selectedVersionId) ??
-        (management
-          ? data?.versions.find(
-              (version) => version.version === data.sop.draftVersion,
-            )
-          : undefined) ??
       data?.versions.find(
         (version) => version.version === data.sop.currentVersion,
       ) ??
+      (management
+        ? data?.versions.find(
+            (version) => version.version === data.sop.draftVersion,
+          )
+        : undefined) ??
       data?.versions[0],
     [data, management, selectedVersionId],
   );
@@ -1560,14 +1555,25 @@ function DetailPage({ id }: { id: number }) {
                   </Button>
                 </>
               ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setRevisionOpen(true)}
-              >
-                <Pencil className="h-4 w-4" />
-                Create New Revision
-              </Button>
+              {data.sop.draftVersion ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => navigate(`/sops/${id}?version=${encodeURIComponent(data.sop.draftVersion!)}`)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Open Draft Revision
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setRevisionOpen(true)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Create New Revision
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="destructive"
@@ -1863,6 +1869,7 @@ function NewSopPage() {
 export default function SopsPage() {
   const { id } = useParams();
   const location = useLocation();
+  if (location.pathname.replace(/\/+$/, "") === "/sops/json-example") return <SopJsonExamplePage />;
   if (location.pathname.endsWith("/new")) return <NewSopPage />;
   if (id) return <DetailPage id={Number(id)} />;
   return <LibraryPage />;

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider-component";
@@ -22,6 +22,9 @@ const { api } = vi.hoisted(() => ({
     downloadSopXlsx: vi.fn(),
     downloadSopJson: vi.fn(),
     downloadSopJsonExample: vi.fn(),
+    fetchSopJsonExampleConfig: vi.fn(),
+    updateSopJsonExampleConfig: vi.fn(),
+    resetSopJsonExampleConfig: vi.fn(),
     downloadSopPdf: vi.fn(),
     openSopPrintWindow: vi.fn(),
     navigateSopPrintWindow: vi.fn(),
@@ -37,6 +40,10 @@ const { api } = vi.hoisted(() => ({
   },
 }));
 vi.mock("@/lib/api/sops", () => api);
+vi.mock("@/lib/date-format", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/date-format")>();
+  return { ...actual, todayIsoDateLy: vi.fn(() => "2026-10-01") };
+});
 vi.mock("./sop-editor", () => ({
   createEmptySopDocument: (definitions: Array<{ key: string; title: string; required: boolean }>) => ({ type: "sop", version: 1, sections: definitions.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph" }] } })) }),
   SopStructuredEditor: ({ value, editable, onChange }: { value: { sections: Array<{ key: string; title: string; required: boolean; content: Record<string, unknown> }> }; editable: boolean; onChange?: (next: typeof value) => void }) => <div data-testid="sop-structured-editor">{value.sections.map((section, index) => <section key={section.title}><h3>{section.title}</h3>{editable ? <><button type="button" aria-label="RTL">RTL</button><button type="button" aria-label="LTR">LTR</button><div contentEditable role="textbox" aria-label={`${section.title} content`} onInput={() => onChange?.({ ...value, sections: value.sections.map((item, itemIndex) => itemIndex === index ? { ...item, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Latest unsaved editor edit" }] }] } } : item) })} /></> : null}</section>)}</div>,
@@ -52,6 +59,7 @@ const users = [
 ];
 const meta = { categories: ["General", "MRI", "Patient Safety"], sections, users };
 const documentJson = { type: "sop" as const, version: 1 as const, sections: sections.map((section) => ({ ...section, content: { type: "doc", content: [{ type: "paragraph", attrs: { dir: section.key === "purpose" ? "rtl" : "ltr" }, content: section.required ? [{ type: "text", text: section.key === "purpose" ? "إجراء MRI" : "Content" }] : undefined }] } })) };
+const sopJsonExampleConfig = { code: "RAD-MRI-001", title: "MRI SOP Example", category: "MRI", version: "1.0", effectiveDate: "2026-10-01", changeSummary: "Initial issue", document: documentJson };
 const draftVersion = { id: 11, sopId: 7, version: "1.0", status: "draft" as const, contentJson: documentJson, changeSummary: "Initial draft", effectiveDate: "2026-10-01", nextReviewDate: "2028-10-01", createdByUserId: 1, createdByName: "Supervisor", createdByUsername: "supervisor", createdAt: "2026-09-18T10:00:00.000Z", updatedByUserId: 1, updatedByName: "Supervisor", updatedAt: "2026-09-18T10:00:00.000Z", publishedByUserId: null, publishedByName: null, publishedByUsername: null, publishedAt: null };
 const publishedVersion = { ...draftVersion, id: 12, status: "published" as const, publishedByUserId: 1, publishedByName: "Supervisor", publishedByUsername: "supervisor", publishedAt: "2026-09-18T11:00:00.000Z" };
 const oldVersion = { ...publishedVersion, id: 10, version: "0.9", status: "superseded" as const, changeSummary: "Previous version", nextReviewDate: "2026-10-01" };
@@ -63,7 +71,11 @@ const publishedSopWithDraft = { ...publishedSop, draftVersion: "1.1" };
 function renderPage(role = "supervisor", entry = "/sops") {
   localStorage.setItem("rispro-language", "en");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<LanguageProvider><AuthContext.Provider value={{ user: { id: 1, username: role, fullName: role, role: role as never }, isLoading: false, login: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), reAuth: vi.fn(), reAuthWithPasskey: vi.fn(), changePassword: vi.fn() }}><QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[entry]}><Routes><Route path="/sops/new/*" element={<SopsPage />} /><Route path="/sops/:id/*" element={<SopsPage />} /><Route path="/sops/*" element={<SopsPage />} /></Routes></MemoryRouter></QueryClientProvider></AuthContext.Provider></LanguageProvider>);
+  function RouterLocation() {
+    const location = useLocation();
+    return <div data-testid="router-location">{location.pathname}{location.search}</div>;
+  }
+  return render(<LanguageProvider><AuthContext.Provider value={{ user: { id: 1, username: role, fullName: role, role: role as never }, isLoading: false, login: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), reAuth: vi.fn(), reAuthWithPasskey: vi.fn(), changePassword: vi.fn() }}><QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[entry]}><Routes><Route path="/sops/new/*" element={<SopsPage />} /><Route path="/sops/:id/*" element={<SopsPage />} /><Route path="/sops/*" element={<SopsPage />} /></Routes><RouterLocation /></MemoryRouter></QueryClientProvider></AuthContext.Provider></LanguageProvider>);
 }
 
 describe("SopsPage", () => {
@@ -87,6 +99,9 @@ describe("SopsPage", () => {
     api.downloadSopXlsx.mockResolvedValue(undefined);
     api.downloadSopJson.mockResolvedValue(undefined);
     api.downloadSopJsonExample.mockResolvedValue(undefined);
+    api.fetchSopJsonExampleConfig.mockResolvedValue({ config: sopJsonExampleConfig, source: "default" });
+    api.updateSopJsonExampleConfig.mockImplementation(async (config) => ({ config, source: "custom" }));
+    api.resetSopJsonExampleConfig.mockResolvedValue({ config: sopJsonExampleConfig, source: "default" });
     api.downloadSopPdf.mockResolvedValue(undefined);
     api.openSopPrintWindow.mockReturnValue({ focus: vi.fn(), print: vi.fn(), close: vi.fn() });
     api.navigateSopPrintWindow.mockImplementation((_window: Window, _id: number, _version: string, onLoad?: () => void) => onLoad?.());
@@ -112,6 +127,7 @@ describe("SopsPage", () => {
     expect(screen.queryByRole("button", { name: "New SOP" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Import SOP" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Download JSON Example" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit JSON Example" })).toBeNull();
     expect(screen.getByLabelText("Status")).toHaveProperty("disabled", true);
     expect(api.fetchSops).toHaveBeenLastCalledWith({ search: "", category: "", status: "published" });
   });
@@ -128,6 +144,66 @@ describe("SopsPage", () => {
     api.inspectNewSopJsonImport.mockRejectedValueOnce(new Error("File is not a RISpro SOP JSON document."));
     await user.upload(screen.getByLabelText("SOP JSON file"), input);
     expect((await screen.findByRole("alert")).textContent).toContain("File is not a RISpro SOP JSON document.");
+  });
+
+  it("opens the management-only visual JSON example editor and saves through its structured editor", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
+    expect(await screen.findByRole("heading", { name: "RISpro SOP JSON Example" })).toBeTruthy();
+    expect(screen.getByText("JSON Example Template — configuration only, not a real SOP.")).toBeTruthy();
+    expect(api.fetchSopJsonExampleConfig).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("sop-structured-editor")).toBeTruthy();
+    expect(screen.getByText(/SOP content may be Arabic, English, or bilingual/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Publish SOP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive SOP" })).toBeNull();
+    expect(screen.queryByText(/Owner:/)).toBeNull();
+    expect(screen.queryByText(/Next review:/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.type(screen.getByLabelText("Example Title"), " Updated");
+    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Save Example" }));
+    await waitFor(() => expect(api.updateSopJsonExampleConfig).toHaveBeenCalledWith(expect.objectContaining({ title: "MRI SOP Example Updated", document: documentJson })));
+    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Download Example" }));
+    expect(api.downloadSopJsonExample).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires confirmation before resetting the JSON example and restores the built-in version", async () => {
+    const user = userEvent.setup();
+    api.fetchSopJsonExampleConfig.mockResolvedValueOnce({ config: { ...sopJsonExampleConfig, title: "Customized Example" }, source: "custom" });
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
+    expect(await screen.findByText("Active example: Customized")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Reset to Default" }));
+    expect(await screen.findByRole("heading", { name: "Reset JSON Example?" })).toBeTruthy();
+    expect(screen.getByText("This does not affect any existing SOPs.")).toBeTruthy();
+    expect(api.resetSopJsonExampleConfig).not.toHaveBeenCalled();
+    await user.click(screen.getAllByRole("button", { name: "Reset to Default" }).at(-1)!);
+    await waitFor(() => expect(api.resetSopJsonExampleConfig).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Active example: Built-in default")).toBeTruthy();
+    expect((screen.getByLabelText("Example Title") as HTMLInputElement).value).toBe("MRI SOP Example");
+  });
+
+  it("does not fetch or expose the JSON example editor to ordinary users", async () => {
+    renderPage("receptionist", "/sops/json-example");
+    expect(await screen.findByRole("heading", { name: "SOP Library" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit JSON Example" })).toBeNull();
+    expect(api.fetchSopJsonExampleConfig).not.toHaveBeenCalled();
+  });
+
+  it("protects unsaved JSON example changes when cancelling", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
+    await user.type(await screen.findByLabelText("Example Title"), " Unsaved");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+    expect(screen.getByTestId("router-location").textContent).toBe("/sops");
   });
 
   it("shows loading, error, and empty library states", async () => {
@@ -441,6 +517,16 @@ describe("SopsPage", () => {
     expect((reviewSelect as HTMLSelectElement).value).toBe("overdue");
   });
 
+  it("classifies due soon and overdue against a deterministic Tripoli date", async () => {
+    api.fetchSops.mockResolvedValueOnce({ sops: [
+      { ...publishedSop, currentNextReviewDate: "2026-12-30" },
+      { ...publishedSop, id: 8, code: "RAD-MRI-002", currentNextReviewDate: "2026-09-30" },
+    ] });
+    renderPage("supervisor");
+    expect(await screen.findByText("Review due soon")).toBeTruthy();
+    expect(await screen.findByText("Review overdue")).toBeTruthy();
+  });
+
   it("shows owner and next review date in details and allows changing owner", async () => {
     const user = userEvent.setup();
     renderPage("supervisor", "/sops/7");
@@ -475,6 +561,17 @@ describe("SopsPage", () => {
     expect(await screen.findByRole("heading", { name: "Create a new SOP revision" })).toBeTruthy();
     const versionInput = screen.getByLabelText("New version") as HTMLInputElement;
     expect(versionInput.value).toBe("1.1");
+  });
+
+  it("opens the existing draft revision instead of offering a second revision", async () => {
+    const user = userEvent.setup();
+    api.fetchSop.mockResolvedValueOnce({ sop: publishedSopWithDraft, versions: [revisionVersion, publishedVersion, oldVersion] });
+    renderPage("supervisor", "/sops/7");
+    const openDraft = await screen.findByRole("button", { name: "Open Draft Revision" });
+    expect(screen.queryByRole("button", { name: "Create New Revision" })).toBeNull();
+    await user.click(openDraft);
+    expect(screen.getByTestId("router-location").textContent).toBe("/sops/7?version=1.1");
+    expect(await screen.findByRole("button", { name: "Save Draft" })).toBeTruthy();
   });
 
   it("exposes revision and archive actions only to management users", async () => {

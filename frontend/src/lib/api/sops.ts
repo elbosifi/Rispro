@@ -5,6 +5,19 @@ export type SopVersionStatus = "draft" | "published" | "superseded";
 export interface SopSectionDefinition { key: string; title: string; required: boolean; }
 export interface SopSection { key: string; title: string; required: boolean; content: Record<string, unknown>; }
 export interface SopDocument { type: "sop"; version: 1; sections: SopSection[]; }
+export interface SopJsonExampleConfig {
+  code: string;
+  title: string;
+  category: string;
+  version: string;
+  effectiveDate: string;
+  changeSummary: string;
+  document: SopDocument;
+}
+export interface SopJsonExampleConfigResult {
+  config: SopJsonExampleConfig;
+  source: "custom" | "default";
+}
 export interface SopVersion {
   id: number;
   sopId: number;
@@ -184,6 +197,10 @@ export async function downloadSopJsonExample(): Promise<void> {
   const url = URL.createObjectURL(await response.blob());
   try { const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); } finally { URL.revokeObjectURL(url); }
 }
+
+export const fetchSopJsonExampleConfig = () => api<SopJsonExampleConfigResult>("/sops/import/json/example/config");
+export const updateSopJsonExampleConfig = (payload: SopJsonExampleConfig) => api<SopJsonExampleConfigResult>("/sops/import/json/example/config", { method: "PUT", body: JSON.stringify(payload) });
+export const resetSopJsonExampleConfig = () => api<SopJsonExampleConfigResult>("/sops/import/json/example/reset", { method: "POST", body: JSON.stringify({}) });
 
 export async function downloadSopPdf(id: number, version: string): Promise<void> {
   const response = await fetch(`/api/sops/${id}/versions/${encodeURIComponent(version)}/pdf`, { credentials: "include", cache: "no-store" });

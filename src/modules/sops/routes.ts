@@ -5,7 +5,7 @@ import { asyncRoute } from "../../utils/async-route.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { confirmSopXlsxImport, exportSopVersionXlsx, inspectSopXlsxImport, previewSopXlsxImport } from "./sop-import-export-service.js";
-import { confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopJsonExample, exportSopVersionJson, inspectDraftSopJsonImport, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport } from "./sop-json-import-export-service.js";
+import { confirmDraftSopJsonImport, confirmNewSopJsonImport, exportSopJsonExample, exportSopVersionJson, getSopJsonExampleConfig, inspectDraftSopJsonImport, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport, resetSopJsonExampleConfig, updateSopJsonExampleConfig } from "./sop-json-import-export-service.js";
 import { archiveSopForUser, createSop, createSopRevisionForUser, getSopDetailForUser, getSopMeta, getSopPrintDocumentForUser, getSopVersionForUser, listSops, publishSopVersionForUser, reviewSopNoChangesForUser, updateSopDraftForUser, updateSopOwnerForUser, validateSopFilters } from "./sop-service.js";
 import { ChromiumPdfRenderError, renderChromiumPdf } from "../../services/chromium-pdf-service.js";
 import { buildSopPdfFooterTemplate, buildSopPrintHtml } from "./sop-print-service.js";
@@ -16,8 +16,20 @@ sopsRouter.use(requireAuth);
 
 sopsRouter.get("/meta", asyncRoute(async (req: Request, res: Response) => { res.json(await getSopMeta(req.user?.role)); }));
 sopsRouter.get("/", asyncRoute(async (req: Request, res: Response) => { res.json({ sops: await listSops(validateSopFilters(req.query), req.user?.role) }); }));
+sopsRouter.get("/import/json/example/config", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, private");
+  res.json(await getSopJsonExampleConfig(req.user?.role));
+}));
+sopsRouter.put("/import/json/example/config", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, private");
+  res.json(await updateSopJsonExampleConfig(asUnknownRecord(req.body), req.user!.sub, req.user?.role));
+}));
+sopsRouter.post("/import/json/example/reset", requireAnyRole([...MANAGEMENT]), asyncRoute(async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, private");
+  res.json(await resetSopJsonExampleConfig(req.user!.sub, req.user?.role));
+}));
 sopsRouter.get("/import/json/example", requireAnyRole([...MANAGEMENT]), asyncRoute(async (_req: Request, res: Response) => {
-  const payload = exportSopJsonExample();
+  const payload = await exportSopJsonExample();
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
   res.setHeader("Cache-Control", "no-store, private");

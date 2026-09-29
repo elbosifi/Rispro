@@ -35,6 +35,11 @@ export function normalizeSopDate(value: unknown, fieldName = "Effective date"): 
   }
   return date;
 }
+export function validateSopReviewDate(effectiveDate: string | null | undefined, nextReviewDate: string | null | undefined): void {
+  if (effectiveDate && nextReviewDate && nextReviewDate < effectiveDate) {
+    throw new HttpError(400, "Next review date cannot be before the effective date.");
+  }
+}
 export function normalizeSopCategory(value: unknown): SopCategory { const parsed = requiredText(value, "Category"); if (!(SOP_CATEGORIES as readonly string[]).includes(parsed)) throw new HttpError(400, "Category is invalid."); return parsed as SopCategory; }
 
 export function isLeapYear(year: number): boolean {

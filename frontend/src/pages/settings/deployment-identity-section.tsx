@@ -13,12 +13,12 @@ function browserOrigin(): string {
 export default function DeploymentIdentitySection({ onReAuthRequired, reauthVersion }: { onReAuthRequired: (key: string[]) => void; reauthVersion: number }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState("");
+  const [draftOverride, setDraftOverride] = useState<string | null>(null);
   const [pendingSaveAfterReAuth, setPendingSaveAfterReAuth] = useState<number | null>(null);
-  const currentOrigin = useMemo(browserOrigin, []);
+  const currentOrigin = useMemo(() => browserOrigin(), []);
   const query = useQuery({ queryKey: ["deployment-identity"], queryFn: fetchDeploymentIdentitySettings, retry: false });
 
-  useEffect(() => { if (query.data) setDraft(query.data.publicAppBaseUrl); }, [query.data]);
+  const draft = draftOverride ?? query.data?.publicAppBaseUrl ?? "";
   useEffect(() => {
     if (query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403)) onReAuthRequired(["deployment-identity"]);
   }, [query.error, onReAuthRequired]);
@@ -26,7 +26,7 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
   const mutation = useMutation({
     mutationFn: () => saveDeploymentIdentitySettings(draft),
     onSuccess: async (saved) => {
-      setDraft(saved.publicAppBaseUrl);
+      setDraftOverride(saved.publicAppBaseUrl);
       setPendingSaveAfterReAuth(null);
       await queryClient.invalidateQueries({ queryKey: ["deployment-identity"] });
     },
@@ -54,12 +54,12 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
       {query.error && !(query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403)) ? <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{query.error instanceof Error ? query.error.message : "Could not load the setting."}</p> : null}
       <div>
         <label htmlFor="public-rispro-url" className="block text-sm font-semibold text-foreground">{text.label}</label>
-        <input id="public-rispro-url" type="url" dir="ltr" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="https://rispro.nccb.com.ly" className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
+        <input id="public-rispro-url" type="url" dir="ltr" value={draft} onChange={(event) => setDraftOverride(event.target.value)} placeholder="https://rispro.nccb.com.ly" className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
       </div>
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm">
         <p className="font-semibold text-foreground">{text.current}</p>
         <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{currentOrigin || "Unavailable"}</p>
-        <button type="button" onClick={() => setDraft(currentOrigin)} disabled={!currentOrigin} className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold disabled:opacity-60">{text.use}</button>
+        <button type="button" onClick={() => setDraftOverride(currentOrigin)} disabled={!currentOrigin} className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold disabled:opacity-60">{text.use}</button>
       </div>
       <button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending || !draft.trim()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
         {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{text.save}

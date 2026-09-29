@@ -74,8 +74,8 @@ export function TeachingImportBatchPage() {
   const [showPersistedValidation, setShowPersistedValidation] = useState(false);
 
   const batch = useQuery({ queryKey: ["teaching", "import-batch", batchId], queryFn: () => fetchTeachingImportBatch(batchId), enabled: canInspect && Boolean(batchId) });
-  const validate = useMutation({
-    mutationFn: (confirmAfterValidation: boolean) => validateTeachingImportBatch(batchId),
+  const validate = useMutation<TeachingBulkValidationResult, Error, boolean>({
+    mutationFn: () => validateTeachingImportBatch(batchId),
     onSuccess: (result, confirmAfterValidation) => {
       setQuestions(result.questions);
       setValidationSummary(result);

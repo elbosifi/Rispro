@@ -70,6 +70,13 @@ test("SOP lifecycle preserves published Unicode versions, controls owner and rev
 
   let sopId: number | null = null;
   try {
+    const invalidDateMessage = (error: unknown) => (error as { statusCode?: number; message?: string }).statusCode === 400
+      && (error as { message?: string }).message === "Next review date cannot be before the effective date.";
+    await assert.rejects(
+      () => createSop({ title: "Invalid SOP dates", code: `RAD-DATE-${marker}`, category: "General", version: "1.0", effectiveDate: "2026-10-01", nextReviewDate: "2026-09-30", changeSummary: "Invalid dates", contentJson: documentWith("Invalid dates") }, actor, "supervisor"),
+      invalidDateMessage,
+    );
+
     await assert.rejects(
       () => createSop({ title: "Denied SOP", code: `RAD-DENY-${marker}`, category: "General", version: "1.0", effectiveDate: "2026-10-01", changeSummary: "Denied", contentJson: documentWith("Denied") }, actor, "receptionist"),
       (error: unknown) => (error as { statusCode?: number }).statusCode === 403
@@ -98,6 +105,19 @@ test("SOP lifecycle preserves published Unicode versions, controls owner and rev
     await assert.rejects(
       () => publishSopVersionForUser(sopId, "1.0", actor, "supervisor"),
       (error: unknown) => (error as { statusCode?: number; message?: string }).statusCode === 400 && String((error as { message?: string }).message).includes("SOP Owner is required")
+    );
+
+    await assert.rejects(
+      () => updateSopDraftForUser(sopId, "1.0", {
+        title: "MRI Safety Ø¹Ø±Ø¨ÙŠØ©",
+        category: "MRI",
+        effectiveDate: "2026-10-02",
+        nextReviewDate: "2026-10-01",
+        ownerUserId: actor,
+        changeSummary: "Invalid date order",
+        contentJson: documentWith("Invalid date order"),
+      }, actor, "supervisor"),
+      invalidDateMessage,
     );
 
     // Update draft with manual nextReviewDate and owner
@@ -156,6 +176,10 @@ test("SOP lifecycle preserves published Unicode versions, controls owner and rev
     );
     assert.equal(reviewAuditAfter.rowCount, 1);
 
+    await pool.query("update sop_versions set next_review_date='2026-10-01' where sop_id=$1 and version='1.0'", [sopId]);
+    await assert.rejects(() => publishSopVersionForUser(sopId, "1.0", actor, "supervisor"), invalidDateMessage);
+    await pool.query("update sop_versions set next_review_date='2029-01-15' where sop_id=$1 and version='1.0'", [sopId]);
+
     // Publish the draft; explicit nextReviewDate is preserved
     const publishResult = await publishSopVersionForUser(sopId, "1.0", actor, "supervisor");
     assert.equal(publishResult.version.status, "published");
@@ -201,6 +225,10 @@ test("SOP lifecycle preserves published Unicode versions, controls owner and rev
     assert.equal(reviewedAudit.rows[0]!.new_values.new_review_date, expectedAdvancedReviewDate);
 
     // Revision retains same owner
+    await assert.rejects(
+      () => createSopRevisionForUser(sopId, { version: "1.1", changeSummary: "Invalid revision date", effectiveDate: "2026-11-01", nextReviewDate: "2026-10-31" }, actor, "supervisor"),
+      invalidDateMessage,
+    );
     const revision = await createSopRevisionForUser(sopId, { version: "2.0", changeSummary: "Updated safety language", effectiveDate: "2026-11-01" }, actor, "supervisor");
     assert.equal(revision.status, "draft");
 

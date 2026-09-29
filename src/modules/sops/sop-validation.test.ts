@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SOP_SECTION_DEFINITIONS } from "./constants.js";
-import { addCalendarYears, normalizeSopCode, normalizeSopDate, validateSopDocument } from "./sop-validation.js";
+import { addCalendarYears, normalizeSopCode, normalizeSopDate, validateSopReviewDate, validateSopDocument } from "./sop-validation.js";
 
 function documentWith(requiredText = "MRI safety"): any {
   return {
@@ -50,5 +50,15 @@ test("normalizeSopDate validates date format and rejects invalid dates", () => {
   assert.equal(normalizeSopDate(undefined), null);
   assert.throws(() => normalizeSopDate("2026/10/01"));
   assert.throws(() => normalizeSopDate("invalid-date"));
+});
+
+test("SOP next review date cannot precede the effective date", () => {
+  assert.doesNotThrow(() => validateSopReviewDate("2026-10-01", "2026-10-02"));
+  assert.doesNotThrow(() => validateSopReviewDate("2026-10-01", "2026-10-01"));
+  assert.throws(
+    () => validateSopReviewDate("2026-10-01", "2026-09-30"),
+    (error: unknown) => (error as { statusCode?: number; message?: string }).statusCode === 400
+      && (error as { message?: string }).message === "Next review date cannot be before the effective date.",
+  );
 });
 
