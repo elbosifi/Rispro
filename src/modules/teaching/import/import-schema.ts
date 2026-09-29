@@ -1,6 +1,7 @@
 import { asUnknownRecord } from "../../../utils/records.js";
 
-export const TEACHING_IMPORT_SCHEMA_VERSION = "1.0" as const;
+export const TEACHING_IMPORT_SCHEMA_VERSION = "1.1" as const;
+export const LEGACY_TEACHING_IMPORT_SCHEMA_VERSION = "1.0" as const;
 
 export interface TeachingImportIssue {
   code: string;
@@ -53,6 +54,21 @@ export interface TeachingImportReference {
   notes: string | null;
 }
 
+export interface TeachingImportEvidenceReview {
+  status: "confirmed" | "updated" | "uncertain" | "not_verified";
+  checkedAt: string | null;
+  summary: string;
+  update: string | null;
+}
+
+export interface TeachingTopicProposal {
+  specialty: string;
+  domain: string;
+  code: string;
+  label: string;
+  description: string;
+}
+
 export interface TeachingImportQuestion {
   externalId: string;
   classification: {
@@ -79,6 +95,7 @@ export interface TeachingImportQuestion {
   source: TeachingImportSource | null;
   relationshipToSource: string | null;
   references: TeachingImportReference[];
+  evidenceReview: TeachingImportEvidenceReview;
   generation: { method: string; model: string | null };
   media: TeachingImportMedia[];
   caseId: string | null;
@@ -88,6 +105,7 @@ export interface TeachingImportQuestion {
 export interface ParsedTeachingImport {
   schemaVersion: string | null;
   questions: TeachingImportQuestion[];
+  taxonomyProposals: { topics: TeachingTopicProposal[] };
   errors: TeachingImportIssue[];
   rawDocument: Record<string, unknown> | null;
 }
@@ -230,12 +248,32 @@ function parseReferences(value: unknown, path: string, errors: TeachingImportIss
   });
 }
 
-function parseQuestion(value: unknown, index: number, errors: TeachingImportIssue[]): TeachingImportQuestion {
+function parseEvidenceReview(value: unknown, path: string, errors: TeachingImportIssue[]): TeachingImportEvidenceReview {
+  if (value === undefined || value === null) return { status: "not_verified", checkedAt: null, summary: "", update: null };
+  const row = record(value, path, errors);
+  knownFields(row, ["status", "checkedAt", "summary", "update"], path, errors);
+  const rawStatus = stringValue(row.status, `${path}.status`, errors, { required: true, max: 40 }) ?? "not_verified";
+  const status = ["confirmed", "updated", "uncertain", "not_verified"].includes(rawStatus)
+    ? rawStatus as TeachingImportEvidenceReview["status"] : "not_verified";
+  if (status !== rawStatus) errors.push({ code: "invalid_evidence_status", message: "evidenceReview.status is invalid.", path: `${path}.status` });
+  const checkedAt = stringValue(row.checkedAt, `${path}.checkedAt`, errors, { nullable: true, max: 10 });
+  if (checkedAt !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(checkedAt) || Number.isNaN(Date.parse(`${checkedAt}T00:00:00Z`)))) {
+    errors.push({ code: "invalid_evidence_checked_at", message: "evidenceReview.checkedAt must use a valid YYYY-MM-DD date.", path: `${path}.checkedAt` });
+  }
+  return {
+    status,
+    checkedAt,
+    summary: stringValue(row.summary ?? "", `${path}.summary`, errors, { max: 20000 }) ?? "",
+    update: stringValue(row.update, `${path}.update`, errors, { nullable: true, max: 20000 }),
+  };
+}
+
+function parseQuestion(value: unknown, index: number, errors: TeachingImportIssue[], supportsEvidenceReview: boolean): TeachingImportQuestion {
   const path = `questions[${index}]`;
   const row = record(value, path, errors);
   const externalId = stringValue(row.externalId, `${path}.externalId`, errors, { required: true, max: 100 }) ?? "";
   const start = errors.length;
-  knownFields(row, ["externalId", "classification", "type", "stem", "options", "answerKey", "explanation", "source", "provenance", "references", "generation", "media", "caseId", "case", "status"], path, errors);
+  knownFields(row, ["externalId", "classification", "type", "stem", "options", "answerKey", "explanation", "source", "provenance", "references", "generation", "media", "caseId", "case", "status", ...(supportsEvidenceReview ? ["evidenceReview"] : [])], path, errors);
   const classification = record(row.classification, `${path}.classification`, errors);
   knownFields(classification, ["specialty", "domain", "topic", "subtopics", "modalities", "competencies", "trainingLevel", "difficulty", "tags"], `${path}.classification`, errors);
   const explanation = record(row.explanation, `${path}.explanation`, errors);
@@ -343,6 +381,7 @@ function parseQuestion(value: unknown, index: number, errors: TeachingImportIssu
     source: parseSource(row.source, `${path}.source`, errors),
     relationshipToSource: stringValue(provenance.relationshipToSource, `${path}.provenance.relationshipToSource`, errors, { nullable: true, max: 80 }),
     references: parseReferences(row.references, `${path}.references`, errors),
+    evidenceReview: supportsEvidenceReview ? parseEvidenceReview(row.evidenceReview, `${path}.evidenceReview`, errors) : { status: "not_verified", checkedAt: null, summary: "", update: null },
     generation: {
       method: stringValue(generation.method, `${path}.generation.method`, errors, { required: true, max: 80 }) ?? "unknown",
       model: stringValue(generation.model, `${path}.generation.model`, errors, { nullable: true, max: 200 }),
@@ -364,7 +403,7 @@ function parseVersionOne(root: Record<string, unknown>, errors: TeachingImportIs
     errors.push({ code: "invalid_questions", message: "questions must contain between 1 and 1000 question objects.", path: "questions" });
     return [];
   }
-  const questions = root.questions.map((question, index) => parseQuestion(question, index, errors));
+  const questions = root.questions.map((question, index) => parseQuestion(question, index, errors, false));
   const seen = new Set<string>();
   for (const question of questions) {
     if (!question.externalId) continue;
@@ -379,7 +418,49 @@ function parseVersionOne(root: Record<string, unknown>, errors: TeachingImportIs
   return questions;
 }
 
-const VERSION_PARSERS = new Map<string, VersionParser>([[TEACHING_IMPORT_SCHEMA_VERSION, parseVersionOne]]);
+function parseVersionOneOne(root: Record<string, unknown>, errors: TeachingImportIssue[]): TeachingImportQuestion[] {
+  if (!Array.isArray(root.questions) || root.questions.length === 0 || root.questions.length > 5000) {
+    errors.push({ code: "invalid_questions", message: "questions must contain between 1 and 5000 question objects.", path: "questions" });
+    return [];
+  }
+  const questions = root.questions.map((question, index) => parseQuestion(question, index, errors, true));
+  const seen = new Set<string>();
+  for (const question of questions) {
+    if (!question.externalId) continue;
+    if (seen.has(question.externalId)) errors.push({ code: "duplicate_external_id", message: `Duplicate externalId "${question.externalId}" in this file.`, externalId: question.externalId, path: "questions" });
+    seen.add(question.externalId);
+  }
+  return questions;
+}
+
+function parseTopicProposals(root: Record<string, unknown>, errors: TeachingImportIssue[]): { topics: TeachingTopicProposal[] } {
+  if (root.taxonomyProposals === undefined || root.taxonomyProposals === null) return { topics: [] };
+  const proposals = record(root.taxonomyProposals, "taxonomyProposals", errors);
+  knownFields(proposals, ["topics"], "taxonomyProposals", errors);
+  if (!Array.isArray(proposals.topics) || proposals.topics.length > 5000) {
+    errors.push({ code: "invalid_topic_proposals", message: "taxonomyProposals.topics must be an array with at most 5000 items.", path: "taxonomyProposals.topics" });
+    return { topics: [] };
+  }
+  return { topics: proposals.topics.map((value, index) => {
+    const path = `taxonomyProposals.topics[${index}]`;
+    const row = record(value, path, errors);
+    knownFields(row, ["specialty", "domain", "code", "label", "description"], path, errors);
+    const code = stringValue(row.code, `${path}.code`, errors, { required: true, max: 100 }) ?? "";
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(code)) errors.push({ code: "invalid_topic_code", message: "New Topic code must use lower-case kebab-case.", path: `${path}.code` });
+    return {
+      specialty: stringValue(row.specialty, `${path}.specialty`, errors, { required: true, max: 100 }) ?? "",
+      domain: stringValue(row.domain, `${path}.domain`, errors, { required: true, max: 100 }) ?? "",
+      code,
+      label: stringValue(row.label, `${path}.label`, errors, { required: true, max: 300 }) ?? "",
+      description: stringValue(row.description ?? "", `${path}.description`, errors, { max: 5000 }) ?? "",
+    };
+  }) };
+}
+
+const VERSION_PARSERS = new Map<string, VersionParser>([
+  [LEGACY_TEACHING_IMPORT_SCHEMA_VERSION, parseVersionOne],
+  [TEACHING_IMPORT_SCHEMA_VERSION, parseVersionOneOne],
+]);
 
 export function parseTeachingImportJson(bytes: Buffer): ParsedTeachingImport {
   const errors: TeachingImportIssue[] = [];
@@ -387,23 +468,23 @@ export function parseTeachingImportJson(bytes: Buffer): ParsedTeachingImport {
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return { schemaVersion: null, questions: [], errors: [{ code: "invalid_encoding", message: "File must be valid UTF-8 JSON." }], rawDocument: null };
+    return { schemaVersion: null, questions: [], taxonomyProposals: { topics: [] }, errors: [{ code: "invalid_encoding", message: "File must be valid UTF-8 JSON." }], rawDocument: null };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text) as unknown;
   } catch {
-    return { schemaVersion: null, questions: [], errors: [{ code: "invalid_json", message: "File does not contain valid JSON." }], rawDocument: null };
+    return { schemaVersion: null, questions: [], taxonomyProposals: { topics: [] }, errors: [{ code: "invalid_json", message: "File does not contain valid JSON." }], rawDocument: null };
   }
   const root = record(parsed, "$", errors);
-  knownFields(root, ["schemaVersion", "_instructions", "_aiInstructions", "_catalog", "_schemaExamples", "questions"], "$", errors);
   const schemaVersion = stringValue(root.schemaVersion, "schemaVersion", errors, { required: true, max: 40 });
   const versionParser = schemaVersion === null ? undefined : VERSION_PARSERS.get(schemaVersion);
   if (!versionParser) {
     const supported = [...VERSION_PARSERS.keys()].map((version) => `"${version}"`).join(", ");
     errors.push({ code: "unsupported_schema_version", message: `Schema version "${schemaVersion ?? "(missing)"}" is not supported. Supported versions: ${supported}.`, path: "schemaVersion" });
-    return { schemaVersion, questions: [], errors, rawDocument: root };
+    return { schemaVersion, questions: [], taxonomyProposals: { topics: [] }, errors, rawDocument: root };
   }
+  knownFields(root, ["schemaVersion", "_instructions", "_aiInstructions", "_catalog", "_schemaExamples", "questions", ...(schemaVersion === TEACHING_IMPORT_SCHEMA_VERSION ? ["taxonomyProposals"] : [])], "$", errors);
   const questions = versionParser(root, errors);
-  return { schemaVersion, questions, errors, rawDocument: root };
+  return { schemaVersion, questions, taxonomyProposals: schemaVersion === TEACHING_IMPORT_SCHEMA_VERSION ? parseTopicProposals(root, errors) : { topics: [] }, errors, rawDocument: root };
 }

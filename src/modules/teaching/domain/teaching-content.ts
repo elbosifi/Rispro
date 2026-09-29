@@ -24,6 +24,16 @@ export const TEACHING_AUTHORSHIP_KINDS = [
 ] as const;
 export type TeachingAuthorshipKind = (typeof TEACHING_AUTHORSHIP_KINDS)[number];
 
+export const TEACHING_EVIDENCE_STATUSES = ["confirmed", "updated", "uncertain", "not_verified"] as const;
+export type TeachingEvidenceStatus = (typeof TEACHING_EVIDENCE_STATUSES)[number];
+
+export interface TeachingEvidenceReviewInput {
+  status: TeachingEvidenceStatus;
+  checkedAt: string | null;
+  summary: string;
+  update: string | null;
+}
+
 export interface TeachingOptionInput {
   key: string;
   text: string;
@@ -67,6 +77,7 @@ export interface TeachingQuestionInput {
   assetAltTexts: Array<{ assetId: number; altText: string }>;
   authorshipKind: TeachingAuthorshipKind;
   modelName: string | null;
+  evidenceReview: TeachingEvidenceReviewInput;
 }
 
 export interface TeachingAuditIdentity {

@@ -8,6 +8,7 @@ import { TeachingImportPage } from "./pages/teaching-import-page";
 import { TeachingImportHistoryPage } from "./pages/teaching-import-history-page";
 import { TeachingQuestionEditorPage } from "./pages/teaching-question-editor-page";
 import { TeachingQuestionListPage } from "./pages/teaching-question-list-page";
+import { TeachingQuestionMaintenancePage } from "./pages/teaching-question-maintenance-page";
 import { TeachingImportBatchPage } from "./pages/teaching-import-batch-page";
 import { TeachingQbankPage } from "./pages/teaching-qbank-page";
 import { TeachingSessionPage } from "./pages/teaching-session-page";
@@ -106,6 +107,7 @@ export function TeachingApplication() {
         <Route path="admin/import/history" element={<TeachingAccessRoute requiredPermission="teaching.author"><TeachingLayout><TeachingImportHistoryPage /></TeachingLayout></TeachingAccessRoute>} />
         <Route path="admin/import/batches/:batchId" element={<TeachingEditorialRoute><TeachingImportBatchPage /></TeachingEditorialRoute>} />
         <Route path="admin/questions" element={<TeachingEditorialRoute><TeachingQuestionListPage /></TeachingEditorialRoute>} />
+        <Route path="admin/questions/maintenance" element={<TeachingEditorialRoute><TeachingQuestionMaintenancePage /></TeachingEditorialRoute>} />
         <Route path="admin/questions/new" element={<TeachingEditorialRoute><TeachingQuestionEditorPage /></TeachingEditorialRoute>} />
         <Route path="admin/questions/:id" element={<TeachingEditorialRoute><TeachingQuestionEditorPage /></TeachingEditorialRoute>} />
         <Route path="*" element={<Navigate to="/teaching" replace />} />

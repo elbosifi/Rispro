@@ -54,6 +54,10 @@ interface LearnerScope {
   identitySubject: string;
 }
 
+function dateOnly(value: Date | string): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+}
+
 function record(value: unknown, name: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new HttpError(400, `${name} must be an object.`);
   return value as Record<string, unknown>;
@@ -557,6 +561,10 @@ interface SessionQuestionRow {
   explanation_summary: string;
   teaching_point: string;
   further_discussion: string | null;
+  evidence_status: string;
+  evidence_checked_at: Date | string | null;
+  evidence_summary: string;
+  evidence_update: string | null;
 }
 
 async function loadSessionQuestion(client: PoolClient, session: SessionRow, position: number): Promise<SessionQuestionRow> {
@@ -564,7 +572,8 @@ async function loadSessionQuestion(client: PoolClient, session: SessionRow, posi
     `select item.id, item.question_id, item.question_revision_id, item.position, item.opened_at,
        item.draft_selected_option_key, attempt.id as attempt_id, attempt.selected_option_key, attempt.is_correct,
        question.external_id, revision.question_type, revision.stem, case_row.title as case_title,
-       case_row.clinical_history, revision.explanation_summary, revision.teaching_point, revision.further_discussion
+       case_row.clinical_history, revision.explanation_summary, revision.teaching_point, revision.further_discussion,
+       revision.evidence_status, revision.evidence_checked_at, revision.evidence_summary, revision.evidence_update
      from teaching.session_questions item
      join teaching.questions question on question.id = item.question_id
      join teaching.question_revisions revision on revision.id = item.question_revision_id and revision.question_id = item.question_id
@@ -667,6 +676,12 @@ async function buildQuestionView(client: PoolClient, session: SessionRow, positi
         year: reference.year, edition: reference.edition, url: reference.url, doi: reference.doi,
         citationText: reference.citation_text,
       })),
+      evidenceReview: {
+        status: question.evidence_status,
+        checkedAt: question.evidence_checked_at === null ? null : dateOnly(question.evidence_checked_at),
+        summary: question.evidence_summary,
+        update: question.evidence_update,
+      },
     };
     dto.options = optionRows.rows.map((option) => ({
       key: option.key, text: option.text,

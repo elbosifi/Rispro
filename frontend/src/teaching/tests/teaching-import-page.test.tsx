@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { TeachingAuthContext } from "../auth/teaching-auth-context";
 import { TeachingImportPage } from "../pages/teaching-import-page";
 
 const importApi = vi.hoisted(() => ({
@@ -23,10 +24,10 @@ function LocationDisplay() {
 }
 
 function renderImportPage() {
-  return render(<MemoryRouter initialEntries={["/teaching/admin/import"]}><Routes>
+  return render(<TeachingAuthContext.Provider value={{ identity: { permissions: ["teaching.author"] } } as never}><MemoryRouter initialEntries={["/teaching/admin/import"]}><Routes>
     <Route path="/teaching/admin/import" element={<><TeachingImportPage /><LocationDisplay /></>} />
     <Route path="/teaching/admin/import/batches/:batchId" element={<LocationDisplay />} />
-  </Routes></MemoryRouter>);
+  </Routes></MemoryRouter></TeachingAuthContext.Provider>);
 }
 
 describe("Teaching import page", () => {

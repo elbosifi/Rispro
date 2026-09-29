@@ -27,7 +27,7 @@ import {
   type ExtractedTeachingUpload,
   type StagedTeachingAsset,
 } from "./staging-service.js";
-import type { ImportDisposition, TeachingImportValidation } from "./validation-service.js";
+import type { ImportDisposition, TeachingImportTopicProposal, TeachingImportValidation } from "./validation-service.js";
 import { toTeachingQuestionCommand, validateTeachingImport } from "./validation-service.js";
 
 const logger = createLogger({ domain: "teaching" });
@@ -167,8 +167,45 @@ function storedValidation(summary: Record<string, unknown>, batch: { schema_vers
     assetCount: batch.asset_count,
     errors,
     warnings,
+    taxonomyProposals: Array.isArray(summary.taxonomyProposals) ? summary.taxonomyProposals as TeachingImportValidation["taxonomyProposals"] : [],
     questions,
   };
+}
+
+export async function createProposedTopicsInTransaction(
+  client: PoolClient,
+  taxonomyProposals: readonly TeachingImportTopicProposal[],
+): Promise<number> {
+  const proposals = taxonomyProposals
+    .filter((proposal) => !proposal.alreadyExists)
+    .sort((left, right) => left.domain.localeCompare(right.domain) || left.code.localeCompare(right.code));
+  let created = 0;
+  for (const proposal of proposals) {
+    const domain = await client.query<{ id: string | number; specialty_code: string }>(
+      `select domain.id, specialty.code as specialty_code from teaching.domains domain
+       join teaching.specialties specialty on specialty.id = domain.specialty_id
+       where domain.code = $1 and domain.is_active and specialty.is_active for update of domain`,
+      [proposal.domain],
+    );
+    if (domain.rowCount !== 1 || domain.rows[0]!.specialty_code !== proposal.specialty) throw new HttpError(409, `Domain "${proposal.domain}" changed after preview.`);
+    const domainId = Number(domain.rows[0]!.id);
+    const existing = await client.query<{ label: string }>("select label from teaching.topics where domain_id = $1 and code = $2 for update", [domainId, proposal.code]);
+    if (existing.rowCount === 1) {
+      if (existing.rows[0]!.label.trim().toLocaleLowerCase("en-US") !== proposal.label.trim().toLocaleLowerCase("en-US")) {
+        throw new HttpError(409, `Topic "${proposal.code}" was created with conflicting metadata after preview.`);
+      }
+      continue;
+    }
+    const duplicateLabel = await client.query<{ code: string }>(
+      "select code from teaching.topics where domain_id = $1 and lower(regexp_replace(btrim(label), '\\s+', ' ', 'g')) = lower(regexp_replace(btrim($2), '\\s+', ' ', 'g')) for update",
+      [domainId, proposal.label],
+    );
+    if (duplicateLabel.rowCount) throw new HttpError(409, `Topic label "${proposal.label}" now conflicts with "${duplicateLabel.rows[0]!.code}".`);
+    const next = await client.query<{ sort_order: number }>("select coalesce(max(sort_order), 0) + 10 as sort_order from teaching.topics where domain_id = $1", [domainId]);
+    await client.query("insert into teaching.topics (domain_id, code, label, description, sort_order) values ($1, $2, $3, $4, $5)", [domainId, proposal.code, proposal.label, proposal.description, next.rows[0]!.sort_order]);
+    created += 1;
+  }
+  return created;
 }
 
 function requirePayload(batch: { payload_json: unknown | null }, batchId: string): ParsedTeachingImport {
@@ -189,7 +226,7 @@ async function insertBatchAuditFailure(batchId: string, issue: TeachingImportIss
   );
 }
 
-export async function confirmTeachingImport(batchId: string, actor: TeachingAuditIdentity) {
+export async function confirmTeachingImport(batchId: string, actor: TeachingAuditIdentity, canManageTaxonomy = false) {
   await cleanupExpiredTeachingImports();
   const client = await pool.connect();
   const promoted: string[] = [];
@@ -221,6 +258,9 @@ export async function confirmTeachingImport(batchId: string, actor: TeachingAudi
       cleanupAfter = true;
       response = { batchId, status: "invalid", validation };
     } else {
+      const requiresTaxonomyPermission = validation.taxonomyProposals.some((proposal) => !proposal.alreadyExists);
+      if (requiresTaxonomyPermission && !canManageTaxonomy) throw new HttpError(403, "New Topics require Teaching taxonomy management permission.");
+      const topicsCreated = await createProposedTopicsInTransaction(client, validation.taxonomyProposals);
       const questionByExternalId = new Map(parsed.questions.map((question) => [question.externalId, question]));
       const assetByFilename = new Map(stagedAssets.map((asset) => [asset.filename.toLocaleLowerCase("en-US"), asset]));
       const stagedByAssetKey = new Map<string, StagedTeachingAsset>();
@@ -367,7 +407,7 @@ export async function confirmTeachingImport(batchId: string, actor: TeachingAudi
       );
       await client.query("commit");
       cleanupAfter = true;
-      response = { batchId, status: "confirmed", questionCount: created.length, questions: created, confirmedAt };
+      response = { batchId, status: "confirmed", questionCount: created.length, questions: created, topicsCreated, confirmedAt };
     }
   } catch (error) {
     failure = error;

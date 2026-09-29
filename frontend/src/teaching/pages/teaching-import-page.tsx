@@ -11,6 +11,7 @@ import {
   type TeachingImportIssue,
   type TeachingImportValidation,
 } from "../api/teaching-api";
+import { useTeachingAuth } from "../auth/teaching-auth-context";
 
 function IssueList({ title, issues, variant }: { title: string; issues: TeachingImportIssue[]; variant: "error" | "warning" }) {
   if (issues.length === 0) return null;
@@ -52,6 +53,7 @@ function ApiValidation(error: unknown): TeachingImportValidation | null {
 
 export function TeachingImportPage() {
   const navigate = useNavigate();
+  const { identity } = useTeachingAuth();
   const [file, setFile] = useState<File | null>(null);
   const [inspection, setInspection] = useState<TeachingImportInspectResult | null>(null);
   const [validation, setValidation] = useState<TeachingImportValidation | null>(null);
@@ -208,6 +210,7 @@ export function TeachingImportPage() {
           </div>
           <IssueList title="Errors · import blocked" issues={validation.errors} variant="error" />
           <IssueList title="Warnings · review before import" issues={validation.warnings} variant="warning" />
+          {(validation.taxonomyProposals ?? []).length > 0 && <Card className="space-y-3 p-4"><div><h3 className="font-semibold text-foreground">Proposed Topics</h3><p className="mt-1 text-sm text-muted-foreground">Valid new Topics will be created with the questions when this import is confirmed.</p></div>{!identity?.permissions.includes("teaching.manage_taxonomy") && !identity?.permissions.includes("teaching.admin") ? <Alert variant="warning"><AlertTitle>Taxonomy permission required</AlertTitle><AlertDescription>New Topics require Teaching taxonomy management permission.</AlertDescription></Alert> : null}<ul className="space-y-2 text-sm">{(validation.taxonomyProposals ?? []).map((topic) => <li key={`${topic.domain}-${topic.code}`}><strong>{topic.label}</strong> · Domain: {topic.domain} · Code: {topic.code} · Used by: {topic.questionCount} questions</li>)}</ul></Card>}
           {validation.questions.length === 0 ? (
             <Card className="p-5 text-sm text-muted-foreground">There are no valid question previews in this batch.</Card>
           ) : (

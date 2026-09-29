@@ -61,7 +61,7 @@ test("Teaching import parser returns actionable invalid JSON and schema version 
   assert.equal(parseTeachingImportJson(Buffer.from("{", "utf8")).errors[0]?.code, "invalid_json");
   const parsed = parse({ schemaVersion: "9.0", questions: [] });
   assert.ok(parsed.errors.some((item) => item.code === "unsupported_schema_version"));
-  assert.match(parsed.errors.find((item) => item.code === "unsupported_schema_version")?.message ?? "", /Supported versions: "1\.0"/);
+  assert.match(parsed.errors.find((item) => item.code === "unsupported_schema_version")?.message ?? "", /"1\.0".*"1\.1"/);
   const invalidUtf8 = parseTeachingImportJson(Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d]));
   assert.equal(invalidUtf8.errors[0]?.code, "invalid_encoding");
 });
@@ -148,4 +148,17 @@ test("Teaching import parser leaves live catalog and referenced media availabili
   });
   assert.equal(parsed.errors.length, 0);
   assert.equal(parsed.questions.length, 2);
+});
+
+test("Teaching import schema 1.1 parses Topic proposals and structured evidence review while 1.0 defaults safely", () => {
+  const current = parse({
+    schemaVersion: "1.1",
+    taxonomyProposals: { topics: [{ specialty: "radiology", domain: "neuroradiology", code: "demyelinating-disease", label: "Demyelinating Disease", description: "" }] },
+    questions: [question("TEST-SBA-1100", { classification: { ...question().classification, topic: "demyelinating-disease", subtopics: [] }, references: [{ type: "guideline", title: "Synthetic reference", organization: null, authors: [], year: 2026, edition: null, url: null, doi: null, citationText: null, notes: null }], evidenceReview: { status: "confirmed", checkedAt: "2026-09-29", summary: "Checked.", update: null } })],
+  });
+  assert.deepEqual(current.errors, []);
+  assert.equal(current.taxonomyProposals.topics[0]?.code, "demyelinating-disease");
+  assert.equal(current.questions[0]?.evidenceReview.status, "confirmed");
+  const legacy = parse({ schemaVersion: "1.0", questions: [question("TEST-SBA-1101")] });
+  assert.deepEqual(legacy.questions[0]?.evidenceReview, { status: "not_verified", checkedAt: null, summary: "", update: null });
 });

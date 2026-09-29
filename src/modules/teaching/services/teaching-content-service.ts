@@ -52,6 +52,10 @@ interface RevisionRow {
   further_discussion: string | null;
   authorship_kind: string;
   model_name: string | null;
+  evidence_status: string;
+  evidence_checked_at: Date | string | null;
+  evidence_summary: string;
+  evidence_update: string | null;
   created_at: Date;
   updated_at: Date;
   submitted_at: Date | null;
@@ -114,6 +118,7 @@ interface ReferenceLinkRow {
 
 interface AssetLinkRow {
   id: string | number;
+  assetKey: string;
   mimeType: string;
   originalFilename: string;
   altText: string;
@@ -135,6 +140,10 @@ interface LookupIds {
 
 function toId(value: string | number): number {
   return Number(value);
+}
+
+function dateOnly(value: unknown): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : typeof value === "string" ? value.slice(0, 10) : "";
 }
 
 async function requireOneId(client: PoolClient, sql: string, values: unknown[], label: string): Promise<number> {
@@ -265,13 +274,16 @@ async function createRevisionRow(
        question_id, revision_number, status, question_type, stem, specialty_id, domain_id, topic_id, subtopic_id,
        difficulty_id, training_level_id, case_id, explanation_summary, teaching_point, further_discussion,
        authorship_kind, model_name, created_by_identity_issuer, created_by_identity_subject,
-       updated_by_identity_issuer, updated_by_identity_subject, import_batch_id
+       updated_by_identity_issuer, updated_by_identity_subject, import_batch_id,
+       evidence_status, evidence_checked_at, evidence_summary, evidence_update
      ) values (
-       $1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $17, $18, $19
+       $1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $17, $18, $19,
+       $20, $21::date, $22, $23
      ) returning id`,
     [questionId, revisionNumber, input.type, input.stem, lookup.specialtyId, lookup.domainId, lookup.topicId, lookup.subtopicId,
       lookup.difficultyId, lookup.trainingLevelId, input.caseId, input.explanationSummary, input.teachingPoint, input.furtherDiscussion,
-      input.authorshipKind, input.modelName, actor.identityIssuer, actor.identitySubject, importBatchId],
+      input.authorshipKind, input.modelName, actor.identityIssuer, actor.identitySubject, importBatchId,
+      input.evidenceReview.status, input.evidenceReview.checkedAt, input.evidenceReview.summary, input.evidenceReview.update],
   );
   return toId(result.rows[0]!.id);
 }
@@ -392,6 +404,12 @@ async function loadRevisionInput(client: PoolClient, revisionId: number, questio
     assetIds: assets.rows.map((row) => toId(row.id)),
     assetAltTexts: assets.rows.map((row) => ({ assetId: toId(row.id), altText: row.altText })),
     authorship: { kind: revision.authorship_kind, modelName: revision.model_name },
+    evidenceReview: {
+      status: revision.evidence_status,
+      checkedAt: revision.evidence_checked_at === null ? null : dateOnly(revision.evidence_checked_at),
+      summary: revision.evidence_summary,
+      update: revision.evidence_update,
+    },
   };
 }
 
@@ -445,7 +463,7 @@ export async function patchTeachingQuestionDraft(questionId: number, revisionId:
   const editable = new Set([
     "type", "stem", "specialtyCode", "domainCode", "topicCode", "subtopicCode", "difficulty", "trainingLevelCode",
     "caseId", "explanation", "options", "modalityCodes", "competencyCodes", "tagCodes", "sources", "references",
-    "assetIds", "assetAltTexts", "authorship", "expectedVersion",
+    "assetIds", "assetAltTexts", "authorship", "evidenceReview", "expectedVersion",
   ]);
   if (Object.keys(patch).some((field) => !editable.has(field))) throw new HttpError(400, "Only draft content fields can be edited.");
   await withTeachingTransaction(async (client) => {
@@ -466,17 +484,20 @@ export async function patchTeachingQuestionDraft(questionId: number, revisionId:
     const merged = { ...current, ...patch };
     const mergedExplanation = { ...(asUnknownRecord(current.explanation) ?? {}), ...(asUnknownRecord(patch.explanation) ?? {}) };
     const mergedAuthorship = { ...(asUnknownRecord(current.authorship) ?? {}), ...(asUnknownRecord(patch.authorship) ?? {}) };
-    const input = parseTeachingQuestionInput({ ...merged, explanation: mergedExplanation, authorship: mergedAuthorship });
+    const mergedEvidenceReview = { ...(asUnknownRecord(current.evidenceReview) ?? {}), ...(asUnknownRecord(patch.evidenceReview) ?? {}) };
+    const input = parseTeachingQuestionInput({ ...merged, explanation: mergedExplanation, authorship: mergedAuthorship, evidenceReview: mergedEvidenceReview });
     const lookup = await resolveLookups(client, input);
     await client.query(
       `update teaching.question_revisions set question_type = $2, stem = $3, specialty_id = $4, domain_id = $5, topic_id = $6,
        subtopic_id = $7, difficulty_id = $8, training_level_id = $9, case_id = $10, explanation_summary = $11,
-       teaching_point = $12, further_discussion = $13, authorship_kind = $14, model_name = $15, version = version + 1,
-       updated_by_identity_issuer = $16, updated_by_identity_subject = $17, updated_at = now()
+       teaching_point = $12, further_discussion = $13, authorship_kind = $14, model_name = $15,
+       evidence_status = $16, evidence_checked_at = $17::date, evidence_summary = $18, evidence_update = $19, version = version + 1,
+       updated_by_identity_issuer = $20, updated_by_identity_subject = $21, updated_at = now()
        where id = $1`,
       [revisionId, input.type, input.stem, lookup.specialtyId, lookup.domainId, lookup.topicId, lookup.subtopicId, lookup.difficultyId,
         lookup.trainingLevelId, input.caseId, input.explanationSummary, input.teachingPoint, input.furtherDiscussion,
-        input.authorshipKind, input.modelName, actor.identityIssuer, actor.identitySubject],
+        input.authorshipKind, input.modelName, input.evidenceReview.status, input.evidenceReview.checkedAt,
+        input.evidenceReview.summary, input.evidenceReview.update, actor.identityIssuer, actor.identitySubject],
     );
     await saveRevisionRelations(client, revisionId, input, lookup);
     await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
@@ -951,6 +972,7 @@ export async function getTeachingQuestion(id: number) {
        difficulty.value as difficulty, level.code as training_level_code, revision.case_id, case_row.external_id as case_external_id,
        case_row.title as case_title, case_row.clinical_history as case_clinical_history, revision.explanation_summary,
        revision.teaching_point, revision.further_discussion, revision.authorship_kind, revision.model_name,
+       revision.evidence_status, revision.evidence_checked_at, revision.evidence_summary, revision.evidence_update,
        revision.created_at, revision.updated_at, revision.submitted_at, revision.reviewed_at, revision.published_at,
        revision.retired_at, revision.created_by_identity_subject, revision.reviewed_by_identity_subject,
        revision.published_by_identity_subject, revision.import_batch_id
@@ -980,8 +1002,8 @@ export async function getTeachingQuestion(id: number) {
         join teaching.sources source on source.id = link.source_id where link.question_revision_id = $1
         order by source.title nulls last, source.id`, [revisionId]),
       pool.query<ReferenceLinkRow>(`select reference.id, reference.reference_type as "referenceType", reference.title, reference.organization, reference.authors, reference.year, reference.edition, reference.url, reference.doi, reference.citation_text as "citationText", link.notes from teaching.question_references link join teaching."references" reference on reference.id = link.reference_id where link.question_revision_id = $1 order by link.sort_order`, [revisionId]),
-      pool.query<AssetLinkRow>(`select asset.id, asset.mime_type as "mimeType", asset.original_filename as "originalFilename", coalesce(link.alt_text, asset.alt_text) as "altText", asset.size_bytes as "sizeBytes" from teaching.question_revision_assets link join teaching.assets asset on asset.id = link.asset_id where link.question_revision_id = $1 order by link.sort_order`, [revisionId]),
-      row.case_id === null ? Promise.resolve({ rows: [] as AssetLinkRow[] }) : pool.query<AssetLinkRow>(`select asset.id, asset.mime_type as "mimeType", asset.original_filename as "originalFilename", asset.alt_text as "altText", asset.size_bytes as "sizeBytes" from teaching.case_assets link join teaching.assets asset on asset.id = link.asset_id where link.case_id = $1 order by link.sort_order`, [row.case_id]),
+      pool.query<AssetLinkRow>(`select asset.id, asset.asset_key as "assetKey", asset.mime_type as "mimeType", asset.original_filename as "originalFilename", coalesce(link.alt_text, asset.alt_text) as "altText", asset.size_bytes as "sizeBytes" from teaching.question_revision_assets link join teaching.assets asset on asset.id = link.asset_id where link.question_revision_id = $1 order by link.sort_order`, [revisionId]),
+      row.case_id === null ? Promise.resolve({ rows: [] as AssetLinkRow[] }) : pool.query<AssetLinkRow>(`select asset.id, asset.asset_key as "assetKey", asset.mime_type as "mimeType", asset.original_filename as "originalFilename", asset.alt_text as "altText", asset.size_bytes as "sizeBytes" from teaching.case_assets link join teaching.assets asset on asset.id = link.asset_id where link.case_id = $1 order by link.sort_order`, [row.case_id]),
     ]);
     return {
       id: revisionId,
@@ -1002,7 +1024,7 @@ export async function getTeachingQuestion(id: number) {
         id: toId(row.case_id), externalId: row.case_external_id, title: row.case_title,
         clinicalHistory: row.case_clinical_history,
         assets: caseAssets.rows.map((asset) => ({
-          id: toId(asset.id), mimeType: asset.mimeType,
+          id: toId(asset.id), assetKey: asset.assetKey, mimeType: asset.mimeType,
           originalFilename: asset.originalFilename, altText: asset.altText, sizeBytes: toId(asset.sizeBytes),
         })),
       },
@@ -1024,10 +1046,16 @@ export async function getTeachingQuestion(id: number) {
         url: reference.url, doi: reference.doi, citationText: reference.citationText, notes: reference.notes,
       })),
       assets: assets.rows.map((asset) => ({
-        id: toId(asset.id), mimeType: asset.mimeType,
+        id: toId(asset.id), assetKey: asset.assetKey, mimeType: asset.mimeType,
         originalFilename: asset.originalFilename, altText: asset.altText, sizeBytes: toId(asset.sizeBytes),
       })),
       authorship: { kind: row.authorship_kind, modelName: row.model_name },
+      evidenceReview: {
+        status: row.evidence_status,
+        checkedAt: row.evidence_checked_at === null ? null : dateOnly(row.evidence_checked_at),
+        summary: row.evidence_summary,
+        update: row.evidence_update,
+      },
       audit: {
         createdBy: row.created_by_identity_subject,
         submittedAt: row.submitted_at,

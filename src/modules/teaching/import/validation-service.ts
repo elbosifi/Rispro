@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "../../../db/pool.js";
-import type { TeachingImportIssue, TeachingImportQuestion, ParsedTeachingImport } from "./import-schema.js";
+import type { TeachingImportIssue, TeachingImportQuestion, TeachingTopicProposal, ParsedTeachingImport } from "./import-schema.js";
 import type { StagedTeachingAsset } from "./staging-service.js";
 import { getTeachingCatalog, listTeachingQuestionBanks } from "../repositories/teaching-catalog-repository.js";
 import type { TeachingQuestionType } from "../domain/teaching-content.js";
@@ -42,7 +42,20 @@ export interface TeachingImportValidation {
   assetCount: number;
   errors: TeachingImportIssue[];
   warnings: TeachingImportIssue[];
+  taxonomyProposals: Array<TeachingImportTopicProposal>;
   questions: TeachingImportPreviewQuestion[];
+}
+
+export interface TeachingImportTopicProposal {
+  specialty: string;
+  domain: string;
+  code: string;
+  label: string;
+  description: string;
+  questionCount: number;
+  alreadyExists: boolean;
+  warnings: TeachingImportIssue[];
+  errors: TeachingImportIssue[];
 }
 
 interface ExistingQuestionRow {
@@ -68,6 +81,14 @@ function issue(code: string, message: string, externalId?: string, path?: string
 
 function labelByCode<T extends { code: string; label: string }>(items: readonly T[], code: string | null) {
   return code === null ? null : items.find((item) => item.code === code) ?? null;
+}
+
+function normalizeLabel(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+}
+
+function proposalKey(domain: string, code: string): string {
+  return `${domain}\u0000${code}`;
 }
 
 export async function validateTeachingImport(
@@ -107,6 +128,45 @@ export async function validateTeachingImport(
   const caseDefinitions = new Map<string, { specialty: string; title: string | null; clinicalHistory: string | null; questions: TeachingImportQuestion[] }>();
   const bankBySpecialty = new Map<string, typeof banks>();
   for (const bank of banks) bankBySpecialty.set(bank.specialtyCode, [...(bankBySpecialty.get(bank.specialtyCode) ?? []), bank]);
+  const proposalIssues = new Map<TeachingTopicProposal, { errors: TeachingImportIssue[]; warnings: TeachingImportIssue[]; alreadyExists: boolean }>();
+  const proposalsByKey = new Map<string, TeachingTopicProposal>();
+  const proposedLabelsByDomain = new Map<string, TeachingTopicProposal>();
+  const existingTopicsByKey = new Map(catalog.topics.map((item) => [proposalKey(item.parentCode ?? "", item.code), item]));
+  const existingLabelsByDomain = new Map(catalog.topics.map((item) => [proposalKey(item.parentCode ?? "", normalizeLabel(item.label)), item]));
+  const addProposalError = (proposal: TeachingTopicProposal, code: string, message: string, path?: string) => {
+    const entry = issue(code, message, undefined, path);
+    errors.push(entry);
+    proposalIssues.get(proposal)?.errors.push(entry);
+  };
+  const addProposalWarning = (proposal: TeachingTopicProposal, code: string, message: string, path?: string) => {
+    const entry = issue(code, message, undefined, path);
+    warnings.push(entry);
+    proposalIssues.get(proposal)?.warnings.push(entry);
+  };
+  for (const [index, proposal] of parsed.taxonomyProposals.topics.entries()) {
+    proposalIssues.set(proposal, { errors: [], warnings: [], alreadyExists: false });
+    const path = `taxonomyProposals.topics[${index}]`;
+    const specialty = specialties.get(proposal.specialty);
+    const domain = domains.get(proposal.domain);
+    if (!specialty) addProposalError(proposal, "unknown_specialty", `Unknown or inactive specialty "${proposal.specialty}".`, `${path}.specialty`);
+    if (!domain || domain.parentCode !== proposal.specialty) addProposalError(proposal, "invalid_domain_hierarchy", `Domain "${proposal.domain}" is unknown, inactive, or does not belong to specialty "${proposal.specialty}".`, `${path}.domain`);
+    const key = proposalKey(proposal.domain, proposal.code);
+    if (proposalsByKey.has(key)) addProposalError(proposal, "duplicate_topic_proposal", `Topic "${proposal.code}" is proposed more than once for domain "${proposal.domain}".`, `${path}.code`);
+    else proposalsByKey.set(key, proposal);
+    const existing = existingTopicsByKey.get(key);
+    if (existing) {
+      if (normalizeLabel(existing.label) === normalizeLabel(proposal.label)) {
+        proposalIssues.get(proposal)!.alreadyExists = true;
+        addProposalWarning(proposal, "topic_already_exists", `Topic "${proposal.code}" already exists in domain "${proposal.domain}"; it will not be created.`, `${path}.code`);
+      } else addProposalError(proposal, "topic_conflict", `Topic code "${proposal.code}" already exists in domain "${proposal.domain}" with different metadata.`, `${path}.code`);
+    }
+    const labelKey = proposalKey(proposal.domain, normalizeLabel(proposal.label));
+    const existingLabel = existingLabelsByDomain.get(labelKey);
+    if (existingLabel && existingLabel.code !== proposal.code) addProposalError(proposal, "topic_duplicate_label", `Topic label "${proposal.label}" already exists in domain "${proposal.domain}" with code "${existingLabel.code}".`, `${path}.label`);
+    const proposedLabel = proposedLabelsByDomain.get(labelKey);
+    if (proposedLabel && proposedLabel.code !== proposal.code) addProposalError(proposal, "topic_duplicate_label", `Topic label "${proposal.label}" is proposed more than once in domain "${proposal.domain}".`, `${path}.label`);
+    else proposedLabelsByDomain.set(labelKey, proposal);
+  }
 
   for (const question of questions) {
     const { specialty, domain, topic, subtopics: subtopicCodes, modalities: modalityCodes, competencies: competencyCodes, trainingLevel, difficulty, tags: tagCodes } = question.classification;
@@ -115,7 +175,9 @@ export async function validateTeachingImport(
     if (!specialtyRow) addError(question, issue("unknown_specialty", `Unknown or inactive specialty "${specialty}".`, question.externalId, "classification.specialty"));
     if (!domainRow || domainRow.parentCode !== specialty) addError(question, issue("invalid_domain_hierarchy", `Domain "${domain}" is unknown, inactive, or does not belong to specialty "${specialty}".`, question.externalId, "classification.domain"));
     const topicRow = topic === null ? null : topics.get(topic);
-    if (topic !== null && (!topicRow || topicRow.parentCode !== domain)) addError(question, issue("invalid_topic_hierarchy", `Topic "${topic}" is unknown, inactive, or does not belong to domain "${domain}".`, question.externalId, "classification.topic"));
+    const proposedTopic = topic === null ? null : proposalsByKey.get(proposalKey(domain, topic));
+    if (topic !== null && (!topicRow || topicRow.parentCode !== domain) && !proposedTopic) addError(question, issue("invalid_topic_hierarchy", `Topic "${topic}" is unknown or does not belong to domain "${domain}" and has no matching proposal.`, question.externalId, "classification.topic"));
+    if (topic !== null && proposedTopic && proposedTopic.specialty !== specialty) addError(question, issue("invalid_topic_hierarchy", `Proposed Topic "${topic}" belongs to a different specialty or domain.`, question.externalId, "classification.topic"));
     for (const subtopic of subtopicCodes) {
       const subtopicRow = subtopicsByCode.get(subtopic);
       if (!topicRow || !subtopicRow || subtopicRow.parentCode !== topic) addError(question, issue("invalid_subtopic_hierarchy", `Subtopic "${subtopic}" is unknown, inactive, or does not belong to topic "${topic ?? "(none)"}".`, question.externalId, "classification.subtopics"));
@@ -152,6 +214,12 @@ export async function validateTeachingImport(
       if (reference.year !== null && (reference.year < 1000 || reference.year > 9999)) addError(question, issue("invalid_reference_year", "Reference year must be a four-digit year from 1000 to 9999.", question.externalId, "references.year"));
       if (reference.doi && !DOI.test(reference.doi)) addError(question, issue("invalid_doi", "DOI must use a valid DOI identifier format.", question.externalId, "references.doi"));
     }
+    if (question.evidenceReview.status !== "not_verified") {
+      if (question.evidenceReview.checkedAt === null) addError(question, issue("evidence_checked_at_required", "Evidence review date is required when evidence was reviewed.", question.externalId, "evidenceReview.checkedAt"));
+      if (!question.evidenceReview.summary.trim()) addError(question, issue("evidence_summary_required", "Evidence review summary is required when evidence was reviewed.", question.externalId, "evidenceReview.summary"));
+      if (question.references.length === 0) addError(question, issue("evidence_reference_required", "At least one supporting reference is required when evidence was reviewed.", question.externalId, "references"));
+    }
+    if (question.evidenceReview.status === "updated" && !question.evidenceReview.update?.trim()) addError(question, issue("evidence_update_required", "Evidence update text is required when status is updated.", question.externalId, "evidenceReview.update"));
     if (question.references.length === 0) addWarning(question, issue("references_missing", "No independent references were supplied.", question.externalId, "references"));
     for (const option of question.options) if (!question.explanation.optionExplanations[option.id]) addWarning(question, issue("option_explanation_missing", `No option explanation was supplied for option ${option.id}.`, question.externalId, "explanation.optionExplanations"));
     if ((question.generation.method === "ai_assisted" || question.generation.method === "ai_generated") && !question.generation.model) addWarning(question, issue("model_name_missing", "AI generation was indicated without a model name.", question.externalId, "generation.model"));
@@ -231,6 +299,10 @@ export async function validateTeachingImport(
     if (question) addError(question, issue("asset_key_conflict", `assetKey "${assetKey}" already belongs to a Teaching asset.`, question.externalId, "media.assetKey"));
   }
   for (const asset of assets) if (!referencedFilenames.has(asset.filename.toLocaleLowerCase("en-US"))) warnings.push({ code: "asset_unused", message: `ZIP asset "${asset.filename}" is not referenced by a question.`, filename: asset.filename, path: "assets" });
+  for (const proposal of parsed.taxonomyProposals.topics) {
+    const count = questions.filter((question) => question.classification.domain === proposal.domain && question.classification.topic === proposal.code).length;
+    if (count === 0) addProposalWarning(proposal, "topic_proposal_unused", `Proposed Topic "${proposal.code}" is not used by a question in this import.`, "taxonomyProposals.topics");
+  }
 
   const difficultyDefault = catalog.difficulties.find((item) => item.value === 3) ?? catalog.difficulties[0] ?? null;
   const previewQuestions: TeachingImportPreviewQuestion[] = questions.map((question) => {
@@ -280,6 +352,13 @@ export async function validateTeachingImport(
     assetCount: assets.length,
     errors,
     warnings,
+    taxonomyProposals: parsed.taxonomyProposals.topics.map((proposal) => ({
+      ...proposal,
+      questionCount: questions.filter((question) => question.classification.domain === proposal.domain && question.classification.topic === proposal.code).length,
+      alreadyExists: proposalIssues.get(proposal)?.alreadyExists ?? false,
+      warnings: proposalIssues.get(proposal)?.warnings ?? [],
+      errors: proposalIssues.get(proposal)?.errors ?? [],
+    })),
     questions: previewQuestions,
   };
 }
@@ -318,5 +397,6 @@ export function toTeachingQuestionCommand(question: TeachingImportQuestion, ques
     references: referenceIds.map((referenceId) => ({ referenceId, notes: null })),
     assetIds: [...assetIds],
     authorship: { kind: question.generation.method, modelName: question.generation.model },
+    evidenceReview: question.evidenceReview,
   };
 }

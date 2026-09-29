@@ -85,7 +85,9 @@ test("Teaching import template, authorization, inspect-preview-confirm, conflict
     `TST-RACE-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
     `TST-CASE-CONFLICT-A-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
     `TST-CASE-CONFLICT-B-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
+    `TST-TOPIC-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
   ];
+  const proposedTopicCode = `integration-topic-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const caseExternalId = `CASE-IMPORT-${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
   const tempUploadsDirectory = await mkdtemp(path.join(os.tmpdir(), "teaching-import-integration-"));
   const previousUploadsDirectory = env.uploadsDir;
@@ -130,9 +132,11 @@ test("Teaching import template, authorization, inspect-preview-confirm, conflict
 
     const templateResponse = await request("/api/teaching/qbank/import/template.json", { role: "supervisor" });
     assert.equal(templateResponse.status, 200);
-    assert.match(templateResponse.headers.get("content-disposition") ?? "", /rispro-teaching-qbank-template-v1\.json/);
+    assert.match(templateResponse.headers.get("content-disposition") ?? "", /rispro-teaching-qbank-template-v1\.1\.json/);
     const template = templateResponse.data;
-    assert.equal(template.schemaVersion, "1.0");
+    assert.equal(template.schemaVersion, "1.1");
+    assert.ok(typeof (template._instructions as Record<string, unknown> | undefined)?.templateGeneratedAt === "string");
+    assert.deepEqual(template.taxonomyProposals, { topics: [] });
     const catalog = template._catalog as Record<string, unknown>;
     const currentCatalogResponse = await request("/api/teaching/catalog", { role: "supervisor" });
     assert.equal(currentCatalogResponse.status, 200);
@@ -172,10 +176,28 @@ test("Teaching import template, authorization, inspect-preview-confirm, conflict
       assert.ok(humanInstructions.includes(instruction), `human instructions must include ${instruction}`);
     }
     const aiInstructions = JSON.stringify(template._aiInstructions);
-    for (const instruction of ["Return valid JSON only", "schemaVersion and questions", "Do not invent specialties", "domains", "topics", "subtopics", "modalities", "competencies", "tags", "source details", "references", "textbook page numbers", "DOI values", "examination years", "sittings", "papers", "question numbers", "null rather than guessing", "unique externalId", "exactly one correct answer", "meaningful explanation", "draft", "reviewedBy", "publishedBy"]) {
-      assert.ok(aiInstructions.includes(instruction), `AI instructions must include ${instruction}`);
+    for (const instruction of ["Return valid JSON only", "schemaVersion 1.1", "existing Topic", "taxonomyProposals.topics", "Do not create synonyms", "Do not propose or invent specialties", "domains", "subtopics", "modalities", "competencies", "tags", "source details", "references", "textbook page numbers", "DOI values", "examination years", "sittings", "papers", "question numbers", "null rather than guessing", "unique externalId", "exactly one correct answer", "meaningful explanation", "not_verified", "Never write vague claims", "draft", "reviewedBy", "publishedBy"]) {
+    assert.ok(aiInstructions.includes(instruction), `AI instructions must include ${instruction}`);
     }
     assert.doesNotMatch(JSON.stringify(template._catalog), /patients|appointments|PACS/i);
+
+    const topicProposalPayload = {
+      schemaVersion: "1.1",
+      taxonomyProposals: { topics: [{ specialty: "radiology", domain: "neuroradiology", code: proposedTopicCode, label: "Integration Topic", description: "A reusable integration-test Topic." }] },
+      questions: [question(externalIds[15]!, { classification: { specialty: "radiology", domain: "neuroradiology", topic: proposedTopicCode, subtopics: [], modalities: ["MRI"], competencies: ["diagnosis"], trainingLevel: "junior_resident", difficulty: 3, tags: ["oncology"] } })],
+    };
+    const topicProposalUpload = await upload("topic-proposal.json", Buffer.from(JSON.stringify(topicProposalPayload)), "supervisor");
+    const topicProposalBatchId = String(topicProposalUpload.data.batchId); batchIds.push(topicProposalBatchId);
+    const topicProposalPreview = await request("/api/teaching/qbank/import/preview", { method: "POST", role: "supervisor", body: { batchId: topicProposalBatchId } });
+    assert.equal(topicProposalPreview.status, 200, JSON.stringify(topicProposalPreview.data));
+    const proposedTopics = (topicProposalPreview.data.validation as { taxonomyProposals?: Array<{ code: string; questionCount: number; alreadyExists: boolean }> } | undefined)?.taxonomyProposals ?? (topicProposalPreview.data as unknown as { taxonomyProposals: Array<{ code: string; questionCount: number; alreadyExists: boolean }> }).taxonomyProposals;
+    assert.deepEqual(proposedTopics.map((item) => ({ code: item.code, questionCount: item.questionCount, alreadyExists: item.alreadyExists })), [{ code: proposedTopicCode, questionCount: 1, alreadyExists: false }]);
+    const topicProposalConfirm = await request("/api/teaching/qbank/import/confirm", { method: "POST", role: "supervisor", body: { batchId: topicProposalBatchId } });
+    assert.equal(topicProposalConfirm.status, 200, JSON.stringify(topicProposalConfirm.data));
+    assert.equal(topicProposalConfirm.data.topicsCreated, 1);
+    assert.equal((await pool.query("select count(*)::int as count from teaching.topics topic join teaching.domains domain on domain.id = topic.domain_id where domain.code = 'neuroradiology' and topic.code = $1", [proposedTopicCode])).rows[0]?.count, 1);
+    const refreshedTemplate = await request("/api/teaching/qbank/import/template.json", { role: "supervisor" });
+    assert.ok(((refreshedTemplate.data._catalog as { topics: Array<{ code: string }> }).topics).some((item) => item.code === proposedTopicCode));
 
     const jsonPayload = { schemaVersion: "1.0", questions: [question(externalIds[0]!, {
       source: { type: "unknown" },
@@ -621,6 +643,7 @@ test("Teaching import template, authorization, inspect-preview-confirm, conflict
       const questionIds = questions.rows.map((row) => row.id);
       if (questionIds.length) await client.query("delete from teaching.question_revisions where question_id = any($1::bigint[])", [questionIds]);
       await client.query("delete from teaching.questions where id = any($1::bigint[])", [questionIds]);
+      await client.query("delete from teaching.topics where code = $1", [proposedTopicCode]);
       await client.query("delete from teaching.case_assets where case_id in (select id from teaching.cases where created_by_identity_subject = $1)", [subject]);
       await client.query("delete from teaching.cases where created_by_identity_subject = $1", [subject]);
       await client.query("delete from teaching.sources where created_by_identity_subject = $1", [subject]);

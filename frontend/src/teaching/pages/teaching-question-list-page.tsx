@@ -159,9 +159,12 @@ export function TeachingQuestionListPage() {
           <h1 id="teaching-questions-title" className="mt-1 text-2xl font-semibold text-foreground">Question Bank</h1>
           <p className="mt-2 text-sm text-muted-foreground">Review and maintain Teaching question content.</p>
         </div>
-        {canAuthor ? <Button onClick={() => navigate("/teaching/admin/questions/new")}>
-          <Plus size={16} aria-hidden="true" /> New question
-        </Button> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => navigate("/teaching/admin/questions/maintenance")}>Question Bank Maintenance</Button>
+          {canAuthor ? <Button onClick={() => navigate("/teaching/admin/questions/new")}>
+            <Plus size={16} aria-hidden="true" /> New question
+          </Button> : null}
+        </div>
       </div>
 
       <Card className="space-y-4 p-4 sm:p-5">

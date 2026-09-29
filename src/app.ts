@@ -105,6 +105,7 @@ export function createApp(): Application {
   const PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/stage-multipart";
   const SCAN_SESSION_UPLOAD_PATH = "/api/scan-sessions/upload";
   const TEACHING_IMPORT_INSPECT_PATH = "/api/teaching/qbank/import/inspect";
+  const TEACHING_MAINTENANCE_PREFIX = "/api/teaching/admin/questions/maintenance/";
   const ADMIN_RESTORE_PREFIX = "/api/admin/restore";
   const QZ_SIGNING_PATH = "/api/printing/qz-sign";
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -117,6 +118,7 @@ export function createApp(): Application {
       req.path === PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH ||
       req.path === SCAN_SESSION_UPLOAD_PATH ||
       req.path === TEACHING_IMPORT_INSPECT_PATH ||
+      req.path.startsWith(TEACHING_MAINTENANCE_PREFIX) ||
       req.path.startsWith(ADMIN_RESTORE_PREFIX)
       || req.path === QZ_SIGNING_PATH
     ) {

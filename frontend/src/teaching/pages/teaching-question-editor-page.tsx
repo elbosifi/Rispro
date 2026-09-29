@@ -49,6 +49,7 @@ function blankCommand(catalog: TeachingCatalog, banks: Array<{ code: string; nam
     options: [{ key: "A", text: "", isCorrect: false, explanation: null }, { key: "B", text: "", isCorrect: true, explanation: null }],
     modalityCodes: [], competencyCodes: [], tagCodes: [], sources: [], references: [], assetIds: [], assetAltTexts: [],
     authorship: { kind: "human_authored", modelName: null },
+    evidenceReview: { status: "not_verified", checkedAt: null, summary: "", update: null },
   };
 }
 
@@ -75,6 +76,7 @@ function revisionCommand(question: TeachingQuestionDetail, revision: TeachingQue
     assetIds: revision.assets.map((asset) => asset.id),
     assetAltTexts: revision.assets.map((asset) => ({ assetId: asset.id, altText: asset.altText })),
     authorship: { ...revision.authorship },
+    evidenceReview: { ...(revision.evidenceReview ?? { status: "not_verified", checkedAt: null, summary: "", update: null }) },
   };
 }
 
@@ -445,6 +447,14 @@ export function TeachingQuestionEditorPage() {
             <div><FieldLabel htmlFor="teaching-explanation-summary">Summary</FieldLabel><Textarea id="teaching-explanation-summary" value={command.explanation.summary} disabled={!editable} onChange={(event) => updateExplanation("summary", event.target.value)} rows={3} /></div>
             <div><FieldLabel htmlFor="teaching-teaching-point">Teaching point</FieldLabel><Textarea id="teaching-teaching-point" value={command.explanation.teachingPoint} disabled={!editable} onChange={(event) => updateExplanation("teachingPoint", event.target.value)} rows={3} /></div>
             <div><FieldLabel htmlFor="teaching-further-discussion">Further discussion</FieldLabel><Textarea id="teaching-further-discussion" value={command.explanation.furtherDiscussion ?? ""} disabled={!editable} onChange={(event) => updateExplanation("furtherDiscussion", event.target.value)} rows={4} /></div>
+          </Card>
+
+          <Card className="space-y-4 p-4 sm:p-6">
+            <div><h2 className="text-lg font-semibold text-foreground">Current evidence review</h2><p className="mt-1 text-sm text-muted-foreground">Supporting references are managed in the existing References section.</p></div>
+            <label className="block text-xs font-semibold text-muted-foreground">Status<select aria-label="Evidence status" className="input-premium mt-1 h-10 w-full" disabled={!editable} value={command.evidenceReview.status} onChange={(event) => update("evidenceReview", { ...command.evidenceReview, status: event.target.value as TeachingQuestionCommand["evidenceReview"]["status"] })}><option value="not_verified">Not verified</option><option value="confirmed">Confirmed</option><option value="updated">Updated</option><option value="uncertain">Uncertain</option></select></label>
+            {command.evidenceReview.status !== "not_verified" && <div><FieldLabel htmlFor="teaching-evidence-date">Checked date</FieldLabel><Input id="teaching-evidence-date" type="date" required value={command.evidenceReview.checkedAt ?? ""} disabled={!editable} onChange={(event) => update("evidenceReview", { ...command.evidenceReview, checkedAt: event.target.value || null })} /></div>}
+            <div><FieldLabel htmlFor="teaching-evidence-summary">Evidence summary</FieldLabel><Textarea id="teaching-evidence-summary" value={command.evidenceReview.summary} disabled={!editable} onChange={(event) => update("evidenceReview", { ...command.evidenceReview, summary: event.target.value })} rows={3} /></div>
+            {command.evidenceReview.status === "updated" && <div><FieldLabel htmlFor="teaching-evidence-update">Evidence update</FieldLabel><Textarea id="teaching-evidence-update" required value={command.evidenceReview.update ?? ""} disabled={!editable} onChange={(event) => update("evidenceReview", { ...command.evidenceReview, update: event.target.value || null })} rows={3} /></div>}
           </Card>
 
           <Card className="space-y-4 p-4 sm:p-6">

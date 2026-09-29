@@ -15,7 +15,7 @@ test("Teaching author imports a reviewed JSON batch from the isolated applicatio
   const templateDownloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download AI Template" }).click();
   const templateDownload = await templateDownloadPromise;
-  expect(templateDownload.suggestedFilename()).toBe("rispro-teaching-qbank-template-v1.json");
+  expect(templateDownload.suggestedFilename()).toBe("rispro-teaching-qbank-template-v1.1.json");
 
   const templateResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/qbank/import/template.json");
   expect(templateResponse.ok()).toBeTruthy();
@@ -27,7 +27,7 @@ test("Teaching author imports a reviewed JSON batch from the isolated applicatio
   const exceptionQuestion = structuredClone(question);
   exceptionQuestion.externalId = `${externalId}-EXCEPTION`;
   exceptionQuestion.stem = "Synthetic E2E import exception question. No patient information.";
-  const payload = { schemaVersion: "1.0", questions: [question, exceptionQuestion] };
+  const payload = { schemaVersion: "1.1", taxonomyProposals: { topics: [] }, questions: [question, exceptionQuestion] };
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("link", { name: "Import", exact: true }).click();
@@ -114,7 +114,7 @@ test("Teaching import shows actionable errors and blocks confirmation for invali
   const question = structuredClone(template._schemaExamples.single_best_answer);
   const classification = question.classification as Record<string, unknown>;
   classification.specialty = "invented_specialty";
-  const payload = { schemaVersion: "1.0", questions: [question] };
+  const payload = { schemaVersion: "1.1", taxonomyProposals: { topics: [] }, questions: [question] };
 
   await page.locator("#teaching-import-file").setInputFiles({
     name: "invalid-teaching-import.json",

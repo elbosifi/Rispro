@@ -37,6 +37,7 @@ import {
   previewTeachingImport,
 } from "../import/import-service.js";
 import { createTeachingImportTemplate } from "../import/template-service.js";
+import { confirmTeachingMaintenanceWorkbook, exportTeachingMaintenanceWorkbook, previewTeachingMaintenanceWorkbook } from "../import/maintenance-workbook-service.js";
 import {
   parseTeachingBulkQuestionIds,
   publishTeachingQuestionScope,
@@ -172,7 +173,7 @@ export function createTeachingRouter(): Router {
     const template = await createTeachingImportTemplate();
     res.setHeader("Cache-Control", "no-store, private");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="rispro-teaching-qbank-template-v1.json"');
+    res.setHeader("Content-Disposition", 'attachment; filename="rispro-teaching-qbank-template-v1.1.json"');
     res.send(`${JSON.stringify(template, null, 2)}\n`);
   }));
 
@@ -187,8 +188,8 @@ export function createTeachingRouter(): Router {
   }));
 
   router.post("/qbank/import/confirm", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
-    const { actor } = await requireTeachingCapabilities(req, ["teaching.author"]);
-    const result = await confirmTeachingImport(bodyBatchId(req.body), actor);
+    const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.author"]);
+    const result = await confirmTeachingImport(bodyBatchId(req.body), actor, teachingIdentity.permissions.includes("teaching.manage_taxonomy") || teachingIdentity.permissions.includes("teaching.admin"));
     if (!result) throw new HttpError(500, "Teaching import did not produce a result.");
     if (result.status === "invalid") {
       res.status(422).json(result);
@@ -374,6 +375,27 @@ export function createTeachingRouter(): Router {
   router.get("/admin/questions", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     await requireTeachingCapabilities(req, ["teaching.author", "teaching.review", "teaching.publish"]);
     res.json(await listTeachingQuestions(teachingQuestionListQuery(req.query)));
+  }));
+
+  router.get("/admin/questions/export.xlsx", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    await requireTeachingCapabilities(req, ["teaching.author", "teaching.review", "teaching.publish"]);
+    const workbook = await exportTeachingMaintenanceWorkbook(teachingQuestionListQuery(req.query));
+    privateNoStore(res);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="rispro-teaching-question-bank-maintenance.xlsx"');
+    res.send(workbook);
+  }));
+
+  router.post("/admin/questions/maintenance/preview", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    await requireTeachingCapabilities(req, ["teaching.author", "teaching.review", "teaching.publish"]);
+    privateNoStore(res);
+    res.json(await previewTeachingMaintenanceWorkbook(req));
+  }));
+
+  router.post("/admin/questions/maintenance/confirm", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const { actor, teachingIdentity } = await requireTeachingCapabilities(req, ["teaching.author", "teaching.review", "teaching.publish"]);
+    privateNoStore(res);
+    res.json(await confirmTeachingMaintenanceWorkbook(req, actor, teachingIdentity.permissions.includes("teaching.manage_taxonomy") || teachingIdentity.permissions.includes("teaching.admin")));
   }));
 
   router.get("/admin/sources", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {

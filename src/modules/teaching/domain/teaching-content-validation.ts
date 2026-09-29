@@ -2,6 +2,7 @@ import { HttpError } from "../../../utils/http-error.js";
 import { asUnknownRecord } from "../../../utils/records.js";
 import {
   TEACHING_AUTHORSHIP_KINDS,
+  TEACHING_EVIDENCE_STATUSES,
   TEACHING_PROVENANCE_RELATIONSHIPS,
   TEACHING_QUESTION_TYPES,
   TEACHING_SOURCE_TYPES,
@@ -135,6 +136,25 @@ function year(value: unknown, name: string): number | null {
   return parsed;
 }
 
+function evidenceReview(value: unknown, references: TeachingQuestionReferenceInput[]) {
+  const row = value == null ? {} : asUnknownRecord(value);
+  if (!row) return fail("evidenceReview must be an object.");
+  const status = row.status ?? "not_verified";
+  if (typeof status !== "string" || !TEACHING_EVIDENCE_STATUSES.includes(status as never)) return fail("evidenceReview.status is invalid.");
+  const checkedAt = text(row.checkedAt, "evidenceReview.checkedAt", { max: 10 });
+  if (checkedAt !== null && !/^\d{4}-\d{2}-\d{2}$/.test(checkedAt)) return fail("evidenceReview.checkedAt must use YYYY-MM-DD.");
+  if (checkedAt !== null && Number.isNaN(Date.parse(`${checkedAt}T00:00:00Z`))) return fail("evidenceReview.checkedAt is invalid.");
+  const summary = text(row.summary ?? "", "evidenceReview.summary", { max: 20000 }) ?? "";
+  const update = text(row.update, "evidenceReview.update", { max: 20000 });
+  if (status !== "not_verified") {
+    if (checkedAt === null) return fail("evidenceReview.checkedAt is required when evidence was reviewed.");
+    if (!summary) return fail("evidenceReview.summary is required when evidence was reviewed.");
+    if (references.length === 0) return fail("At least one supporting reference is required when evidence was reviewed.");
+  }
+  if (status === "updated" && !update) return fail("evidenceReview.update is required when evidence status is updated.");
+  return { status: status as import("./teaching-content.js").TeachingEvidenceStatus, checkedAt, summary, update };
+}
+
 export function parseTeachingQuestionInput(value: unknown): TeachingQuestionInput {
   const row = asUnknownRecord(value);
   if (!row) return fail("Question content must be an object.");
@@ -163,6 +183,7 @@ export function parseTeachingQuestionInput(value: unknown): TeachingQuestionInpu
   });
   if (new Set(assetAltTexts.map((item) => item.assetId)).size !== assetAltTexts.length) return fail("An asset alt text may only be supplied once.");
   if (assetAltTexts.some((item) => !assetIds.includes(item.assetId))) return fail("Asset alt text can only be updated for assets attached to this revision.");
+  const references = questionReferences(row.references ?? []);
   return {
     externalId,
     questionBankCode: code(row.questionBankCode ?? "radiology-main", "questionBankCode")!,
@@ -183,11 +204,12 @@ export function parseTeachingQuestionInput(value: unknown): TeachingQuestionInpu
     competencyCodes: stringArray(row.competencyCodes ?? [], "competencyCodes"),
     tagCodes: stringArray(row.tagCodes ?? [], "tagCodes"),
     sources: questionSources(row.sources ?? []),
-    references: questionReferences(row.references ?? []),
+    references,
     assetIds,
     assetAltTexts,
     authorshipKind: authorship.kind as TeachingQuestionInput["authorshipKind"],
     modelName: text(authorship.modelName, "authorship.modelName", { max: 200 }),
+    evidenceReview: evidenceReview(row.evidenceReview, references),
   };
 }
 

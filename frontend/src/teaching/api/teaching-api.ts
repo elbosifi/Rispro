@@ -48,9 +48,11 @@ export interface TeachingCatalog {
 
 export type TeachingQuestionStatus = "draft" | "in_review" | "published" | "retired";
 export type TeachingQuestionType = "single_best_answer" | "image_based_sba" | "case_based_sba";
+export type TeachingEvidenceStatus = "confirmed" | "updated" | "uncertain" | "not_verified";
 
 export interface TeachingAsset {
   id: number;
+  assetKey?: string;
   mimeType: string;
   originalFilename: string;
   altText: string;
@@ -126,6 +128,7 @@ export interface TeachingQuestionRevision {
   references: TeachingReferenceLink[];
   assets: TeachingAsset[];
   authorship: { kind: string; modelName: string | null };
+  evidenceReview: { status: TeachingEvidenceStatus; checkedAt: string | null; summary: string; update: string | null };
   audit: {
     createdBy: string;
     submittedAt: string | null;
@@ -237,6 +240,7 @@ export interface TeachingQuestionCommand {
   assetIds: number[];
   assetAltTexts: Array<{ assetId: number; altText: string }>;
   authorship: { kind: string; modelName: string | null };
+  evidenceReview: { status: TeachingEvidenceStatus; checkedAt: string | null; summary: string; update: string | null };
 }
 
 export interface TeachingImportIssue {
@@ -282,6 +286,7 @@ export interface TeachingImportValidation {
   assetCount: number;
   errors: TeachingImportIssue[];
   warnings: TeachingImportIssue[];
+  taxonomyProposals: Array<{ specialty: string; domain: string; code: string; label: string; description: string; questionCount: number; alreadyExists: boolean; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[] }>;
   questions: TeachingImportPreviewQuestion[];
 }
 
@@ -317,10 +322,21 @@ export async function downloadTeachingImportTemplate(): Promise<void> {
   const url = URL.createObjectURL(file);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "rispro-teaching-qbank-template-v1.json";
+  anchor.download = "rispro-teaching-qbank-template-v1.1.json";
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+export async function downloadTeachingMaintenanceWorkbook(): Promise<void> {
+  const response = await fetch("/api/teaching/admin/questions/export.xlsx", { credentials: "include", cache: "no-store" });
+  if (!response.ok) throw new Error("Could not export the Teaching maintenance workbook.");
+  const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement("a");
+  anchor.href = url; anchor.download = "rispro-teaching-question-bank-maintenance.xlsx"; anchor.click(); URL.revokeObjectURL(url);
+}
+
+export interface TeachingMaintenancePreview { workbookHash: string; summary: { total: number; unchanged: number; updateDraft: number; createDraftRevision: number; invalid: number; staleConflict: number; inReviewConflict: number; retired: number; missingQuestion: number }; topicProposals: Array<{ specialty: string; domain: string; code: string; label: string; description: string; questionCount: number; alreadyExists: boolean; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[] }>; errors: TeachingImportIssue[]; warnings: TeachingImportIssue[]; rows: Array<{ externalId: string; currentStatus: string; action: string; changedFields: string[]; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[] }>; }
+export async function previewTeachingMaintenanceWorkbook(file: File): Promise<TeachingMaintenancePreview> { const form = new FormData(); form.append("file", file, file.name); return api("/teaching/admin/questions/maintenance/preview", { method: "POST", body: form }, 120_000); }
+export async function confirmTeachingMaintenanceWorkbook(file: File, workbookHash: string): Promise<{ updatedDraft: number; newDraftRevision: number; unchanged: number; invalid: number; conflicts: number; proposedTopicsCreated: number }> { const form = new FormData(); form.append("file", file, file.name); return api("/teaching/admin/questions/maintenance/confirm", { method: "POST", body: form, headers: { "x-teaching-maintenance-preview-hash": workbookHash } }, 120_000); }
 
 export async function fetchTeachingIdentity(): Promise<TeachingIdentity> {
   return api<TeachingIdentity>("/teaching/me");
@@ -633,6 +649,7 @@ export interface TeachingLearnerQuestion {
       doi: string | null;
       citationText: string | null;
     }>;
+    evidenceReview?: { status: TeachingEvidenceStatus; checkedAt: string | null; summary: string; update: string | null };
   };
 }
 
