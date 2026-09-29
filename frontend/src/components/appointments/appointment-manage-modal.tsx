@@ -43,7 +43,7 @@ import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSe
 import { SupervisorOverrideModal, type SupervisorOverrideConfirmation } from "@/v2/appointments/components/SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/SchedulingOverrideRequestModal";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
-import { inferSupportedOverrideTypesFromExamRuleMetadata as inferSupportedOverrideTypesFromExamRuleMetadataRaw, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
+import { inferSupportedOverrideTypesFromExamRuleMetadata as inferSupportedOverrideTypesFromExamRuleMetadataRaw, isDirectedDoctorOverbookingTypes, shouldUseDeferredOverrideRequest } from "@/v2/appointments/utils/scheduling-override-requests";
 import { useAuth } from "@/providers/auth-provider";
 import type { ComplementaryRecall } from "@/lib/api/complementary-recalls";
 import { reopenAppointmentForScanning } from "@/lib/api/appointments-queue";
@@ -582,7 +582,7 @@ export function AppointmentManageModal({
     const supportedOverrideTypes = inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode });
     if (user?.role === "receptionist" && !allowReceptionOverrideRequestsFromAvailability && rescheduleSelectedRow?.requiresSupervisorOverride) return;
     if (rescheduleSelectedRow?.requiresSupervisorOverride || rescheduleSelectedRow?.status === "restricted" || rescheduleSelectedRow?.status === "full" || (rescheduleSelectedRow?.status === "blocked" && supportedOverrideTypes.length) || rescheduleCapacityModeNeedsOverrideAuth) {
-      if (shouldUseDeferredOverrideRequest(user?.role, supportedOverrideTypes, allowReceptionOverrideRequestsFromAvailability)) {
+      if (!isSuperAdmin && shouldUseDeferredOverrideRequest(user?.role, supportedOverrideTypes, allowReceptionOverrideRequestsFromAvailability)) {
         setPendingReschedulePayload(payload);
         setRescheduleRequestOverrideTypes(supportedOverrideTypes);
         setRescheduleRequestError(null);
@@ -631,7 +631,7 @@ export function AppointmentManageModal({
     }
   };
 
-  const submitRescheduleOverrideRequest = async (requesterReason: string) => {
+  const submitRescheduleOverrideRequest = async (requesterReason: string, requestedApproverUserId?: number) => {
     if (!appointment || !pendingReschedulePayload) return;
     setRescheduleRequestError(null);
     try {
@@ -639,6 +639,7 @@ export function AppointmentManageModal({
         requestType: "reschedule_booking",
         bookingId: appointment.id,
         requesterReason,
+        requestedApproverUserId,
         createdFromContext: "registrations_reschedule",
         requestPayload: { ...pendingReschedulePayload, capacityResolutionMode: "standard" },
       });
@@ -989,7 +990,7 @@ export function AppointmentManageModal({
       {selectedPatientId ? <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} /> : null}
 
       <SupervisorOverrideModal open={rescheduleOverrideOpen} onClose={() => { setRescheduleOverrideOpen(false); setRescheduleOverrideError(null); setPendingReschedulePayload(null); }} onConfirm={handleRescheduleOverrideConfirm} loading={rescheduleOverrideLoading || rescheduleMutation.isPending} authError={rescheduleOverrideError} overrideTypes={inferSupportedOverrideTypesFromExamRuleMetadataRaw({ reasonCodes: rescheduleSelectedRow?.reasonCodes, requiresSupervisorOverride: Boolean(rescheduleSelectedRow?.requiresSupervisorOverride), effectModes: rescheduleSelectedRow?.matchedExamRuleSummary ? [rescheduleSelectedRow.matchedExamRuleSummary.effectMode] : [], capacityResolutionMode: effectiveRescheduleCapacityResolutionMode })} mode={user?.role === "supervisor" || user?.role === "super_admin" ? "current_user" : "delegated_supervisor"} />
-      <SchedulingOverrideRequestModal open={rescheduleRequestOpen} requestType="reschedule_booking" overrideTypes={rescheduleRequestOverrideTypes} patientLabel={appointment?.englishFullName || appointment?.arabicFullName || `Patient #${appointment?.patientId ?? ""}`} modalityLabel={appointment?.modalityNameEn || appointment?.modalityNameAr || `Modality #${appointment?.modalityId ?? ""}`} examTypeLabel={appointment?.examNameEn || appointment?.examNameAr || `Exam #${appointment?.examTypeId ?? ""}`} requestedDate={rescheduleDate} requestedTime={null} decision={selectedRescheduleAvailabilityItem?.decision ?? null} loading={createRescheduleOverrideRequest.isPending} error={rescheduleRequestError} onClose={() => { setRescheduleRequestOpen(false); setRescheduleRequestError(null); }} onSubmit={submitRescheduleOverrideRequest} />
+      <SchedulingOverrideRequestModal open={rescheduleRequestOpen} requestType="reschedule_booking" overrideTypes={rescheduleRequestOverrideTypes} patientLabel={appointment?.englishFullName || appointment?.arabicFullName || `Patient #${appointment?.patientId ?? ""}`} modalityLabel={appointment?.modalityNameEn || appointment?.modalityNameAr || `Modality #${appointment?.modalityId ?? ""}`} examTypeLabel={appointment?.examNameEn || appointment?.examNameAr || `Exam #${appointment?.examTypeId ?? ""}`} requestedDate={rescheduleDate} requestedTime={null} modalityId={appointment?.modalityId ?? null} requiresDirectedApprover={isDirectedDoctorOverbookingTypes(rescheduleRequestOverrideTypes)} decision={selectedRescheduleAvailabilityItem?.decision ?? null} loading={createRescheduleOverrideRequest.isPending} error={rescheduleRequestError} onClose={() => { setRescheduleRequestOpen(false); setRescheduleRequestError(null); }} onSubmit={submitRescheduleOverrideRequest} />
     </>
   );
 }

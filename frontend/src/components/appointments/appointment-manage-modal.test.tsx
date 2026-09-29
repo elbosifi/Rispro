@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   fetchPublicAppointmentReportStatus: vi.fn(),
   fetchPublicSchedulingCapacitySettings: vi.fn(),
   createSchedulingOverrideRequest: vi.fn(),
+  listEligibleDoctorOverbookingApprovers: vi.fn(),
   deleteAppointment: vi.fn(),
   rescheduleV2Booking: vi.fn(),
   updateAppointmentStatus: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("@/v2/appointments/api", () => ({
   useV2ExamTypes: () => ({ data: [], isLoading: false }),
   useV2SpecialReasonCodes: () => ({ data: [] }),
   useCreateSchedulingOverrideRequest: () => ({ mutateAsync: mocks.createSchedulingOverrideRequest, isPending: false }),
+  listEligibleDoctorOverbookingApprovers: (...args: unknown[]) => mocks.listEligibleDoctorOverbookingApprovers(...args),
   rescheduleV2Booking: (...args: unknown[]) => mocks.rescheduleV2Booking(...args),
 }));
 
@@ -184,6 +186,8 @@ beforeEach(() => {
   mocks.reopenAppointmentForScanning.mockResolvedValue(undefined);
   mocks.createSchedulingOverrideRequest.mockReset();
   mocks.createSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
+  mocks.listEligibleDoctorOverbookingApprovers.mockReset();
+  mocks.listEligibleDoctorOverbookingApprovers.mockResolvedValue([{ userId: 77, displayName: "Dr A" }]);
   mocks.deleteAppointment.mockReset();
   mocks.deleteAppointment.mockResolvedValue(undefined);
   mocks.rescheduleV2Booking.mockReset();
@@ -583,6 +587,38 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("menuitem", { name: "Change status" })).toBeTruthy();
   });
 
+  it("reschedules normally for an available date without opening an override modal", async () => {
+    mocks.availabilityRows = [{
+      date: "2026-09-03",
+      dayLabel: "Thu, Sep 3",
+      status: "available",
+      bucketMode: "total_only",
+      remainingCapacity: 4,
+      dailyCapacity: 18,
+      oncologyReserved: null,
+      oncologyFilled: 0,
+      oncologyRemaining: null,
+      nonOncologyReserved: null,
+      nonOncologyFilled: 0,
+      nonOncologyRemaining: null,
+      specialQuotaRemaining: null,
+      hasSpecialQuotaPath: false,
+      reasonText: "Available",
+      requiresSupervisorOverride: false,
+      reasonCodes: [],
+    }];
+    renderModal({ initialTab: "reschedule" });
+
+    await userEvent.click(await screen.findByRole("button", { name: /2026-09-03 available/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
+
+    await waitFor(() => expect(mocks.rescheduleV2Booking).toHaveBeenCalledTimes(1));
+    expect(mocks.rescheduleV2Booking.mock.calls[0][1]).toMatchObject({ bookingDate: "2026-09-03" });
+    expect(screen.queryByText("Supervisor Override Required")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Submit request" })).toBeNull();
+    expect(mocks.createSchedulingOverrideRequest).not.toHaveBeenCalled();
+  });
+
   it("sends the exam restriction override type for supervisor rescheduling", async () => {
     mocks.userRole = "supervisor";
     mocks.availabilityRows = [{
@@ -758,6 +794,7 @@ describe("AppointmentManageModal", () => {
   });
 
   it("lets a super admin directly reschedule with the complete total-capacity and exam-mix override set", async () => {
+    mocks.userRole = "super_admin";
     mocks.availabilityRows = [{
       date: "2026-09-02",
       dayLabel: "Wed, Sep 2",
@@ -783,6 +820,8 @@ describe("AppointmentManageModal", () => {
     fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), { target: { value: "total_capacity_override" } });
     await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
     expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+    expect(screen.queryByLabelText(/Request approval from/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Submit request" })).toBeNull();
     expect(screen.getByText("Total modality capacity override")).toBeTruthy();
     expect(screen.getByText("Exam mix override")).toBeTruthy();
 
@@ -795,9 +834,11 @@ describe("AppointmentManageModal", () => {
     await waitFor(() => expect(mocks.rescheduleV2Booking).toHaveBeenCalledTimes(1));
     expect(mocks.rescheduleV2Booking.mock.calls[0][1].override).toMatchObject({
       authorizationMode: "current_user_reauth",
+      reason: "combined",
       overrideTypes: ["total_capacity_override", "exam_mix_override"],
       overrideType: "total_capacity_override",
     });
+    expect(mocks.createSchedulingOverrideRequest).not.toHaveBeenCalled();
   });
 
   it("submits one combined deferred reschedule request for a supervisor", async () => {
@@ -827,6 +868,13 @@ describe("AppointmentManageModal", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reschedule" }));
     expect(screen.queryByText("Supervisor Override Required")).toBeNull();
     expect(await screen.findByText(/Total modality capacity override, Exam mix override/)).toBeTruthy();
+    const doctorSelector = await screen.findByLabelText(/Request approval from/i) as HTMLSelectElement;
+    await waitFor(() => expect(mocks.listEligibleDoctorOverbookingApprovers).toHaveBeenCalledWith(appointment.modalityId));
+    expect(Array.from(doctorSelector.options).map((option) => option.text)).not.toContain("Any doctor");
+    expect(await screen.findByRole("option", { name: "Dr A" })).toBeTruthy();
+    const submitButton = screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+    await userEvent.selectOptions(doctorSelector, "77");
     fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), { target: { value: "combined" } });
     await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
 
@@ -834,6 +882,9 @@ describe("AppointmentManageModal", () => {
     expect(mocks.rescheduleV2Booking).not.toHaveBeenCalled();
     expect(mocks.createSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
       requestType: "reschedule_booking",
+      bookingId: appointment.id,
+      requestedApproverUserId: 77,
+      requesterReason: "combined",
       requestPayload: { bookingDate: "2026-09-02" },
     });
   });
