@@ -6,7 +6,20 @@ import { buildWorkbookBuffer, parseWorksheet, readWorkbookFromBase64 } from "../
 import { HttpError } from "../../../utils/http-error.js";
 import type { TeachingAuditIdentity } from "../domain/teaching-content.js";
 import { parseTeachingReferenceInput, parseTeachingSourceInput } from "../domain/teaching-content-validation.js";
-import { createTeachingQuestionRevision, createTeachingReference, createTeachingSource, getTeachingQuestion, listTeachingQuestions, patchTeachingQuestionDraft, type TeachingQuestionListQuery } from "../services/teaching-content-service.js";
+import {
+  createOrReuseTeachingReferenceInTransaction,
+  createOrReuseTeachingSourceInTransaction,
+  createTeachingQuestionRevisionInTransaction,
+  lockCurrentTeachingQuestionRevisionInTransaction,
+  patchTeachingQuestionDraftInTransaction,
+  type TeachingQuestionListQuery,
+} from "../services/teaching-content-service.js";
+import { withTeachingTransaction } from "../services/teaching-transaction.js";
+import {
+  getTeachingMaintenanceQuestionSnapshots,
+  getTeachingMaintenanceQuestionSnapshotsByIdentity,
+  type TeachingMaintenanceQuestionSnapshot,
+} from "./maintenance-question-query-service.js";
 import type { TeachingImportIssue } from "./import-schema.js";
 import { createProposedTopicsInTransaction } from "./import-service.js";
 import type { TeachingImportTopicProposal } from "./validation-service.js";
@@ -25,7 +38,7 @@ const PROPOSAL_HEADERS = ["specialty", "domain", "code", "label", "description"]
 type Action = "unchanged" | "update_draft" | "create_draft_revision" | "conflict_in_review" | "stale_conflict" | "retired" | "missing_question" | "invalid";
 interface MaintenanceRow { externalId: string; questionBankCode: string; questionId: number; revisionId: number; revisionVersion: number; action: Action; changedFields: string[]; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[]; values: Record<string, string>; }
 interface MaintenanceTopicProposal extends TeachingImportTopicProposal {}
-interface ParsedMaintenanceWorkbook { hash: string; rows: MaintenanceRow[]; topicProposals: MaintenanceTopicProposal[]; errors: TeachingImportIssue[]; warnings: TeachingImportIssue[]; }
+interface ParsedMaintenanceWorkbook { hash: string; rows: MaintenanceRow[]; topicProposals: MaintenanceTopicProposal[]; errors: TeachingImportIssue[]; warnings: TeachingImportIssue[]; snapshots?: Map<string, TeachingMaintenanceQuestionSnapshot>; }
 
 function value(row: Record<string, unknown>, key: string): string { return String(row[key] ?? "").trim(); }
 function semicolon(value: string): string[] { return value ? value.split(";").map((item) => item.trim()).filter(Boolean) : []; }
@@ -35,13 +48,13 @@ function number(value: string): number | null { const parsed = Number(value); re
 function date(value: string): string | null { return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? value : null; }
 function hash(bytes: Buffer): string { return createHash("sha256").update(bytes).digest("hex"); }
 function rowKey(row: Record<string, string>, headers: readonly string[]) { return JSON.stringify(headers.filter((header) => header !== "external_id").map((header) => value(row, header))); }
-function sourceWorkbookRow(source: Awaited<ReturnType<typeof getTeachingQuestion>>["revisions"][number]["sources"][number], index: number): Record<string, string> {
+function sourceWorkbookRow(source: TeachingMaintenanceQuestionSnapshot["revision"]["sources"][number], index: number): Record<string, string> {
   return { external_id: "", source_order: String(index + 1), source_type: source.sourceType, title: source.title ?? "", organization: source.organization ?? "", authors: source.authors.join(";"), edition: source.edition ?? "", year: source.year === null ? "" : String(source.year), chapter: source.chapter ?? "", page: source.page ?? "", exam_name: source.examName ?? "", exam_sitting: source.examSitting ?? "", exam_paper: source.examPaper ?? "", question_number: source.questionNumber ?? "", url: source.url ?? "", doi: source.doi ?? "", relationship_to_source: source.relationship, notes: source.notes ?? "" };
 }
-function referenceWorkbookRow(reference: Awaited<ReturnType<typeof getTeachingQuestion>>["revisions"][number]["references"][number], index: number): Record<string, string> {
+function referenceWorkbookRow(reference: TeachingMaintenanceQuestionSnapshot["revision"]["references"][number], index: number): Record<string, string> {
   return { external_id: "", reference_order: String(index + 1), reference_type: reference.referenceType, title: reference.title, organization: reference.organization ?? "", authors: reference.authors.join(";"), year: reference.year === null ? "" : String(reference.year), edition: reference.edition ?? "", url: reference.url ?? "", doi: reference.doi ?? "", citation_text: reference.citationText ?? "", notes: reference.notes ?? "" };
 }
-function mediaWorkbookRow(asset: Awaited<ReturnType<typeof getTeachingQuestion>>["revisions"][number]["assets"][number], index: number): Record<string, string> {
+function mediaWorkbookRow(asset: TeachingMaintenanceQuestionSnapshot["revision"]["assets"][number], index: number): Record<string, string> {
   return { external_id: "", media_order: String(index + 1), asset_id: String(asset.id), asset_key: asset.assetKey, original_filename: asset.originalFilename, alt_text: asset.altText };
 }
 function sameLinkedRows(actual: Array<Record<string, string>>, supplied: Array<Record<string, string>>, headers: readonly string[]) {
@@ -56,6 +69,7 @@ function referenceInput(row: Record<string, string>) {
 
 function normalizedLabel(value: string) { return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US"); }
 function topicKey(domain: string, code: string) { return `${domain}\u0000${code}`; }
+function questionKey(questionBankCode: string, externalId: string) { return `${questionBankCode}\u0000${externalId}`; }
 
 async function validateMaintenanceTopicProposals(parsed: ParsedMaintenanceWorkbook) {
   const catalog = await getTeachingCatalog();
@@ -182,14 +196,10 @@ function workbookInput(row: MaintenanceRow, options: Array<Record<string, string
 }
 
 export async function exportTeachingMaintenanceWorkbook(query: TeachingQuestionListQuery = {}): Promise<Buffer> {
-  const list = await listTeachingQuestions({ ...query, page: 1, pageSize: 100 });
-  const summaries = [...list.items];
-  for (let page = 2; page <= list.pagination.totalPages; page += 1) summaries.push(...(await listTeachingQuestions({ ...query, page, pageSize: 100 })).items);
-  if (summaries.length > MAX_QUESTIONS) throw new HttpError(422, `Export is limited to ${MAX_QUESTIONS} questions.`);
-  const details = await Promise.all(summaries.map((item) => getTeachingQuestion(item.id)));
+  const details = await getTeachingMaintenanceQuestionSnapshots(query, MAX_QUESTIONS);
   const questions: Array<Record<string, unknown>> = []; const options: Array<Record<string, unknown>> = []; const sources: Array<Record<string, unknown>> = []; const references: Array<Record<string, unknown>> = []; const media: Array<Record<string, unknown>> = [];
   for (const item of details) {
-    const revision = item.revisions[0]!;
+    const revision = item.revision;
     questions.push({ question_bank_code: item.questionBank.code, external_id: item.externalId, question_id: item.id, revision_id: revision.id, revision_number: revision.revisionNumber, revision_version: revision.version, status: revision.status, type: revision.type, specialty: revision.classification.specialty.code, domain: revision.classification.domain.code, topic: revision.classification.topic?.code ?? "", subtopic: revision.classification.subtopic?.code ?? "", modalities: revision.modalities.map((x) => x.code).join(";"), competencies: revision.competencies.map((x) => x.code).join(";"), training_level: revision.trainingLevel ?? "", difficulty: revision.difficulty, tags: revision.tags.map((x) => x.code).join(";"), stem: revision.stem, explanation_summary: revision.explanation.summary, teaching_point: revision.explanation.teachingPoint, further_discussion: revision.explanation.furtherDiscussion ?? "", evidence_status: revision.evidenceReview.status, evidence_checked_at: revision.evidenceReview.checkedAt ?? "", evidence_summary: revision.evidenceReview.summary, evidence_update: revision.evidenceReview.update ?? "", generation_method: revision.authorship.kind, generation_model: revision.authorship.modelName ?? "", case_external_id: revision.case?.externalId ?? "" });
     revision.options.forEach((option, index) => options.push({ external_id: item.externalId, option_order: index + 1, option_key: option.key, option_text: option.text, is_correct: option.isCorrect, explanation: option.explanation ?? "" }));
     revision.sources.forEach((source, index) => sources.push({ external_id: item.externalId, source_order: index + 1, source_type: source.sourceType, title: source.title ?? "", organization: source.organization ?? "", authors: source.authors.join(";"), edition: source.edition ?? "", year: source.year ?? "", chapter: source.chapter ?? "", page: source.page ?? "", exam_name: source.examName ?? "", exam_sitting: source.examSitting ?? "", exam_paper: source.examPaper ?? "", question_number: source.questionNumber ?? "", url: source.url ?? "", doi: source.doi ?? "", relationship_to_source: source.relationship, notes: source.notes ?? "" }));
@@ -227,19 +237,20 @@ async function classifyMaintenance(bytes: Buffer): Promise<ParsedMaintenanceWork
     }
   };
   readLinkedRows("Options", OPTION_HEADERS, optionRows); readLinkedRows("Sources", SOURCE_HEADERS, sourceRows); readLinkedRows("References", REFERENCE_HEADERS, referenceRows); readLinkedRows("Media", MEDIA_HEADERS, mediaRows);
+  const currentSnapshots = await getTeachingMaintenanceQuestionSnapshotsByIdentity(parsed.rows.map((row) => ({
+    questionBankCode: row.questionBankCode,
+    externalId: row.externalId,
+  })));
+  parsed.snapshots = new Map(currentSnapshots.map((item) => [questionKey(item.questionBank.code, item.externalId), item]));
   for (const row of parsed.rows) {
     if (row.errors.length) continue;
-    const current = await pool.query<{ id: number; revision_id: number; version: number; status: string; retired_at: Date | null }>(
-      `select question.id, revision.id as revision_id, revision.version, revision.status, question.retired_at
-       from teaching.questions question join teaching.question_banks bank on bank.id = question.question_bank_id
-       join lateral (select * from teaching.question_revisions where question_id = question.id order by revision_number desc, id desc limit 1) revision on true
-       where question.external_id = $1 and bank.code = $2`, [row.externalId, row.questionBankCode]);
-    if (!current.rowCount) { row.action = "missing_question"; continue; }
-    const actual = current.rows[0]!;
-    if (actual.retired_at) { row.action = "retired"; continue; }
-    if (Number(actual.revision_id) !== row.revisionId || Number(actual.version) !== row.revisionVersion || Number(actual.id) !== row.questionId) { row.action = "stale_conflict"; continue; }
-    if (actual.status === "in_review") { row.action = "conflict_in_review"; continue; }
-    const detail = await getTeachingQuestion(actual.id); const revision = detail.revisions[0]!;
+    const detail = parsed.snapshots.get(questionKey(row.questionBankCode, row.externalId));
+    if (!detail) { row.action = "missing_question"; continue; }
+    if (detail.retiredAt) { row.action = "retired"; continue; }
+    const revision = detail.revision;
+    if (detail.id !== row.questionId || revision.id !== row.revisionId || revision.version !== row.revisionVersion
+      || revision.status !== row.values.status) { row.action = "stale_conflict"; continue; }
+    if (revision.status === "in_review") { row.action = "conflict_in_review"; continue; }
     const candidate = workbookInput(row, optionRows.get(row.externalId) ?? []);
     const workbookSources = sourceRows.get(row.externalId) ?? [];
     const workbookReferences = referenceRows.get(row.externalId) ?? [];
@@ -255,8 +266,8 @@ async function classifyMaintenance(bytes: Buffer): Promise<ParsedMaintenanceWork
     const proposed = { type: candidate.type, stem: candidate.stem, specialty: candidate.specialtyCode, domain: candidate.domainCode, topic: candidate.topicCode, subtopic: candidate.subtopicCode, modalities: candidate.modalityCodes, competencies: candidate.competencyCodes, trainingLevel: candidate.trainingLevelCode, difficulty: candidate.difficulty, tags: candidate.tagCodes, options: candidate.options, explanation: candidate.explanation, authorship: candidate.authorship, evidenceReview: candidate.evidenceReview };
     row.changedFields = [...Object.keys(snapshot).filter((field) => JSON.stringify(snapshot[field as keyof typeof snapshot]) !== JSON.stringify(proposed[field as keyof typeof proposed])), ...(sourcesChanged ? ["sources"] : []), ...(referencesChanged ? ["references"] : [])];
     if (row.changedFields.length === 0) row.action = "unchanged";
-    else if (actual.status === "draft") row.action = "update_draft";
-    else if (actual.status === "published") row.action = "create_draft_revision";
+    else if (revision.status === "draft") row.action = "update_draft";
+    else if (revision.status === "published") row.action = "create_draft_revision";
     else row.action = "invalid";
     if (candidate.options.length < 2 || new Set(candidate.options.map((o) => o.key)).size !== candidate.options.length || candidate.options.filter((o) => o.isCorrect).length !== 1) { row.action = "invalid"; row.errors.push(issue("invalid_options", "Options must contain unique keys and exactly one correct answer.", row.externalId)); }
   }
@@ -298,32 +309,61 @@ export async function confirmTeachingMaintenanceWorkbook(req: Request, actor: Te
     if (row.action === "unchanged") { result.unchanged += 1; continue; }
     if (row.action !== "update_draft" && row.action !== "create_draft_revision") { if (row.action === "invalid") result.invalid += 1; else result.conflicts += 1; result.exceptions.push({ externalId: row.externalId, action: row.action }); continue; }
     try {
-      if (row.action === "create_draft_revision") await createTeachingQuestionRevision(row.questionId, actor);
-      const current = await getTeachingQuestion(row.questionId); const draft = current.revisions[0]!;
-      const { externalId: _externalId, questionBankCode: _questionBankCode, ...update } = workbookInput(row, optionRows.get(row.externalId) ?? []);
-      const sources = row.changedFields.includes("sources")
-        ? await Promise.all((sourceRows.get(row.externalId) ?? []).map(async (source) => {
-          const created = await createTeachingSource(sourceInput(source), actor);
-          return { sourceId: created.id, relationship: source.relationship_to_source, notes: source.notes || null };
-        }))
-        : draft.sources.map((source) => ({ sourceId: source.id, relationship: source.relationship, notes: source.notes }));
-      const references = row.changedFields.includes("references")
-        ? await Promise.all((referenceRows.get(row.externalId) ?? []).map(async (reference) => {
-          const created = await createTeachingReference(referenceInput(reference), actor);
-          return { referenceId: created.id, notes: reference.notes || null };
-        }))
-        : draft.references.map((reference) => ({ referenceId: reference.id, notes: reference.notes }));
-      await patchTeachingQuestionDraft(row.questionId, draft.id, {
-        ...update,
-        caseId: draft.case?.id ?? null,
-        sources,
-        references,
-        assetIds: draft.assets.map((asset) => asset.id),
-        assetAltTexts: draft.assets.map((asset) => ({ assetId: asset.id, altText: asset.altText })),
-        expectedVersion: draft.version,
-      }, actor);
+      const detail = parsed.snapshots?.get(questionKey(row.questionBankCode, row.externalId));
+      if (!detail) throw new HttpError(409, "The question changed after preview. Refresh the workbook preview.");
+      await withTeachingTransaction(async (client) => {
+        await lockCurrentTeachingQuestionRevisionInTransaction(client, {
+          questionId: row.questionId,
+          questionBankCode: row.questionBankCode,
+          externalId: row.externalId,
+          revisionId: row.revisionId,
+          revisionVersion: row.revisionVersion,
+          status: row.values.status,
+        });
+        const draftRevisionId = row.action === "create_draft_revision"
+          ? await createTeachingQuestionRevisionInTransaction(client, row.questionId, actor)
+          : row.revisionId;
+        const draftVersion = row.action === "create_draft_revision"
+          ? Number((await client.query<{ version: number | string }>("select version from teaching.question_revisions where id = $1 for update", [draftRevisionId])).rows[0]?.version ?? 0)
+          : row.revisionVersion;
+        const { externalId: _externalId, questionBankCode: _questionBankCode, ...update } = workbookInput(row, optionRows.get(row.externalId) ?? []);
+        const sources = row.changedFields.includes("sources")
+          ? await (async () => {
+            const created = [];
+            for (const source of sourceRows.get(row.externalId) ?? []) {
+              const sourceId = await createOrReuseTeachingSourceInTransaction(client, sourceInput(source), actor);
+              created.push({ sourceId, relationship: source.relationship_to_source, notes: source.notes || null });
+            }
+            return created;
+          })()
+          : detail.revision.sources.map((source) => ({ sourceId: source.sourceId, relationship: source.relationship, notes: source.notes }));
+        const references = row.changedFields.includes("references")
+          ? await (async () => {
+            const created = [];
+            for (const reference of referenceRows.get(row.externalId) ?? []) {
+              const referenceId = await createOrReuseTeachingReferenceInTransaction(client, referenceInput(reference), actor);
+              created.push({ referenceId, notes: reference.notes || null });
+            }
+            return created;
+          })()
+          : detail.revision.references.map((reference) => ({ referenceId: reference.referenceId, notes: reference.notes }));
+        await patchTeachingQuestionDraftInTransaction(client, row.questionId, draftRevisionId, {
+          ...update,
+          caseId: detail.revision.case?.id ?? null,
+          sources,
+          references,
+          assetIds: detail.revision.assets.map((asset) => asset.id),
+          assetAltTexts: detail.revision.assets.map((asset) => ({ assetId: asset.id, altText: asset.altText })),
+          expectedVersion: draftVersion,
+        }, actor);
+      });
       if (row.action === "update_draft") result.updatedDraft += 1; else result.newDraftRevision += 1;
-    } catch (error) { result.conflicts += 1; result.exceptions.push({ externalId: row.externalId, action: "stale_conflict", message: error instanceof Error ? error.message : "Update failed." }); }
+    } catch (error) {
+      const stale = error instanceof HttpError && error.statusCode === 409;
+      const action: Action = stale ? "stale_conflict" : "invalid";
+      if (stale) result.conflicts += 1; else result.invalid += 1;
+      result.exceptions.push({ externalId: row.externalId, action, message: error instanceof Error ? error.message : "Update failed." });
+    }
   }
   return result;
 }

@@ -456,7 +456,7 @@ export async function validateTeachingQuestionRevision(
   });
 }
 
-export async function patchTeachingQuestionDraft(questionId: number, revisionId: number, patchValue: unknown, actor: TeachingAuditIdentity) {
+export async function patchTeachingQuestionDraftInTransaction(client: PoolClient, questionId: number, revisionId: number, patchValue: unknown, actor: TeachingAuditIdentity): Promise<void> {
   const patch = asUnknownRecord(patchValue);
   if (!patch) throw new HttpError(400, "Question patch must be an object.");
   const expectedVersion = patch.expectedVersion;
@@ -466,42 +466,44 @@ export async function patchTeachingQuestionDraft(questionId: number, revisionId:
     "assetIds", "assetAltTexts", "authorship", "evidenceReview", "expectedVersion",
   ]);
   if (Object.keys(patch).some((field) => !editable.has(field))) throw new HttpError(400, "Only draft content fields can be edited.");
-  await withTeachingTransaction(async (client) => {
-    const question = await client.query("select id from teaching.questions where id = $1 for update", [questionId]);
-    if (question.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
-    const revision = await client.query<{ status: string; id: number; version: number }>(
-      "select id, status, version from teaching.question_revisions where id = $1 and question_id = $2 for update",
-      [revisionId, questionId],
-    );
-    if (revision.rowCount !== 1) throw new HttpError(404, "Teaching question revision not found.");
-    if (revision.rows[0]!.status !== "draft") throw new HttpError(409, "Only draft revisions can be edited.");
-    if (!Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 1) throw new HttpError(400, "expectedVersion is required for draft updates.");
-    if (Number(expectedVersion) !== revision.rows[0]!.version) {
-      throw new HttpError(409, "This draft changed after it was loaded. Reload it before saving.");
-    }
-    const base = await questionBase(questionId, client);
-    const current = await loadRevisionInput(client, revisionId, base);
-    const merged = { ...current, ...patch };
-    const mergedExplanation = { ...(asUnknownRecord(current.explanation) ?? {}), ...(asUnknownRecord(patch.explanation) ?? {}) };
-    const mergedAuthorship = { ...(asUnknownRecord(current.authorship) ?? {}), ...(asUnknownRecord(patch.authorship) ?? {}) };
-    const mergedEvidenceReview = { ...(asUnknownRecord(current.evidenceReview) ?? {}), ...(asUnknownRecord(patch.evidenceReview) ?? {}) };
-    const input = parseTeachingQuestionInput({ ...merged, explanation: mergedExplanation, authorship: mergedAuthorship, evidenceReview: mergedEvidenceReview });
-    const lookup = await resolveLookups(client, input);
-    await client.query(
-      `update teaching.question_revisions set question_type = $2, stem = $3, specialty_id = $4, domain_id = $5, topic_id = $6,
-       subtopic_id = $7, difficulty_id = $8, training_level_id = $9, case_id = $10, explanation_summary = $11,
-       teaching_point = $12, further_discussion = $13, authorship_kind = $14, model_name = $15,
-       evidence_status = $16, evidence_checked_at = $17::date, evidence_summary = $18, evidence_update = $19, version = version + 1,
-       updated_by_identity_issuer = $20, updated_by_identity_subject = $21, updated_at = now()
-       where id = $1`,
-      [revisionId, input.type, input.stem, lookup.specialtyId, lookup.domainId, lookup.topicId, lookup.subtopicId, lookup.difficultyId,
-        lookup.trainingLevelId, input.caseId, input.explanationSummary, input.teachingPoint, input.furtherDiscussion,
-        input.authorshipKind, input.modelName, input.evidenceReview.status, input.evidenceReview.checkedAt,
-        input.evidenceReview.summary, input.evidenceReview.update, actor.identityIssuer, actor.identitySubject],
-    );
-    await saveRevisionRelations(client, revisionId, input, lookup);
-    await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
-  });
+  const question = await client.query("select id from teaching.questions where id = $1 for update", [questionId]);
+  if (question.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
+  const revision = await client.query<{ status: string; id: number; version: number }>(
+    "select id, status, version from teaching.question_revisions where id = $1 and question_id = $2 for update",
+    [revisionId, questionId],
+  );
+  if (revision.rowCount !== 1) throw new HttpError(404, "Teaching question revision not found.");
+  if (revision.rows[0]!.status !== "draft") throw new HttpError(409, "Only draft revisions can be edited.");
+  if (!Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 1) throw new HttpError(400, "expectedVersion is required for draft updates.");
+  if (Number(expectedVersion) !== Number(revision.rows[0]!.version)) {
+    throw new HttpError(409, "This draft changed after it was loaded. Reload it before saving.");
+  }
+  const base = await questionBase(questionId, client);
+  const current = await loadRevisionInput(client, revisionId, base);
+  const merged = { ...current, ...patch };
+  const mergedExplanation = { ...(asUnknownRecord(current.explanation) ?? {}), ...(asUnknownRecord(patch.explanation) ?? {}) };
+  const mergedAuthorship = { ...(asUnknownRecord(current.authorship) ?? {}), ...(asUnknownRecord(patch.authorship) ?? {}) };
+  const mergedEvidenceReview = { ...(asUnknownRecord(current.evidenceReview) ?? {}), ...(asUnknownRecord(patch.evidenceReview) ?? {}) };
+  const input = parseTeachingQuestionInput({ ...merged, explanation: mergedExplanation, authorship: mergedAuthorship, evidenceReview: mergedEvidenceReview });
+  const lookup = await resolveLookups(client, input);
+  await client.query(
+    `update teaching.question_revisions set question_type = $2, stem = $3, specialty_id = $4, domain_id = $5, topic_id = $6,
+     subtopic_id = $7, difficulty_id = $8, training_level_id = $9, case_id = $10, explanation_summary = $11,
+     teaching_point = $12, further_discussion = $13, authorship_kind = $14, model_name = $15,
+     evidence_status = $16, evidence_checked_at = $17::date, evidence_summary = $18, evidence_update = $19, version = version + 1,
+     updated_by_identity_issuer = $20, updated_by_identity_subject = $21, updated_at = now()
+     where id = $1`,
+    [revisionId, input.type, input.stem, lookup.specialtyId, lookup.domainId, lookup.topicId, lookup.subtopicId, lookup.difficultyId,
+      lookup.trainingLevelId, input.caseId, input.explanationSummary, input.teachingPoint, input.furtherDiscussion,
+      input.authorshipKind, input.modelName, input.evidenceReview.status, input.evidenceReview.checkedAt,
+      input.evidenceReview.summary, input.evidenceReview.update, actor.identityIssuer, actor.identitySubject],
+  );
+  await saveRevisionRelations(client, revisionId, input, lookup);
+  await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+}
+
+export async function patchTeachingQuestionDraft(questionId: number, revisionId: number, patchValue: unknown, actor: TeachingAuditIdentity) {
+  await withTeachingTransaction((client) => patchTeachingQuestionDraftInTransaction(client, questionId, revisionId, patchValue, actor));
   return getTeachingQuestion(questionId);
 }
 
@@ -699,47 +701,50 @@ export async function publishTeachingQuestionFromBulk(
   });
 }
 
+export async function createTeachingQuestionRevisionInTransaction(client: PoolClient, questionId: number, actor: TeachingAuditIdentity): Promise<number> {
+  const questionResult = await client.query<{ id: number; external_id: string; question_bank_code: string; question_bank_name: string; specialty_code: string; created_at: Date; updated_at: Date; retired_at: Date | null }>(
+    `select question.id, question.external_id, bank.code as question_bank_code, bank.name as question_bank_name,
+     specialty.code as specialty_code, question.created_at, question.updated_at, question.retired_at
+     from teaching.questions question join teaching.question_banks bank on bank.id = question.question_bank_id
+     join teaching.specialties specialty on specialty.id = question.specialty_id where question.id = $1 for update of question`,
+    [questionId],
+  );
+  if (questionResult.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
+  const question = questionResult.rows[0]!;
+  if (question.retired_at) throw new HttpError(409, "A retired question cannot receive a new revision.");
+  const published = await client.query<{ id: number; import_batch_id: string | null }>(
+    "select id, import_batch_id from teaching.question_revisions where question_id = $1 and status = 'published' order by revision_number desc limit 1",
+    [questionId],
+  );
+  if (!published.rowCount) throw new HttpError(409, "A published revision is required before creating a revision.");
+  const revisionNumberResult = await client.query<{ next_revision_number: number }>(
+    "select coalesce(max(revision_number), 0) + 1 as next_revision_number from teaching.question_revisions where question_id = $1",
+    [questionId],
+  );
+  const base: QuestionBaseRow = {
+    id: question.id, external_id: question.external_id, created_at: question.created_at, updated_at: question.updated_at,
+    retired_at: question.retired_at, question_bank_code: question.question_bank_code, question_bank_name: question.question_bank_name,
+    specialty_code: question.specialty_code,
+  };
+  const rawInput = await loadRevisionInput(client, toId(published.rows[0]!.id), base);
+  const input = parseTeachingQuestionInput(rawInput);
+  const lookup = await resolveLookups(client, input);
+  const newId = await createRevisionRow(
+    client,
+    questionId,
+    Number(revisionNumberResult.rows[0]!.next_revision_number),
+    input,
+    lookup,
+    actor,
+    published.rows[0]!.import_batch_id,
+  );
+  await saveRevisionRelations(client, newId, input, lookup);
+  await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
+  return newId;
+}
+
 export async function createTeachingQuestionRevision(questionId: number, actor: TeachingAuditIdentity) {
-  await withTeachingTransaction(async (client) => {
-    const questionResult = await client.query<{ id: number; external_id: string; question_bank_code: string; question_bank_name: string; specialty_code: string; created_at: Date; updated_at: Date; retired_at: Date | null }>(
-      `select question.id, question.external_id, bank.code as question_bank_code, bank.name as question_bank_name,
-       specialty.code as specialty_code, question.created_at, question.updated_at, question.retired_at
-       from teaching.questions question join teaching.question_banks bank on bank.id = question.question_bank_id
-       join teaching.specialties specialty on specialty.id = question.specialty_id where question.id = $1 for update of question`,
-      [questionId],
-    );
-    if (questionResult.rowCount !== 1) throw new HttpError(404, "Teaching question not found.");
-    const question = questionResult.rows[0]!;
-    if (question.retired_at) throw new HttpError(409, "A retired question cannot receive a new revision.");
-    const published = await client.query<{ id: number; import_batch_id: string | null }>(
-      "select id, import_batch_id from teaching.question_revisions where question_id = $1 and status = 'published' order by revision_number desc limit 1",
-      [questionId],
-    );
-    if (!published.rowCount) throw new HttpError(409, "A published revision is required before creating a revision.");
-    const revisionNumberResult = await client.query<{ next_revision_number: number }>(
-      "select coalesce(max(revision_number), 0) + 1 as next_revision_number from teaching.question_revisions where question_id = $1",
-      [questionId],
-    );
-    const base: QuestionBaseRow = {
-      id: question.id, external_id: question.external_id, created_at: question.created_at, updated_at: question.updated_at,
-      retired_at: question.retired_at, question_bank_code: question.question_bank_code, question_bank_name: question.question_bank_name,
-      specialty_code: question.specialty_code,
-    };
-    const rawInput = await loadRevisionInput(client, published.rows[0]!.id, base);
-    const input = parseTeachingQuestionInput(rawInput);
-    const lookup = await resolveLookups(client, input);
-    const newId = await createRevisionRow(
-      client,
-      questionId,
-      revisionNumberResult.rows[0]!.next_revision_number,
-      input,
-      lookup,
-      actor,
-      published.rows[0]!.import_batch_id,
-    );
-    await saveRevisionRelations(client, newId, input, lookup);
-    await client.query("update teaching.questions set updated_at = now() where id = $1", [questionId]);
-  });
+  await withTeachingTransaction((client) => createTeachingQuestionRevisionInTransaction(client, questionId, actor));
   return getTeachingQuestion(questionId);
 }
 
@@ -797,6 +802,43 @@ export interface TeachingQuestionBulkTarget {
   revisionId: number;
   revisionVersion: number;
   revisionStatus: string;
+}
+
+export interface TeachingQuestionRevisionExpectation {
+  questionId: number;
+  questionBankCode: string;
+  externalId: string;
+  revisionId: number;
+  revisionVersion: number;
+  status: string;
+}
+
+export async function lockCurrentTeachingQuestionRevisionInTransaction(
+  client: PoolClient,
+  expected: TeachingQuestionRevisionExpectation,
+): Promise<void> {
+  const question = await client.query<{ id: string | number; external_id: string; question_bank_code: string; retired_at: Date | null }>(
+    `select question.id, question.external_id, bank.code as question_bank_code, question.retired_at
+     from teaching.questions question join teaching.question_banks bank on bank.id = question.question_bank_id
+     where question.id = $1 for update of question`,
+    [expected.questionId],
+  );
+  if (question.rowCount !== 1) throw new HttpError(409, "The question changed after preview. Refresh the workbook preview.");
+  const actualQuestion = question.rows[0]!;
+  const revision = await client.query<{ id: string | number; version: number | string; status: string }>(
+    `select id, version, status from teaching.question_revisions
+     where question_id = $1 order by revision_number desc, id desc limit 1 for update`,
+    [expected.questionId],
+  );
+  if (revision.rowCount !== 1 || actualQuestion.retired_at !== null
+    || Number(actualQuestion.id) !== expected.questionId
+    || actualQuestion.question_bank_code !== expected.questionBankCode
+    || actualQuestion.external_id !== expected.externalId
+    || Number(revision.rows[0]!.id) !== expected.revisionId
+    || Number(revision.rows[0]!.version) !== expected.revisionVersion
+    || revision.rows[0]!.status !== expected.status) {
+    throw new HttpError(409, "The question changed after preview. Refresh the workbook preview.");
+  }
 }
 
 export async function listTeachingQuestions(query: TeachingQuestionListQuery) {
@@ -1100,6 +1142,22 @@ export async function createTeachingSourceInTransaction(client: PoolClient, inpu
   return toId(inserted.rows[0]!.id);
 }
 
+export async function createOrReuseTeachingSourceInTransaction(client: PoolClient, input: TeachingSourceInput, actor: TeachingAuditIdentity): Promise<number> {
+  const existing = await client.query<{ id: string | number }>(
+    `select id from teaching.sources
+     where is_active and source_type = $1 and title is not distinct from $2 and organization is not distinct from $3
+       and authors = $4::text[] and edition is not distinct from $5 and year is not distinct from $6
+       and chapter is not distinct from $7 and page is not distinct from $8 and exam_name is not distinct from $9
+       and exam_sitting is not distinct from $10 and exam_paper is not distinct from $11
+       and question_number is not distinct from $12 and url is not distinct from $13 and doi is not distinct from $14
+       and notes is not distinct from $15 and metadata_json = $16::jsonb
+     order by id limit 1`,
+    [input.sourceType, input.title, input.organization, input.authors, input.edition, input.year, input.chapter, input.page,
+      input.examName, input.examSitting, input.examPaper, input.questionNumber, input.url, input.doi, input.notes, JSON.stringify(input.metadata)],
+  );
+  return existing.rowCount ? toId(existing.rows[0]!.id) : createTeachingSourceInTransaction(client, input, actor);
+}
+
 export async function createTeachingSource(input: TeachingSourceInput, actor: TeachingAuditIdentity) {
   const result = await withTeachingTransaction((client) => createTeachingSourceInTransaction(client, input, actor));
   const row = await pool.query<{ id: string | number; source_type: string; title: string | null; organization: string | null; authors: string[]; edition: string | null; year: number | null; chapter: string | null; page: string | null; exam_name: string | null; exam_sitting: string | null; exam_paper: string | null; question_number: string | null; url: string | null; doi: string | null; notes: string | null; metadata: Record<string, unknown>; created_at: Date; updated_at: Date }>(`select id, source_type, title, organization, authors, edition, year, chapter, page,
@@ -1123,6 +1181,18 @@ export async function createTeachingReferenceInTransaction(client: PoolClient, i
       input.citationText, input.notes, actor.identityIssuer, actor.identitySubject],
   );
   return toId(inserted.rows[0]!.id);
+}
+
+export async function createOrReuseTeachingReferenceInTransaction(client: PoolClient, input: TeachingReferenceInput, actor: TeachingAuditIdentity): Promise<number> {
+  const existing = await client.query<{ id: string | number }>(
+    `select id from teaching."references"
+     where reference_type = $1 and title = $2 and organization is not distinct from $3 and authors = $4::text[]
+       and year is not distinct from $5 and edition is not distinct from $6 and url is not distinct from $7
+       and doi is not distinct from $8 and citation_text is not distinct from $9 and notes is not distinct from $10
+     order by id limit 1`,
+    [input.referenceType, input.title, input.organization, input.authors, input.year, input.edition, input.url, input.doi, input.citationText, input.notes],
+  );
+  return existing.rowCount ? toId(existing.rows[0]!.id) : createTeachingReferenceInTransaction(client, input, actor);
 }
 
 export async function createTeachingReference(input: TeachingReferenceInput, actor: TeachingAuditIdentity) {

@@ -6,4 +6,11 @@ if (!result.deleted) {
   console.log("Teaching content reset dry run. No data was deleted.");
   console.log(JSON.stringify(result.counts, null, 2));
   console.log(`To reset non-production Teaching content, run: ${result.confirmationCommand}`);
-} else console.log(`Teaching content reset complete using ${TEACHING_RESET_CONFIRMATION}.`, JSON.stringify(result.counts));
+} else {
+  console.log(`Teaching content reset complete using ${TEACHING_RESET_CONFIRMATION}.`, JSON.stringify(result.counts));
+  console.log("Teaching asset files deleted: " + result.assetFilesDeleted);
+  if (result.assetFileDeletionFailures.length) {
+    console.error("Teaching content data was deleted, but these Teaching asset files need attention:");
+    console.error(JSON.stringify(result.assetFileDeletionFailures, null, 2));
+  }
+}
