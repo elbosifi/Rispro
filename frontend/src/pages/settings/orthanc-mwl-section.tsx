@@ -123,8 +123,18 @@ type ReconcileResponse = {
     staleExtras: number[];
     payloadMismatches: number[];
     notSynced: number[];
+    liveCheck: { ok: boolean; error: string | null };
+    liveMissing: number[];
+    liveIdMismatches: Array<{
+      bookingId: number;
+      storedExternalWorklistId: string | null;
+      liveWorklistId: string;
+    }>;
+    liveDuplicates: Array<{ bookingId: number; worklistIds: string[] }>;
     repaired: {
       enqueuedBookingIds: number[];
+      adoptedBookingIds: number[];
+      skippedAdoptions: Array<{ bookingId: number; reason: string }>;
       failedBookingIds: Array<{ bookingId: number; error: string }>;
     };
   };
@@ -301,10 +311,15 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
         result.missing.length +
         result.staleExtras.length +
         result.payloadMismatches.length +
-        result.notSynced.length;
+        result.notSynced.length +
+        result.liveMissing.length +
+        result.liveIdMismatches.length +
+        result.liveDuplicates.length;
       const repaired = result.repaired.enqueuedBookingIds.length;
-      const suffix = variables.apply ? ` Re-enqueued: ${repaired}.` : "";
-      setStatusMessage(`Reconciliation completed. Drift candidates: ${driftCount}.${suffix}`);
+      const adopted = result.repaired.adoptedBookingIds.length;
+      const suffix = variables.apply ? ` Re-enqueued: ${repaired}. Adopted live mappings: ${adopted}.` : "";
+      const liveWarning = result.liveCheck.ok ? "" : " Live Orthanc check failed; no repairs were applied.";
+      setStatusMessage(`Reconciliation completed. Drift candidates: ${driftCount}.${suffix}${liveWarning}`);
       setTimeout(() => setStatusMessage(null), 5000);
       void refetchSummary();
     },

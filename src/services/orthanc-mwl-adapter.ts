@@ -29,8 +29,8 @@ export interface OrthancProbeResult {
   baseUrl: string;
   orthancVersion: string | null;
   worklistsRouteReachable: boolean;
-  worklistsPostSupported: boolean;
-  worklistsCreateSupported: boolean;
+  worklistsPostSupported: boolean | null;
+  worklistsCreateSupported: boolean | null;
 }
 
 export interface OrthancUpsertResult {
@@ -46,6 +46,12 @@ export interface OrthancDeleteResult {
 export interface OrthancBulkDeleteResult {
   deletedCount: number;
   failed: Array<{ worklistId: string; error: string }>;
+}
+
+export interface OrthancLiveWorklist {
+  worklistId: string;
+  accessionNumber: string | null;
+  bookingId: number | null;
 }
 
 export class OrthancSyncError extends Error {
@@ -221,14 +227,65 @@ async function loadOrthancProjection(bookingId: number): Promise<OrthancBookingP
 }
 
 function parseExternalIdFromOrthancResponse(payload: unknown): string | null {
+  if (typeof payload === "string") {
+    return normalizeOrthancWorklistId(payload);
+  }
   if (!payload || typeof payload !== "object") return null;
   const row = payload as Record<string, unknown>;
   const candidates = [row.ID, row.Id, row.id, row.uuid, row.UUID, row.Path];
   for (const candidate of candidates) {
-    const str = String(candidate || "").trim();
-    if (str) return str.replaceAll("/", "");
+    const worklistId = normalizeOrthancWorklistId(candidate);
+    if (worklistId) return worklistId;
   }
   return null;
+}
+
+function normalizeOrthancWorklistId(value: unknown): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const withoutQuery = raw.split(/[?#]/, 1)[0] || "";
+  const pathMatch = withoutQuery.match(/(?:^|\/)worklists\/([^/]+)$/i);
+  const candidate = pathMatch?.[1] || withoutQuery.replace(/^\/+|\/+$/g, "");
+  return candidate && !candidate.includes("/") ? candidate : null;
+}
+
+function extractOrthancValue(value: unknown): string | null {
+  if (typeof value === "string" || typeof value === "number") {
+    const normalized = String(value).trim();
+    return normalized || null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const extracted = extractOrthancValue(item);
+      if (extracted) return extracted;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  return extractOrthancValue(row.Value ?? row.value ?? row.Alphabetic ?? row.alphabetic);
+}
+
+function extractOrthancTagsAccessionNumber(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  const tags = row.Tags && typeof row.Tags === "object" && !Array.isArray(row.Tags)
+    ? row.Tags as Record<string, unknown>
+    : null;
+  return extractOrthancValue(tags?.AccessionNumber ?? tags?.["0008,0050"]);
+}
+
+function extractOrthancAccessionNumber(payload: unknown): string | null {
+  const tagsAccession = extractOrthancTagsAccessionNumber(payload);
+  if (tagsAccession) return tagsAccession;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  return extractOrthancValue(row.AccessionNumber ?? row["0008,0050"]);
+}
+
+function parseBookingIdFromCanonicalAccession(accessionNumber: string | null): number | null {
+  const match = String(accessionNumber || "").trim().match(/^V2-(\d+)$/i);
+  return match ? Number(match[1]) : null;
 }
 
 function extractStringCandidates(payload: unknown, values: string[]): void {
@@ -291,6 +348,110 @@ function parseBookingIdFromOrthancPayload(payload: unknown): number | null {
   return null;
 }
 
+export function sanitizeOrthancTarget(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return "invalid_or_unconfigured";
+  }
+}
+
+function verificationError(
+  worklistId: string,
+  response: FetchResponse,
+  expectedAccessionNumber: string,
+  expectedBookingId: number
+): OrthancSyncError | null {
+  if (!response.ok) {
+    const retryable = response.status === 404 || response.status === 429 || response.status >= 500;
+    return new OrthancSyncError(
+      `Orthanc worklist verification failed for ${worklistId} (status=${response.status}).`,
+      retryable,
+      response.status
+    );
+  }
+
+  const accessionNumber = extractOrthancTagsAccessionNumber(response.json);
+  if (accessionNumber !== expectedAccessionNumber) {
+    return new OrthancSyncError(
+      `Orthanc worklist verification returned an unexpected accession for ${worklistId}.`,
+      false,
+      response.status
+    );
+  }
+
+  const parsedBookingId = parseBookingIdFromCanonicalAccession(accessionNumber)
+    ?? parseBookingIdFromOrthancPayload(response.json);
+  if (parsedBookingId !== expectedBookingId) {
+    return new OrthancSyncError(
+      `Orthanc worklist verification returned unusable booking identity for ${worklistId}.`,
+      false,
+      response.status
+    );
+  }
+
+  return null;
+}
+
+async function verifyOrthancWorklist(
+  worklistId: string,
+  bookingId: number,
+  accessionNumber: string,
+  settings: ResolvedOrthancSettings
+): Promise<void> {
+  const detail = await orthancFetch(`/worklists/${encodeURIComponent(worklistId)}`, { settings });
+  const error = verificationError(worklistId, detail, accessionNumber, bookingId);
+  if (error) throw error;
+}
+
+async function listLiveOrthancWorklists(settings: ResolvedOrthancSettings): Promise<OrthancLiveWorklist[]> {
+  const worklists = await orthancFetch("/worklists", { settings });
+  if (!worklists.ok || !Array.isArray(worklists.json)) {
+    throw new OrthancSyncError(
+      `Orthanc worklist enumeration failed (status=${worklists.status}).`,
+      worklists.status >= 500 || worklists.status === 429 || worklists.status === 404,
+      worklists.status
+    );
+  }
+
+  const entries: OrthancLiveWorklist[] = [];
+  for (const rawEntry of worklists.json) {
+    const worklistId = parseExternalIdFromOrthancResponse(rawEntry);
+    if (!worklistId) {
+      throw new OrthancSyncError("Orthanc worklist enumeration returned an entry without a usable ID.", false, worklists.status);
+    }
+    const detail = await orthancFetch(`/worklists/${encodeURIComponent(worklistId)}`, { settings });
+    if (!detail.ok) {
+      throw new OrthancSyncError(
+        `Orthanc worklist inspection failed for ${worklistId} (status=${detail.status}).`,
+        detail.status >= 500 || detail.status === 429 || detail.status === 404,
+        detail.status
+      );
+    }
+    const accessionNumber = extractOrthancAccessionNumber(detail.json);
+    entries.push({
+      worklistId,
+      accessionNumber,
+      bookingId: parseBookingIdFromCanonicalAccession(accessionNumber) ?? parseBookingIdFromOrthancPayload(detail.json),
+    });
+  }
+  return entries;
+}
+
+export async function enumerateLiveOrthancWorklists(): Promise<OrthancLiveWorklist[]> {
+  return listLiveOrthancWorklists(await resolveOrthancSettings());
+}
+
+async function findLiveWorklistsForBooking(
+  bookingId: number,
+  accessionNumber: string,
+  settings: ResolvedOrthancSettings
+): Promise<OrthancLiveWorklist[]> {
+  const worklists = await listLiveOrthancWorklists(settings);
+  return worklists.filter((entry) => entry.bookingId === bookingId && entry.accessionNumber === accessionNumber);
+}
+
 async function deleteOrthancWorklistById(
   worklistId: string,
   settings: ResolvedOrthancSettings
@@ -313,6 +474,7 @@ async function deleteOrthancWorklistById(
 
 async function cleanupObsoleteOrthancEntries(
   bookingId: number,
+  accessionNumber: string,
   preservedWorklistId: string,
   settings: ResolvedOrthancSettings
 ): Promise<void> {
@@ -323,6 +485,19 @@ async function cleanupObsoleteOrthancEntries(
   ).filter((candidateId) => candidateId !== preservedWorklistId);
 
   for (const candidateId of obsoleteIds) {
+    const detail = await orthancFetch(`/worklists/${encodeURIComponent(candidateId)}`, { settings });
+    if (detail.status === 404) continue;
+    if (!detail.ok) {
+      throw new OrthancSyncError(
+        `Orthanc obsolete worklist inspection failed for ${candidateId} (status=${detail.status}).`,
+        detail.status >= 500 || detail.status === 429,
+        detail.status
+      );
+    }
+    const candidateAccession = extractOrthancAccessionNumber(detail.json);
+    const candidateBookingId = parseBookingIdFromCanonicalAccession(candidateAccession)
+      ?? parseBookingIdFromOrthancPayload(detail.json);
+    if (candidateAccession !== accessionNumber || candidateBookingId !== bookingId) continue;
     await deleteOrthancWorklistById(candidateId, settings);
   }
 }
@@ -337,28 +512,15 @@ export async function probeOrthancWorklistApi(): Promise<OrthancProbeResult> {
   const worklists = await orthancFetch("/worklists", { settings });
   const worklistsRouteReachable = [200, 401, 403].includes(worklists.status);
 
-  // Check write capabilities
-  const worklistsPost = await orthancFetch("/worklists", {
-    method: "POST",
-    body: {},
-    settings,
-  });
-  const worklistsPostSupported = worklistsPost.status !== 405;
-
-  const worklistsCreate = await orthancFetch("/worklists/create", {
-    method: "POST",
-    body: {},
-    settings,
-  });
-  const worklistsCreateSupported = worklistsCreate.status !== 405;
-
   return {
     ok: system.ok || worklistsRouteReachable,
-    baseUrl: settings.baseUrl,
+    baseUrl: sanitizeOrthancTarget(settings.baseUrl),
     orthancVersion: orthancVersion || null,
     worklistsRouteReachable,
-    worklistsPostSupported,
-    worklistsCreateSupported,
+    // Writing a malformed worklist just to probe capability creates noisy Orthanc errors.
+    // Actual upserts remain the authoritative compatibility check.
+    worklistsPostSupported: null,
+    worklistsCreateSupported: null,
   };
 }
 
@@ -374,12 +536,64 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   }
 
   const stableId = buildStableOrthancWorklistId(bookingId);
+  const accessionNumber = formatV2AccessionNumber(projection.id);
   const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL", settings);
 
   // For new worklists plugin, strip custom fields that aren't valid DICOM tags
   const { RISproProjection, ...dicomOnlyPayload } = fullPayload;
 
-  // Try primary method based on strategy preference
+  const existingLiveWorklists = await findLiveWorklistsForBooking(bookingId, accessionNumber, settings);
+  if (existingLiveWorklists.length > 1) {
+    throw new OrthancSyncError(
+      `Orthanc has multiple live worklists for booking ${bookingId}; refusing to create another.`,
+      false,
+      null
+    );
+  }
+
+  const finalizeVerifiedWrite = async (
+    externalWorklistId: string,
+    strategy: string
+  ): Promise<OrthancUpsertResult> => {
+    await verifyOrthancWorklist(externalWorklistId, bookingId, accessionNumber, settings);
+    // Never remove a prior projection until the replacement is proven readable and attributable.
+    await cleanupObsoleteOrthancEntries(bookingId, accessionNumber, externalWorklistId, settings);
+    return { externalWorklistId, strategy };
+  };
+
+  if (existingLiveWorklists.length === 1) {
+    const existingWorklistId = existingLiveWorklists[0]!.worklistId;
+    const existingResult = await orthancFetch(`/worklists/${encodeURIComponent(existingWorklistId)}`, {
+      method: "PUT",
+      body: fullPayload,
+      settings,
+    });
+    if (!(existingResult.ok || existingResult.status === 201 || existingResult.status === 204)) {
+      const retryable = existingResult.status >= 500 || existingResult.status === 429;
+      throw new OrthancSyncError(
+        `Orthanc upsert failed while reusing live worklist ${existingWorklistId} (status=${existingResult.status}).`,
+        retryable,
+        existingResult.status
+      );
+    }
+    return finalizeVerifiedWrite(existingWorklistId, "put_by_live_id");
+  }
+
+  const resolvePostCreatedWorklistId = async (responsePayload: unknown): Promise<string> => {
+    const responseId = parseExternalIdFromOrthancResponse(responsePayload);
+    if (responseId) return responseId;
+    const matches = await findLiveWorklistsForBooking(bookingId, accessionNumber, settings);
+    if (matches.length !== 1) {
+      throw new OrthancSyncError(
+        `Orthanc POST succeeded but did not return one unambiguous worklist ID for booking ${bookingId}.`,
+        true,
+        null
+      );
+    }
+    return matches[0]!.worklistId;
+  };
+
+  // Try primary method based on strategy preference.
   const primaryMethod = settings.strategyPreference === "post_first" ? "POST" : "PUT";
   const primaryPath = primaryMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
   const primaryPayload = primaryMethod === "PUT" ? fullPayload : fullPayload; // Both use full payload with metadata
@@ -392,12 +606,9 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
 
   if (primaryResult.ok || primaryResult.status === 201 || primaryResult.status === 204) {
     if (primaryMethod === "PUT") {
-      return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
+      return finalizeVerifiedWrite(stableId, "put_by_stable_id");
     } else {
-      const parsed = parseExternalIdFromOrthancResponse(primaryResult.json);
-      const externalWorklistId = parsed || stableId;
-      await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
-      return { externalWorklistId, strategy: "post_collection" };
+      return finalizeVerifiedWrite(await resolvePostCreatedWorklistId(primaryResult.json), "post_collection");
     }
   }
 
@@ -414,12 +625,9 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
     });
     if (fallbackResult.ok || fallbackResult.status === 201 || fallbackResult.status === 204) {
       if (fallbackMethod === "PUT") {
-        return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
+        return finalizeVerifiedWrite(stableId, "put_by_stable_id");
       } else {
-        const parsed = parseExternalIdFromOrthancResponse(fallbackResult.json);
-        const externalWorklistId = parsed || stableId;
-        await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
-        return { externalWorklistId, strategy: "post_collection" };
+        return finalizeVerifiedWrite(await resolvePostCreatedWorklistId(fallbackResult.json), "post_collection");
       }
     }
 
@@ -432,14 +640,11 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
         settings,
       });
       if (altResult.ok || altResult.status === 201 || altResult.status === 204) {
-        const parsed = parseExternalIdFromOrthancResponse(altResult.json);
-        const externalWorklistId = parsed || stableId;
-        await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
-        return { externalWorklistId, strategy: "post_create" };
+        return finalizeVerifiedWrite(await resolvePostCreatedWorklistId(altResult.json), "post_create");
       }
       const retryable = altResult.status >= 500 || altResult.status === 429;
       throw new OrthancSyncError(
-        `Orthanc upsert failed via POST /worklists/create (status=${altResult.status}): ${altResult.text}`,
+        `Orthanc upsert failed via POST /worklists/create (status=${altResult.status}).`,
         retryable,
         altResult.status
       );
@@ -448,7 +653,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
     // If fallback also fails with method not allowed, this is likely a server configuration issue
     const retryable = fallbackResult.status >= 500 || fallbackResult.status === 429;
     throw new OrthancSyncError(
-      `Orthanc upsert failed via ${fallbackMethod} ${fallbackPath} (status=${fallbackResult.status}): ${fallbackResult.text}`,
+      `Orthanc upsert failed via ${fallbackMethod} ${fallbackPath} (status=${fallbackResult.status}).`,
       retryable,
       fallbackResult.status
     );
@@ -456,7 +661,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
 
   const retryable = primaryResult.status >= 500 || primaryResult.status === 429;
   throw new OrthancSyncError(
-    `Orthanc upsert failed via ${primaryMethod} ${primaryPath} (status=${primaryResult.status}): ${primaryResult.text}`,
+    `Orthanc upsert failed via ${primaryMethod} ${primaryPath} (status=${primaryResult.status}).`,
     retryable,
     primaryResult.status
   );
@@ -499,42 +704,22 @@ export async function deleteOrthancEntriesForBookingIds(bookingIds: number[]): P
   }
 
   const settings = await resolveOrthancSettings();
-  const worklists = await orthancFetch("/worklists", { settings });
-  if (!worklists.ok || !Array.isArray(worklists.json)) {
-    throw new OrthancSyncError(
-      `Orthanc worklist enumeration failed (status=${worklists.status}).`,
-      worklists.status >= 500 || worklists.status === 429,
-      worklists.status
-    );
-  }
+  const worklists = await listLiveOrthancWorklists(settings);
 
   const failed: Array<{ worklistId: string; error: string }> = [];
   let deletedCount = 0;
 
-  for (const entry of worklists.json) {
-    const worklistId = parseExternalIdFromOrthancResponse(entry) || String(entry || "").trim();
-    if (!worklistId) continue;
-
-    const detail = await orthancFetch(`/worklists/${encodeURIComponent(worklistId)}`, { settings });
-    if (!detail.ok) {
-      failed.push({
-        worklistId,
-        error: `Failed to inspect worklist (status=${detail.status}).`,
-      });
-      continue;
-    }
-
-    const bookingId = parseBookingIdFromOrthancPayload(detail.json);
-    if (!bookingId || !targetIds.has(bookingId)) {
+  for (const entry of worklists) {
+    if (!entry.bookingId || !targetIds.has(entry.bookingId)) {
       continue;
     }
 
     try {
-      await deleteOrthancWorklistById(worklistId, settings);
+      await deleteOrthancWorklistById(entry.worklistId, settings);
       deletedCount += 1;
     } catch (error) {
       failed.push({
-        worklistId,
+        worklistId: entry.worklistId,
         error: error instanceof Error ? error.message : "delete_failed",
       });
     }

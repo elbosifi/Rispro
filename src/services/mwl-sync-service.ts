@@ -568,6 +568,79 @@ export async function markOrthancOutboxFailure(
   }
 }
 
+export async function adoptLiveOrthancSyncProjection(
+  bookingId: number,
+  externalWorklistId: string,
+  payloadHash: string | null
+): Promise<{ adopted: boolean; reason?: string }> {
+  const normalizedId = String(externalWorklistId || "").trim();
+  if (!Number.isInteger(bookingId) || bookingId <= 0 || !normalizedId || normalizedId.includes("/")) {
+    throw new Error("Cannot adopt an invalid Orthanc MWL projection identity.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const activeOutbox = await client.query<{ exists: boolean }>(
+      `
+        select exists(
+          select 1
+          from external_mwl_outbox
+          where booking_id = $1::bigint
+            and external_system = 'orthanc'
+            and status in ('pending', 'processing')
+        )
+      `,
+      [bookingId]
+    );
+    if (activeOutbox.rows[0]?.exists) {
+      await client.query("rollback");
+      return { adopted: false, reason: "active_outbox" };
+    }
+
+    const current = await client.query<{ sync_status: OrthancSyncState["syncStatus"] }>(
+      `
+        select sync_status
+        from external_mwl_sync
+        where booking_id = $1::bigint and external_system = 'orthanc'
+        for update
+      `,
+      [bookingId]
+    );
+    if (current.rows[0] && current.rows[0].sync_status !== "synced") {
+      await client.query("rollback");
+      return { adopted: false, reason: "sync_not_synced" };
+    }
+
+    await client.query(
+      `
+        insert into external_mwl_sync (
+          booking_id, external_system, external_worklist_id, sync_status,
+          payload_hash, last_synced_at, last_attempt_at, last_error, deleted_at, updated_at
+        )
+        values ($1::bigint, 'orthanc', $2, 'synced', $3, now(), now(), null, null, now())
+        on conflict (booking_id, external_system)
+        do update set
+          external_worklist_id = excluded.external_worklist_id,
+          payload_hash = coalesce(excluded.payload_hash, external_mwl_sync.payload_hash),
+          last_synced_at = now(),
+          last_attempt_at = now(),
+          last_error = null,
+          deleted_at = null,
+          updated_at = now()
+      `,
+      [bookingId, normalizedId, payloadHash]
+    );
+    await client.query("commit");
+    return { adopted: true };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getOrthancSyncState(bookingId: number): Promise<OrthancSyncState | null> {
   const { rows } = await pool.query<{
     booking_id: number;

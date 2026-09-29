@@ -1,7 +1,12 @@
 import { pool } from "../db/pool.js";
-import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
+import { adoptLiveOrthancSyncProjection, enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
 import { resolveMwlEligibilityForBookings } from "./mwl-eligibility-service.js";
-import { deleteOrthancEntriesForBookingIds, probeOrthancWorklistApi } from "./orthanc-mwl-adapter.js";
+import {
+  deleteOrthancEntriesForBookingIds,
+  enumerateLiveOrthancWorklists,
+  probeOrthancWorklistApi,
+  type OrthancLiveWorklist,
+} from "./orthanc-mwl-adapter.js";
 import { createHash } from "crypto";
 
 export interface OrthancMwlReconcileInput {
@@ -20,6 +25,7 @@ interface ActiveBookingRow {
 interface SyncRow {
   booking_id: number;
   sync_status: "pending" | "in_progress" | "synced" | "failed" | "deleted";
+  external_worklist_id: string | null;
   payload_hash: string | null;
   last_synced_at: string | null;
 }
@@ -49,6 +55,11 @@ interface ExpectedHashRow {
   updated_at: string;
 }
 
+interface LiveCheckResult {
+  entries: OrthancLiveWorklist[] | null;
+  error: string | null;
+}
+
 export interface OrthancMwlReconcileResult {
   window: { dateFrom: string; dateTo: string };
   apply: boolean;
@@ -57,15 +68,31 @@ export interface OrthancMwlReconcileResult {
     baseUrl: string;
     orthancVersion: string | null;
     worklistsRouteReachable: boolean;
-    worklistsPostSupported: boolean;
-    worklistsCreateSupported: boolean;
+    worklistsPostSupported: boolean | null;
+    worklistsCreateSupported: boolean | null;
   } | null;
   missing: number[];
   staleExtras: number[];
   payloadMismatches: number[];
   notSynced: number[];
+  liveCheck: {
+    ok: boolean;
+    error: string | null;
+  };
+  liveMissing: number[];
+  liveIdMismatches: Array<{
+    bookingId: number;
+    storedExternalWorklistId: string | null;
+    liveWorklistId: string;
+  }>;
+  liveDuplicates: Array<{
+    bookingId: number;
+    worklistIds: string[];
+  }>;
   repaired: {
     enqueuedBookingIds: number[];
+    adoptedBookingIds: number[];
+    skippedAdoptions: Array<{ bookingId: number; reason: string }>;
     failedBookingIds: Array<{ bookingId: number; error: string }>;
   };
 }
@@ -127,7 +154,7 @@ export async function reconcileOrthancMwlProjection(
   const apply = Boolean(input.apply);
   const limit = Number.isInteger(input.limit) && (input.limit as number) > 0 ? Number(input.limit) : 5000;
 
-  const [activeBookingsResult, syncRowsResult, expectedHashResult, orthancProbe] = await Promise.all([
+  const [activeBookingsResult, syncRowsResult, expectedHashResult, orthancProbe, liveCheckResult] = await Promise.all([
     pool.query<ActiveBookingRow>(
       `
         select
@@ -147,6 +174,7 @@ export async function reconcileOrthancMwlProjection(
         select
           s.booking_id,
           s.sync_status,
+          s.external_worklist_id,
           s.payload_hash,
           s.last_synced_at::text as last_synced_at
         from external_mwl_sync s
@@ -194,6 +222,12 @@ export async function reconcileOrthancMwlProjection(
       [dateFrom, dateTo, limit]
     ),
     probeOrthancWorklistApi().catch(() => null),
+    enumerateLiveOrthancWorklists()
+      .then((entries): LiveCheckResult => ({ entries, error: null }))
+      .catch((error): LiveCheckResult => ({
+        entries: null,
+        error: error instanceof Error ? error.message : "orthanc_live_check_failed",
+      })),
   ]);
 
   const eligibilityByBookingId = await resolveMwlEligibilityForBookings(toSortedUniqueIds([
@@ -211,6 +245,16 @@ export async function reconcileOrthancMwlProjection(
   const expectedHashByBookingId = new Map<number, string>();
   for (const row of expectedHashResult.rows) {
     expectedHashByBookingId.set(Number(row.booking_id), computeExpectedPayloadHash(row));
+  }
+
+  const liveByBookingId = new Map<number, OrthancLiveWorklist[]>();
+  if (liveCheckResult.entries) {
+    for (const entry of liveCheckResult.entries) {
+      if (!entry.bookingId || !entry.accessionNumber) continue;
+      const current = liveByBookingId.get(entry.bookingId) || [];
+      current.push(entry);
+      liveByBookingId.set(entry.bookingId, current);
+    }
   }
 
   const missing: number[] = [];
@@ -244,20 +288,83 @@ export async function reconcileOrthancMwlProjection(
       })
   );
 
+  const liveMissing: number[] = [];
+  const liveIdMismatches: OrthancMwlReconcileResult["liveIdMismatches"] = [];
+  const liveDuplicates: OrthancMwlReconcileResult["liveDuplicates"] = [];
+  if (liveCheckResult.entries) {
+    for (const bookingId of activeIds) {
+      const liveEntries = liveByBookingId.get(bookingId) || [];
+      if (liveEntries.length === 0) {
+        liveMissing.push(bookingId);
+        continue;
+      }
+      if (liveEntries.length > 1) {
+        liveDuplicates.push({
+          bookingId,
+          worklistIds: liveEntries.map((entry) => entry.worklistId).sort(),
+        });
+        continue;
+      }
+      const sync = syncByBookingId.get(bookingId);
+      const liveWorklistId = liveEntries[0]!.worklistId;
+      if (sync?.external_worklist_id !== liveWorklistId) {
+        liveIdMismatches.push({
+          bookingId,
+          storedExternalWorklistId: sync?.external_worklist_id ?? null,
+          liveWorklistId,
+        });
+      }
+    }
+  }
+
   const repairCandidates = toSortedUniqueIds([
     ...missing,
     ...payloadMismatches,
     ...notSynced,
     ...staleExtras,
+    ...liveMissing,
   ]);
 
   const repaired = {
     enqueuedBookingIds: [] as number[],
+    adoptedBookingIds: [] as number[],
+    skippedAdoptions: [] as Array<{ bookingId: number; reason: string }>,
     failedBookingIds: [] as Array<{ bookingId: number; error: string }>,
   };
 
-  if (apply) {
+  if (apply && liveCheckResult.entries) {
+    for (const mismatch of liveIdMismatches) {
+      try {
+        const result = await adoptLiveOrthancSyncProjection(
+          mismatch.bookingId,
+          mismatch.liveWorklistId,
+          expectedHashByBookingId.get(mismatch.bookingId) ?? null
+        );
+        if (result.adopted) {
+          repaired.adoptedBookingIds.push(mismatch.bookingId);
+        } else {
+          repaired.skippedAdoptions.push({ bookingId: mismatch.bookingId, reason: result.reason || "not_adopted" });
+        }
+      } catch (error) {
+        repaired.failedBookingIds.push({
+          bookingId: mismatch.bookingId,
+          error: (error as Error).message || "adopt_failed",
+        });
+      }
+    }
+
+    const duplicateBookingIds = new Set(liveDuplicates.map((entry) => entry.bookingId));
+    const mappingRepairBookingIds = new Set(
+      liveIdMismatches
+        .map((entry) => entry.bookingId)
+        .filter((bookingId) => {
+          const sync = syncByBookingId.get(bookingId);
+          return !sync || sync.sync_status === "synced";
+        })
+    );
     for (const bookingId of repairCandidates) {
+      // Duplicates require operator review. Do not enqueue an operation that could add another one.
+      if (duplicateBookingIds.has(bookingId) || mappingRepairBookingIds.has(bookingId)) continue;
       try {
         const result = await enqueueOrthancSyncForBooking(bookingId, eligibilityByBookingId.get(bookingId));
         if (result.enqueued) {
@@ -289,6 +396,13 @@ export async function reconcileOrthancMwlProjection(
     staleExtras,
     payloadMismatches: toSortedUniqueIds(payloadMismatches),
     notSynced: toSortedUniqueIds(notSynced),
+    liveCheck: {
+      ok: Boolean(liveCheckResult.entries),
+      error: liveCheckResult.error,
+    },
+    liveMissing: toSortedUniqueIds(liveMissing),
+    liveIdMismatches: liveIdMismatches.sort((a, b) => a.bookingId - b.bookingId),
+    liveDuplicates: liveDuplicates.sort((a, b) => a.bookingId - b.bookingId),
     repaired,
   };
 }

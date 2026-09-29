@@ -1,11 +1,13 @@
 import pg from "pg";
 import { env } from "../config/env.js";
+import { getRisproRuntimeIdentity } from "../services/rispro-runtime-identity.js";
 
 const { Pool } = pg;
 
 const poolConfig: pg.PoolConfig = {
   connectionString: env.databaseUrl,
-  max: env.dbPoolMax
+  max: env.dbPoolMax,
+  application_name: getRisproRuntimeIdentity().postgresApplicationName,
 };
 
 // Support local Unix socket connections for development

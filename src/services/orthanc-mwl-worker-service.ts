@@ -9,8 +9,11 @@ import {
   deleteBookingFromOrthanc,
   OrthancSyncError,
   probeOrthancWorklistApi,
+  sanitizeOrthancTarget,
   upsertBookingToOrthanc,
 } from "./orthanc-mwl-adapter.js";
+import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
+import { getRisproRuntimeIdentity } from "./rispro-runtime-identity.js";
 
 export interface OrthancMwlWorker {
   stop(): Promise<void>;
@@ -19,6 +22,23 @@ export interface OrthancMwlWorker {
 let intervalHandle: NodeJS.Timeout | null = null;
 let isTickRunning = false;
 let stopped = false;
+
+async function orthancMwlLogIdentity(): Promise<Record<string, string>> {
+  const runtime = getRisproRuntimeIdentity();
+  let orthancTarget = "unavailable";
+  try {
+    orthancTarget = sanitizeOrthancTarget((await resolveOrthancSettings()).baseUrl);
+  } catch {
+    // The settings error is logged by the caller without exposing configuration details.
+  }
+  return {
+    risproInstanceId: runtime.instanceId,
+    processRole: runtime.processRole,
+    hostname: runtime.hostname,
+    buildCommitSha: runtime.buildCommitSha,
+    orthancTarget,
+  };
+}
 
 function computeRetryDelaySeconds(attemptCount: number, retryable: boolean): number {
   if (!retryable) {
@@ -29,6 +49,7 @@ function computeRetryDelaySeconds(attemptCount: number, retryable: boolean): num
 }
 
 async function processOrthancOutboxJob(job: OrthancOutboxJob): Promise<void> {
+  const identity = await orthancMwlLogIdentity();
   try {
     console.info(
       JSON.stringify({
@@ -37,6 +58,7 @@ async function processOrthancOutboxJob(job: OrthancOutboxJob): Promise<void> {
         bookingId: job.bookingId,
         operation: job.operation,
         attemptCount: job.attemptCount,
+        ...identity,
       })
     );
 
@@ -51,6 +73,7 @@ async function processOrthancOutboxJob(job: OrthancOutboxJob): Promise<void> {
           operation: job.operation,
           strategy: result.strategy,
           externalWorklistId: result.externalWorklistId,
+          ...identity,
         })
       );
       return;
@@ -66,6 +89,7 @@ async function processOrthancOutboxJob(job: OrthancOutboxJob): Promise<void> {
         operation: job.operation,
         strategy: result.strategy,
         externalWorklistId: result.externalWorklistId,
+          ...identity,
       })
     );
   } catch (error) {
@@ -85,6 +109,7 @@ async function processOrthancOutboxJob(job: OrthancOutboxJob): Promise<void> {
         retryDelaySeconds,
         statusCode: normalized.statusCode,
         error: normalized.message,
+        ...identity,
       })
     );
   }
@@ -125,6 +150,7 @@ export async function startOrthancMwlWorker(options?: {
   const intervalMs = Math.max(1000, options?.intervalMs ?? 5000);
   const batchSize = Math.max(1, options?.batchSize ?? 20);
   const enabled = await isOrthancMwlEnabled();
+  const identity = await orthancMwlLogIdentity();
 
   stopped = false;
   const probe = enabled
@@ -133,6 +159,7 @@ export async function startOrthancMwlWorker(options?: {
           JSON.stringify({
             type: "orthanc_mwl_probe_failed",
             error: (error as Error).message || "probe_failed",
+            ...identity,
           })
         );
         return null;
@@ -143,8 +170,8 @@ export async function startOrthancMwlWorker(options?: {
     console.info(
       JSON.stringify({
         type: "orthanc_mwl_probe",
+        ...identity,
         ok: probe.ok,
-        baseUrl: probe.baseUrl,
         orthancVersion: probe.orthancVersion,
         worklistsRouteReachable: probe.worklistsRouteReachable,
         worklistsPostSupported: probe.worklistsPostSupported,
