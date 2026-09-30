@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { invalidateCache } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
 import {
   buildNameDictionaryLookup,
@@ -90,6 +91,7 @@ export async function upsertNameDictionary(
     changedByUserId: currentUserId
   });
 
+  invalidateCache("name_dictionary");
   return entry;
 }
 
@@ -151,6 +153,7 @@ export async function updateNameDictionaryEntry(
     changedByUserId: currentUserId
   });
 
+  invalidateCache("name_dictionary");
   return updated;
 }
 
@@ -188,6 +191,7 @@ export async function deleteNameDictionaryEntry(
     changedByUserId: currentUserId
   });
 
+  invalidateCache("name_dictionary");
   return removed;
 }
 

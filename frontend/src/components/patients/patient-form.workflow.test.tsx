@@ -155,15 +155,15 @@ describe("PatientForm workflow hardening", () => {
     expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).readOnly).toBe(true);
   });
 
-  it("allows super admins to manually edit the English name", async () => {
+  it("keeps the English name readonly for super admins", async () => {
     const user = userEvent.setup();
     authMock.user = { role: "super_admin" };
     renderPatientForm({ mode: "create" });
 
     const englishInput = screen.getByLabelText(/English Full Name/i) as HTMLInputElement;
-    expect(englishInput.readOnly).toBe(false);
+    expect(englishInput.readOnly).toBe(true);
     await user.type(englishInput, "Manual English Name");
-    expect(englishInput.value).toBe("Manual English Name");
+    expect(englishInput.value).toBe("");
   });
 
   it("shows post-success modal with 3 actions after create", async () => {
@@ -588,6 +588,7 @@ describe("PatientForm workflow hardening", () => {
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
+    expect(await screen.findByText("زيد")).toBeTruthy();
     await user.tab();
     await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
@@ -599,19 +600,26 @@ describe("PatientForm workflow hardening", () => {
     expect(createPatient).not.toHaveBeenCalled();
   });
 
-  it("allows save after manual English-name correction even when transliteration has unresolved tokens", async () => {
+  it("adds a missing dictionary token, regenerates the English full name, and allows registration", async () => {
     const user = userEvent.setup();
-    authMock.user = { role: "super_admin" };
     vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({
       entries: [
         { arabicText: "محمد", englishText: "Mohamed" },
         { arabicText: "حسن", englishText: "Hassan" }
       ]
     }));
+    vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "زيد", english_text: "Zaid" } });
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
-    await user.type(screen.getByLabelText(/English Full Name/i), "Mohamed Zaid Hassan");
+    expect(await screen.findByText("زيد")).toBeTruthy();
+    await user.type(screen.getByPlaceholderText(/English translation/i), "Zaid");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+
+    await waitFor(() => expect(upsertNameDictionaryEntry).toHaveBeenCalledWith("زيد", "Zaid"));
+    await waitFor(() => expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).value).toBe("Mohamed Zaid Hassan"));
+    expect(screen.queryByText(/Unrecognized name tokens/i)).toBeNull();
+
     await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
@@ -621,6 +629,6 @@ describe("PatientForm workflow hardening", () => {
     await waitFor(() => expect(createPatient).toHaveBeenCalled());
     const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload.englishFullName).toBe("Mohamed Zaid Hassan");
-    expect(payload.autoGenerateEnglish).toBe(false);
+    expect(payload.autoGenerateEnglish).toBe(true);
   });
 });

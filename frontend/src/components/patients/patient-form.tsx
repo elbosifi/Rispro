@@ -159,7 +159,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [duplicateFocusField, setDuplicateFocusField] = useState<FormFieldKey | null>(null);
   const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
-  const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [postCreatePatient, setPostCreatePatient] = useState<Patient | null>(null);
   const showToast = (message: string, type: "success" | "error" = "success") => {
@@ -226,7 +225,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setForm(formState);
       setOriginalNationalId(formState.identifierType === "national_id" ? formState.identifierValue : "");
       setNationalIdConfirmedByPaste(null);
-      if (existingPatient.englishFullName) setEnglishNameManuallyEdited(true);
       prevArabicTokenCountRef.current = existingPatient.arabicFullName
         ? existingPatient.arabicFullName.trim().split(/\s+/).filter(Boolean).length
         : 0;
@@ -295,7 +293,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     onSuccess: (patient) => {
       setForm(DEFAULT_FORM);
       setNationalIdConfirmedByPaste(null);
-      setEnglishNameManuallyEdited(false);
       setDuplicateFocusField(null);
       setMissingTokenInputs({});
       setLocalDictionary([]);
@@ -339,7 +336,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   });
   const mutation = isEdit ? updateMutation : createMutation;
   const canDeletePatient = user?.role === "super_admin";
-  const canEditEnglishName = user?.role === "super_admin";
 
   const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
   const normalizeIdentifierForType = (type: IdentifierType, value: string) => {
@@ -541,16 +537,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const nowEndsWithSpace = value.endsWith(" ");
     const nowTokens = value.trim().split(/\s+/).filter(Boolean);
     const tokenJustCompleted = !prevEndsWithSpace && nowEndsWithSpace;
-    const arabicNameChanged = value !== form.arabicFullName;
-
     setForm((f) => {
       const u: Partial<PatientFormState> = { arabicFullName: value };
-      // In edit mode: if Arabic name changed, reset manual flag so transliteration works
-      if (isEdit && arabicNameChanged && englishNameManuallyEdited) {
-        setEnglishNameManuallyEdited(false);
-      }
       // Generate English only when a token is completed (space typed after word)
-      if (!englishNameManuallyEdited && tokenJustCompleted) {
+      if (tokenJustCompleted) {
         const generated = generateEnglishFromDictionary(value, dictionary);
         u.englishFullName = generated.missingTokens.length === 0 ? generated.englishName : "";
       }
@@ -559,13 +549,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     prevArabicTokenCountRef.current = nowTokens.length;
   };
 
-  const handleEnglishNameChange = (v: string) => {
-    setEnglishNameManuallyEdited(true);
-    setForm((f) => ({ ...f, englishFullName: v }));
-  };
-
   const handleRegenerateEnglishName = () => {
-    setEnglishNameManuallyEdited(false);
     const r = generateEnglishFromDictionary(form.arabicFullName, dictionary);
     setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
     if (r.missingTokens.length > 0) {
@@ -623,16 +607,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       return;
     }
     const fullNameGeneration = generateEnglishFromDictionary(form.arabicFullName.trim(), dictionary);
-    if (!englishNameManuallyEdited && fullNameGeneration.missingTokens.length > 0) {
+    if (fullNameGeneration.missingTokens.length > 0) {
       const tokensLabel = fullNameGeneration.missingTokens.join(", ");
       showToast(
         language === "ar"
-          ? canEditEnglishName
-            ? `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس أو حرر الاسم الإنجليزي يدوياً.`
-            : `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس.`
-          : canEditEnglishName
-            ? `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary or edit English name manually.`
-            : `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary.`,
+          ? `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس.`
+          : `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary.`,
         "error"
       );
       englishFullNameRef.current?.focus();
@@ -694,7 +674,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       phone1: normalizePhoneInput(form.phone1),
       phone2: form.phone2 ? normalizePhoneInput(form.phone2) : undefined,
       address: form.address || undefined,
-      autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName,
+      autoGenerateEnglish: true,
       identifiers: form.identifiers
         .map((entry) => ({
           typeCode: entry.typeCode,
@@ -799,27 +779,19 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <input
               aria-label={language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}
               value={form.englishFullName}
-              onChange={(e) => {
-                if (!canEditEnglishName) return;
-                setDuplicateFocusField("englishFullName");
-                handleEnglishNameChange(e.target.value);
-              }}
-              readOnly={!canEditEnglishName}
+              readOnly
               onKeyDown={handleEnterNavigation("englishFullName")}
               dir="ltr"
               ref={englishFullNameRef}
               className={`input-premium input-ltr w-full ${isDuplicateField("englishFullName") ? duplicateFocusClass : ""}`}
             />
-            {form.arabicFullName && !englishNameManuallyEdited && (
+            {form.arabicFullName && (
               <p className={helperTextClass}>
                 {currentMissingTokens.length === 0
                   ? (language === "ar" ? "مُولّد من قاموس الأسماء." : "Generated from name dictionary.")
                   : (language === "ar" ? "توليد غير مكتمل: توجد رموز عربية غير موجودة في القاموس." : "Generation incomplete: unresolved Arabic token(s) found in dictionary lookup.")}
                 <button type="button" onClick={handleRegenerateEnglishName} className="ml-2 text-accent hover:underline">{language === "ar" ? "إعادة توليد" : "Regenerate"}</button>
               </p>
-            )}
-            {englishNameManuallyEdited && canEditEnglishName && (
-              <p className="mt-2 text-sm font-medium text-amber-600">{language === "ar" ? "تم التحرير يدوياً. لن تؤثر التغييرات على الاسم العربي." : "Manually edited. Changes to Arabic name will not override this."}</p>
             )}
           </div>
         </div>

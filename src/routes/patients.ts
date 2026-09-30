@@ -104,9 +104,7 @@ patientsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const userId: UserId = request.user.sub;
-    const payload = request.user.role === "super_admin"
-      ? request.body ?? {}
-      : { ...(request.body ?? {}), englishFullName: undefined, autoGenerateEnglish: true };
+    const payload = { ...(request.body ?? {}), englishFullName: undefined, autoGenerateEnglish: true };
     const patient = await createPatient(payload, userId);
     res.status(201).json({ patient });
   })
@@ -169,12 +167,6 @@ patientsRouter.put(
     const patientId = asOptionalString(request.params?.patientId) ?? "";
     const userId: UserId = request.user.sub;
     const payload = request.body ?? {};
-    if (request.user.role === "super_admin") {
-      const patient = await updatePatient(patientId, payload, userId);
-      res.json({ patient });
-      return;
-    }
-
     const existingPatient = await getPatientById(patientId);
     const existingEnglishName = existingPatient.english_full_name;
     if (existingEnglishName) {
@@ -182,7 +174,7 @@ patientsRouter.put(
         Object.prototype.hasOwnProperty.call(payload, "englishFullName") &&
         String(payload.englishFullName ?? "").trim() !== existingEnglishName.trim()
       ) {
-        throw new HttpError(403, "Only super admins can edit the English patient name.");
+        throw new HttpError(403, "English patient name is generated from the name dictionary and cannot be edited manually.");
       }
       const patient = await updatePatient(
         patientId,
