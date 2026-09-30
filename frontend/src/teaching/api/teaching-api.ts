@@ -327,11 +327,48 @@ export async function downloadTeachingImportTemplate(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadTeachingMaintenanceWorkbook(): Promise<void> {
-  const response = await fetch("/api/teaching/admin/questions/export.xlsx", { credentials: "include", cache: "no-store" });
+export interface TeachingMaintenanceExportFilters {
+  status?: string;
+  specialtyCode?: string;
+  domainCode?: string;
+  topicCode?: string;
+  subtopicCode?: string;
+  type?: string;
+  difficulty?: number;
+  trainingLevelCode?: string;
+  tagCode?: string;
+  sourceType?: string;
+  hasImage?: boolean;
+  imported?: boolean;
+  validationStatus?: string;
+  search?: string;
+}
+
+function maintenanceExportFilename(filters: TeachingMaintenanceExportFilters, hasFilters: boolean): string {
+  if (!hasFilters) return "rispro-teaching-question-bank-maintenance.xlsx";
+  const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const scope = [filters.status, filters.domainCode, filters.topicCode].filter((value): value is string => Boolean(value?.trim())).map(slug).filter(Boolean);
+  return `rispro-teaching-maintenance-${scope.length > 0 ? scope.join("-") : "filtered"}.xlsx`;
+}
+
+export async function downloadTeachingMaintenanceWorkbook(filters: TeachingMaintenanceExportFilters = {}): Promise<void> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) params.set(key, trimmed);
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      params.set(key, String(value));
+    } else if (typeof value === "boolean") {
+      params.set(key, String(value));
+    }
+  }
+  const query = params.toString();
+  const endpoint = `/api/teaching/admin/questions/export.xlsx${query ? `?${query}` : ""}`;
+  const response = await fetch(endpoint, { credentials: "include", cache: "no-store" });
   if (!response.ok) throw new Error("Could not export the Teaching maintenance workbook.");
   const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = "rispro-teaching-question-bank-maintenance.xlsx"; anchor.click(); URL.revokeObjectURL(url);
+  anchor.href = url; anchor.download = maintenanceExportFilename(filters, params.size > 0); anchor.click(); URL.revokeObjectURL(url);
 }
 
 export interface TeachingMaintenancePreview { workbookHash: string; summary: { total: number; unchanged: number; updateDraft: number; createDraftRevision: number; invalid: number; staleConflict: number; inReviewConflict: number; retired: number; missingQuestion: number }; topicProposals: Array<{ specialty: string; domain: string; code: string; label: string; description: string; questionCount: number; alreadyExists: boolean; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[] }>; errors: TeachingImportIssue[]; warnings: TeachingImportIssue[]; rows: Array<{ externalId: string; currentStatus: string; action: string; changedFields: string[]; warnings: TeachingImportIssue[]; errors: TeachingImportIssue[] }>; }

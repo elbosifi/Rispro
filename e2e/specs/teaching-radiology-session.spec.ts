@@ -205,6 +205,15 @@ test("Teaching radiology sessions prioritize context, images, and scalable navig
   await page.getByRole("button", { name: "Submit answer" }).click();
   await expect(page.getByRole("heading", { name: "Incorrect" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Teaching point" })).toBeVisible();
+  const selectedIncorrectOption = page.getByRole("radio").first().locator("xpath=..");
+  const answerStateColors = await selectedIncorrectOption.evaluate((element) => ({
+    error: getComputedStyle(element).getPropertyValue("--state-error-bg").trim(),
+    success: getComputedStyle(element).getPropertyValue("--state-success-bg").trim(),
+  }));
+  await expect(selectedIncorrectOption).toHaveCSS("background-color", answerStateColors.error);
+  const correctAnswerText = (await page.getByText(/Correct answer:/).textContent())!.split(":").slice(1).join(":").trim();
+  const correctOption = page.getByRole("group", { name: "Answer options" }).locator("label").filter({ hasText: correctAnswerText });
+  await expect(correctOption).toHaveCSS("background-color", answerStateColors.success);
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
   await page.getByRole("heading", { name: "Incorrect" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("teaching-radiology-study-feedback.png") });

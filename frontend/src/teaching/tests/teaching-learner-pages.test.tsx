@@ -226,6 +226,7 @@ describe("Teaching learner pages", () => {
     fireEvent.click(afterFirstAnswer[1]!);
     await waitFor(() => expect(learnerApi.saveExamResponse).toHaveBeenLastCalledWith(42, 1, "B"));
     expect(screen.queryByRole("heading", { name: "Correct" })).toBeNull();
+    expect((screen.getByRole("radio", { name: /B\.\s*Beta/ }).closest("label") as HTMLLabelElement).style.backgroundColor).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Mark question" }));
     await waitFor(() => expect(learnerApi.setBookmark).toHaveBeenCalledWith(501, true));
@@ -242,6 +243,8 @@ describe("Teaching learner pages", () => {
     expect(await screen.findByRole("heading", { name: "Incorrect" })).toBeTruthy();
     expect(screen.getByText((_content, element) => element?.tagName === "P" && element.textContent === "Correct answer: A. Alpha")).toBeTruthy();
     expect(screen.getByText("Synthetic explanation after submission.")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: /A\.\s*Alpha/ }).closest("label") as HTMLLabelElement).style.backgroundColor).toBe("var(--state-success-bg)");
+    expect((screen.getByRole("radio", { name: /B\.\s*Beta/ }).closest("label") as HTMLLabelElement).style.backgroundColor).toBe("var(--state-error-bg)");
   });
 
   it("clears the saved-note indication when the draft changes and clears saved and draft note state together", async () => {
@@ -424,6 +427,29 @@ describe("Teaching learner pages", () => {
     const feedback = screen.getByRole("heading", { name: "Incorrect" }).parentElement;
     const feedbackText = feedback?.textContent ?? "";
     expect(feedbackText.indexOf("Review the key finding.")).toBeLessThan(feedbackText.indexOf("Synthetic explanation after submission."));
+  });
+
+  it("marks a correctly answered question with light green confirmation", async () => {
+    const submittedSession = sessionFixture("submitted", "A");
+    learnerApi.fetchSession.mockResolvedValue({
+      ...submittedSession,
+      mode: "study",
+      progress: { ...submittedSession.progress, correct: 1, incorrect: 0, scorePercent: 50, answeredAccuracy: 100 },
+    });
+    const correctQuestion = questionFixture(true, "A");
+    learnerApi.fetchQuestion.mockResolvedValue({
+      ...correctQuestion,
+      feedback: { ...correctQuestion.feedback!, isCorrect: true, selectedOptionKey: "A" },
+    });
+    renderWithProviders(
+      <Routes><Route path="/teaching/qbank/session/:sessionId" element={<TeachingSessionPage />} /></Routes>,
+      "/teaching/qbank/session/42",
+    );
+
+    expect(await screen.findByRole("heading", { name: "Correct" })).toBeTruthy();
+    const correctAnswer = screen.getByRole("radio", { name: /A\.\s*Alpha/ }).closest("label") as HTMLLabelElement;
+    expect(correctAnswer.style.backgroundColor).toBe("var(--state-success-bg)");
+    expect(correctAnswer.style.borderColor).toBe("var(--state-success-border)");
   });
 
   it("shows empty history with a path to create the first session", async () => {

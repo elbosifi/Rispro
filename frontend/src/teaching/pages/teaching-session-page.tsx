@@ -230,21 +230,37 @@ export function TeachingSessionPage() {
 
         <fieldset disabled={!canAnswer || answerMutation.isPending || responseMutation.isPending} className="min-w-0 space-y-2" aria-label="Answer options">
           <legend className="mb-2 text-sm font-semibold text-foreground">Choose one answer</legend>
-          {question.options.map((option) => (
-            <label key={option.key} className={`flex min-h-16 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm leading-6 transition-colors hover:border-accent/60 hover:bg-muted/40 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50 sm:gap-4 sm:p-4 ${selectedChoice === option.key ? "border-accent bg-accent/5 ring-1 ring-accent/30" : "border-border bg-card"}`}>
-              <input
-                type="radio"
-                name="teaching-answer"
-                value={option.key}
-                checked={selectedChoice === option.key}
-                onChange={() => isExam
-                  ? saveExamChoice(option.key)
-                  : setChoiceState({ questionId: question.questionId, key: option.key })}
-                className="mt-1 h-5 w-5 shrink-0 accent-accent"
-              />
-              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words"><span className="me-1 font-semibold">{option.key}.</span> {option.text}</span>
-            </label>
-          ))}
+          {question.options.map((option) => {
+            const feedback = question.feedback;
+            const isCorrectOption = feedback?.correctOption?.key === option.key
+              || (feedback?.isCorrect === true && feedback.selectedOptionKey === option.key);
+            const isIncorrectSelection = feedback?.isCorrect === false && feedback.selectedOptionKey === option.key;
+            const hasAnswerResult = isCorrectOption || isIncorrectSelection;
+            const answerResultStyle = isCorrectOption
+              ? { borderColor: "var(--state-success-border)", backgroundColor: "var(--state-success-bg)" }
+              : isIncorrectSelection
+                ? { borderColor: "var(--state-error-border)", backgroundColor: "var(--state-error-bg)" }
+                : undefined;
+            return (
+              <label
+                key={option.key}
+                className={`flex min-h-16 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm leading-6 transition-colors hover:border-accent/60 hover:bg-muted/40 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50 sm:gap-4 sm:p-4 ${hasAnswerResult ? "" : selectedChoice === option.key ? "border-accent bg-accent/5 ring-1 ring-accent/30" : "border-border bg-card"}`}
+                style={answerResultStyle}
+              >
+                <input
+                  type="radio"
+                  name="teaching-answer"
+                  value={option.key}
+                  checked={selectedChoice === option.key}
+                  onChange={() => isExam
+                    ? saveExamChoice(option.key)
+                    : setChoiceState({ questionId: question.questionId, key: option.key })}
+                  className="mt-1 h-5 w-5 shrink-0 accent-accent"
+                />
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words"><span className="me-1 font-semibold">{option.key}.</span> {option.text}</span>
+              </label>
+            );
+          })}
         </fieldset>
         {isExam && responseMutation.isPending ? <p role="status" className="text-sm text-muted-foreground">Saving…</p> : null}
         {isExam && examResponseState?.questionId === question.questionId && examResponseState.failedKey !== null ? <p role="alert" className="text-sm text-red-700">Answer was not saved. Please select it again or retry.</p> : null}

@@ -44,6 +44,27 @@ test("Teaching maintenance XLSX creates a Draft without mutating a Published rev
   const editedWorkbook = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
 
   await page.goto("/teaching/admin/questions/maintenance");
+  const catalogResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/catalog");
+  expect(catalogResponse.ok()).toBeTruthy();
+  const catalog = await catalogResponse.json() as { domains: Array<{ code: string; label: string; active: boolean }>; topics: Array<{ code: string; label: string; parentCode?: string; active: boolean }> };
+  const exportDomain = catalog.domains.find((domain) => domain.active && catalog.topics.some((topic) => topic.active && topic.parentCode === domain.code));
+  expect(exportDomain).toBeTruthy();
+  const exportTopic = catalog.topics.find((topic) => topic.active && topic.parentCode === exportDomain!.code)!;
+  await expect(page.getByRole("button", { name: "Export selected XLSX" })).toBeEnabled();
+  await page.getByLabel("Domain").selectOption(exportDomain!.code);
+  await page.getByLabel("Topic").selectOption(exportTopic.code);
+  await expect(page.getByText(`Draft · ${exportDomain!.label} · ${exportTopic.label}`)).toBeVisible();
+  const filteredExportResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/teaching/admin/questions/export.xlsx");
+  const filteredExportDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected XLSX" }).click();
+  const [filteredResponse, selectedDownload] = await Promise.all([filteredExportResponse, filteredExportDownload]);
+  expect(filteredResponse.ok()).toBeTruthy();
+  const filteredParams = new URL(filteredResponse.url()).searchParams;
+  expect(filteredParams.get("status")).toBe("draft");
+  expect(filteredParams.get("domainCode")).toBe(exportDomain!.code);
+  expect(filteredParams.get("topicCode")).toBe(exportTopic.code);
+  expect(selectedDownload.suggestedFilename()).toBe(`rispro-teaching-maintenance-draft-${exportDomain!.code}-${exportTopic.code}.xlsx`);
+
   await page.locator('input[aria-label="Updated XLSX workbook"]').setInputFiles({ name: "teaching-maintenance.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: editedWorkbook });
   const previewed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/teaching/admin/questions/maintenance/preview" && response.request().method() === "POST");
   await page.getByRole("button", { name: "Preview changes" }).click();
