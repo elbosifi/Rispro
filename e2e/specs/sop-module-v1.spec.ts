@@ -5,8 +5,12 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   test.setTimeout(120_000);
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
+  const forbiddenResponses: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("response", (response) => {
+    if (response.status() === 403) forbiddenResponses.push(`${response.request().method()} ${new URL(response.url()).pathname}`);
+  });
   const screenshot = (name: string) => page.screenshot({ path: testInfo.outputPath(name), fullPage: false });
   const dismissToast = async () => {
     const close = page.getByRole("button", { name: /close/i });
@@ -25,7 +29,7 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   await expect(page.getByRole("heading", { name: "SOP Library", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search SOPs" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Category" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Status" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Status", exact: true })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await dismissToast();
   await screenshot("01-sop-library-desktop.png");
@@ -41,7 +45,8 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   await page.getByRole("textbox", { name: "Title" }).fill("E2E General Safety");
   await page.getByRole("textbox", { name: "SOP Code" }).fill(code.toLowerCase());
   await page.getByRole("combobox", { name: "Category" }).selectOption("General");
-  await page.locator("input[type='date']").fill("2026-10-15");
+  await page.getByRole("combobox", { name: "SOP Owner", exact: true }).selectOption({ label: "E2E Supervisor (supervisor)" });
+  await page.getByRole("textbox", { name: "Effective date", exact: true }).fill("2026-10-15");
   await page.getByRole("textbox", { name: "Change summary" }).fill("Initial bilingual SOP");
   const editors = requiredEditors();
   await editors.nth(0).click();
@@ -155,14 +160,18 @@ test("SOP V1 library, bilingual authoring, publishing, revision, archive, and pe
   await archiveDialog.getByRole("button", { name: "Archive SOP", exact: true }).click();
   await expect(page).toHaveURL(/\/sops$/);
   await expect(page.getByText(code, { exact: true })).toHaveCount(0);
-  await page.getByRole("combobox", { name: "Status" }).selectOption("archived");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("archived");
   await expect(page.getByText(code, { exact: true })).toBeVisible();
   await noOverflow();
   await dismissToast();
   await screenshot("07-sop-library-mobile.png");
 
   expect(pageErrors, `Unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);
-  expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join(" | ")}`).toEqual([]);
+  expect(forbiddenResponses.length).toBeGreaterThan(0);
+  expect(forbiddenResponses.every((response) => response === "GET /api/teaching/me")).toBeTruthy();
+  const expectedTeachingAccessDenial = "Failed to load resource: the server responded with a status of 403 (Forbidden)";
+  const unexpectedConsoleErrors = consoleErrors.filter((error) => error !== expectedTeachingAccessDenial);
+  expect(unexpectedConsoleErrors, `Unexpected console errors: ${unexpectedConsoleErrors.join(" | ")}`).toEqual([]);
 });
 
 test("SOP V1 hardening protects unsaved publish state, draft isolation, and dirty navigation", async ({ page }) => {
@@ -176,7 +185,8 @@ test("SOP V1 hardening protects unsaved publish state, draft isolation, and dirt
   await page.getByRole("textbox", { name: "Title" }).fill("SOP Hardening Safety");
   await page.getByRole("textbox", { name: "SOP Code" }).fill(code);
   await page.getByRole("combobox", { name: "Category" }).selectOption("Patient Safety");
-  await page.locator("input[type='date']").fill("2026-12-01");
+  await page.getByRole("combobox", { name: "SOP Owner", exact: true }).selectOption({ label: "E2E Supervisor (supervisor)" });
+  await page.getByRole("textbox", { name: "Effective date", exact: true }).fill("2026-12-01");
   await page.getByRole("textbox", { name: "Change summary" }).fill("Hardening baseline");
   await editors().nth(0).click();
   await page.keyboard.insertText("Purpose baseline.");

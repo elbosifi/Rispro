@@ -27,7 +27,7 @@ import { formatDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { Patient, PatientIdentifierTypeOption } from "@/types/api";
-import { Button, Card } from "@/components/shared";
+import { Button, Card, Input } from "@/components/shared";
 import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useAuth } from "@/providers/auth-provider";
@@ -776,14 +776,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </div>
           <div>
             <label className={`${fieldLabelClass} ${isDuplicateField("englishFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}</label>
-            <input
+            <Input
               aria-label={language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}
               value={form.englishFullName}
               readOnly
               onKeyDown={handleEnterNavigation("englishFullName")}
               dir="ltr"
               ref={englishFullNameRef}
-              className={`input-premium input-ltr w-full ${isDuplicateField("englishFullName") ? duplicateFocusClass : ""}`}
+              className={`input-ltr w-full ${isDuplicateField("englishFullName") ? duplicateFocusClass : ""}`}
             />
             {form.arabicFullName && (
               <p className={helperTextClass}>
@@ -817,12 +817,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             {currentMissingTokens.map((token) => (
               <div key={token} className="flex items-center gap-3 mb-2">
                 <span className="text-sm font-mono" dir="rtl">{token}</span>
-                <input
+                <Input
                   type="text"
                   value={missingTokenInputs[token] ?? ""}
                   onChange={(e) => setMissingTokenInputs((p) => ({ ...p, [token]: e.target.value }))}
                   placeholder={language === "ar" ? "الترجمة الإنجليزية…" : "English translation…"}
-                  className="flex-1 input-premium h-10 text-sm"
+                  className="flex-1 h-10 text-sm"
                 />
                 <Button
                   type="button"

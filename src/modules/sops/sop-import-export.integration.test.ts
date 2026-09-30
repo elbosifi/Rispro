@@ -114,7 +114,9 @@ test("SOP XLSX round trip preserves unchanged rich JSON and imports Arabic/list 
     assert.equal(confirmed.version.status, "draft");
     assert.equal(confirmed.version.version, "1.1");
     assert.equal(confirmed.version.changeSummary, "Imported Arabic XLSX revision");
+    assert.equal(confirmed.sop.ownerUserId, actor);
     const loaded = await getSopDetailForUser(sopId, "supervisor");
+    assert.equal(loaded.sop.ownerUserId, actor);
     const loadedPurpose = loaded.versions.find((version) => version.version === "1.1")!.contentJson.sections.find((section) => section.key === "purpose")!.content;
     const loadedScope = loaded.versions.find((version) => version.version === "1.1")!.contentJson.sections.find((section) => section.key === "scope")!.content;
     assert.match(JSON.stringify(loadedPurpose), /يجب التأكد من هوية المريض/);

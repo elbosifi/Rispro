@@ -9,6 +9,7 @@ async function importRadiologyQuestionSet(page: Page): Promise<{ stems: Record<s
   const templateResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/qbank/import/template.json");
   expect(templateResponse.ok()).toBeTruthy();
   const template = await templateResponse.json() as {
+    schemaVersion: string;
     _catalog: { domains: Array<{ code: string }>; topics: Array<{ code: string; parentCode: string | null }> };
     _schemaExamples: Record<string, TemplateQuestion>;
   };
@@ -74,7 +75,7 @@ async function importRadiologyQuestionSet(page: Page): Promise<{ stems: Record<s
   }
 
   const archive = new AdmZip();
-  archive.addFile("questions.json", Buffer.from(JSON.stringify({ schemaVersion: "1.0", questions })));
+  archive.addFile("questions.json", Buffer.from(JSON.stringify({ schemaVersion: template.schemaVersion, questions })));
   for (let index = 0; index < assets.length; index += 1) {
     const asset = assets[index]!;
     const color = ["#6f93b5", "#789dbe", "#8ba9c3", "#688ba7", "#839fb3"][index]!;
@@ -211,7 +212,7 @@ test("Teaching radiology sessions prioritize context, images, and scalable navig
     success: getComputedStyle(element).getPropertyValue("--state-success-bg").trim(),
   }));
   await expect(selectedIncorrectOption).toHaveCSS("background-color", answerStateColors.error);
-  const correctAnswerText = (await page.getByText(/Correct answer:/).textContent())!.split(":").slice(1).join(":").trim();
+  const correctAnswerText = (await page.getByText("Correct answer:", { exact: true }).locator("xpath=..").textContent())!.replace("Correct answer:", "").trim();
   const correctOption = page.getByRole("group", { name: "Answer options" }).locator("label").filter({ hasText: correctAnswerText });
   await expect(correctOption).toHaveCSS("background-color", answerStateColors.success);
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);

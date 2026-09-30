@@ -553,7 +553,7 @@ export async function confirmSopXlsxImport(
           return imported ? { ...section, content: imported } : section;
         }),
       });
-      result = await updateSopDraft({ sopId, version: target.version.version, title: target.sop.title, category: target.sop.category, contentJson, changeSummary, effectiveDate, actorUserId }, client);
+      result = await updateSopDraft({ sopId, version: target.version.version, title: target.sop.title, category: target.sop.category, ownerUserId: target.sop.ownerUserId, contentJson, changeSummary, effectiveDate, actorUserId }, client);
     }
     await logAuditEntry({
       entityType: "sop",

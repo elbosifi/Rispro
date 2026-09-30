@@ -12,7 +12,7 @@ test("Teaching faculty imports, reviews, publishes, and revises an image questio
 
   const templateResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/qbank/import/template.json");
   expect(templateResponse.ok()).toBeTruthy();
-  const template = await templateResponse.json() as { _schemaExamples: { image_based_sba: Record<string, unknown> } };
+  const template = await templateResponse.json() as { schemaVersion: string; _schemaExamples: { image_based_sba: Record<string, unknown> } };
   const question = structuredClone(template._schemaExamples.image_based_sba);
   const externalId = `E2E-EDITOR-${Date.now()}`;
   const filename = "synthetic-editorial-image.png";
@@ -21,7 +21,7 @@ test("Teaching faculty imports, reviews, publishes, and revises an image questio
   question.stem = "Synthetic editorial question before review.";
   media[0] = { assetKey: `${externalId}-IMAGE-1`, filename, type: "image", altText: "Synthetic image for editorial E2E" };
   const archive = new AdmZip();
-  archive.addFile("questions.json", Buffer.from(JSON.stringify({ schemaVersion: "1.0", questions: [question] })));
+  archive.addFile("questions.json", Buffer.from(JSON.stringify({ schemaVersion: template.schemaVersion, questions: [question] })));
   archive.addFile(`assets/${filename}`, await sharp({ create: { width: 32, height: 24, channels: 3, background: "#6f93b5" } }).png().toBuffer());
 
   await page.locator("#teaching-import-file").setInputFiles({ name: "editorial-image.zip", mimeType: "application/zip", buffer: archive.toBuffer() });

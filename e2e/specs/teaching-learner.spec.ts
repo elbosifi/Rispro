@@ -1,15 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
 import { signInWithSession } from "../helpers/auth";
 
-async function createPublishedQuestion(page: Page): Promise<{ externalId: string; stem: string }> {
+async function createPublishedQuestion(page: Page): Promise<{ externalId: string; stem: string; tag: string }> {
   const templateResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/qbank/import/template.json");
   expect(templateResponse.ok()).toBeTruthy();
-  const template = await templateResponse.json() as { _schemaExamples: { single_best_answer: Record<string, unknown> } };
+  const template = await templateResponse.json() as { schemaVersion: string; _schemaExamples: { single_best_answer: Record<string, unknown> }; _catalog: { tags: Array<{ code: string }> } };
+  const tag = template._catalog.tags.find(({ code }) => code === "radiation_safety")?.code;
+  expect(tag).toBeTruthy();
   const question = structuredClone(template._schemaExamples.single_best_answer);
   const externalId = `E2E-LEARNER-${Date.now()}`;
   const stem = "Synthetic learner question for Study, Exam, and Review.";
   const classification = question.classification as Record<string, unknown>;
-  classification.tags = ["oncology"];
+  classification.tags = [tag!];
   question.externalId = externalId;
   question.stem = stem;
 
@@ -17,14 +19,16 @@ async function createPublishedQuestion(page: Page): Promise<{ externalId: string
   await page.locator("#teaching-import-file").setInputFiles({
     name: "teaching-learner-question.json",
     mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify({ schemaVersion: "1.0", questions: [question] })),
+    buffer: Buffer.from(JSON.stringify({ schemaVersion: template.schemaVersion, questions: [question] })),
   });
   await page.getByRole("button", { name: "Inspect upload" }).click();
   await expect(page.getByText("Structure valid")).toBeVisible();
   await page.getByRole("button", { name: "Validate and preview" }).click();
   await expect(page.getByText(externalId)).toBeVisible();
   await page.getByRole("button", { name: "Import 1 Draft Questions" }).first().click();
-  await expect(page.getByText("1 questions imported as Draft.")).toBeVisible();
+  await expect(page).toHaveURL(/\/teaching\/admin\/import\/batches\/[0-9a-f-]+$/i);
+  await expect(page.getByRole("heading", { name: "Import batch" })).toBeVisible();
+  await expect(page.getByText("1 questions · teaching-learner-question.json", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "Question Bank", exact: true }).click();
   await page.getByLabel(/Search external ID/).fill(externalId);
@@ -35,13 +39,13 @@ async function createPublishedQuestion(page: Page): Promise<{ externalId: string
   await page.getByRole("button", { name: "Approve Review" }).click();
   await page.getByRole("button", { name: "Publish revision" }).click();
   await expect(page.getByRole("button", { name: "Create New Revision" })).toBeVisible();
-  return { externalId, stem };
+  return { externalId, stem, tag: tag! };
 }
 
-async function createSession(page: Page, mode: "study" | "exam" | "review", timed = false) {
+async function createSession(page: Page, mode: "study" | "exam" | "review", tag: string, timed = false) {
   await page.goto("/teaching/qbank");
   await page.getByText("More filters").click();
-  await page.getByLabel("Tags").selectOption("oncology");
+  await page.getByLabel("Tags").selectOption(tag);
   await page.getByLabel("Mode").selectOption(mode);
   await page.getByLabel("Number of questions").fill("1");
   if (timed) {
@@ -67,7 +71,7 @@ test("Teaching learner completes, resumes, resets a study cycle, and reviews pri
   await expect(page.getByRole("link", { name: "Learn Q-Bank" })).toBeVisible();
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 1440);
 
-  await createSession(page, "study");
+  await createSession(page, "study", fixture.tag);
   await expect(page.getByText(fixture.stem)).toBeVisible();
   const studySessionId = Number(page.url().match(/session\/(\d+)$/)?.[1]);
   const unanswered = await page.request.get(`http://127.0.0.1:3100/api/teaching/sessions/${studySessionId}/questions/1`);
@@ -86,7 +90,7 @@ test("Teaching learner completes, resumes, resets a study cycle, and reviews pri
   await page.getByRole("button", { name: "End study session" }).click();
   await expect(page.getByText("Score", { exact: true })).toBeVisible();
 
-  await createSession(page, "exam", true);
+  await createSession(page, "exam", fixture.tag, true);
   await expect(page.getByText(fixture.stem)).toBeVisible();
   const examSessionId = Number(page.url().match(/session\/(\d+)$/)?.[1]);
   const responsePath = `/api/teaching/sessions/${examSessionId}/questions/1/response`;
@@ -131,7 +135,7 @@ test("Teaching learner completes, resumes, resets a study cycle, and reviews pri
   await expect(page.getByRole("heading", { name: /Exam.*1 questions/ }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Review", exact: true }).first()).toBeVisible();
 
-  await createSession(page, "review");
+  await createSession(page, "review", fixture.tag);
   await expect(page.getByText(fixture.stem)).toBeVisible();
   await page.getByRole("radio").nth(1).check();
   await page.getByRole("button", { name: "Submit answer" }).click();
@@ -139,7 +143,7 @@ test("Teaching learner completes, resumes, resets a study cycle, and reviews pri
   await page.getByRole("button", { name: "End review session" }).click();
   await expect(page.getByText("Score", { exact: true })).toBeVisible();
 
-  await createSession(page, "study");
+  await createSession(page, "study", fixture.tag);
   const preResetSessionId = Number(page.url().match(/session\/(\d+)$/)?.[1]);
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto("/teaching/progress");
@@ -173,7 +177,7 @@ test("Teaching learner completes, resumes, resets a study cycle, and reviews pri
 
   await page.goto("/teaching/qbank");
   await page.getByText("More filters").click();
-  await page.getByLabel("Tags").selectOption("oncology");
+  await page.getByLabel("Tags").selectOption(fixture.tag);
   await page.getByLabel("Question state").selectOption("unseen");
   await expect(page.getByRole("status")).toHaveText("Available questions: 1");
   await page.getByRole("spinbutton", { name: "Number of questions" }).fill("1");

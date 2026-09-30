@@ -8,6 +8,8 @@ import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpr
 function noSymbol(): Error & { code: number } { return Object.assign(new Error("no symbols found"), { code: 4 }); }
 const QR_TOKEN = "pa_ab_CD-12_ef";
 const QR_URL = `https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`;
+const QR_ORIGINS = new Set(["https://rispro.nccb.com.ly"]);
+const QR_ORIGIN_CONFIGURATION = { publicAppBaseUrl: "https://rispro.nccb.com.ly" };
 type Decode = (filePath: string) => string | Error;
 type Options = { preprocessError?: boolean; rotateError?: number; derivativePaths?: string[]; renderedPaths?: string[]; calls?: string[]; renders?: number[]; diagnostics?: Record<string, string | number | boolean>[]; pageNumbers?: number[] };
 function dependencies(decode: Decode, options: Options = {}): RequestScanBarcodeDependencies {
@@ -27,6 +29,9 @@ function dependencies(decode: Decode, options: Options = {}): RequestScanBarcode
     },
     logDiagnostic(_event, metadata) { options.diagnostics?.push(metadata); },
   };
+}
+function extractRequestScanBarcodeWithTrustedQrOrigin(filePath: string, dependencies: RequestScanBarcodeDependencies) {
+  return extractRequestScanBarcode(filePath, dependencies, QR_ORIGIN_CONFIGURATION);
 }
 async function withImage(t: (filePath: string) => Promise<void>): Promise<void> { const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-barcode-test-")); const image = path.join(dir, "request.jpg"); await fs.writeFile(image, "original upload bytes"); try { await t(image); } finally { await fs.rm(dir, { recursive: true, force: true }); } }
 
@@ -57,16 +62,17 @@ test("parses Poppler native image listings conservatively across spacing, masks,
   ]);
 });
 test("accepts only configured RISpro public appointment origins and preserves the token exactly", () => {
-  assert.equal(extractRisproPublicAppointmentToken(QR_URL), QR_TOKEN);
-  assert.equal(extractRisproPublicAppointmentToken(`https://example.com/public/appointment?t=${QR_TOKEN}`), null);
-  assert.equal(extractRisproPublicAppointmentToken(`http://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`), null);
-  assert.equal(extractRisproPublicAppointmentToken(`https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}&t=other`), null);
+  assert.equal(extractRisproPublicAppointmentToken(QR_URL, new Set()), null);
+  assert.equal(extractRisproPublicAppointmentToken(QR_URL, QR_ORIGINS), QR_TOKEN);
+  assert.equal(extractRisproPublicAppointmentToken(`https://example.com/public/appointment?t=${QR_TOKEN}`, QR_ORIGINS), null);
+  assert.equal(extractRisproPublicAppointmentToken(`http://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`, QR_ORIGINS), null);
+  assert.equal(extractRisproPublicAppointmentToken(`https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}&t=other`, QR_ORIGINS), null);
   assert.equal(extractRisproPublicAppointmentToken(`https://dev.nccb.com.ly/public/appointment?t=${QR_TOKEN}`, new Set(["https://dev.nccb.com.ly"])), QR_TOKEN);
   assert.equal(extractRisproPublicAppointmentToken(`https://evil-rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`, new Set(["https://rispro.nccb.com.ly"])), null);
   assert.equal(extractRisproPublicAppointmentToken(`https://rispro.nccb.com.ly.evil.test/public/appointment?t=${QR_TOKEN}`, new Set(["https://rispro.nccb.com.ly"])), null);
   assert.equal(extractRisproPublicAppointmentToken(`https://rispro.nccb.com.ly/public/appointment?t=pa_A-b_C_12`, new Set(["https://rispro.nccb.com.ly"])), "pa_A-b_C_12");
-  assert.deepEqual(interpretRequestScanBarcodes(`QR-Code:${QR_URL}`), { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
-  assert.deepEqual(interpretRequestScanBarcodes("QR-Code:https://example.com/unrelated?t=private"), { ok: false, reason: "no_valid_accession", ignoredQrCount: 1 });
+  assert.deepEqual(interpretRequestScanBarcodes(`QR-Code:${QR_URL}`, QR_ORIGINS), { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
+  assert.deepEqual(interpretRequestScanBarcodes("QR-Code:https://example.com/unrelated?t=private", QR_ORIGINS), { ok: false, reason: "no_valid_accession", ignoredQrCount: 1 });
 });
 test("builds trusted QR origins from the canonical public URL and an explicit exact-origin allowlist", () => {
   const origins = trustedRequestScanQrOrigins({ explicitAllowedOrigins: "https://dev.nccb.com.ly, https://rispro.nccb.com.ly:443" });
@@ -77,7 +83,7 @@ test("builds trusted QR origins from the canonical public URL and an explicit ex
 test("enables QR in the existing zbar invocation and resolves a clear patient QR", async () => {
   await withImage(async (image) => {
     let zbarArgs: string[] = [];
-    const result = await extractRequestScanBarcode(image, {
+    const result = await extractRequestScanBarcodeWithTrustedQrOrigin(image, {
       ...dependencies(() => `QR-Code:${QR_URL}`),
       async execFile(_command, args) { zbarArgs = args; return { stdout: `QR-Code:${QR_URL}` }; },
     });
@@ -133,24 +139,24 @@ test("Stop abort signals are passed to active zbarimg, pdftoppm, and pdfimages c
 });
 test("resolves patient QR evidence through existing preprocessing and rotation fallbacks", async () => {
   await withImage(async (image) => {
-    const preprocessed = await extractRequestScanBarcode(image, dependencies((filePath) => filePath.includes("processed-1.png") && !filePath.includes("rotated") ? `QR-Code:${QR_URL}` : noSymbol()));
+    const preprocessed = await extractRequestScanBarcodeWithTrustedQrOrigin(image, dependencies((filePath) => filePath.includes("processed-1.png") && !filePath.includes("rotated") ? `QR-Code:${QR_URL}` : noSymbol()));
     assert.deepEqual(preprocessed, { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
   });
   await withImage(async (image) => {
-    const rotated = await extractRequestScanBarcode(image, dependencies((filePath) => filePath.includes("rotated-270.png") ? `QR-Code:${QR_URL}` : noSymbol()));
+    const rotated = await extractRequestScanBarcodeWithTrustedQrOrigin(image, dependencies((filePath) => filePath.includes("rotated-270.png") ? `QR-Code:${QR_URL}` : noSymbol()));
     assert.deepEqual(rotated, { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
   });
 });
 test("resolves a patient QR visible only in the bounded 600-DPI PDF stage", async () => {
   const renders: number[] = [];
-  const result = await extractRequestScanBarcode("qr-600.pdf", dependencies((filePath) => filePath.includes("pdf-600") ? `QR-Code:${QR_URL}` : noSymbol(), { renders }));
+  const result = await extractRequestScanBarcodeWithTrustedQrOrigin("qr-600.pdf", dependencies((filePath) => filePath.includes("pdf-600") ? `QR-Code:${QR_URL}` : noSymbol(), { renders }));
   assert.deepEqual(result, { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
   assert.deepEqual(renders, [300, 600]);
 });
 test("collects accession and QR evidence together, deduplicates QR detections, and keeps diagnostics secret-free", async () => {
   await withImage(async (image) => {
     const diagnostics: Record<string, string | number | boolean>[] = [];
-    const result = await extractRequestScanBarcode(image, dependencies(() => `CODE-128:V2-003628\nQR-Code:${QR_URL}\nQR-Code:${QR_URL}`, { diagnostics }));
+    const result = await extractRequestScanBarcodeWithTrustedQrOrigin(image, dependencies(() => `CODE-128:V2-003628\nQR-Code:${QR_URL}\nQR-Code:${QR_URL}`, { diagnostics }));
     assert.deepEqual(result, { ok: true, accessions: ["V2-003628"], accession: "V2-003628", qrTokens: [QR_TOKEN] });
     assert.equal(JSON.stringify(diagnostics).includes(QR_TOKEN), false);
     assert.equal(JSON.stringify(diagnostics).includes(QR_URL), false);
@@ -158,7 +164,7 @@ test("collects accession and QR evidence together, deduplicates QR detections, a
 });
 test("QR-only evidence skips 600 DPI after the complete 300-DPI original sweep", async () => {
   await withImage(async (image) => {
-    const result = await extractRequestScanBarcode(image, dependencies((filePath) => {
+    const result = await extractRequestScanBarcodeWithTrustedQrOrigin(image, dependencies((filePath) => {
       if (filePath === image) return `QR-Code:${QR_URL}`;
       if (filePath.includes("processed-1.png") && !filePath.includes("rotated")) return "CODE-128:V2-003628";
       return noSymbol();
@@ -166,7 +172,7 @@ test("QR-only evidence skips 600 DPI after the complete 300-DPI original sweep",
     assert.deepEqual(result, { ok: true, accessions: ["V2-003628"], accession: "V2-003628", qrTokens: [QR_TOKEN] });
   });
   const renders: number[] = [];
-  const pdf = await extractRequestScanBarcode("qr-then-accession.pdf", dependencies((filePath) => {
+  const pdf = await extractRequestScanBarcodeWithTrustedQrOrigin("qr-then-accession.pdf", dependencies((filePath) => {
     if (filePath.includes("pdf-300")) return `QR-Code:${QR_URL}`;
     if (filePath.includes("pdf-600")) return "CODE-128:V2-003628";
     return noSymbol();
@@ -183,7 +189,7 @@ test("does not render 600 DPI after a 300-DPI success or ambiguity", async () =>
 });
 test("scans multipage PDFs last-page-first using numeric page order before enhancement", async () => {
   const calls: string[] = []; const derivatives: string[] = []; const diagnostics: Record<string, string | number | boolean>[] = [];
-  const result = await extractRequestScanBarcode("nine-pages.pdf", dependencies((filePath) => filePath.endsWith("page-9.png") ? `QR-Code:${QR_URL}` : noSymbol(), { calls, derivativePaths: derivatives, diagnostics, pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9] }));
+  const result = await extractRequestScanBarcodeWithTrustedQrOrigin("nine-pages.pdf", dependencies((filePath) => filePath.endsWith("page-9.png") ? `QR-Code:${QR_URL}` : noSymbol(), { calls, derivativePaths: derivatives, diagnostics, pageNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9] }));
   assert.deepEqual(result, { ok: true, accessions: [], qrTokens: [QR_TOKEN] });
   assert.deepEqual(calls.filter((filePath) => /page-\d+\.png$/i.test(filePath)).map((filePath) => Number(filePath.match(/page-(\d+)\.png$/)?.[1])), [9, 1, 2, 3, 4, 5, 6, 7, 8]);
   assert.equal(derivatives.length, 0);

@@ -164,6 +164,7 @@ test("logout clears module last-location state before the next authenticated ses
 
   await page.getByRole("button", { name: "Open account menu" }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
   await expect.poll(() => page.evaluate((key) => sessionStorage.getItem(key), moduleLastLocationsStorageKey)).toBeNull();
 
   await signInWithSession(page, "e2e_reception");

@@ -1,9 +1,15 @@
 import { expect, type Page, test } from "@playwright/test";
 import { E2E_PASSWORD, signInWithSession } from "../helpers/auth";
-import { e2eTomorrowInTripoli } from "../helpers/fixtures";
+import { e2eTodayInTripoli } from "../helpers/fixtures";
+
+async function selectFullDay(page: Page) {
+  const fullDay = page.getByRole("button", { name: /\d{4}-\d{2}-\d{2}.*\bfull\b/i }).first();
+  await expect(fullDay).toBeVisible();
+  await fullDay.click();
+}
 
 async function createDirectedCapacityRequest(page: Page, patientName: string, nationalId: string, screenshot: (name: string) => Promise<unknown>) {
-  const fullFixtureDate = e2eTomorrowInTripoli();
+  const fullFixtureDate = e2eTodayInTripoli();
   await page.goto("/appointments");
   await page.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill(patientName);
   await page.getByRole("button", { name: new RegExp(patientName, "i") }).click();
@@ -18,7 +24,7 @@ async function createDirectedCapacityRequest(page: Page, patientName: string, na
   await examTypeSelect.selectOption(examTypeValue ?? "");
   await page.getByLabel(/start date/i).fill(fullFixtureDate);
   await page.getByRole("button", { name: "Show full days" }).click();
-  await page.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") }).click();
+  await selectFullDay(page);
   await page.getByRole("button", { name: "Request override approval" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -109,10 +115,10 @@ test("Super Admin retains direct override while also being able to request named
   await page.getByRole("button", { name: "Acknowledge and continue" }).click();
   const examTypeSelect = page.getByTestId("appointment-form-region").getByLabel("Exam Type", { exact: true });
   await examTypeSelect.selectOption(await examTypeSelect.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value") ?? "");
-  const fullFixtureDate = e2eTomorrowInTripoli();
+  const fullFixtureDate = e2eTodayInTripoli();
   await page.getByLabel(/start date/i).fill(fullFixtureDate);
   await page.getByRole("button", { name: "Show full days" }).click();
-  await page.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") }).click();
+  await selectFullDay(page);
 
   await page.getByLabel("Capacity Resolution Action").selectOption("total_capacity_override");
   await expect(page.getByRole("button", { name: "Create Appointment" })).toBeEnabled();
@@ -137,7 +143,7 @@ test("Super Admin retains direct override while also being able to request named
   await deferredExam.selectOption(await deferredExam.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value") ?? "");
   await page.getByLabel(/start date/i).fill(fullFixtureDate);
   await page.getByRole("button", { name: "Show full days" }).click();
-  await page.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") }).click();
+  await selectFullDay(page);
   await page.getByRole("button", { name: "Request override approval" }).click();
   const dialog = page.getByRole("dialog");
   const selector = dialog.getByLabel(/Request approval from/);
@@ -167,19 +173,20 @@ test("Super Admin sees and decides a request that remains directed to its origin
   await signInWithSession(admin, "e2e_super_admin");
   await admin.goto("/dashboard");
   await admin.getByRole("button", { name: /override/i }).click();
-  await expect(admin.getByText("E2E Similar Patient One")).toBeVisible();
-  await expect(admin.getByText("Requested doctor").first()).toBeVisible();
-  await expect(admin.getByText("E2E Doctor", { exact: true }).first()).toBeVisible();
-  await admin.getByRole("button", { name: "Reject" }).click();
+  const directedRequest = admin.locator("article").filter({ hasText: "E2E Similar Patient One" }).filter({ hasText: "Requested doctor" });
+  await expect(directedRequest).toHaveCount(1);
+  await expect(directedRequest).toContainText("E2E Similar Patient One");
+  await expect(directedRequest).toContainText("E2E Doctor");
+  await directedRequest.getByRole("button", { name: "Reject" }).click();
   await admin.getByPlaceholder(/rejection reason/i).fill("E2E Super Admin rejection of directed exception.");
   await admin.getByRole("button", { name: "Confirm rejection" }).click();
   await admin.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);
   await admin.getByRole("button", { name: "Verify" }).click();
   await expect(admin.getByText("No override requests found.")).toBeVisible();
   await admin.getByLabel("Override request status filter").selectOption("");
-  await expect(admin.getByText("E2E Similar Patient One")).toBeVisible();
-  await expect(admin.getByText("Requested doctor").first()).toBeVisible();
-  await expect(admin.getByText("E2E Doctor", { exact: true }).first()).toBeVisible();
+  await expect(directedRequest).toHaveCount(1);
+  await expect(directedRequest).toContainText("E2E Similar Patient One");
+  await expect(directedRequest).toContainText("E2E Doctor");
 
   await adminContext.close();
   await receptionContext.close();

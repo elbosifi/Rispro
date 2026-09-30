@@ -26,8 +26,12 @@ test("SOP XLSX export, external edit, preview, confirm, invalid validation, Arab
   test.setTimeout(180_000);
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
+  const forbiddenResponses: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("response", (response) => {
+    if (response.status() === 403) forbiddenResponses.push(`${response.request().method()} ${new URL(response.url()).pathname}`);
+  });
   const screenshot = (name: string) => page.screenshot({ path: testInfo.outputPath(name), fullPage: false });
   const code = `RAD-XLSX-E2E-${Date.now().toString().slice(-6)}`;
   const editors = () => page.locator(".ProseMirror");
@@ -41,7 +45,8 @@ test("SOP XLSX export, external edit, preview, confirm, invalid validation, Arab
   await page.getByRole("textbox", { name: "Title" }).fill("MRI XLSX Safety Workflow");
   await page.getByRole("textbox", { name: "SOP Code" }).fill(code);
   await page.getByRole("combobox", { name: "Category" }).selectOption("MRI");
-  await page.locator("input[type='date']").fill("2026-10-20");
+  await page.getByRole("combobox", { name: "SOP Owner", exact: true }).selectOption({ label: "E2E Supervisor (supervisor)" });
+  await page.getByRole("textbox", { name: "Effective date", exact: true }).fill("2026-10-20");
   await page.getByRole("textbox", { name: "Change summary" }).fill("Initial Excel round trip");
   await editors().nth(0).click();
   await page.keyboard.insertText("يجب التأكد من هوية المريض قبل بدء الفحص.");
@@ -162,5 +167,9 @@ test("SOP XLSX export, external edit, preview, confirm, invalid validation, Arab
   await expect(page.getByRole("button", { name: "Publish SOP", exact: true })).toBeVisible();
 
   expect(pageErrors, `Unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);
-  expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join(" | ")}`).toEqual([]);
+  expect(forbiddenResponses.length).toBeGreaterThan(0);
+  expect(forbiddenResponses.every((response) => response === "GET /api/teaching/me")).toBeTruthy();
+  const expectedTeachingAccessDenial = "Failed to load resource: the server responded with a status of 403 (Forbidden)";
+  const unexpectedConsoleErrors = consoleErrors.filter((error) => error !== expectedTeachingAccessDenial);
+  expect(unexpectedConsoleErrors, `Unexpected console errors: ${unexpectedConsoleErrors.join(" | ")}`).toEqual([]);
 });

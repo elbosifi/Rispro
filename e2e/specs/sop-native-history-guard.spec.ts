@@ -16,7 +16,7 @@ test("SOP dirty drafts protect native Back and clear protection after Save Draft
   await page.getByRole("textbox", { name: "Title" }).fill("Native History Guard SOP");
   await page.getByRole("textbox", { name: "SOP Code" }).fill(code);
   await page.getByRole("combobox", { name: "Category" }).selectOption("Patient Safety");
-  await page.locator("input[type='date']").fill("2026-12-01");
+  await page.getByRole("textbox", { name: "Effective date", exact: true }).fill("2026-12-01");
   await page.getByRole("textbox", { name: "Change summary" }).fill("Native history guard baseline");
   for (const [index, text] of [[0, "Purpose baseline."], [1, "Scope baseline."], [2, "Responsibilities baseline."], [5, "Procedure baseline."]] as const) {
     await editors().nth(index).click();
@@ -30,7 +30,7 @@ test("SOP dirty drafts protect native Back and clear protection after Save Draft
   // Put the library immediately behind the existing draft through SPA routes.
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page).toHaveURL(/\/sops$/);
-  await page.getByRole("combobox", { name: "Status" }).selectOption("draft");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("draft");
   const draftRow = page.locator("tr").filter({ hasText: code });
   await expect(draftRow).toContainText("1.0");
   await draftRow.getByRole("button", { name: "Open", exact: true }).click();
@@ -56,7 +56,7 @@ test("SOP dirty drafts protect native Back and clear protection after Save Draft
   await page.getByRole("dialog").getByRole("button", { name: "Discard changes" }).click();
   await expect(page).toHaveURL(/\/sops$/);
   await expect(page.getByRole("heading", { name: "SOP Library", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "Status" }).selectOption("draft");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("draft");
 
   await draftRow.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(draftUrl);

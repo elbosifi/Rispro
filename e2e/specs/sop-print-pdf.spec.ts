@@ -36,7 +36,8 @@ test("SOP print and PDF actions save drafts and render the authoritative bilingu
   await page.getByRole("textbox", { name: "Title" }).fill("Bilingual MRI Safety Print SOP");
   await page.getByRole("textbox", { name: "SOP Code" }).fill(code);
   await page.getByRole("combobox", { name: "Category" }).selectOption("Patient Safety");
-  await page.locator("input[type='date']").fill("2026-10-15");
+  await page.getByRole("combobox", { name: "SOP Owner", exact: true }).selectOption({ label: "E2E Supervisor (supervisor)" });
+  await page.getByRole("textbox", { name: "Effective date", exact: true }).fill("2026-10-15");
   await page.getByRole("textbox", { name: "Change summary" }).fill("Initial print and PDF validation");
 
   await editors().nth(0).click();

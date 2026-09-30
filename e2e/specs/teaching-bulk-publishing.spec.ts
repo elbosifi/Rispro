@@ -13,7 +13,7 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
 
   const templateResponse = await page.request.get("http://127.0.0.1:3100/api/teaching/qbank/import/template.json");
   expect(templateResponse.ok()).toBeTruthy();
-  const template = await templateResponse.json() as { _schemaExamples: { single_best_answer: Record<string, unknown> } };
+  const template = await templateResponse.json() as { schemaVersion: string; _schemaExamples: { single_best_answer: Record<string, unknown> } };
   const example = template._schemaExamples.single_best_answer;
   const learnerTag = "oncology";
   const questions = externalIds.map((externalId, index) => {
@@ -32,7 +32,7 @@ test("Teaching faculty validates and publishes all eligible matching Draft quest
   await page.locator("#teaching-import-file").setInputFiles({
     name: "teaching-bulk-publication.json",
     mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify({ schemaVersion: "1.0", questions })),
+    buffer: Buffer.from(JSON.stringify({ schemaVersion: template.schemaVersion, questions })),
   });
   const inspectResponsePromise = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/api/teaching/qbank/import/inspect" && response.request().method() === "POST",
