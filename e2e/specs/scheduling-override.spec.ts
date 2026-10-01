@@ -8,7 +8,7 @@ async function selectFullDay(page: Page) {
   await fullDay.click();
 }
 
-async function createDirectedCapacityRequest(page: Page, patientName: string, nationalId: string, screenshot: (name: string) => Promise<unknown>) {
+async function createDirectedCapacityRequest(page: Page, patientName: string, nationalId: string, screenshot: (name: string) => Promise<unknown>, requesterReason = "Synthetic E2E directed capacity exception requiring clinical review.") {
   const fullFixtureDate = e2eTodayInTripoli();
   await page.goto("/appointments");
   await page.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill(patientName);
@@ -36,7 +36,7 @@ async function createDirectedCapacityRequest(page: Page, patientName: string, na
   await expect(selector.locator("option")).toContainText(["Select supervising doctor", "Dr E2E", "Dr E2E Other", "Dr E2E Supervisor"]);
   await expect(selector).not.toContainText(/any doctor/i);
   await screenshot("directed-overbooking-selector.png");
-  await dialog.getByLabel("Requester reason").fill("Synthetic E2E directed capacity exception requiring clinical review.");
+  await dialog.getByLabel("Requester reason").fill(requesterReason);
   await selector.selectOption({ label: "Dr E2E" });
   const selectedUserId = await selector.inputValue();
   const createRequest = page.waitForRequest((request) => request.method() === "POST" && /\/v2\/scheduling-override-requests$/.test(new URL(request.url()).pathname));
@@ -166,14 +166,15 @@ test("Super Admin sees and decides a request that remains directed to its origin
   const reception = await receptionContext.newPage();
   const screenshot = (name: string) => reception.screenshot({ path: testInfo.outputPath(name), fullPage: true });
   await signInWithSession(reception, "e2e_reception");
-  await createDirectedCapacityRequest(reception, "E2E Similar Patient One", "100000000001", screenshot);
+  const requesterReason = "Synthetic E2E request from reception for isolated decision coverage.";
+  await createDirectedCapacityRequest(reception, "E2E Similar Patient One", "100000000001", screenshot, requesterReason);
 
   const adminContext = await browser.newContext();
   const admin = await adminContext.newPage();
   await signInWithSession(admin, "e2e_super_admin");
   await admin.goto("/dashboard");
   await admin.getByRole("button", { name: /override/i }).click();
-  const directedRequest = admin.locator("article").filter({ hasText: "E2E Similar Patient One" }).filter({ hasText: "Requested doctor" });
+  const directedRequest = admin.locator("article").filter({ hasText: requesterReason });
   await expect(directedRequest).toHaveCount(1);
   await expect(directedRequest).toContainText("E2E Similar Patient One");
   await expect(directedRequest).toContainText("E2E Doctor");
@@ -182,7 +183,7 @@ test("Super Admin sees and decides a request that remains directed to its origin
   await admin.getByRole("button", { name: "Confirm rejection" }).click();
   await admin.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);
   await admin.getByRole("button", { name: "Verify" }).click();
-  await expect(admin.getByText("No override requests found.")).toBeVisible();
+  await expect(directedRequest).toHaveCount(0);
   await admin.getByLabel("Override request status filter").selectOption("");
   await expect(directedRequest).toHaveCount(1);
   await expect(directedRequest).toContainText("E2E Similar Patient One");

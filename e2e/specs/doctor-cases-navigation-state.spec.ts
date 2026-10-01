@@ -17,8 +17,14 @@ async function openSupervisorCases(page: Parameters<typeof signInWithSession>[0]
 async function configureCases(page: Parameters<typeof signInWithSession>[0]) {
   const dateFrom = addDays(e2eTodayInTripoli(), 1);
   const dateTo = addDays(dateFrom, 8);
-  await page.getByRole("textbox", { name: "From" }).fill(dateFrom);
-  await page.getByRole("textbox", { name: "To" }).fill(dateTo);
+  const fromInput = page.getByRole("textbox", { name: "From" });
+  const toInput = page.getByRole("textbox", { name: "To" });
+  await fromInput.fill(dateFrom);
+  await expect.poll(() => new URL(page.url()).searchParams.get("dateFrom")).toBe(dateFrom);
+  await expect(fromInput).toHaveValue(dateFrom);
+  await toInput.fill(dateTo);
+  await expect.poll(() => new URL(page.url()).searchParams.get("dateTo")).toBe(dateTo);
+  await expect(toInput).toHaveValue(dateTo);
   const modality = page.getByRole("combobox", { name: "Modality" });
   await modality.selectOption({ label: "E2E CT" });
   await expect(modality).toHaveValue(/^\d+$/);
@@ -69,6 +75,11 @@ test("Doctor Cases state survives navigating away and browser Back", async ({ pa
   await openSupervisorCases(page);
   const { dateFrom, dateTo } = await configureCases(page);
   await page.getByRole("button", { name: "My cases" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("my");
+  await expect.poll(() => new URL(page.url()).searchParams.get("dateFrom")).toBe(dateFrom);
+  await expect.poll(() => new URL(page.url()).searchParams.get("dateTo")).toBe(dateTo);
+  await expect(page.getByRole("textbox", { name: "From" })).toHaveValue(dateFrom);
+  await expect(page.getByRole("textbox", { name: "To" })).toHaveValue(dateTo);
   const savedUrl = page.url();
 
   await page.goto("/doctor/my-work");

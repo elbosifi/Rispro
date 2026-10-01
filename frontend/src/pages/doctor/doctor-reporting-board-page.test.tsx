@@ -1145,7 +1145,7 @@ describe("DoctorReportingBoardPage", () => {
       currentAssignedAt: "2026-05-29T08:30:00.000Z",
       reportingHold: { id: 12, reason: "Needs administrative review", createdAt: "2026-08-23T10:00:00.000Z", createdByUserId: 10, createdByDoctorId: 1, createdByName: "Dr Manager" },
     };
-    fetchReportingBoardCasesMock.mockResolvedValueOnce({
+    fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [heldRow],
       totalCount: 1,
       pagination: { limit: 100, offset: 0, hasMore: false, nextOffset: null },

@@ -1026,7 +1026,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
-  it("uses only the assigned doctor's document during manual Reporting Board refresh", async () => {
+  it("preserves another doctor's Final over the assigned doctor's Draft during manual Reporting Board refresh", async () => {
     guard();
     const date = addDays(183);
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Assigned doctor manual refresh" });
@@ -1075,7 +1075,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         `select report_status, sonicdicom_latest_document_id from doctor_portal.reporting_board_sonicdicom_cache where appointment_id = $1`,
         [appointmentId]
       )).rows[0];
-      assert.deepEqual(cache, { report_status: "draft", sonicdicom_latest_document_id: "assigned-doctor-draft" });
+      assert.deepEqual(cache, { report_status: "final", sonicdicom_latest_document_id: "other-doctor-final" });
     } finally {
       installDefaultSonicDicomReadersForTest();
     }

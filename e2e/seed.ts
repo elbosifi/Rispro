@@ -1,11 +1,12 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../src/db/pool.js";
-import { e2eTodayInTripoli, e2eTomorrowInTripoli, e2eYesterdayInTripoli } from "./helpers/fixtures.js";
+import { e2eTodayInTripoli, e2eTomorrowInTripoli, e2eTomorrowUtc, e2eYesterdayUtc } from "./helpers/fixtures.js";
 
 if (process.env.RISPRO_E2E !== "1") throw new Error("RISPRO_E2E=1 is required to seed browser E2E data.");
 
 const passwordHash = await bcrypt.hash("E2ePassword!2026", 10);
 const fullFixtureDate = e2eTomorrowInTripoli();
+const protocolingFixtureDate = e2eTomorrowUtc();
 const users = [
   ["e2e_reception", "E2E Reception", "receptionist"],
   ["e2e_supervisor", "E2E Supervisor", "supervisor"],
@@ -258,7 +259,7 @@ try {
   await pool.query(
     `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, case_category, status, policy_version_id, created_by_user_id, updated_by_user_id)
      values ($1, $2, $3, $4::date, 'non_oncology', 'scheduled', $5, $6, $6)`,
-    [Number(protocolingPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), fullFixtureDate, Number(policyVersion.rows[0].id), supervisorId],
+    [Number(protocolingPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), protocolingFixtureDate, Number(policyVersion.rows[0].id), supervisorId],
   );
   await pool.query(`update system_settings set setting_value = '{"value":{"enabledModalityCodes":["E2E_CT"],"daysBack":30,"defaultRequiresReport":true,"defaultReportStatusFilter":"required_not_final"}}'::jsonb where category = 'doctor_portal_reporting_board' and setting_key = 'config'`);
   await pool.query(
@@ -314,7 +315,7 @@ try {
   };
   await seedPersonalReportingCase({ patientName: "E2E Reporting Assigned", nationalId: "100000000081", assigned: true });
   await seedPersonalReportingCase({ patientName: "E2E Reporting Available", nationalId: "100000000082" });
-  await seedPersonalReportingCase({ patientName: "E2E Reporting Overdue", nationalId: "100000000083", assigned: true, expectedReportingDate: e2eYesterdayInTripoli() });
+  await seedPersonalReportingCase({ patientName: "E2E Reporting Overdue", nationalId: "100000000083", assigned: true, expectedReportingDate: e2eYesterdayUtc() });
   await seedPersonalReportingCase({ patientName: "E2E Reporting Urgent", nationalId: "100000000084", priority: "urgent" });
   await seedPersonalReportingCase({ patientName: "E2E Reporting Claim", nationalId: "100000000085" });
   await seedPersonalReportingCase({ patientName: "E2E Reporting Final Guard", nationalId: "100000000087", reportStatus: "final" });
