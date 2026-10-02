@@ -58,8 +58,10 @@ export function TeachingQuestionMaintenancePage() {
     return () => { active = false; };
   }, []);
 
-  const availableTopics = topics.filter((item) => !domainCode || item.parentCode === domainCode);
-  const selectedTopic = availableTopics.find((item) => item.code === topicCode);
+  const availableTopics = domainCode
+    ? topics.filter((item) => item.active && item.parentCode === domainCode)
+    : [];
+  const selectedTopic = domainCode ? availableTopics.find((item) => item.code === topicCode) : undefined;
   const selectedStatusLabel = status ? questionStatuses.find((item) => item.value === status)?.label ?? "Selected status" : "All statuses";
   const selectedScope = `${selectedStatusLabel} · ${catalogLabel(domains, domainCode, "All domains")} · ${selectedTopic?.label ?? "All topics"}`;
 
@@ -80,7 +82,7 @@ export function TeachingQuestionMaintenancePage() {
     const filters: TeachingMaintenanceExportFilters = {};
     if (status) filters.status = status;
     if (domainCode) filters.domainCode = domainCode;
-    if (selectedTopic && (!domainCode || selectedTopic.parentCode === domainCode)) filters.topicCode = selectedTopic.code;
+    if (domainCode && selectedTopic?.parentCode === domainCode) filters.topicCode = selectedTopic.code;
     void exportWorkbook(filters, true);
   };
 
@@ -138,7 +140,7 @@ export function TeachingQuestionMaintenancePage() {
             </select>
           </Field>
           <Field label="Topic">
-            <select aria-label="Topic" className={fieldClass} value={selectedTopic?.code ?? ""} disabled={!catalogReady || availableTopics.length === 0 || busy !== null} onChange={(event) => setTopicCode(event.target.value)}>
+            <select aria-label="Topic" className={fieldClass} value={selectedTopic?.code ?? ""} disabled={!catalogReady || !domainCode || availableTopics.length === 0 || busy !== null} onChange={(event) => setTopicCode(event.target.value)}>
               <option value="">All topics</option>
               {availableTopics.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
             </select>

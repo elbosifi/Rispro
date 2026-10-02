@@ -22,7 +22,9 @@ const catalog = {
   ],
   topics: [
     { code: "brain-tumors", label: "Brain tumors", description: "", parentCode: "neuroradiology", active: true, sortOrder: 1 },
+    { code: "shared-topic", label: "Neuroradiology shared topic", description: "", parentCode: "neuroradiology", active: true, sortOrder: 2 },
     { code: "acl-injuries", label: "ACL injuries", description: "", parentCode: "musculoskeletal", active: true, sortOrder: 2 },
+    { code: "shared-topic", label: "Musculoskeletal shared topic", description: "", parentCode: "musculoskeletal", active: true, sortOrder: 3 },
     { code: "inactive-topic", label: "Inactive topic", description: "", parentCode: "neuroradiology", active: false, sortOrder: 3 },
   ],
   subtopics: [], modalities: [], competencies: [], trainingLevels: [], difficulties: [], tags: [],
@@ -91,7 +93,20 @@ describe("Teaching question maintenance page", () => {
     const topicSelect = screen.getByLabelText("Topic") as HTMLSelectElement;
     const optionLabels = Array.from(topicSelect.options).map((option) => option.textContent);
 
-    expect(optionLabels).toEqual(["All topics", "Brain tumors"]);
+    expect(topicSelect.disabled).toBe(false);
+    expect(optionLabels).toEqual(["All topics", "Brain tumors", "Neuroradiology shared topic"]);
+  });
+
+  it("disables Topic and offers no domain topics while All domains is selected", async () => {
+    maintenanceApi.catalog.mockResolvedValue(catalog);
+    render(<MemoryRouter><TeachingQuestionMaintenancePage /></MemoryRouter>);
+
+    const topicSelect = await screen.findByLabelText("Topic") as HTMLSelectElement;
+    await waitFor(() => expect(screen.getByLabelText("Domain").querySelectorAll("option")).toHaveLength(3));
+
+    expect(topicSelect.disabled).toBe(true);
+    expect(topicSelect.value).toBe("");
+    expect(Array.from(topicSelect.options).map((option) => option.textContent)).toEqual(["All topics"]);
   });
 
   it("clears an incompatible topic when the selected domain changes", async () => {
@@ -117,6 +132,26 @@ describe("Teaching question maintenance page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Export selected XLSX" }));
 
     await waitFor(() => expect(maintenanceApi.download).toHaveBeenCalledWith({ status: "draft", domainCode: "musculoskeletal" }));
+  });
+
+  it("clears Topic when Domain is cleared and never exports a topic without its domain", async () => {
+    maintenanceApi.catalog.mockResolvedValue(catalog);
+    maintenanceApi.download.mockResolvedValue(undefined);
+    render(<MemoryRouter><TeachingQuestionMaintenancePage /></MemoryRouter>);
+
+    fireEvent.change(await screen.findByLabelText("Domain"), { target: { value: "neuroradiology" } });
+    fireEvent.change(screen.getByLabelText("Topic"), { target: { value: "brain-tumors" } });
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "" } });
+
+    const topicSelect = screen.getByLabelText("Topic") as HTMLSelectElement;
+    expect(topicSelect.value).toBe("");
+    expect(topicSelect.disabled).toBe(true);
+    expect(Array.from(topicSelect.options).map((option) => option.textContent)).toEqual(["All topics"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export selected XLSX" }));
+
+    await waitFor(() => expect(maintenanceApi.download).toHaveBeenCalledWith({ status: "draft" }));
+    expect(maintenanceApi.download).not.toHaveBeenCalledWith(expect.objectContaining({ topicCode: "brain-tumors" }));
   });
 
   it("shows a busy label and disables export actions while a workbook is being prepared", async () => {
