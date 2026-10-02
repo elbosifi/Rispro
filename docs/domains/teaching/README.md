@@ -10,6 +10,7 @@ Teaching is an independently bounded education application hosted by the RISpro 
 - Identity keys are the pair `(identity_issuer, identity_subject)`. Teaching stores no passwords, passkeys, clinical user foreign keys, patient data, or workflow records.
 - Backend imports are limited to generic authentication, database, HTTP, and type infrastructure. `src/modules/teaching/tests/teaching-isolation.test.ts` checks that production Teaching files do not import the listed clinical domains.
 - Teaching-owned import and media metadata are created by `218_teaching_qbank_import_pipeline.sql`; this migration does not modify clinical tables.
+- The proof-of-concept anatomy viewer uses a Teaching-owned, manifest-whitelisted asset root; it does not use Q-bank image assets, PACS, clinical DICOM, or clinical workflow services. See [Teaching Anatomy installation and validation](../../teaching-anatomy.md).
 
 ## V1 authentication and permissions
 
@@ -24,6 +25,7 @@ The capability vocabulary is owned by `src/modules/teaching/domain/teaching-perm
 - `/teaching/login` uses the existing password or passkey flow through the Teaching adapter.
 - `/teaching` redirects to `/teaching/dashboard`.
 - `/teaching/dashboard` requires persisted `teaching.access`.
+- `/teaching/anatomy` and `/teaching/anatomy/liver` use the same persisted `teaching.access` boundary and Teaching layout.
 - Teaching is not registered in the clinical page-access matrix or clinical Settings page. Doctor Workspace exposes a Teaching destination only when `/api/teaching/me` confirms `teaching.access`.
 
 The issuer adapter and DTO are the intended seam for a later OIDC/SSO provider. The Teaching domain does not depend on Doctor Workspace services or workflows.

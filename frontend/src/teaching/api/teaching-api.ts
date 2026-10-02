@@ -21,6 +21,40 @@ export interface TeachingIdentity {
   permissions: TeachingPermission[];
 }
 
+export interface TeachingAnatomyAsset {
+  file: string;
+  mediaType: string;
+  sourceFile?: string;
+}
+
+export interface TeachingAnatomyStructure {
+  id: string;
+  labelValue: number;
+  name: string;
+  category: string;
+  color: string;
+  meshAsset: string;
+  note: string;
+}
+
+export interface TeachingAnatomyManifest {
+  schemaVersion: "1.0";
+  atlasId: string;
+  title: string;
+  modality: string;
+  coordinateSystem: "LPS" | "RAS";
+  meshCoordinateSystem: "LPS" | "RAS";
+  volumes: { ct: { assetKey: string; file: string }; segmentation: { assetKey: string; file: string } };
+  assets: Record<string, TeachingAnatomyAsset>;
+  structures: TeachingAnatomyStructure[];
+  provenance: { sourceRepository: string; project: string; attribution: string; license: string; licenseUrl: string; use: string };
+  spatialValidation: { status: "passed"; method: string; minimumMeshLabelAgreement: number; meshLabelAgreement: Record<string, number> };
+}
+
+export type TeachingAnatomyManifestResult =
+  | { available: true; manifest: TeachingAnatomyManifest }
+  | { available: false; atlasId: string; title: string; message: string };
+
 export interface TeachingCatalogItem {
   code: string;
   label: string;
@@ -377,6 +411,24 @@ export async function confirmTeachingMaintenanceWorkbook(file: File, workbookHas
 
 export async function fetchTeachingIdentity(): Promise<TeachingIdentity> {
   return api<TeachingIdentity>("/teaching/me");
+}
+
+export async function fetchTeachingAnatomyManifest(): Promise<TeachingAnatomyManifestResult> {
+  return api<TeachingAnatomyManifestResult>("/teaching/anatomy/liver/manifest");
+}
+
+export async function fetchTeachingAnatomyAsset(assetKey: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(`/api/teaching/anatomy/liver/assets/${encodeURIComponent(assetKey)}`, {
+    credentials: "include",
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(response.status === 404
+      ? "A declared anatomy asset is missing from the installed atlas. Reinstall the SPL Liver Atlas dataset."
+      : `Teaching anatomy asset could not be loaded (${response.status}).`);
+  }
+  return response.arrayBuffer();
 }
 
 export async function fetchTeachingCatalog(): Promise<TeachingCatalog> {

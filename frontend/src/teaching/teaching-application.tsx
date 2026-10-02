@@ -14,6 +14,8 @@ import { TeachingQbankPage } from "./pages/teaching-qbank-page";
 import { TeachingSessionPage } from "./pages/teaching-session-page";
 import { TeachingHistoryPage } from "./pages/teaching-history-page";
 import { TeachingProgressPage } from "./pages/teaching-progress-page";
+import { TeachingAnatomyIndexPage } from "./pages/teaching-anatomy-index-page";
+import { TeachingLiverAnatomyPage } from "./pages/teaching-liver-anatomy-page";
 import { TeachingAccessDenied } from "./components/teaching-access-denied";
 import { useTeachingAuth } from "./auth/teaching-auth-context";
 
@@ -38,6 +40,14 @@ function TeachingDashboardRoute() {
     <TeachingLearnerRoute>
       <TeachingDashboardPage />
     </TeachingLearnerRoute>
+  );
+}
+
+function TeachingAnatomyRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <TeachingAccessRoute>
+      <TeachingLayout>{children}</TeachingLayout>
+    </TeachingAccessRoute>
   );
 }
 
@@ -99,6 +109,8 @@ export function TeachingApplication() {
         <Route path="login" element={<TeachingLoginPage />} />
         <Route index element={<Navigate to="/teaching/dashboard" replace />} />
         <Route path="dashboard" element={<TeachingDashboardRoute />} />
+        <Route path="anatomy" element={<TeachingAnatomyRoute><TeachingAnatomyIndexPage /></TeachingAnatomyRoute>} />
+        <Route path="anatomy/liver" element={<TeachingAnatomyRoute><TeachingLiverAnatomyPage /></TeachingAnatomyRoute>} />
         <Route path="qbank" element={<TeachingQbankRoute />} />
         <Route path="qbank/session/:sessionId" element={<TeachingSessionRoute />} />
         <Route path="history" element={<TeachingHistoryRoute />} />

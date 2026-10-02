@@ -115,6 +115,13 @@ COPY frontend/src/assets/fonts/ ./frontend/src/assets/fonts/
 # Keep it in the shared runtime base so both production targets contain it.
 COPY scripts/qz/windows/ ./scripts/qz/windows/
 
+# Deployment-only Teaching Anatomy provisioner. It runs after the app is healthy
+# and writes the pinned atlas into the existing /app/storage volume.
+COPY scripts/teaching-anatomy/install-spl-liver-atlas.mjs ./scripts/teaching-anatomy/install-spl-liver-atlas.mjs
+COPY scripts/teaching-anatomy/provision-spl-liver-atlas.mjs ./scripts/teaching-anatomy/provision-spl-liver-atlas.mjs
+COPY scripts/teaching-anatomy/spl-liver-atlas.lock.json ./scripts/teaching-anatomy/spl-liver-atlas.lock.json
+COPY src/modules/teaching/anatomy/liver-manifest.template.json ./src/modules/teaching/anatomy/liver-manifest.template.json
+
 # ---------------------------------------------------------------------------
 # Stage 4a: Production runtime with embedded DCMTK MWL tools
 # ---------------------------------------------------------------------------

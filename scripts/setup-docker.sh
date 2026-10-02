@@ -86,6 +86,7 @@ main() {
       wait_for_internal_orthanc_worklists
       wait_for_app_health || true
       verify_qz_bootstrap_readiness
+      ensure_teaching_anatomy_assets
       print_deployment_summary 'RISpro is running.'
       exit 0
     fi
@@ -98,6 +99,7 @@ main() {
   wait_for_internal_orthanc_worklists
   wait_for_app_health || true
   verify_qz_bootstrap_readiness
+  ensure_teaching_anatomy_assets
   print_deployment_summary 'RISpro is ready.'
 }
 

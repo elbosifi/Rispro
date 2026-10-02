@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import path from "node:path";
 import { readRequestScanMaxConcurrency } from "./request-scan-concurrency.js";
 
 // E2E is deliberately isolated from a developer's .env so its guard can never
@@ -125,6 +126,7 @@ export interface EnvConfig {
   qzWindowsScriptFile: string;
   trustProxy: boolean | number | string;
   uploadsDir: string;
+  teachingAnatomyAssetRoot: string;
   dicomRemapStagingDir: string;
   scanSessionTokenSecret: string;
   naps2WebscanEnabled: boolean;
@@ -223,6 +225,7 @@ export const env: EnvConfig = {
   qzWindowsScriptFile: String(process.env.QZ_WINDOWS_SCRIPT_FILE || "scripts/qz/windows/RISpro-Printing-Setup.ps1").trim(),
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
+  teachingAnatomyAssetRoot: process.env.TEACHING_ANATOMY_ASSET_ROOT || path.join(process.env.UPLOADS_DIR || "storage/uploads", "teaching", "anatomy"),
   dicomRemapStagingDir: String(process.env.DICOM_REMAP_STAGING_DIR || "storage/dicom/remap-staging").trim(),
   scanSessionTokenSecret: process.env.SCAN_SESSION_TOKEN_SECRET || process.env.JWT_SECRET || "",
   naps2WebscanEnabled: readBoolean("NAPS2_WEBSCAN_ENABLED", false),

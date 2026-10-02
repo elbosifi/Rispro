@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0",
+  "atlasId": "spl-liver",
+  "title": "SPL Liver Atlas",
+  "modality": "CT",
+  "coordinateSystem": "LPS",
+  "meshCoordinateSystem": "RAS",
+  "volumes": {
+    "ct": { "assetKey": "ct", "file": "SPLLiverAtlasVolume.nrrd" },
+    "segmentation": { "assetKey": "labels", "file": "SPLLiverAtlasLabels.nrrd" }
+  },
+  "assets": {
+    "ct": { "file": "SPLLiverAtlasVolume.nrrd", "mediaType": "application/octet-stream" },
+    "labels": { "file": "SPLLiverAtlasLabels.nrrd", "mediaType": "application/octet-stream" },
+    "colors": { "file": "SPLLiverAtlasColors.ctbl", "mediaType": "text/plain; charset=utf-8" },
+    "mesh-ivc": { "file": "mesh_ivc.stl", "mediaType": "model/stl", "sourceFile": "IVC-1.stl" },
+    "mesh-main-portal-vein": { "file": "mesh_main_portal_vein.stl", "mediaType": "model/stl", "sourceFile": "MainPortalVein-3.stl" },
+    "mesh-left-hepatic-vein": { "file": "mesh_left_hepatic_vein.stl", "mediaType": "model/stl", "sourceFile": "LeftHepaticVein_and_Branches-4.stl" },
+    "mesh-middle-hepatic-vein": { "file": "mesh_middle_hepatic_vein.stl", "mediaType": "model/stl", "sourceFile": "MiddleHepaticVein_and_Branches-5.stl" },
+    "mesh-right-hepatic-vein": { "file": "mesh_right_hepatic_vein.stl", "mediaType": "model/stl", "sourceFile": "RightHepaticVein_and_Branches-6.stl" },
+    "mesh-left-portal-vein": { "file": "mesh_left_portal_vein.stl", "mediaType": "model/stl", "sourceFile": "LeftPortalVein_and_Branches-7.stl" },
+    "mesh-right-portal-vein": { "file": "mesh_right_portal_vein.stl", "mediaType": "model/stl", "sourceFile": "RightPortalVein_and_Branches-8.stl" },
+    "mesh-segment-ii": { "file": "mesh_segment_ii.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_II-9.stl" },
+    "mesh-segment-iii": { "file": "mesh_segment_iii.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_III-10.stl" },
+    "mesh-segment-vi": { "file": "mesh_segment_vi.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_VI-12.stl" },
+    "mesh-segment-iva": { "file": "mesh_segment_iva.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_IVa-15.stl" },
+    "mesh-segment-ivb": { "file": "mesh_segment_ivb.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_IVb-17.stl" },
+    "mesh-segment-i": { "file": "mesh_segment_i.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_I-18.stl" },
+    "mesh-segment-v": { "file": "mesh_segment_v.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_V-24.stl" },
+    "mesh-segment-vii": { "file": "mesh_segment_vii.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_VII-26.stl" },
+    "mesh-segment-viii": { "file": "mesh_segment_viii.stl", "mediaType": "model/stl", "sourceFile": "LiverSegment_VIII-33.stl" },
+    "mesh-gallbladder": { "file": "mesh_gallbladder.stl", "mediaType": "model/stl", "sourceFile": "Gallbladder-40.stl" }
+  },
+  "structures": [
+    { "id": "ivc", "labelValue": 1, "name": "Inferior vena cava", "category": "Major vessels", "color": "#d2a65a", "meshAsset": "mesh-ivc", "note": "The IVC runs posterior to the liver and receives the hepatic veins." },
+    { "id": "main-portal-vein", "labelValue": 3, "name": "Main portal vein", "category": "Portal veins", "color": "#42a5a5", "meshAsset": "mesh-main-portal-vein", "note": "The main portal vein enters at the porta hepatis and divides into right and left branches." },
+    { "id": "left-hepatic-vein", "labelValue": 4, "name": "Left hepatic vein and branches", "category": "Hepatic veins", "color": "#ed9b9b", "meshAsset": "mesh-left-hepatic-vein", "note": "The left hepatic vein drains the left liver toward the IVC." },
+    { "id": "middle-hepatic-vein", "labelValue": 5, "name": "Middle hepatic vein and branches", "category": "Hepatic veins", "color": "#e6b45c", "meshAsset": "mesh-middle-hepatic-vein", "note": "The middle hepatic vein follows the principal plane separating functional right and left liver." },
+    { "id": "right-hepatic-vein", "labelValue": 6, "name": "Right hepatic vein and branches", "category": "Hepatic veins", "color": "#a788d5", "meshAsset": "mesh-right-hepatic-vein", "note": "The right hepatic vein marks the right intersegmental plane and drains to the IVC." },
+    { "id": "left-portal-vein", "labelValue": 7, "name": "Left portal vein and branches", "category": "Portal veins", "color": "#7ec8c8", "meshAsset": "mesh-left-portal-vein", "note": "The left portal vein supplies the left liver and gives rise to segmental branches." },
+    { "id": "right-portal-vein", "labelValue": 8, "name": "Right portal vein and branches", "category": "Portal veins", "color": "#318f96", "meshAsset": "mesh-right-portal-vein", "note": "The right portal vein divides into anterior and posterior sectoral branches." },
+    { "id": "segment-ii", "labelValue": 9, "name": "Liver Segment II", "category": "Liver segments", "color": "#6bbf72", "meshAsset": "mesh-segment-ii", "note": "Segment II lies in the superior part of the left lateral section." },
+    { "id": "segment-iii", "labelValue": 10, "name": "Liver Segment III", "category": "Liver segments", "color": "#97cf63", "meshAsset": "mesh-segment-iii", "note": "Segment III lies in the inferior part of the left lateral section." },
+    { "id": "segment-vi", "labelValue": 12, "name": "Liver Segment VI", "category": "Liver segments", "color": "#4c9e56", "meshAsset": "mesh-segment-vi", "note": "Segment VI is in the inferior posterior right liver." },
+    { "id": "segment-iva", "labelValue": 15, "name": "Liver Segment IVa", "category": "Liver segments", "color": "#e4ca53", "meshAsset": "mesh-segment-iva", "note": "Segment IVa occupies the superior medial left liver." },
+    { "id": "segment-ivb", "labelValue": 17, "name": "Liver Segment IVb", "category": "Liver segments", "color": "#c7b844", "meshAsset": "mesh-segment-ivb", "note": "Segment IVb occupies the inferior medial left liver." },
+    { "id": "segment-i", "labelValue": 18, "name": "Liver Segment I", "category": "Liver segments", "color": "#d18754", "meshAsset": "mesh-segment-i", "note": "Segment I is the caudate lobe, posterior to the porta hepatis and close to the IVC." },
+    { "id": "segment-v", "labelValue": 24, "name": "Liver Segment V", "category": "Liver segments", "color": "#63b5bd", "meshAsset": "mesh-segment-v", "note": "Segment V is in the inferior anterior right liver." },
+    { "id": "segment-vii", "labelValue": 26, "name": "Liver Segment VII", "category": "Liver segments", "color": "#4191a2", "meshAsset": "mesh-segment-vii", "note": "Segment VII is in the superior posterior right liver." },
+    { "id": "segment-viii", "labelValue": 33, "name": "Liver Segment VIII", "category": "Liver segments", "color": "#53ad7a", "meshAsset": "mesh-segment-viii", "note": "Segment VIII is anterosuperior in the right liver, between the middle and right hepatic veins; its portal branches course within the segment." },
+    { "id": "gallbladder", "labelValue": 40, "name": "Gallbladder", "category": "Adjacent structures", "color": "#b9a365", "meshAsset": "mesh-gallbladder", "note": "The gallbladder lies along the inferior surface of the right liver near segments IVb and V." }
+  ],
+  "provenance": {
+    "sourceRepository": "https://github.com/lorensen/SPLLiverAtlas",
+    "project": "The Brigham and Women's Surgical Planning Lab Liver Atlas",
+    "attribution": "Jakab M. (SPL), Pujol S. (SPL), Shaffer K. (BMC), and Kikinis R. (SPL); Surgical Planning Laboratory, Department of Radiology, Brigham and Women's Hospital, Harvard Medical School, and Boston Medical Center. Other contributors include Matthew D’Artista, Alex Kikinis, and Tobias Penzkofer. Released February 2014.",
+    "license": "The SPL atlases are distributed under the 3D Slicer Contribution and Software License Agreement; preserve the upstream license and notices with these files.",
+    "licenseUrl": "https://www.openanatomy.org/atlas-pages/slicer-license.html",
+    "use": "RISpro adapts this atlas as educational material. The data are not patient-specific RISpro clinical data."
+  }
+}

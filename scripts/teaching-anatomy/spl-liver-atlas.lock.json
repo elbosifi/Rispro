@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "atlasId": "spl-liver",
+  "managedVersion": "spl-liver-2019-06-24.1",
+  "upstream": {
+    "repository": "https://github.com/lorensen/SPLLiverAtlas",
+    "commit": "6630f4d4ff047937545287de92ccbb5590273ca5",
+    "mediaBaseUrl": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5"
+  },
+  "assets": [
+    { "path": "Atlas/SPLLiverAtlasVolume.nrrd", "size": 22043602, "sha256": "540b6be2ea932745cfe4e6d779173a2756043ae75102b9a38bfd1ef466fe608e", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Atlas/SPLLiverAtlasVolume.nrrd" },
+    { "path": "Atlas/SPLLiverAtlasLabels.nrrd", "size": 157773, "sha256": "218104298a93ee13607798788bb313ae2d6daf766fff76953b5d44bb168abfc7", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Atlas/SPLLiverAtlasLabels.nrrd" },
+    { "path": "Atlas/SPLLiverAtlasColors.ctbl", "size": 943, "sha256": "914da81d5b274616b61b9b54299d5eb2130cc1f0954520e007e13b71d929f8bd", "url": "https://raw.githubusercontent.com/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Atlas/SPLLiverAtlasColors.ctbl" },
+    { "path": "Models/STL/IVC-1.stl", "size": 1794684, "sha256": "9d52122e3a6247fb83a69133fec933d10ab6b6919e76ce6b9aec0d93c706fea0", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/IVC-1.stl" },
+    { "path": "Models/STL/MainPortalVein-3.stl", "size": 791284, "sha256": "7a6726c31816d77af2e5dac7fdc5db26980a82f8a4fdbf4003cc2a0ed3179349", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/MainPortalVein-3.stl" },
+    { "path": "Models/STL/LeftHepaticVein_and_Branches-4.stl", "size": 639284, "sha256": "c58dd29f608f256fe804866dd252dc919be9fc1d23f44febb29a5c7e833debb1", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LeftHepaticVein_and_Branches-4.stl" },
+    { "path": "Models/STL/MiddleHepaticVein_and_Branches-5.stl", "size": 881684, "sha256": "1f1c0524c93f776ae5104d43035f17d7ba9bb8b5615985394993841f3800cf6c", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/MiddleHepaticVein_and_Branches-5.stl" },
+    { "path": "Models/STL/RightHepaticVein_and_Branches-6.stl", "size": 1644684, "sha256": "d60db8928e79c16cd31f71d411b046b4d9e551a277891389393573a6542ae5dd", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/RightHepaticVein_and_Branches-6.stl" },
+    { "path": "Models/STL/LeftPortalVein_and_Branches-7.stl", "size": 1671484, "sha256": "14e71a87ecad7683abe79a6d3c97b19f4847690b1e025eddf0acc14b2a2c4948", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LeftPortalVein_and_Branches-7.stl" },
+    { "path": "Models/STL/RightPortalVein_and_Branches-8.stl", "size": 3317284, "sha256": "0062f254cfc212e4ef669636e19f5360610334249d8394c2c9fea4afb036de4c", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/RightPortalVein_and_Branches-8.stl" },
+    { "path": "Models/STL/LiverSegment_II-9.stl", "size": 3447084, "sha256": "f55aa208eb0aa5936cc54ba2fe662becc5afa00fedd2f2e4b403c7623c85ec19", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_II-9.stl" },
+    { "path": "Models/STL/LiverSegment_III-10.stl", "size": 2135484, "sha256": "39635180aa186291165e9655675279514a588d8c8842f5fa987fc4d99cda2042", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_III-10.stl" },
+    { "path": "Models/STL/LiverSegment_VI-12.stl", "size": 4092684, "sha256": "00d7b4b1f286ac47d8d3b79f414fccf63dd6c4a2fc464780da1554d31c7433ce", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_VI-12.stl" },
+    { "path": "Models/STL/LiverSegment_IVa-15.stl", "size": 3874884, "sha256": "1cca6aba3c06b5126ab6b369dd4cb466d98e5d608e2b53ac911da48d8cfed9de", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_IVa-15.stl" },
+    { "path": "Models/STL/LiverSegment_IVb-17.stl", "size": 2148484, "sha256": "a4cf55f17b5edb2de72b8b5fcbbe701319205a9845d408bf8f974e8d00b16428", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_IVb-17.stl" },
+    { "path": "Models/STL/LiverSegment_I-18.stl", "size": 1118884, "sha256": "4a93c0030c52a458ca4ecb92f93e29af2007c71f270c10994f548c90b727b0d6", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_I-18.stl" },
+    { "path": "Models/STL/LiverSegment_V-24.stl", "size": 4327684, "sha256": "34705ba40c6e3ada1d3f2839c108fea6945e73b591d111560a1bda79a1e9b861", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_V-24.stl" },
+    { "path": "Models/STL/LiverSegment_VII-26.stl", "size": 5930484, "sha256": "af870f9975fc814e85e2fd4855cfc6de05274afd2fbce0296dfd6f3a70e2aa09", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_VII-26.stl" },
+    { "path": "Models/STL/LiverSegment_VIII-33.stl", "size": 5051684, "sha256": "563b771137fb2bc8a18b5ff0f891deda02244917586964b87e9846f2bc0092e2", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/LiverSegment_VIII-33.stl" },
+    { "path": "Models/STL/Gallbladder-40.stl", "size": 883684, "sha256": "073f58d39d1f9f4a90d11653d56de317666f29c139c618404ea20157f670be68", "url": "https://media.githubusercontent.com/media/lorensen/SPLLiverAtlas/6630f4d4ff047937545287de92ccbb5590273ca5/Models/STL/Gallbladder-40.stl" }
+  ]
+}

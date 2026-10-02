@@ -15,6 +15,7 @@ SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 # git clean intentionally removes untracked repository files.
 RISPRO_CONFIG_BACKUP_DIR="${RISPRO_CONFIG_BACKUP_DIR:-${PROJECT_ROOT}/../rispro-config-backups}"
 ORTHANC_CONFIG_CHANGED=0
+TEACHING_ANATOMY_DEPLOYMENT_STATUS='unavailable - provisioning failed'
 
 deploy_now_ms() {
   date +%s%3N
@@ -1165,6 +1166,32 @@ verify_qz_bootstrap_readiness() {
   ok "QZ printing bootstrap is ready: ${manifest_url}"
 }
 
+ensure_teaching_anatomy_assets() {
+  local provision_output
+  TEACHING_ANATOMY_DEPLOYMENT_STATUS='unavailable - provisioning failed'
+  log 'Ensuring the pinned Teaching Anatomy SPL Liver Atlas in persistent rispro-storage...'
+  if ! provision_output="$("${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T app node /app/scripts/teaching-anatomy/provision-spl-liver-atlas.mjs 2>&1)"; then
+    warn 'Teaching Anatomy: unavailable - provisioning failed because the app-container provisioner could not run. RISpro remains available.'
+    return 0
+  fi
+  printf '%s\n' "${provision_output}"
+  case "${provision_output}" in
+    *'RISPRO_TEACHING_ANATOMY_STATUS=ready'*)
+      TEACHING_ANATOMY_DEPLOYMENT_STATUS='ready'
+      ;;
+    *'RISPRO_TEACHING_ANATOMY_STATUS=already-current'*)
+      TEACHING_ANATOMY_DEPLOYMENT_STATUS='already current'
+      ;;
+    *'RISPRO_TEACHING_ANATOMY_STATUS=unavailable'*)
+      warn 'Teaching Anatomy: unavailable - provisioning failed. RISpro remains available.'
+      ;;
+    *)
+      warn 'Teaching Anatomy: unavailable - provisioning produced no recognized status. RISpro remains available.'
+      ;;
+  esac
+  return 0
+}
+
 wait_for_app_health() {
   local attempts="${APP_HEALTH_ATTEMPTS:-45}"
   local interval="${APP_HEALTH_INTERVAL_SECONDS:-2}"
@@ -1252,6 +1279,7 @@ print_deployment_summary() {
   fi
   printf '  OHIF DB setting: determined in Settings → Integrations → OHIF Viewer\n'
   printf '  OHIF URL:        /ohif/\n'
+  printf '  Teaching Anatomy: %s\n' "${TEACHING_ANATOMY_DEPLOYMENT_STATUS}"
 
   case "$RISPRO_DICOM_MODE" in
     embedded)

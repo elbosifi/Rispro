@@ -195,6 +195,7 @@ main() {
   log_deploy_timing 'qz_readiness' "${qz_started_at}"
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
+  ensure_teaching_anatomy_assets
   print_deployment_summary 'Update complete.'
 }
 

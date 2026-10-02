@@ -1,5 +1,5 @@
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { BookOpenText, ClipboardList, FileUp, GraduationCap, History, LogOut, NotebookTabs } from "lucide-react";
+import { BookOpenText, ClipboardList, FileUp, GraduationCap, History, LogOut, NotebookTabs, Scan } from "lucide-react";
 import { Button } from "@/components/shared";
 import { requestNavigationWithUnsavedGuard } from "@/lib/unsaved-navigation-guard";
 import { useTeachingAuth } from "../auth/teaching-auth-context";
@@ -53,6 +53,13 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
               <BookOpenText size={17} aria-hidden="true" />
               Dashboard
             </NavLink>
+            <NavLink
+              to="/teaching/anatomy"
+              onClick={(event) => follow(event, "/teaching/anatomy")}
+              className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}
+            >
+              <Scan size={17} aria-hidden="true" /> Anatomy
+            </NavLink>
             {canLearn && <NavLink to="/teaching/progress" onClick={(event) => follow(event, "/teaching/progress")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}>Progress</NavLink>}
             {canLearn && <NavLink to="/teaching/qbank" onClick={(event) => follow(event, "/teaching/qbank")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}><ClipboardList size={17} aria-hidden="true" /> Learn Q-Bank</NavLink>}
             {canLearn && <NavLink to="/teaching/history" onClick={(event) => follow(event, "/teaching/history")} className={({ isActive }) => `flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${isActive ? "bg-muted text-accent" : "text-foreground hover:bg-muted"}`}><History size={17} aria-hidden="true" /> Session History</NavLink>}
@@ -78,6 +85,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
               <BookOpenText size={16} aria-hidden="true" />
               Dashboard
             </NavLink>
+            <NavLink to="/teaching/anatomy" onClick={(event) => follow(event, "/teaching/anatomy")} className={mobileLinkClass}><Scan size={16} aria-hidden="true" /> Anatomy</NavLink>
             {canLearn && <NavLink to="/teaching/progress" onClick={(event) => follow(event, "/teaching/progress")} className={mobileLinkClass}>Progress</NavLink>}
             {canLearn && <NavLink to="/teaching/qbank" onClick={(event) => follow(event, "/teaching/qbank")} className={mobileLinkClass}><ClipboardList size={16} aria-hidden="true" /> Learn</NavLink>}
             {canLearn && <NavLink to="/teaching/history" onClick={(event) => follow(event, "/teaching/history")} className={mobileLinkClass}><History size={16} aria-hidden="true" /> History</NavLink>}

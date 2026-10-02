@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../../middleware/auth.js";
 import { asyncRoute } from "../../../utils/async-route.js";
 import { HttpError } from "../../../utils/http-error.js";
+import { readTeachingAnatomyManifest, resolveTeachingAnatomyAsset } from "../anatomy/anatomy-asset-service.js";
 import { requireTeachingCapabilities, requireTeachingLearner, type TeachingRequest } from "./teaching-route-auth.js";
 import { getTeachingCatalog, listTeachingQuestionBanks } from "../repositories/teaching-catalog-repository.js";
 import {
@@ -166,6 +167,43 @@ export function createTeachingRouter(): Router {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
     res.send(asset.content);
+  }));
+
+  router.get("/anatomy/liver/manifest", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    await requireTeachingCapabilities(req, []);
+    const manifest = await readTeachingAnatomyManifest();
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Vary", "Cookie");
+    res.json(manifest ? { available: true, manifest } : {
+      available: false,
+      atlasId: "spl-liver",
+      title: "SPL Liver Atlas",
+      message: "The Teaching anatomy dataset is not installed on this RISpro server.",
+    });
+  }));
+
+  router.get("/anatomy/liver/assets/:assetKey", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response, next) => {
+    await requireTeachingCapabilities(req, []);
+    let asset: Awaited<ReturnType<typeof resolveTeachingAnatomyAsset>>;
+    try {
+      const assetKey = typeof req.params.assetKey === "string" ? req.params.assetKey : "";
+      asset = await resolveTeachingAnatomyAsset(assetKey);
+    } catch (error) {
+      if (error instanceof Error && /Invalid anatomy asset key|not declared/.test(error.message)) {
+        throw new HttpError(404, "Anatomy asset is not declared in the installed atlas.");
+      }
+      throw error;
+    }
+    if (!asset) {
+      res.status(404).json({ message: "The Teaching anatomy dataset is not installed." });
+      return;
+    }
+    res.setHeader("Content-Type", asset.mediaType);
+    res.setHeader("Content-Disposition", `inline; filename="${asset.filePath.split(/[\\/]/).at(-1)}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Vary", "Cookie");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.sendFile(asset.filePath, (error) => { if (error) next(error); });
   }));
 
   router.get("/qbank/import/template.json", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
