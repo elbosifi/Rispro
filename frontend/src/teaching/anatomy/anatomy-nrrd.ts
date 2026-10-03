@@ -15,6 +15,35 @@ export interface ParsedAnatomyNrrd {
   intercept: number;
 }
 
+export type AnatomyPlane = "axial" | "coronal" | "sagittal";
+
+export interface AnatomyPlaneSpec {
+  width: number;
+  height: number;
+  sliceCount: number;
+  spacingX: number;
+  spacingY: number;
+  spacingNormal: number;
+  uMin: number;
+  vMin: number;
+  normalMin: number;
+  horizontal: [number, number, number];
+  vertical: [number, number, number];
+  normal: [number, number, number];
+  leftMarker: "R" | "A";
+  rightMarker: "L" | "P";
+}
+
+export interface ReslicedAnatomyPlane {
+  width: number;
+  height: number;
+  spacingX: number;
+  spacingY: number;
+  values: Float32Array;
+  labels: Int32Array | null;
+  markers: { left: "R" | "A"; right: "L" | "P" };
+}
+
 function fieldValue(header: Map<string, string>, key: string): string | undefined {
   return header.get(key.toLowerCase());
 }
@@ -137,12 +166,12 @@ export async function parseAnatomyNrrd(buffer: ArrayBuffer): Promise<ParsedAnato
   };
 }
 
-export function validateCompatibleAnatomyGeometry(ct: AnatomyNrrdGeometry, labels: AnatomyNrrdGeometry): void {
+export function validateCompatibleAnatomyGeometry(image: AnatomyNrrdGeometry, labels: AnatomyNrrdGeometry): void {
   const close = (left: number, right: number) => Math.abs(left - right) <= 1e-4;
-  if (ct.sizes.some((size, index) => size !== labels.sizes[index])) throw new Error("The CT and segmentation dimensions do not match.");
-  if (ct.coordinateSystem !== labels.coordinateSystem || ct.origin.some((value, index) => !close(value, labels.origin[index]!))
-    || ct.directions.some((direction, axis) => direction.some((value, component) => !close(value, labels.directions[axis]![component]!)))) {
-    throw new Error("The CT and segmentation NRRD spatial transforms do not match.");
+  if (image.sizes.some((size, index) => size !== labels.sizes[index])) throw new Error("The image and segmentation dimensions do not match.");
+  if (image.coordinateSystem !== labels.coordinateSystem || image.origin.some((value, index) => !close(value, labels.origin[index]!))
+    || image.directions.some((direction, axis) => direction.some((value, component) => !close(value, labels.directions[axis]![component]!)))) {
+    throw new Error("The image and segmentation NRRD spatial transforms do not match.");
   }
 }
 
@@ -165,6 +194,175 @@ export function validateAxialAnatomyGeometry(geometry: AnatomyNrrdGeometry): voi
   if (sliceAlignment < 0.99 || Math.abs(normal[2]!) < 0.95) {
     throw new Error("The installed NRRD slice axis is not aligned with axial patient space; the atlas cannot be displayed as an axial stack.");
   }
+}
+
+export function validateAnatomyGeometry(geometry: AnatomyNrrdGeometry): void {
+  if (geometry.sizes.some((size) => !Number.isSafeInteger(size) || size < 1)
+    || geometry.directions.some((direction) => direction.some((component) => !Number.isFinite(component)))) {
+    throw new Error("The anatomy volume has invalid spatial dimensions or directions.");
+  }
+  const [x, y, z] = geometry.directions;
+  const cross = [y[1] * z[2] - y[2] * z[1], y[2] * z[0] - y[0] * z[2], y[0] * z[1] - y[1] * z[0]];
+  const determinant = x[0] * cross[0]! + x[1] * cross[1]! + x[2] * cross[2]!;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) {
+    throw new Error("The anatomy volume spatial transform is singular.");
+  }
+}
+
+function anatomyPlaneAxes(plane: AnatomyPlane): Pick<AnatomyPlaneSpec, "horizontal" | "vertical" | "normal" | "leftMarker" | "rightMarker"> {
+  if (plane === "axial") return { horizontal: [1, 0, 0], vertical: [0, -1, 0], normal: [0, 0, -1], leftMarker: "R", rightMarker: "L" };
+  if (plane === "coronal") return { horizontal: [1, 0, 0], vertical: [0, 0, 1], normal: [0, -1, 0], leftMarker: "R", rightMarker: "L" };
+  return { horizontal: [0, 1, 0], vertical: [0, 0, 1], normal: [1, 0, 0], leftMarker: "A", rightMarker: "P" };
+}
+
+function toLps(point: readonly number[], coordinateSystem: "LPS" | "RAS"): [number, number, number] {
+  return coordinateSystem === "RAS" ? [-point[0]!, -point[1]!, point[2]!] : [point[0]!, point[1]!, point[2]!];
+}
+
+function dot(left: readonly number[], right: readonly number[]): number {
+  return left[0]! * right[0]! + left[1]! * right[1]! + left[2]! * right[2]!;
+}
+
+function projectedBounds(geometry: AnatomyNrrdGeometry, axis: readonly number[]): [number, number] {
+  const values: number[] = [];
+  for (const i of [0, geometry.sizes[0] - 1]) for (const j of [0, geometry.sizes[1] - 1]) for (const k of [0, geometry.sizes[2] - 1]) {
+    const point = [0, 1, 2].map((component) => geometry.origin[component]!
+      + geometry.directions[0][component]! * i + geometry.directions[1][component]! * j + geometry.directions[2][component]! * k);
+    values.push(dot(toLps(point, geometry.coordinateSystem), axis));
+  }
+  return [Math.min(...values), Math.max(...values)];
+}
+
+function boundedGridSize(range: number, requestedSpacing: number): { count: number; spacing: number } {
+  const count = Math.max(1, Math.min(1024, Math.ceil(range / requestedSpacing) + 1));
+  return { count, spacing: count > 1 ? range / (count - 1) : requestedSpacing };
+}
+
+export function getAnatomyPlaneSpec(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane): AnatomyPlaneSpec {
+  validateAnatomyGeometry(geometry);
+  const axes = anatomyPlaneAxes(plane);
+  const [uMin, uMax] = projectedBounds(geometry, axes.horizontal);
+  const [vMin, vMax] = projectedBounds(geometry, axes.vertical);
+  const [normalMin, normalMax] = projectedBounds(geometry, axes.normal);
+  const voxelSpacing = Math.min(...geometry.directions.map((direction) => vectorLength(direction)));
+  const normalSteps = geometry.directions.map((direction) => Math.abs(dot(toLps(direction, geometry.coordinateSystem), axes.normal)))
+    .filter((step) => step > 1e-4);
+  const requestedNormalSpacing = normalSteps.length ? Math.min(...normalSteps) : voxelSpacing;
+  const horizontal = boundedGridSize(uMax - uMin, voxelSpacing);
+  const vertical = boundedGridSize(vMax - vMin, voxelSpacing);
+  const normal = boundedGridSize(normalMax - normalMin, requestedNormalSpacing);
+  return {
+    ...axes,
+    width: horizontal.count,
+    height: vertical.count,
+    sliceCount: normal.count,
+    spacingX: horizontal.spacing,
+    spacingY: vertical.spacing,
+    spacingNormal: normal.spacing,
+    uMin,
+    vMin,
+    normalMin,
+  };
+}
+
+function voxelCoordinatesFromLps(geometry: AnatomyNrrdGeometry, lpsPoint: readonly number[]): [number, number, number] {
+  const origin = toLps(geometry.origin, geometry.coordinateSystem);
+  const x = toLps(geometry.directions[0], geometry.coordinateSystem);
+  const y = toLps(geometry.directions[1], geometry.coordinateSystem);
+  const z = toLps(geometry.directions[2], geometry.coordinateSystem);
+  const relative = [lpsPoint[0]! - origin[0], lpsPoint[1]! - origin[1], lpsPoint[2]! - origin[2]];
+  const crossYZ = [y[1]! * z[2]! - y[2]! * z[1]!, y[2]! * z[0]! - y[0]! * z[2]!, y[0]! * z[1]! - y[1]! * z[0]!];
+  const crossZX = [z[1]! * x[2]! - z[2]! * x[1]!, z[2]! * x[0]! - z[0]! * x[2]!, z[0]! * x[1]! - z[1]! * x[0]!];
+  const crossXY = [x[1]! * y[2]! - x[2]! * y[1]!, x[2]! * y[0]! - x[0]! * y[2]!, x[0]! * y[1]! - x[1]! * y[0]!];
+  const determinant = dot(x, crossYZ);
+  return [dot(relative, crossYZ) / determinant, dot(relative, crossZX) / determinant, dot(relative, crossXY) / determinant];
+}
+
+export function anatomyPlaneWorldTransform(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, sliceIndex: number): {
+  point: [number, number, number];
+  horizontal: [number, number, number];
+  vertical: [number, number, number];
+  normal: [number, number, number];
+  width: number;
+  height: number;
+  spacingX: number;
+  spacingY: number;
+} {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  if (!Number.isInteger(sliceIndex) || sliceIndex < 0 || sliceIndex >= spec.sliceCount) throw new Error("Anatomy plane index is outside the volume.");
+  const pointLps = [
+    spec.horizontal[0] * (spec.uMin + (spec.width - 1) * spec.spacingX / 2)
+      + spec.vertical[0] * (spec.vMin + (spec.height - 1) * spec.spacingY / 2)
+      + spec.normal[0] * (spec.normalMin + sliceIndex * spec.spacingNormal),
+    spec.horizontal[1] * (spec.uMin + (spec.width - 1) * spec.spacingX / 2)
+      + spec.vertical[1] * (spec.vMin + (spec.height - 1) * spec.spacingY / 2)
+      + spec.normal[1] * (spec.normalMin + sliceIndex * spec.spacingNormal),
+    spec.horizontal[2] * (spec.uMin + (spec.width - 1) * spec.spacingX / 2)
+      + spec.vertical[2] * (spec.vMin + (spec.height - 1) * spec.spacingY / 2)
+      + spec.normal[2] * (spec.normalMin + sliceIndex * spec.spacingNormal),
+  ] as [number, number, number];
+  const fromLps = (vector: readonly number[]) => geometry.coordinateSystem === "RAS" ? [-vector[0]!, -vector[1]!, vector[2]!] as [number, number, number] : [vector[0]!, vector[1]!, vector[2]!] as [number, number, number];
+  return {
+    point: fromLps(pointLps),
+    horizontal: fromLps(spec.horizontal),
+    vertical: fromLps(spec.vertical),
+    normal: fromLps(spec.normal),
+    width: spec.width,
+    height: spec.height,
+    spacingX: spec.spacingX,
+    spacingY: spec.spacingY,
+  };
+}
+
+function sampleVoxel(data: AnatomyVoxelData, geometry: AnatomyNrrdGeometry, coordinates: readonly number[], nearest: boolean): number {
+  const [x, y, z] = coordinates;
+  const [width, height, depth] = geometry.sizes;
+  if (x! < 0 || y! < 0 || z! < 0 || x! > width - 1 || y! > height - 1 || z! > depth - 1) return 0;
+  const index = (i: number, j: number, k: number) => i + width * (j + height * k);
+  if (nearest) return Number(data[index(Math.round(x!), Math.round(y!), Math.round(z!))]);
+  const x0 = Math.floor(x!); const y0 = Math.floor(y!); const z0 = Math.floor(z!);
+  const x1 = Math.min(width - 1, x0 + 1); const y1 = Math.min(height - 1, y0 + 1); const z1 = Math.min(depth - 1, z0 + 1);
+  const fx = x! - x0; const fy = y! - y0; const fz = z! - z0;
+  const at = (i: number, j: number, k: number) => Number(data[index(i, j, k)]);
+  const c00 = at(x0, y0, z0) * (1 - fx) + at(x1, y0, z0) * fx;
+  const c10 = at(x0, y1, z0) * (1 - fx) + at(x1, y1, z0) * fx;
+  const c01 = at(x0, y0, z1) * (1 - fx) + at(x1, y0, z1) * fx;
+  const c11 = at(x0, y1, z1) * (1 - fx) + at(x1, y1, z1) * fx;
+  const c0 = c00 * (1 - fy) + c10 * fy;
+  const c1 = c01 * (1 - fy) + c11 * fy;
+  return c0 * (1 - fz) + c1 * fz;
+}
+
+export function resliceAnatomyPlane(primary: ParsedAnatomyNrrd, segmentation: ParsedAnatomyNrrd | null, plane: AnatomyPlane, sliceIndex: number): ReslicedAnatomyPlane {
+  if (segmentation) validateCompatibleAnatomyGeometry(primary.geometry, segmentation.geometry);
+  const spec = getAnatomyPlaneSpec(primary.geometry, plane);
+  if (!Number.isInteger(sliceIndex) || sliceIndex < 0 || sliceIndex >= spec.sliceCount) throw new Error("Anatomy plane index is outside the volume.");
+  const values = new Float32Array(spec.width * spec.height);
+  const labels = segmentation ? new Int32Array(spec.width * spec.height) : null;
+  const normalValue = spec.normalMin + sliceIndex * spec.spacingNormal;
+  let outputIndex = 0;
+  for (let y = 0; y < spec.height; y += 1) {
+    const verticalValue = spec.vMin + (spec.height - 1 - y) * spec.spacingY;
+    for (let x = 0; x < spec.width; x += 1) {
+      const horizontalValue = spec.uMin + x * spec.spacingX;
+      const worldLps = [0, 1, 2].map((component) => spec.horizontal[component]! * horizontalValue
+        + spec.vertical[component]! * verticalValue + spec.normal[component]! * normalValue);
+      const voxel = voxelCoordinatesFromLps(primary.geometry, worldLps);
+      values[outputIndex] = sampleVoxel(primary.data, primary.geometry, voxel, false) * primary.slope + primary.intercept;
+      if (labels && segmentation) labels[outputIndex] = Math.round(sampleVoxel(segmentation.data, segmentation.geometry, voxel, true));
+      outputIndex += 1;
+    }
+  }
+  const axes = anatomyPlaneAxes(plane);
+  return {
+    width: spec.width,
+    height: spec.height,
+    spacingX: spec.spacingX,
+    spacingY: spec.spacingY,
+    values,
+    labels,
+    markers: { left: axes.leftMarker, right: axes.rightMarker },
+  };
 }
 
 export function sliceIndexWorldPlane(geometry: AnatomyNrrdGeometry, sliceIndex: number): { point: [number, number, number]; normal: [number, number, number] } {

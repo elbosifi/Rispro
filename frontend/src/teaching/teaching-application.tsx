@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { TeachingAuthProvider } from "./auth/teaching-auth-provider";
 import { TeachingAccessRoute } from "./auth/teaching-access-route";
 import { TeachingLayout } from "./layout/teaching-layout";
@@ -15,6 +15,8 @@ import { TeachingSessionPage } from "./pages/teaching-session-page";
 import { TeachingHistoryPage } from "./pages/teaching-history-page";
 import { TeachingProgressPage } from "./pages/teaching-progress-page";
 import { TeachingAnatomyIndexPage } from "./pages/teaching-anatomy-index-page";
+import { TeachingAnatomySourcesPage } from "./pages/teaching-anatomy-sources-page";
+import { TeachingAnatomyAtlasPage } from "./pages/teaching-anatomy-atlas-page";
 import { TeachingLiverAnatomyPage } from "./pages/teaching-liver-anatomy-page";
 import { TeachingAccessDenied } from "./components/teaching-access-denied";
 import { useTeachingAuth } from "./auth/teaching-auth-context";
@@ -41,6 +43,11 @@ function TeachingDashboardRoute() {
       <TeachingDashboardPage />
     </TeachingLearnerRoute>
   );
+}
+
+function TeachingAnatomyAtlasRoute() {
+  const { atlasId = "" } = useParams();
+  return <TeachingAnatomyAtlasPage atlasId={atlasId} />;
 }
 
 function TeachingAnatomyRoute({ children }: { children: React.ReactNode }) {
@@ -110,6 +117,8 @@ export function TeachingApplication() {
         <Route index element={<Navigate to="/teaching/dashboard" replace />} />
         <Route path="dashboard" element={<TeachingDashboardRoute />} />
         <Route path="anatomy" element={<TeachingAnatomyRoute><TeachingAnatomyIndexPage /></TeachingAnatomyRoute>} />
+        <Route path="anatomy/sources" element={<TeachingAnatomyRoute><TeachingAnatomySourcesPage /></TeachingAnatomyRoute>} />
+        <Route path="anatomy/atlas/:atlasId" element={<TeachingAnatomyRoute><TeachingAnatomyAtlasRoute /></TeachingAnatomyRoute>} />
         <Route path="anatomy/liver" element={<TeachingAnatomyRoute><TeachingLiverAnatomyPage /></TeachingAnatomyRoute>} />
         <Route path="qbank" element={<TeachingQbankRoute />} />
         <Route path="qbank/session/:sessionId" element={<TeachingSessionRoute />} />

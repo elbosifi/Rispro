@@ -322,8 +322,9 @@ export async function install(options) {
       asset.sourceFile = sourceInfo.sourceFilename;
     }
     await copyFile(upstreamReadme, path.join(stage, "UPSTREAM-README.md"));
-    if (licenseSource) await copyFile(licenseSource, path.join(stage, "UPSTREAM-LICENSE.txt"));
-    else await writeFile(path.join(stage, "UPSTREAM-LICENSE.txt"), "The upstream repository does not include a root license file. The SPL atlas is described by the Open Anatomy Project as distributed under the 3D Slicer Contribution and Software License Agreement. See the linked license in manifest.json and docs/teaching-anatomy.md; preserve this notice and consult the upstream source before redistributing.\n", "utf8");
+    if (licenseSource) await copyFile(licenseSource, path.join(stage, "UPSTREAM-SOURCE-LICENSE.txt"));
+    const slicerLicensePartB = await readFile(path.join(scriptDirectory, "slicer-license-part-b.txt"), "utf8");
+    await writeFile(path.join(stage, "UPSTREAM-LICENSE.txt"), `All or portions of this licensed product (such portions are the “Software”) have been obtained under license from The Brigham and Women's Hospital, Inc. and are subject to the following terms and conditions:\n\n${slicerLicensePartB}`, "utf8");
     template.spatialValidation = {
       status: "passed",
       method: "CT and label-map affine metadata matched exactly within 0.0001 mm; each STL was transformed only between its declared LPS/RAS coordinate system and the CT coordinate system, its bounding box fit inside the CT physical bounds, and at least 20% of deterministic mesh vertex samples matched its declared label within a 3x3x3 voxel neighborhood.",
@@ -338,7 +339,7 @@ export async function install(options) {
       template.provenance.attribution,
       template.provenance.license,
       `License details: ${template.provenance.licenseUrl}`,
-      "Installed by RISpro as educational material. Preserve UPSTREAM-README.md, UPSTREAM-LICENSE.txt, and this notice with the atlas files.",
+      "Installed by RISpro as educational material. Preserve UPSTREAM-README.md, UPSTREAM-LICENSE.txt, any UPSTREAM-SOURCE-LICENSE.txt, and this notice with the atlas files.",
     ].join("\n\n") + "\n";
     await writeFile(path.join(stage, "NOTICE.txt"), notice, "utf8");
     await writeFile(path.join(stage, "manifest.json"), `${JSON.stringify(template, null, 2)}\n`, "utf8");

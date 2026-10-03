@@ -1168,22 +1168,30 @@ verify_qz_bootstrap_readiness() {
 
 ensure_teaching_anatomy_assets() {
   local provision_output
+  local provision_output_file
   TEACHING_ANATOMY_DEPLOYMENT_STATUS='unavailable - provisioning failed'
-  log 'Ensuring the pinned Teaching Anatomy SPL Liver Atlas in persistent rispro-storage...'
-  if ! provision_output="$("${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T app node /app/scripts/teaching-anatomy/provision-spl-liver-atlas.mjs 2>&1)"; then
-    warn 'Teaching Anatomy: unavailable - provisioning failed because the app-container provisioner could not run. RISpro remains available.'
+  log 'Ensuring pinned Teaching Anatomy atlases in persistent rispro-storage...'
+  provision_output_file="$(mktemp)" || {
+    warn 'Teaching Anatomy: unavailable - could not allocate temporary provisioning output. RISpro remains available.'
+    return 0
+  }
+  if ! "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T app node /app/scripts/teaching-anatomy/provision-teaching-anatomy.mjs 2>&1 | tee "${provision_output_file}"; then
+    warn 'Teaching Anatomy: unavailable - provisioning failed. RISpro remains available.'
+    rm -f "${provision_output_file}"
     return 0
   fi
-  printf '%s\n' "${provision_output}"
+  provision_output="$(cat "${provision_output_file}")"
+  rm -f "${provision_output_file}"
   case "${provision_output}" in
-    *'RISPRO_TEACHING_ANATOMY_STATUS=ready'*)
-      TEACHING_ANATOMY_DEPLOYMENT_STATUS='ready'
-      ;;
-    *'RISPRO_TEACHING_ANATOMY_STATUS=already-current'*)
-      TEACHING_ANATOMY_DEPLOYMENT_STATUS='already current'
+    *'RISPRO_TEACHING_ANATOMY_STATUS=partial'*)
+      TEACHING_ANATOMY_DEPLOYMENT_STATUS='partially ready - some atlas packages unavailable'
+      warn 'Teaching Anatomy: partially ready. See per-atlas provisioning statuses above; RISpro remains available.'
       ;;
     *'RISPRO_TEACHING_ANATOMY_STATUS=unavailable'*)
-      warn 'Teaching Anatomy: unavailable - provisioning failed. RISpro remains available.'
+      warn 'Teaching Anatomy: unavailable - no atlas packages could be provisioned. RISpro remains available.'
+      ;;
+    *'RISPRO_TEACHING_ANATOMY_STATUS=ready'*)
+      TEACHING_ANATOMY_DEPLOYMENT_STATUS='ready'
       ;;
     *)
       warn 'Teaching Anatomy: unavailable - provisioning produced no recognized status. RISpro remains available.'

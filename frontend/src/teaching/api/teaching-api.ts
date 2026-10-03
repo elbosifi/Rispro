@@ -25,35 +25,77 @@ export interface TeachingAnatomyAsset {
   file: string;
   mediaType: string;
   sourceFile?: string;
+  integrity?: { sizeBytes: number; sha256: string };
 }
+
+export type TeachingAnatomyPlane = "axial" | "coronal" | "sagittal";
+export type TeachingAnatomyModality = "CT" | "MRI" | "3D";
 
 export interface TeachingAnatomyStructure {
   id: string;
-  labelValue: number;
+  labelValue?: number;
   name: string;
   category: string;
+  parentId?: string;
+  synonyms: string[];
+  organ?: string;
+  bodyRegion?: string;
+  system?: string;
   color: string;
-  meshAsset: string;
+  meshAsset?: string;
   note: string;
 }
 
 export interface TeachingAnatomyManifest {
-  schemaVersion: "1.0";
+  schemaVersion: "2.0";
   atlasId: string;
   title: string;
-  modality: string;
+  bodyRegion: string;
+  organs: string[];
+  systems: string[];
+  modality: TeachingAnatomyModality;
+  correlatedImaging: boolean;
+  supportedPlanes: TeachingAnatomyPlane[];
+  initialSlice?: { plane: TeachingAnatomyPlane; index: number };
   coordinateSystem: "LPS" | "RAS";
   meshCoordinateSystem: "LPS" | "RAS";
-  volumes: { ct: { assetKey: string; file: string }; segmentation: { assetKey: string; file: string } };
+  volumes: {
+    primary?: {
+      assetKey: string;
+      file: string;
+      modality: "CT" | "MRI";
+      windowLevel?: { width: number; level: number };
+      intensityRange?: { min: number; max: number };
+    };
+    segmentation?: { assetKey: string; file: string };
+  };
   assets: Record<string, TeachingAnatomyAsset>;
   structures: TeachingAnatomyStructure[];
-  provenance: { sourceRepository: string; project: string; attribution: string; license: string; licenseUrl: string; use: string };
-  spatialValidation: { status: "passed"; method: string; minimumMeshLabelAgreement: number; meshLabelAgreement: Record<string, number> };
+  provenance: { sourceRepository: string; project: string; attribution: string; license: string; licenseUrl: string; use: string; citation?: string };
+  spatialValidation: { status: "passed" | "not-applicable"; method: string; minimumMeshLabelAgreement?: number; meshLabelAgreement?: Record<string, number> };
 }
 
 export type TeachingAnatomyManifestResult =
   | { available: true; manifest: TeachingAnatomyManifest }
-  | { available: false; atlasId: string; title: string; message: string };
+  | { available: false; atlasId: string; title: string; status: string; message: string };
+
+export interface TeachingAnatomyAtlasCatalogEntry {
+  atlasId: string;
+  title: string;
+  bodyRegion: string;
+  organs: string[];
+  systems: string[];
+  modality: TeachingAnatomyModality;
+  crossSectionPlanes: TeachingAnatomyPlane[];
+  description: string;
+  correlatedImaging: boolean;
+  status: "ready" | "not-installed" | "pending-source-validation" | "unavailable";
+  structureCount: number | null;
+  thumbnail?: string;
+  provenance: { sourceRepository: string; project: string; attribution: string; license: string; licenseUrl: string; use?: string; citation?: string };
+}
+
+export interface TeachingAnatomyCatalog { items: TeachingAnatomyAtlasCatalogEntry[] }
 
 export interface TeachingCatalogItem {
   code: string;
@@ -413,22 +455,30 @@ export async function fetchTeachingIdentity(): Promise<TeachingIdentity> {
   return api<TeachingIdentity>("/teaching/me");
 }
 
-export async function fetchTeachingAnatomyManifest(): Promise<TeachingAnatomyManifestResult> {
-  return api<TeachingAnatomyManifestResult>("/teaching/anatomy/liver/manifest");
+export async function fetchTeachingAnatomyCatalog(): Promise<TeachingAnatomyCatalog> {
+  return api<TeachingAnatomyCatalog>("/teaching/anatomy/catalog");
 }
 
-export async function fetchTeachingAnatomyAsset(assetKey: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  const response = await fetch(`/api/teaching/anatomy/liver/assets/${encodeURIComponent(assetKey)}`, {
+export async function fetchTeachingAnatomyManifest(atlasId = "spl-liver"): Promise<TeachingAnatomyManifestResult> {
+  return api<TeachingAnatomyManifestResult>(`/teaching/anatomy/atlas/${encodeURIComponent(atlasId)}/manifest`);
+}
+
+export async function fetchTeachingAnatomyAtlasAsset(atlasId: string, assetKey: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(`/api/teaching/anatomy/atlas/${encodeURIComponent(atlasId)}/assets/${encodeURIComponent(assetKey)}`, {
     credentials: "include",
     cache: "no-store",
     signal,
   });
   if (!response.ok) {
     throw new Error(response.status === 404
-      ? "A declared anatomy asset is missing from the installed atlas. Reinstall the SPL Liver Atlas dataset."
+      ? "A declared anatomy asset is missing from the installed atlas."
       : `Teaching anatomy asset could not be loaded (${response.status}).`);
   }
   return response.arrayBuffer();
+}
+
+export async function fetchTeachingAnatomyAsset(assetKey: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return fetchTeachingAnatomyAtlasAsset("spl-liver", assetKey, signal);
 }
 
 export async function fetchTeachingCatalog(): Promise<TeachingCatalog> {

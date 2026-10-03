@@ -2,7 +2,9 @@ import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../../middleware/auth.js";
 import { asyncRoute } from "../../../utils/async-route.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { readTeachingAnatomyManifest, resolveTeachingAnatomyAsset } from "../anatomy/anatomy-asset-service.js";
+import { readTeachingAnatomyCatalog, readTeachingAnatomyManifest, resolveTeachingAnatomyAsset } from "../anatomy/anatomy-asset-service.js";
+import { findTeachingAnatomyAtlas } from "../anatomy/anatomy-catalog.js";
+import { isSafeAnatomyAtlasId } from "../anatomy/anatomy-atlas.js";
 import { requireTeachingCapabilities, requireTeachingLearner, type TeachingRequest } from "./teaching-route-auth.js";
 import { getTeachingCatalog, listTeachingQuestionBanks } from "../repositories/teaching-catalog-repository.js";
 import {
@@ -169,27 +171,40 @@ export function createTeachingRouter(): Router {
     res.send(asset.content);
   }));
 
-  router.get("/anatomy/liver/manifest", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+  router.get("/anatomy/catalog", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
     await requireTeachingCapabilities(req, []);
-    const manifest = await readTeachingAnatomyManifest();
+    const items = await readTeachingAnatomyCatalog();
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Vary", "Cookie");
+    res.json({ items });
+  }));
+
+  const readAtlasManifestRoute = async (req: TeachingRequest, res: Response, atlasId: string) => {
+    await requireTeachingCapabilities(req, []);
+    const entry = findTeachingAnatomyAtlas(atlasId);
+    if (!isSafeAnatomyAtlasId(atlasId) || !entry) throw new HttpError(404, "Teaching anatomy atlas was not found.");
+    const manifest = await readTeachingAnatomyManifest(atlasId, undefined, "presence");
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("Vary", "Cookie");
     res.json(manifest ? { available: true, manifest } : {
       available: false,
-      atlasId: "spl-liver",
-      title: "SPL Liver Atlas",
-      message: "The Teaching anatomy dataset is not installed on this RISpro server.",
+      atlasId,
+      title: entry.title,
+      status: entry.status,
+      message: entry.status === "pending-source-validation"
+        ? "This source atlas is pending acquisition and spatial validation."
+        : "The Teaching anatomy dataset is not installed on this RISpro server.",
     });
-  }));
+  };
 
-  router.get("/anatomy/liver/assets/:assetKey", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response, next) => {
+  const sendAtlasAsset = async (req: TeachingRequest, res: Response, next: (error?: unknown) => void, atlasId: string, assetKey: string) => {
     await requireTeachingCapabilities(req, []);
+    if (!isSafeAnatomyAtlasId(atlasId) || !findTeachingAnatomyAtlas(atlasId)) throw new HttpError(404, "Teaching anatomy atlas was not found.");
     let asset: Awaited<ReturnType<typeof resolveTeachingAnatomyAsset>>;
     try {
-      const assetKey = typeof req.params.assetKey === "string" ? req.params.assetKey : "";
-      asset = await resolveTeachingAnatomyAsset(assetKey);
+      asset = await resolveTeachingAnatomyAsset(atlasId, assetKey);
     } catch (error) {
-      if (error instanceof Error && /Invalid anatomy asset key|not declared/.test(error.message)) {
+      if (error instanceof Error && /Invalid anatomy asset key|not declared|Unknown Teaching anatomy atlas ID/.test(error.message)) {
         throw new HttpError(404, "Anatomy asset is not declared in the installed atlas.");
       }
       throw error;
@@ -204,6 +219,26 @@ export function createTeachingRouter(): Router {
     res.setHeader("Vary", "Cookie");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.sendFile(asset.filePath, (error) => { if (error) next(error); });
+  };
+
+  router.get("/anatomy/atlas/:atlasId/manifest", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    const atlasId = typeof req.params.atlasId === "string" ? req.params.atlasId : "";
+    await readAtlasManifestRoute(req, res, atlasId);
+  }));
+
+  router.get("/anatomy/atlas/:atlasId/assets/:assetKey", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response, next) => {
+    const atlasId = typeof req.params.atlasId === "string" ? req.params.atlasId : "";
+    const assetKey = typeof req.params.assetKey === "string" ? req.params.assetKey : "";
+    await sendAtlasAsset(req, res, next, atlasId, assetKey);
+  }));
+
+  router.get("/anatomy/liver/manifest", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {
+    await readAtlasManifestRoute(req, res, "spl-liver");
+  }));
+
+  router.get("/anatomy/liver/assets/:assetKey", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response, next) => {
+    const assetKey = typeof req.params.assetKey === "string" ? req.params.assetKey : "";
+    await sendAtlasAsset(req, res, next, "spl-liver", assetKey);
   }));
 
   router.get("/qbank/import/template.json", requireAuth, asyncRoute(async (req: TeachingRequest, res: Response) => {

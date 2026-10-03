@@ -265,8 +265,9 @@ test("unsafe lock paths are rejected before requests and deployment scripts reta
   assert.match(compose, /rispro-storage:\/app\/storage/);
   assert.match(library, /ensure_teaching_anatomy_assets\(\)[\s\S]*?return 0/);
   assert.match(library, /Teaching Anatomy: unavailable - provisioning failed\. RISpro remains available\./);
-  assert.match(dockerfile, /COPY scripts\/teaching-anatomy\/provision-spl-liver-atlas\.mjs/);
+  assert.match(dockerfile, /COPY scripts\/teaching-anatomy\/provision-teaching-anatomy\.mjs/);
   assert.match(dockerfile, /COPY scripts\/teaching-anatomy\/spl-liver-atlas\.lock\.json/);
+  assert.match(dockerfile, /COPY scripts\/teaching-anatomy\/slicer-license-part-b\.txt/);
   const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";
   const shell = spawnSync(bash, ["-lc", [
     `source '${bashPath(path.join(repositoryRoot, "scripts/docker-deployment-lib.sh"))}'`,

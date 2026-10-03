@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "1.0",
+  "openAnatomy": [
+    {
+      "atlasId": "spl-abdomen",
+      "managedVersion": "nac-abdomen-2016-09",
+      "url": "https://www.openanatomy.org/atlases/nac/abdomen-2016-09.zip",
+      "sizeBytes": 34861066,
+      "sha256": "1cf85dbc820767b7c3095790ff38ae150a085af713061a2f0e950e355e4dc7c8",
+      "archiveRoot": "abdomen-2016-09",
+      "imageFile": "Data/I.nrrd",
+      "segmentationFile": "Data/seg.nrrd",
+      "structuresFile": "atlasStructure.json",
+      "licenseFile": "LICENSE.md",
+      "readmeFile": "README.md",
+      "modality": "CT",
+      "title": "SPL Abdominal Atlas",
+      "bodyRegion": "Abdomen",
+      "organs": ["Abdomen", "Kidney", "Pancreas", "Spleen"],
+      "systems": ["Gastrointestinal", "Genitourinary", "Vascular", "Musculoskeletal"],
+      "attribution": "Florin Talos, Marianna Jakab, Ron Kikinis, and upstream contributors; Surgical Planning Laboratory, Brigham and Women's Hospital.",
+      "sourceRepository": "https://www.openanatomy.org/atlas-pages/atlas-spl-abdomen.html",
+      "license": "3D Slicer Contribution and Software License Agreement, Part B"
+    },
+    {
+      "atlasId": "spl-head-neck",
+      "managedVersion": "nac-head-neck-2016-09",
+      "url": "https://www.openanatomy.org/atlases/nac/head-neck-2016-09.zip",
+      "sizeBytes": 31612667,
+      "sha256": "c224f054569b284c9a948f6f96b0299eaee13d3ac661a3386657a743fa8552c4",
+      "archiveRoot": "head-neck-2016-09",
+      "imageFile": "grayscale/Osirix-Manix-255-res.nrrd",
+      "segmentationFile": "labels/HN-Atlas-labels.nrrd",
+      "structuresFile": "atlasStructure.json",
+      "licenseFile": "LICENSE.md",
+      "readmeFile": "README.md",
+      "modality": "CT",
+      "title": "SPL Head and Neck Atlas",
+      "bodyRegion": "Head & neck",
+      "organs": ["Skull", "Mandible", "Neck"],
+      "systems": ["Musculoskeletal", "Vascular"],
+      "attribution": "Marianna Jakab, Ron Kikinis, and upstream contributors; Surgical Planning Laboratory, Brigham and Women's Hospital.",
+      "sourceRepository": "https://www.openanatomy.org/atlas-pages/atlas-spl-head-and-neck.html",
+      "license": "3D Slicer Contribution and Software License Agreement, Part B"
+    },
+    {
+      "atlasId": "spl-knee",
+      "managedVersion": "nac-knee-2016-09",
+      "url": "https://www.openanatomy.org/atlases/nac/knee-2016-09.zip",
+      "sizeBytes": 80934412,
+      "sha256": "2f61002f42843910eada3877adf4229ef845bf87cc1e422b719c930dfadc5f6a",
+      "archiveRoot": "knee-2016-09",
+      "imageFile": "Data/I.nrrd",
+      "segmentationFile": "Data/seg.nrrd",
+      "normalizeLabelMapToImageGrid": true,
+      "structuresFile": "atlasStructure.json",
+      "licenseFile": "LICENSE.md",
+      "readmeFile": "README.md",
+      "modality": "MRI",
+      "title": "SPL Knee Atlas",
+      "bodyRegion": "Lower limb",
+      "organs": ["Knee"],
+      "systems": ["Musculoskeletal", "Vascular"],
+      "attribution": "Jen Richolt, Marianna Jakab, Ron Kikinis, and upstream contributors; Surgical Planning Laboratory, Brigham and Women's Hospital.",
+      "sourceRepository": "https://www.openanatomy.org/atlas-pages/atlas-spl-knee.html",
+      "license": "3D Slicer Contribution and Software License Agreement, Part B"
+    }
+  ],
+  "bodyParts3d": {
+    "atlasId": "bodyparts3d",
+    "managedVersion": "BodyParts3D-4.0-PART-OF-obj-99",
+    "expectedModelCount": 1258,
+    "archive": {
+      "url": "https://dbarchive.biosciencedbc.jp/data/bodyparts3d/LATEST/partof_BP3D_4.0_obj_99.zip",
+      "sizeBytes": 64888505,
+      "sha256": "9fbc713fffeee924a5a657d9813d84d7eb957bded63adb854931dd5e3eb61c97"
+    },
+    "metadata": [
+      {
+        "name": "partof_parts_list_e.txt",
+        "url": "https://dbarchive.biosciencedbc.jp/data/bodyparts3d/LATEST/partof_parts_list_e.txt",
+        "sizeBytes": 59351,
+        "sha256": "9224080557053e6f1322f1e13ab27f0ecde0db19bb3b505f0631afad230eeebd"
+      },
+      {
+        "name": "partof_inclusion_relation_list.txt",
+        "url": "https://dbarchive.biosciencedbc.jp/data/bodyparts3d/LATEST/partof_inclusion_relation_list.txt",
+        "sizeBytes": 91241,
+        "sha256": "1b40738270931e3c1d955ce34e0fce0d8d10d8c5ad543463e40b4b4c0243007c"
+      },
+      {
+        "name": "partof_element_parts.txt",
+        "url": "https://dbarchive.biosciencedbc.jp/data/bodyparts3d/LATEST/partof_element_parts.txt",
+        "sizeBytes": 651179,
+        "sha256": "3f5f6df1028eb122b30de77c711597b6bb8e5541658e5985859fd228adbf88ea"
+      }
+    ],
+    "sourceRepository": "https://dbarchive.biosciencedbc.jp/en/bodyparts3d/",
+    "title": "Whole-body 3D Navigator",
+    "attribution": "BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International",
+    "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+    "licenseUrl": "https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html",
+    "citation": "Mitsuhashi N, Fujieda K, Tamura T, Kawamoto S, Takagi T, Okubo K. BodyParts3D: 3D structure database for anatomical concepts. Nucleic Acids Res. 2009;37:D782-D785. PMID:18835852."
+  }
+}

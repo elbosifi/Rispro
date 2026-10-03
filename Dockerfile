@@ -120,6 +120,12 @@ COPY scripts/qz/windows/ ./scripts/qz/windows/
 COPY scripts/teaching-anatomy/install-spl-liver-atlas.mjs ./scripts/teaching-anatomy/install-spl-liver-atlas.mjs
 COPY scripts/teaching-anatomy/provision-spl-liver-atlas.mjs ./scripts/teaching-anatomy/provision-spl-liver-atlas.mjs
 COPY scripts/teaching-anatomy/spl-liver-atlas.lock.json ./scripts/teaching-anatomy/spl-liver-atlas.lock.json
+COPY scripts/teaching-anatomy/install-open-anatomy-atlas.mjs ./scripts/teaching-anatomy/install-open-anatomy-atlas.mjs
+COPY scripts/teaching-anatomy/install-bodyparts3d.mjs ./scripts/teaching-anatomy/install-bodyparts3d.mjs
+COPY scripts/teaching-anatomy/legacy-vtk-polydata.mjs ./scripts/teaching-anatomy/legacy-vtk-polydata.mjs
+COPY scripts/teaching-anatomy/provision-teaching-anatomy.mjs ./scripts/teaching-anatomy/provision-teaching-anatomy.mjs
+COPY scripts/teaching-anatomy/open-atlas-sources.lock.json ./scripts/teaching-anatomy/open-atlas-sources.lock.json
+COPY scripts/teaching-anatomy/slicer-license-part-b.txt ./scripts/teaching-anatomy/slicer-license-part-b.txt
 COPY src/modules/teaching/anatomy/liver-manifest.template.json ./src/modules/teaching/anatomy/liver-manifest.template.json
 
 # ---------------------------------------------------------------------------
