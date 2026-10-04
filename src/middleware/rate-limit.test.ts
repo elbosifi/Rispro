@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from "express";
 import { HttpError } from "../utils/http-error.js";
 import { createFailureRateLimiter, createRateLimiter } from "./rate-limit.js";
 
-describe("login rate limiting primitives", () => {
+describe("rate limiting primitives", () => {
   it("isolates username failures and clears a username after success", () => {
     const limiter = createFailureRateLimiter({ windowMs: 60_000, maxRequests: 2, message: "generic" });
     limiter.recordFailure("doctor-one");
@@ -31,5 +31,15 @@ describe("login rate limiting primitives", () => {
     assert.ok(blocked instanceof HttpError);
     assert.equal(blocked.statusCode, 429);
     assert.equal(blocked.message, "generic");
+  });
+
+  it("keeps failure records isolated by a composite user and patient key", () => {
+    const limiter = createFailureRateLimiter({ windowMs: 60_000, maxRequests: 2, message: "generic" });
+    limiter.recordFailure("user:1:patient:10");
+    limiter.recordFailure("user:1:patient:10");
+
+    assert.throws(() => limiter.check("user:1:patient:10"), HttpError);
+    assert.doesNotThrow(() => limiter.check("user:1:patient:11"));
+    assert.doesNotThrow(() => limiter.check("user:2:patient:10"));
   });
 });

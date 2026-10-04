@@ -394,6 +394,77 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       }
     });
 
+    it("limits only incorrect verification evidence per user and patient", async () => {
+      guard();
+      const previous = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+        `select setting_value, updated_by_user_id from system_settings where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`,
+      );
+      await pool.query(
+        `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+         values ('patient_registration', 'patient_identity_verification_mode', '{"value":"all_appointments"}'::jsonb, $1)
+         on conflict (category, setting_key) do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()`,
+        [testData.userId],
+      );
+      const identifierFor = async (patientId: number) => (await pool.query<{ identifier_value: string }>(`select identifier_value from patients where id = $1`, [patientId])).rows[0]!.identifier_value;
+      const verify = (patientId: number, evidence: string, method = "primary_identifier", cookie = authCookie) => fetch(`/api/v2/appointments/patient-selection/${patientId}/verify`, {
+        method: "POST",
+        cookie,
+        body: { method, evidence },
+      });
+      try {
+        for (let index = 0; index < 13; index += 1) {
+          const patientId = await createPatientForStatusTest(`VerificationSuccess${index}`);
+          assert.equal((await verify(patientId, await identifierFor(patientId))).status, 200);
+        }
+
+        const patientId = await createPatientForStatusTest("VerificationFailureReset");
+        const identifier = await identifierFor(patientId);
+        for (let index = 0; index < 11; index += 1) {
+          assert.equal((await verify(patientId, "wrong")).status, 422);
+        }
+        assert.equal((await verify(patientId, identifier)).status, 200);
+        for (let index = 0; index < 12; index += 1) {
+          assert.equal((await verify(patientId, "wrong")).status, 422);
+        }
+        const throttled = await verify(patientId, "wrong");
+        assert.equal(throttled.status, 429);
+        assert.match(JSON.stringify(throttled.data), /patient_identity_verification_rate_limited/);
+
+        const otherPatientId = await createPatientForStatusTest("VerificationFailureOtherPatient");
+        assert.equal((await verify(otherPatientId, "wrong")).status, 422);
+
+        const alternateUser = await pool.query<{ id: number }>(
+          `insert into users (username, full_name, password_hash, role, is_active)
+           values ($1, $2, 'test-password-hash', 'supervisor', true)
+           returning id`,
+          [`${TEST_PREFIX}${randomUUID().replace(/-/g, "").slice(0, 12)}_verification`, "Verification Limiter User"],
+        );
+        const alternateCookie = createTestAuthCookie(Number(alternateUser.rows[0]!.id), "supervisor");
+        assert.equal((await verify(patientId, "wrong", "primary_identifier", alternateCookie)).status, 422);
+
+        const unavailablePatientId = await createPatientForStatusTest("VerificationUnavailableMethod");
+        for (let index = 0; index < 12; index += 1) {
+          const unavailable = await verify(unavailablePatientId, "1995-01-02", "exact_dob");
+          assert.equal(unavailable.status, 422);
+          assert.match(JSON.stringify(unavailable.data), /patient_identity_verification_method_unavailable/);
+        }
+        assert.equal((await verify(unavailablePatientId, "wrong")).status, 422);
+
+        const audit = await pool.query<{ action_type: string; new_values: { code?: string } }>(
+          `select action_type, new_values from audit_log where entity_type = 'appointment_patient_identity' and entity_id = $1 order by id asc`,
+          [patientId],
+        );
+        assert.ok(audit.rows.some((row) => row.action_type === "appointment_patient_identity_verification_rejected" && row.new_values.code === "patient_identity_verification_incorrect"));
+      } finally {
+        const prior = previous.rows[0];
+        if (prior) {
+          await pool.query(`update system_settings set setting_value = $1::jsonb, updated_by_user_id = $2, updated_at = now() where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`, [JSON.stringify(prior.setting_value), prior.updated_by_user_id]);
+        } else {
+          await pool.query(`delete from system_settings where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`);
+        }
+      }
+    });
+
     it("should create a booking successfully", async () => {
       guard();
       const { status, data } = await fetch("/api/v2/appointments", {

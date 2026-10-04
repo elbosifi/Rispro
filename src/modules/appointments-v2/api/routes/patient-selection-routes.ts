@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../../../middleware/auth.js";
 import { requirePageAccess } from "../../../../middleware/page-access.js";
-import { createRateLimiter } from "../../../../middleware/rate-limit.js";
+import { createFailureRateLimiter } from "../../../../middleware/rate-limit.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { searchPatients } from "../../../../services/patient-service.js";
 import { isPatientIdentityVerificationRequired, maskPatientIdentifier, maskPatientPhone, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityRisks, resolvePatientIdentityVerificationMode, verifyPatientIdentityEvidence } from "../../../../services/patient-selection-safety-service.js";
@@ -11,13 +11,14 @@ import type { AuthenticatedUserContext } from "../../../../types/http.js";
 
 interface AuthedRequest extends Request { user?: AuthenticatedUserContext; }
 
-function verificationRateLimitKey(req: Request): string {
+function verificationFailureRateLimitKey(req: Request): string {
   const userId = Number((req as AuthedRequest).user?.sub ?? 0);
-  return Number.isInteger(userId) && userId > 0 ? `user:${userId}` : `ip:${req.ip ?? "unknown"}`;
+  const patientId = Number(req.params.patientId);
+  return `user:${Number.isInteger(userId) && userId > 0 ? userId : "unknown"}:patient:${Number.isInteger(patientId) && patientId > 0 ? patientId : "unknown"}`;
 }
 
 export const patientSelectionRouter = Router();
-const verificationRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 12, message: "Too many patient identity verification attempts. Please wait before trying again.", errorCode: "patient_identity_verification_rate_limited", key: verificationRateLimitKey });
+const verificationFailureLimiter = createFailureRateLimiter({ windowMs: 15 * 60_000, maxRequests: 12, message: "Too many patient identity verification attempts. Please wait before trying again.", errorCode: "patient_identity_verification_rate_limited" });
 patientSelectionRouter.use(requireAuth, requirePageAccess("appointments"));
 
 function toSelectionRow(risk: Awaited<ReturnType<typeof resolvePatientIdentityRisk>>, verificationMode: Awaited<ReturnType<typeof resolvePatientIdentityVerificationMode>>) {
@@ -42,14 +43,19 @@ patientSelectionRouter.get("/:patientId/risk", asyncRoute(async (req: Request, r
   res.json({ patient: toSelectionRow(risk, verificationMode) });
 }));
 
-patientSelectionRouter.post("/:patientId/verify", verificationRateLimiter, asyncRoute(async (req: AuthedRequest, res: Response) => {
+patientSelectionRouter.post("/:patientId/verify", asyncRoute(async (req: AuthedRequest, res: Response) => {
   const patientId = Number(req.params.patientId);
   const userId = Number(req.user?.sub || 0);
+  const failureKey = verificationFailureRateLimitKey(req);
+  verificationFailureLimiter.check(failureKey);
   let result;
   try {
     result = await verifyPatientIdentityEvidence({ patientId, userId, method: req.body?.method, evidence: req.body?.evidence });
   } catch (error) {
     const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
+    if (details?.code === "patient_identity_verification_incorrect") {
+      verificationFailureLimiter.recordFailure(failureKey);
+    }
     await logAuditEntry({
       entityType: "appointment_patient_identity",
       entityId: Number.isInteger(patientId) && patientId > 0 ? patientId : null,
@@ -59,5 +65,6 @@ patientSelectionRouter.post("/:patientId/verify", verificationRateLimiter, async
     }).catch(() => undefined);
     throw error;
   }
+  verificationFailureLimiter.reset(failureKey);
   res.json({ proof: result.proof, verificationMethod: result.assertion.verificationMethod, verifiedAt: result.assertion.verifiedAt });
 }));
