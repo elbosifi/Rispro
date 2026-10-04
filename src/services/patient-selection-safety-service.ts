@@ -11,6 +11,7 @@ export const PATIENT_IDENTITY_RULE_VERSION = "name_prefix_configurable_primary_i
 export const PATIENT_IDENTITY_PROOF_PURPOSE = "patient_identity_verification";
 export const DEFAULT_PATIENT_IDENTITY_NAME_MATCH_COMPONENTS = 3;
 export const PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY = "patient_identity_name_match_components";
+export const PATIENT_IDENTITY_VERIFICATION_MODE_SETTING_KEY = "patient_identity_verification_mode";
 /** Fixed-width safe display prefix for primary identifiers. */
 export const PATIENT_IDENTIFIER_MASK_PREFIX = "••••";
 const PROOF_TTL_SECONDS = 12 * 60;
@@ -18,6 +19,7 @@ const PROOF_TTL_SECONDS = 12 * 60;
 export type PatientIdentityVerificationMethod = "primary_identifier";
 export type PatientIdentityRisk = "none" | "ambiguous";
 export type PatientIdentityNameMatchComponents = 2 | 3;
+export type PatientIdentityVerificationMode = "ambiguous_only" | "all_appointments";
 
 export interface PatientSelectionSafetyPatient {
   id: number;
@@ -161,6 +163,40 @@ export async function resolvePatientIdentityNameMatchComponents(executor: DbExec
     ? (parsedValue as { value?: unknown }).value
     : undefined;
   return parsePatientIdentityNameMatchComponents(value);
+}
+
+export async function resolvePatientIdentityVerificationMode(executor: DbExecutor = pool): Promise<PatientIdentityVerificationMode> {
+  const { rows } = await executor.query<{ setting_value: unknown }>(
+    `
+      select setting_value
+      from system_settings
+      where category = 'patient_registration'
+        and setting_key = $1
+      limit 1
+    `,
+    [PATIENT_IDENTITY_VERIFICATION_MODE_SETTING_KEY],
+  );
+  const settingValue = rows[0]?.setting_value;
+  const parsedValue = typeof settingValue === "string"
+    ? (() => {
+      try {
+        return JSON.parse(settingValue) as unknown;
+      } catch {
+        return null;
+      }
+    })()
+    : settingValue;
+  const value = parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+    ? (parsedValue as { value?: unknown }).value
+    : undefined;
+  return value === "all_appointments" ? "all_appointments" : "ambiguous_only";
+}
+
+export function isPatientIdentityVerificationRequired(
+  risk: Pick<PatientIdentityRiskResult, "identityRisk">,
+  mode: PatientIdentityVerificationMode,
+): boolean {
+  return mode === "all_appointments" || risk.identityRisk === "ambiguous";
 }
 
 function toPatient(row: PatientIdentityDbRow): PatientSelectionSafetyPatient {
@@ -343,9 +379,11 @@ export function issuePatientIdentityVerificationProof(assertion: PatientIdentity
 }
 
 export async function verifyPatientIdentityEvidence(input: { patientId: number; userId: number; method: unknown; evidence: unknown; executor?: DbExecutor }): Promise<{ proof: string; assertion: PatientIdentityVerificationAssertion; risk: PatientIdentityRiskResult }> {
-  const risk = await resolvePatientIdentityRisk(input.patientId, input.executor ?? pool);
+  const executor = input.executor ?? pool;
+  const risk = await resolvePatientIdentityRisk(input.patientId, executor);
   const method = normalizeMethod(input.method);
-  if (risk.identityRisk !== "ambiguous") throw new HttpError(422, "Patient identity verification is not required.", { code: "patient_identity_verification_method_unavailable" });
+  const mode = await resolvePatientIdentityVerificationMode(executor);
+  if (!isPatientIdentityVerificationRequired(risk, mode)) throw new HttpError(422, "Patient identity verification is not required.", { code: "patient_identity_verification_method_unavailable" });
   if (!risk.availableVerificationMethods.includes(method)) throw new HttpError(422, "Identity verification method is unavailable.", { code: "patient_identity_verification_method_unavailable" });
   if (!evidenceMatches(risk.patient, input.evidence)) throw new HttpError(422, "Patient identity verification is incorrect.", { code: "patient_identity_verification_incorrect" });
   const assertion: PatientIdentityVerificationAssertion = {

@@ -313,6 +313,7 @@ router.get(
     const specialQuota = typeof query.specialQuota === "string" ? query.specialQuota.trim() : "";
     const supervisorOverride = typeof query.supervisorOverride === "string" ? query.supervisorOverride.trim() : "";
     const sort = typeof query.sort === "string" ? query.sort.trim() : "";
+    const identifierType = typeof query.identifierType === "string" ? query.identifierType.trim().toLowerCase() : "";
 
     const status = parseStatuses(query["status[]"] ?? query.status);
     if (status.includes("voided") && !canReviewVoidedAppointments(req.user?.role)) {
@@ -388,6 +389,21 @@ router.get(
       where.push(`b.status not in ('cancelled', 'discontinued', 'voided')`);
     }
 
+    if (identifierType === "__missing__") {
+      where.push(`coalesce(
+        (select pit.code from patient_identifiers pi join patient_identifier_types pit on pit.id = pi.identifier_type_id where pi.patient_id = p.id and pi.is_primary = true and nullif(trim(pi.value), '') is not null order by pi.id asc limit 1),
+        case when nullif(trim(p.identifier_value), '') is not null then nullif(lower(trim(p.identifier_type)), '') end,
+        case when nullif(trim(p.national_id), '') is not null then 'national_id' end
+      ) is null`);
+    } else if (identifierType) {
+      params.push(identifierType);
+      where.push(`coalesce(
+        (select pit.code from patient_identifiers pi join patient_identifier_types pit on pit.id = pi.identifier_type_id where pi.patient_id = p.id and pi.is_primary = true and nullif(trim(pi.value), '') is not null order by pi.id asc limit 1),
+        case when nullif(trim(p.identifier_value), '') is not null then nullif(lower(trim(p.identifier_type)), '') end,
+        case when nullif(trim(p.national_id), '') is not null then 'national_id' end
+      ) = $${params.length}`);
+    }
+
     if (q) {
       params.push(`%${q.replace(/%/g, "").replace(/_/g, "")}%`);
       where.push(`(
@@ -445,6 +461,21 @@ router.get(
           p.sex,
           p.phone_1,
           p.address,
+          coalesce(
+            primary_identifier.identifier_type,
+            case when nullif(trim(p.identifier_value), '') is not null then nullif(lower(trim(p.identifier_type)), '') end,
+            case when nullif(trim(p.national_id), '') is not null then 'national_id' end
+          ) as patient_identifier_type,
+          coalesce(
+            primary_identifier.label_ar,
+            case when nullif(trim(p.identifier_value), '') is not null then legacy_identifier_type.label_ar end,
+            case when nullif(trim(p.national_id), '') is not null then 'الرقم الوطني' end
+          ) as patient_identifier_type_label_ar,
+          coalesce(
+            primary_identifier.label_en,
+            case when nullif(trim(p.identifier_value), '') is not null then legacy_identifier_type.label_en end,
+            case when nullif(trim(p.national_id), '') is not null then 'National ID' end
+          ) as patient_identifier_type_label_en,
           m.name_ar as modality_name_ar,
           m.name_en as modality_name_en,
           m.code as modality_code,
@@ -486,6 +517,17 @@ router.get(
           null::int as modality_slot_number
         from appointments_v2.bookings b
         join patients p on p.id = b.patient_id
+        left join patient_identifier_types legacy_identifier_type on legacy_identifier_type.code = lower(trim(p.identifier_type))
+        left join lateral (
+          select pit.code as identifier_type, pit.label_ar, pit.label_en
+          from patient_identifiers pi
+          join patient_identifier_types pit on pit.id = pi.identifier_type_id
+          where pi.patient_id = p.id
+            and pi.is_primary = true
+            and nullif(trim(pi.value), '') is not null
+          order by pi.id asc
+          limit 1
+        ) primary_identifier on true
         join modalities m on m.id = b.modality_id
         left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
         left join exam_types et on et.id = b.exam_type_id

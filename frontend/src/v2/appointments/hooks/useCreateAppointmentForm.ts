@@ -19,6 +19,7 @@ export interface SelectedPatient {
   primaryIdentifierTypeLabelAr?: string | null;
   primaryIdentifierTypeLabelEn?: string | null;
   identityRisk?: "none" | "ambiguous";
+  identityVerificationRequired?: boolean;
   similarPatientCount?: number;
   availableVerificationMethods?: PatientIdentityVerificationMethod[];
   patientIdentityVerificationProof?: string | null;

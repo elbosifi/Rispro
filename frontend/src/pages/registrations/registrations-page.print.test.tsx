@@ -11,6 +11,7 @@ import { REGISTRATION_DEFAULT_STATUSES, REGISTRATIONS_SEARCH_STORAGE_KEY } from 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchAppointmentSlipSettingsMock = vi.fn();
+const fetchPatientIdentifierTypesMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const fetchPublicAppointmentReportStatusMock = vi.fn();
@@ -81,6 +82,10 @@ vi.mock("@/lib/appointment-printing", () => ({
 
 vi.mock("@/lib/toast", () => ({
   pushToast: (...args: unknown[]) => mockPushToast(...args),
+}));
+
+vi.mock("@/lib/api/patients", () => ({
+  fetchPatientIdentifierTypes: (...args: unknown[]) => fetchPatientIdentifierTypesMock(...args),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
@@ -159,6 +164,11 @@ describe("RegistrationsPage print actions", () => {
     localStorage.setItem("rispro-language", "en");
     sessionStorage.removeItem(REGISTRATIONS_SEARCH_STORAGE_KEY);
     fetchAppointmentsMock.mockReset();
+    fetchPatientIdentifierTypesMock.mockReset();
+    fetchPatientIdentifierTypesMock.mockResolvedValue([
+      { code: "national_id", labelAr: "الرقم الوطني", labelEn: "National ID" },
+      { code: "passport", labelAr: "جواز السفر", labelEn: "Passport" },
+    ]);
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockPushToast.mockReset();
@@ -359,6 +369,17 @@ describe("RegistrationsPage print actions", () => {
       })
     );
     expect(screen.getByRole("button", { name: "In Progress" })).toBeTruthy();
+  });
+
+  it("loads active identifier types and sends the selected server filter", async () => {
+    const user = userEvent.setup();
+    renderRegistrationsPage();
+
+    const identifierType = await screen.findByLabelText("Identifier type");
+    await screen.findByRole("option", { name: "Passport" });
+    expect(within(identifierType).getByRole("option", { name: "No primary identifier" })).toBeTruthy();
+    await user.selectOptions(identifierType, "passport");
+    await waitFor(() => expect(fetchAppointmentsMock.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ identifierType: "passport" })));
   });
 
   it("requests the selected server-side sort and preserves it for Today and Tomorrow", async () => {

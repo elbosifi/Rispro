@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { todayIsoDateLy } from "../../lib/date-format";
 import {
   buildRegistrationSearch,
+  buildRegistrationLastLocationSearch,
   buildRegistrationAppointmentQuery,
   clearRegistrationSearch,
   parseRegistrationFiltersFromSearchParams,
@@ -19,6 +20,7 @@ const defaults: RegistrationsFilters = {
   dateFrom: "",
   dateTo: "",
   modalityId: "",
+  identifierType: "",
   query: "",
   statuses: [...REGISTRATION_DEFAULT_STATUSES],
   sort: "booking-desc",
@@ -49,6 +51,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "",
         dateTo: "",
         modalityId: "",
+        identifierType: "",
         query: "",
         statuses: ["scheduled"],
         sort: "booking-desc",
@@ -57,6 +60,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       dateFrom: selected,
       dateTo: selected,
       modalityId: "",
+      identifierType: "",
       q: "",
       status: ["scheduled"],
       sort: "booking-desc",
@@ -71,6 +75,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "2026-04-20",
         dateTo: "2026-04-27",
         modalityId: "3",
+        identifierType: "passport",
         patientId: "11",
         query: "abc",
         statuses: ["waiting", "arrived"],
@@ -80,6 +85,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       dateFrom: "2026-04-20",
       dateTo: "2026-04-27",
       modalityId: "3",
+      identifierType: "passport",
       patientId: "11",
       q: "abc",
       status: ["waiting", "arrived"],
@@ -97,6 +103,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: today,
         dateTo: today,
         modalityId: "",
+        identifierType: "",
         patientId: "11",
         query: "",
         statuses: [...REGISTRATION_DEFAULT_STATUSES],
@@ -106,6 +113,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       dateFrom: today,
       dateTo: today,
       modalityId: "",
+      identifierType: "",
       patientId: "11",
       q: "",
       status: ["scheduled", "arrived", "waiting", "in-progress"],
@@ -121,6 +129,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "",
         dateTo: "",
         modalityId: "2",
+        identifierType: "__missing__",
         patientId: "11",
         query: "MRN-123",
         statuses: ["scheduled", "waiting"],
@@ -128,6 +137,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       })
     ).toEqual({
       modalityId: "2",
+      identifierType: "__missing__",
       patientId: "11",
       q: "MRN-123",
       status: ["scheduled", "waiting"],
@@ -137,6 +147,15 @@ describe("buildRegistrationAppointmentQuery", () => {
 
   it("accepts valid sort values from URL parameters", () => {
     expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("sort=booking-asc"), defaults).sort).toBe("booking-asc");
+  });
+
+  it("parses, serializes, and sends identifier-type filters", () => {
+    expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("identifierType=passport"), defaults).identifierType).toBe("passport");
+    expect(parseRegistrationFiltersFromSearchParams(new URLSearchParams("identifierType=__missing__"), defaults).identifierType).toBe("__missing__");
+    expect(buildRegistrationSearch(new URLSearchParams(), { ...defaults, identifierType: "passport" }, defaults).toString()).toBe("identifierType=passport");
+    expect(buildRegistrationSearch(new URLSearchParams(), defaults, defaults).has("identifierType")).toBe(false);
+    expect(buildRegistrationAppointmentQuery({ ...defaults, identifierType: "__missing__" }).identifierType).toBe("__missing__");
+    expect(buildRegistrationLastLocationSearch(new URLSearchParams("identifierType=passport&patientId=7")).get("identifierType")).toBe("passport");
   });
 
   it("falls back to the default sort for an invalid URL value", () => {
@@ -176,12 +195,13 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "2026-04-20",
         dateTo: "2026-04-27",
         modalityId: "2",
+        identifierType: "passport",
         statuses: ["waiting", "in-progress"],
         sort: "time-asc",
       },
       defaults,
     );
-    expect(next.toString()).toBe("appointmentId=7&tab=details&source=statistics&dateMode=range&dateFrom=2026-04-20&dateTo=2026-04-27&modalityId=2&status=waiting&status=in-progress&sort=time-asc");
+    expect(next.toString()).toBe("appointmentId=7&tab=details&source=statistics&dateMode=range&dateFrom=2026-04-20&dateTo=2026-04-27&modalityId=2&identifierType=passport&status=waiting&status=in-progress&sort=time-asc");
   });
 
   it("keeps private registration search in session storage only", () => {

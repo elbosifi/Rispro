@@ -554,7 +554,7 @@ export function CreateAppointmentTab({
 
   function validateBaseFields(): string | null {
     if (!form.patientId) return t(language, "appointments.create.missingPatient");
-    if (form.patient?.identityRisk === "ambiguous" && !form.patient.patientIdentityVerificationProof) {
+    if (form.patient?.identityVerificationRequired && !form.patient.patientIdentityVerificationProof) {
       return t(language, "appointments.identity.verificationRequiredBeforeBooking");
     }
     if (!form.modalityId) return t(language, "appointments.create.missingModality");

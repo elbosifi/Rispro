@@ -51,7 +51,7 @@ import {
 import { HttpError } from "../../../../utils/http-error.js";
 import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
-import { PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
+import { isPatientIdentityVerificationRequired, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityVerificationMode, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
 import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
 import { generateComplementaryRecallRequestDocument, linkComplementaryRecallBooking, lockComplementaryRecallForBooking } from "../../recall/complementary-recall.service.js";
@@ -165,9 +165,10 @@ export async function createBookingInternal(
   validateCapacityModeAuthority(userRole, capacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
   let identityVerificationAssertion: PatientIdentityVerificationAssertion | null = null;
-  if (identityVerificationOptions.requirePatientIdentityVerification) {
+  const verificationMode = await resolvePatientIdentityVerificationMode(client);
+  if (identityVerificationOptions.requirePatientIdentityVerification || verificationMode === "all_appointments") {
     const risk = await resolvePatientIdentityRisk(payload.patientId, client);
-    if (risk.identityRisk === "ambiguous") {
+    if (isPatientIdentityVerificationRequired(risk, verificationMode)) {
       if (identityVerificationOptions.assertion) {
         const expectedVerifierUserId = approvedOverrideContext?.requesterUserId ?? userId;
         identityVerificationAssertion = revalidateStoredPatientIdentityAssertion(identityVerificationOptions.assertion, {

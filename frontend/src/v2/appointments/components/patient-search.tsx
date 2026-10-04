@@ -33,6 +33,7 @@ interface Patient extends Partial<AppointmentPatientSelection> {
   demographicsEstimated?: boolean;
   estimatedDateOfBirth?: string | null;
   identityRisk?: "none" | "ambiguous";
+  identityVerificationRequired?: boolean;
   similarPatientCount?: number;
   availableVerificationMethods?: PatientIdentityVerificationMethod[];
   maskedPrimaryIdentifier?: string | null;
@@ -211,7 +212,7 @@ export function PatientSearch({
   }, []);
 
   const selectPatient = (patient: Patient) => {
-    if (patient.identityRisk === "ambiguous") {
+    if (patient.identityVerificationRequired) {
       setVerificationPatient(patient);
       setVerificationEvidence("");
       setVerificationError(null);
@@ -297,7 +298,7 @@ export function PatientSearch({
             </span>
             <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>
           </div>
-          {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
+          {selectedPatient.identityVerificationRequired && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
         </div>
         {!locked ? <button
           type="button"

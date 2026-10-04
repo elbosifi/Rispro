@@ -11,6 +11,7 @@ import {
   sendPatientWebPushNotification,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
+import { fetchPatientIdentifierTypes } from "@/lib/api/patients";
 import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
@@ -49,13 +50,14 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
   dateFrom: "",
   dateTo: "",
   modalityId: "",
+  identifierType: "",
   query: "",
   statuses: [...REGISTRATION_DEFAULT_STATUSES],
   sort: "booking-desc",
 };
 
 const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
-const DRILLDOWN_FILTER_PARAM_KEYS = ["source", "dateMode", "date", "dateFrom", "dateTo", "modalityId", "status", "status[]", "q"];
+const DRILLDOWN_FILTER_PARAM_KEYS = ["source", "dateMode", "date", "dateFrom", "dateTo", "modalityId", "identifierType", "status", "status[]", "q"];
 
 function RegistrationStat({
   label,
@@ -191,6 +193,11 @@ export default function RegistrationsPage() {
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
     queryFn: fetchAppointmentLookups,
+    staleTime: 1000 * 60 * 5,
+  });
+  const { data: patientIdentifierTypes = [] } = useQuery({
+    queryKey: ["patient-identifier-types"],
+    queryFn: fetchPatientIdentifierTypes,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -393,6 +400,7 @@ export default function RegistrationsPage() {
       dateFrom: "",
       dateTo: "",
       modalityId: filters.modalityId,
+      identifierType: filters.identifierType,
       query: filters.query,
       statuses: filters.statuses,
       sort: filters.sort,
@@ -409,6 +417,7 @@ export default function RegistrationsPage() {
       dateFrom: "",
       dateTo: "",
       modalityId: filters.modalityId,
+      identifierType: filters.identifierType,
       query: filters.query,
       statuses: filters.statuses,
       sort: filters.sort,
@@ -432,6 +441,11 @@ export default function RegistrationsPage() {
           ? t("registrations.allDates")
           : null,
     selectedFilterModalityLabel ? `${t("registrations.modality")}: ${selectedFilterModalityLabel}` : null,
+    filters.identifierType
+      ? `${language === "ar" ? "نوع المعرّف" : "Identifier type"}: ${filters.identifierType === "__missing__"
+        ? (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")
+        : (patientIdentifierTypes.find((type) => type.code === filters.identifierType)?.[language === "ar" ? "labelAr" : "labelEn"] || filters.identifierType)}`
+      : null,
     ...filters.statuses.map((status) => `${t("registrations.status")} ${statusLabel(language, status)}`),
     filters.query ? `${t("registrations.search")}: ${filters.query}` : null,
   ].filter((chip): chip is string => Boolean(chip));
@@ -879,7 +893,7 @@ export default function RegistrationsPage() {
                 {t("registrations.patientScopeHint", { patient: patientScopeName })}
               </div>
             ) : null}
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">
                   {t("registrations.modality")}
@@ -909,6 +923,25 @@ export default function RegistrationsPage() {
                   onClear={() => handleFilterChange("query", "")}
                   className="w-full min-h-10"
                 />
+              </div>
+              <div>
+                <label htmlFor="registration-identifier-type" className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">
+                  {language === "ar" ? "نوع المعرّف" : "Identifier type"}
+                </label>
+                <select
+                  id="registration-identifier-type"
+                  value={filters.identifierType}
+                  onChange={(e) => handleFilterChange("identifierType", e.target.value)}
+                  className="input-premium input-ltr w-full min-h-10"
+                >
+                  <option value="">{language === "ar" ? "كل أنواع المعرّفات" : "All identifier types"}</option>
+                  {patientIdentifierTypes.map((identifierType) => (
+                    <option key={identifierType.code} value={identifierType.code}>
+                      {language === "ar" ? identifierType.labelAr : identifierType.labelEn}
+                    </option>
+                  ))}
+                  <option value="__missing__">{language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier"}</option>
+                </select>
               </div>
             </div>
           </div>
@@ -1043,6 +1076,11 @@ export default function RegistrationsPage() {
                           {patientName}
                         </button>
                         <p className="mt-1 font-mono text-xs text-muted-foreground">{apt.accessionNumber}</p>
+                        <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {apt.patientIdentifierType
+                            ? (chooseLocalized(language, apt.patientIdentifierTypeLabelAr, apt.patientIdentifierTypeLabelEn) || apt.patientIdentifierType)
+                            : (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")}
+                        </span>
                         {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
                       </div>
                       <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
@@ -1174,6 +1212,11 @@ export default function RegistrationsPage() {
                               {t("registrations.webPushBadge")}
                             </span>
                           ) : null}
+                          <span className="inline-flex rounded-full border border-slate-200 bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {apt.patientIdentifierType
+                              ? (chooseLocalized(language, apt.patientIdentifierTypeLabelAr, apt.patientIdentifierTypeLabelEn) || apt.patientIdentifierType)
+                              : (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")}
+                          </span>
                         </div>
                         <p className="mt-1 truncate text-[10.5px] leading-snug text-muted-foreground">
                           {[

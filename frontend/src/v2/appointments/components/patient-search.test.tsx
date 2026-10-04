@@ -56,6 +56,7 @@ describe("PatientSearch", () => {
       maskedPrimaryIdentifier: "••••1234",
       maskedPhone1: "••••••5678",
       identityRisk: "ambiguous",
+      identityVerificationRequired: true,
       similarPatientCount: 1,
       availableVerificationMethods: ["primary_identifier"],
     }]);
@@ -106,6 +107,7 @@ describe("PatientSearch", () => {
       arabicFullName: "مريض جواز سفر متشابه",
       englishFullName: "Passport Patient",
       identityRisk: "ambiguous",
+      identityVerificationRequired: true,
       availableVerificationMethods: ["primary_identifier"],
       primaryIdentifierType: "passport",
       primaryIdentifierTypeLabelAr: "جواز السفر",
@@ -130,6 +132,7 @@ describe("PatientSearch", () => {
       arabicFullName: "مريض معرّف مخصص متشابه",
       englishFullName: "Custom Identifier Patient",
       identityRisk: "ambiguous",
+      identityVerificationRequired: true,
       availableVerificationMethods: ["primary_identifier"],
       primaryIdentifierType: "other",
       primaryIdentifierTypeLabelAr: "بطاقة المستشفى",
@@ -154,6 +157,7 @@ describe("PatientSearch", () => {
       arabicFullName: "مريض جواز سفر متشابه",
       englishFullName: "Arabic Passport Patient",
       identityRisk: "ambiguous",
+      identityVerificationRequired: true,
       availableVerificationMethods: ["primary_identifier"],
       primaryIdentifierType: "passport",
       primaryIdentifierTypeLabelAr: "جواز السفر",
@@ -172,7 +176,7 @@ describe("PatientSearch", () => {
   });
 
   it("explains the safe next step when an ambiguous preselected patient has no verification methods", () => {
-    render(<LanguageProvider><PatientSearch selectedPatient={{ id: 9, arabicFullName: "مريض تشابه", identityRisk: "ambiguous", availableVerificationMethods: [] }} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
+    render(<LanguageProvider><PatientSearch selectedPatient={{ id: 9, arabicFullName: "مريض تشابه", identityRisk: "ambiguous", identityVerificationRequired: true, availableVerificationMethods: [] }} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Verify identity" }));
     expect(screen.getByText("No primary identifier is recorded for this patient. Update the patient record and set a primary National ID, passport number, or other identifier before scheduling.")).toBeTruthy();
     expect(screen.queryByText("National ID")).toBeNull();
@@ -197,5 +201,30 @@ describe("PatientSearch", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Estimated" } });
     await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Estimated"));
     expect(await screen.findByText(/Estimated DOB: 1980-01-02/)).toBeTruthy();
+  });
+
+  it("opens the existing verification dialog for a non-ambiguous patient when required", async () => {
+    searchPatients.mockResolvedValue([{
+      id: 14,
+      arabicFullName: "Non ambiguous patient",
+      englishFullName: "Non Ambiguous Patient",
+      identityRisk: "none",
+      identityVerificationRequired: true,
+      availableVerificationMethods: ["primary_identifier"],
+      primaryIdentifierType: "national_id",
+      primaryIdentifierTypeLabelEn: "National ID",
+      maskedPrimaryIdentifier: "••••1234",
+    }]);
+    verifyPatientIdentity.mockResolvedValue({ proof: "signed-proof", verificationMethod: "primary_identifier" });
+    const onSelect = vi.fn();
+
+    render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={onSelect} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Non" } });
+    await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Non"));
+    fireEvent.click(await screen.findByText("Non Ambiguous Patient"));
+    expect(screen.getByText("Verify patient identity")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Enter complete National ID"), { target: { value: "100000000014" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and select" }));
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 14, patientIdentityVerificationProof: "signed-proof" })));
   });
 });

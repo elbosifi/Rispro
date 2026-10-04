@@ -354,6 +354,46 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(JSON.stringify(audit.rows).includes(similar.firstIdentifier), false);
     });
 
+    it("requires the existing proof flow for non-ambiguous patients in all-appointments mode", async () => {
+      guard();
+      const previous = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+        `select setting_value, updated_by_user_id from system_settings where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`,
+      );
+      await pool.query(
+        `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+         values ('patient_registration', 'patient_identity_verification_mode', '{"value":"all_appointments"}'::jsonb, $1)
+         on conflict (category, setting_key) do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()`,
+        [testData.userId],
+      );
+      try {
+        const patientId = await createPatientForStatusTest("AllAppointmentsIdentity");
+        const risk = await fetch(`/api/v2/appointments/patient-selection/${patientId}/risk`);
+        assert.equal(risk.status, 200);
+        assert.equal((risk.data as { patient: { identityRisk: string; identityVerificationRequired: boolean } }).patient.identityRisk, "none");
+        assert.equal((risk.data as { patient: { identityVerificationRequired: boolean } }).patient.identityVerificationRequired, true);
+
+        const bookingPayload = { patientId, modalityId: testData.modalityId, examTypeId: testData.examTypeId, bookingDate: "2039-06-13", bookingTime: null, caseCategory: "non_oncology" };
+        const missingProof = await fetch("/api/v2/appointments", { method: "POST", body: bookingPayload });
+        assert.equal(missingProof.status, 422);
+        assert.match(JSON.stringify(missingProof.data), /patient_identity_verification_required/);
+
+        const identifier = (await pool.query<{ identifier_value: string }>(`select identifier_value from patients where id = $1`, [patientId])).rows[0]!.identifier_value;
+        const wrongProof = await fetch(`/api/v2/appointments/patient-selection/${patientId}/verify`, { method: "POST", body: { method: "primary_identifier", evidence: "wrong" } });
+        assert.equal(wrongProof.status, 422);
+        const verification = await fetch(`/api/v2/appointments/patient-selection/${patientId}/verify`, { method: "POST", body: { method: "primary_identifier", evidence: identifier } });
+        assert.equal(verification.status, 200);
+        const created = await fetch("/api/v2/appointments", { method: "POST", body: { ...bookingPayload, patientIdentityVerificationProof: (verification.data as { proof: string }).proof } });
+        assert.equal(created.status, 201);
+      } finally {
+        const prior = previous.rows[0];
+        if (prior) {
+          await pool.query(`update system_settings set setting_value = $1::jsonb, updated_by_user_id = $2, updated_at = now() where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`, [JSON.stringify(prior.setting_value), prior.updated_by_user_id]);
+        } else {
+          await pool.query(`delete from system_settings where category = 'patient_registration' and setting_key = 'patient_identity_verification_mode'`);
+        }
+      }
+    });
+
     it("should create a booking successfully", async () => {
       guard();
       const { status, data } = await fetch("/api/v2/appointments", {

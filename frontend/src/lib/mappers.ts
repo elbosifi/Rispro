@@ -108,6 +108,9 @@ export interface AppointmentWithDetails extends Appointment {
   patientPrimaryIdentifierLabelAr?: string | null;
   patientPrimaryIdentifierLabelEn?: string | null;
   patientPrimaryIdentifierValue?: string | null;
+  patientIdentifierType?: string | null;
+  patientIdentifierTypeLabelAr?: string | null;
+  patientIdentifierTypeLabelEn?: string | null;
   pacsAutoCompletionEnabled?: boolean;
   pacsStudyStartedAt?: string | null;
   pacsFirstSeenAt?: string | null;
@@ -425,6 +428,12 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
       strOrNull(raw, "patient_primary_identifier_label_en") ?? strOrNull(raw, "patientPrimaryIdentifierLabelEn"),
     patientPrimaryIdentifierValue:
       strOrNull(raw, "patient_primary_identifier_value") ?? strOrNull(raw, "patientPrimaryIdentifierValue"),
+    patientIdentifierType:
+      strOrNull(raw, "patient_identifier_type") ?? strOrNull(raw, "patientIdentifierType"),
+    patientIdentifierTypeLabelAr:
+      strOrNull(raw, "patient_identifier_type_label_ar") ?? strOrNull(raw, "patientIdentifierTypeLabelAr"),
+    patientIdentifierTypeLabelEn:
+      strOrNull(raw, "patient_identifier_type_label_en") ?? strOrNull(raw, "patientIdentifierTypeLabelEn"),
     pacsAutoCompletionEnabled:
       bool(raw, "pacs_auto_completion_enabled", bool(raw, "pacsAutoCompletionEnabled", false)),
     cdSuccessfulCount: num(raw, "cd_successful_count") || num(raw, "cdSuccessfulCount"),

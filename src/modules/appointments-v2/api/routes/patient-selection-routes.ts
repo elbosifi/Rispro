@@ -4,7 +4,7 @@ import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { searchPatients } from "../../../../services/patient-service.js";
-import { maskPatientIdentifier, maskPatientPhone, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityRisks, verifyPatientIdentityEvidence } from "../../../../services/patient-selection-safety-service.js";
+import { isPatientIdentityVerificationRequired, maskPatientIdentifier, maskPatientPhone, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityRisks, resolvePatientIdentityVerificationMode, verifyPatientIdentityEvidence } from "../../../../services/patient-selection-safety-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
@@ -20,23 +20,26 @@ export const patientSelectionRouter = Router();
 const verificationRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 12, message: "Too many patient identity verification attempts. Please wait before trying again.", errorCode: "patient_identity_verification_rate_limited", key: verificationRateLimitKey });
 patientSelectionRouter.use(requireAuth, requirePageAccess("appointments"));
 
-function toSelectionRow(risk: Awaited<ReturnType<typeof resolvePatientIdentityRisk>>) {
+function toSelectionRow(risk: Awaited<ReturnType<typeof resolvePatientIdentityRisk>>, verificationMode: Awaited<ReturnType<typeof resolvePatientIdentityVerificationMode>>) {
   const { patient } = risk;
-  return { id: patient.id, arabicFullName: patient.arabicFullName, englishFullName: patient.englishFullName, mrn: patient.mrn, category: patient.category, sex: patient.sex, ageYears: patient.ageYears, estimatedDateOfBirth: patient.estimatedDateOfBirth, demographicsEstimated: patient.demographicsEstimated, primaryIdentifierType: patient.primaryIdentifierType, primaryIdentifierTypeLabelAr: patient.primaryIdentifierTypeLabelAr, primaryIdentifierTypeLabelEn: patient.primaryIdentifierTypeLabelEn, maskedPrimaryIdentifier: maskPatientIdentifier(patient.primaryIdentifierValue), maskedPhone1: maskPatientPhone(patient.phone1), identityRisk: risk.identityRisk, similarPatientCount: risk.similarPatientCount, availableVerificationMethods: risk.availableVerificationMethods, ambiguityRuleVersion: risk.ambiguityRuleVersion };
+  return { id: patient.id, arabicFullName: patient.arabicFullName, englishFullName: patient.englishFullName, mrn: patient.mrn, category: patient.category, sex: patient.sex, ageYears: patient.ageYears, estimatedDateOfBirth: patient.estimatedDateOfBirth, demographicsEstimated: patient.demographicsEstimated, primaryIdentifierType: patient.primaryIdentifierType, primaryIdentifierTypeLabelAr: patient.primaryIdentifierTypeLabelAr, primaryIdentifierTypeLabelEn: patient.primaryIdentifierTypeLabelEn, maskedPrimaryIdentifier: maskPatientIdentifier(patient.primaryIdentifierValue), maskedPhone1: maskPatientPhone(patient.phone1), identityRisk: risk.identityRisk, identityVerificationRequired: isPatientIdentityVerificationRequired(risk, verificationMode), similarPatientCount: risk.similarPatientCount, availableVerificationMethods: risk.availableVerificationMethods, ambiguityRuleVersion: risk.ambiguityRuleVersion };
 }
 
 patientSelectionRouter.get("/search", asyncRoute(async (req: Request, res: Response) => {
   const query = String(req.query.q || "");
   const patients = await searchPatients(query);
-  const risks = await resolvePatientIdentityRisks(patients.map((patient) => Number(patient.id)));
-  const items = patients.map((patient) => toSelectionRow(risks.get(Number(patient.id))!));
+  const [risks, verificationMode] = await Promise.all([
+    resolvePatientIdentityRisks(patients.map((patient) => Number(patient.id))),
+    resolvePatientIdentityVerificationMode(),
+  ]);
+  const items = patients.map((patient) => toSelectionRow(risks.get(Number(patient.id))!, verificationMode));
   res.json({ patients: items });
 }));
 
 patientSelectionRouter.get("/:patientId/risk", asyncRoute(async (req: Request, res: Response) => {
   const patientId = Number(req.params.patientId);
-  const risk = await resolvePatientIdentityRisk(patientId);
-  res.json({ patient: toSelectionRow(risk) });
+  const [risk, verificationMode] = await Promise.all([resolvePatientIdentityRisk(patientId), resolvePatientIdentityVerificationMode()]);
+  res.json({ patient: toSelectionRow(risk, verificationMode) });
 }));
 
 patientSelectionRouter.post("/:patientId/verify", verificationRateLimiter, asyncRoute(async (req: AuthedRequest, res: Response) => {

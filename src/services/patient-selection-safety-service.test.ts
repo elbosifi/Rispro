@@ -93,6 +93,19 @@ test("patient identity name-match setting defaults safely to three components", 
   assert.equal(await read({ value: "2" }), 2);
 });
 
+test("patient identity verification mode defaults safely and requires the configured scope", async () => {
+  const readMode = (settingValue?: unknown) => service.resolvePatientIdentityVerificationMode({
+    query: async () => ({ rows: settingValue === undefined ? [] : [{ setting_value: settingValue }] }),
+  } as never);
+
+  assert.equal(await readMode(), "ambiguous_only");
+  assert.equal(await readMode({ value: "invalid" }), "ambiguous_only");
+  assert.equal(await readMode('{"value":"all_appointments"}'), "all_appointments");
+  assert.equal(service.isPatientIdentityVerificationRequired({ identityRisk: "ambiguous" }, "ambiguous_only"), true);
+  assert.equal(service.isPatientIdentityVerificationRequired({ identityRisk: "none" }, "ambiguous_only"), false);
+  assert.equal(service.isPatientIdentityVerificationRequired({ identityRisk: "none" }, "all_appointments"), true);
+});
+
 test("verification methods expose only a usable primary identifier and fingerprints preserve identity fields", () => {
   const patient = createPatient();
   assert.deepEqual(service.availablePatientIdentityVerificationMethods(patient), ["primary_identifier"]);
@@ -178,6 +191,38 @@ test("primary identifier evidence requires the complete normalized value and rej
       (error: unknown) => error instanceof Error && error.message === "Identity verification method is unavailable.",
     );
   }
+});
+
+test("all-appointments mode issues the existing proof for a non-ambiguous patient", async () => {
+  const target = { ...createDbRow(1, "PRIMARY-ID"), english_full_name: "Unique Patient One" };
+  const other = { ...createDbRow(2, "OTHER-ID"), english_full_name: "Different Patient Two" };
+  const allAppointmentsExecutor = {
+    query: async <T>(sql: string, values?: unknown[]) => {
+      if (values?.[0] === service.PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY) return { rows: [{ setting_value: { value: "2" } }] as T[] };
+      if (values?.[0] === service.PATIENT_IDENTITY_VERIFICATION_MODE_SETTING_KEY) return { rows: [{ setting_value: { value: "all_appointments" } }] as T[] };
+      return { rows: (sql.includes(" or (") ? [target, other] : [target]) as T[] };
+    },
+  };
+  const verified = await service.verifyPatientIdentityEvidence({ patientId: 1, userId: 4, method: "primary_identifier", evidence: "primary-id", executor: allAppointmentsExecutor as never });
+  assert.equal(verified.risk.identityRisk, "none");
+  assert.equal(verified.assertion.verificationMethod, "primary_identifier");
+  await assert.rejects(
+    service.verifyPatientIdentityEvidence({ patientId: 1, userId: 4, method: "primary_identifier", evidence: "wrong", executor: allAppointmentsExecutor as never }),
+    /verification is incorrect/,
+  );
+
+  const noIdentifierExecutor = {
+    query: async <T>(sql: string, values?: unknown[]) => {
+      if (values?.[0] === service.PATIENT_IDENTITY_NAME_MATCH_COMPONENTS_SETTING_KEY) return { rows: [{ setting_value: { value: "2" } }] as T[] };
+      if (values?.[0] === service.PATIENT_IDENTITY_VERIFICATION_MODE_SETTING_KEY) return { rows: [{ setting_value: { value: "all_appointments" } }] as T[] };
+      const noIdentifier = { ...target, identifier_type: null, identifier_value: null };
+      return { rows: (sql.includes(" or (") ? [noIdentifier, other] : [noIdentifier]) as T[] };
+    },
+  };
+  await assert.rejects(
+    service.verifyPatientIdentityEvidence({ patientId: 1, userId: 4, method: "primary_identifier", evidence: "anything", executor: noIdentifierExecutor as never }),
+    /method is unavailable/,
+  );
 });
 
 test("signed proofs are bound to the patient, verifier, and current identity fingerprint", () => {

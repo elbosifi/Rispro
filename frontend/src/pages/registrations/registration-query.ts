@@ -10,6 +10,7 @@ export const REGISTRATION_FILTER_QUERY_KEYS = [
   "dateFrom",
   "dateTo",
   "modalityId",
+  "identifierType",
   "status",
   "status[]",
   "sort",
@@ -21,6 +22,7 @@ export interface RegistrationsFilters {
   dateFrom: string;
   dateTo: string;
   modalityId: string;
+  identifierType: string;
   patientId?: string;
   query: string;
   statuses: string[];
@@ -81,6 +83,7 @@ export function parseRegistrationFiltersFromSearchParams(
 ): RegistrationsFilters {
   const next: RegistrationsFilters = { ...defaults, statuses: [...defaults.statuses] };
   const modalityId = firstTrimmed(params, "modalityId");
+  const identifierType = firstTrimmed(params, "identifierType");
   const statuses = readStatuses(params);
   const dateMode = firstTrimmed(params, "dateMode");
   const date = firstTrimmed(params, "date");
@@ -90,6 +93,9 @@ export function parseRegistrationFiltersFromSearchParams(
 
   if (/^[1-9]\d*$/.test(modalityId)) {
     next.modalityId = modalityId;
+  }
+  if (identifierType) {
+    next.identifierType = identifierType;
   }
   if (statuses.length > 0) {
     next.statuses = statuses;
@@ -170,6 +176,7 @@ export function buildRegistrationSearch(
   }
 
   if (/^[1-9]\d*$/.test(filters.modalityId)) next.set("modalityId", filters.modalityId);
+  if (filters.identifierType) next.set("identifierType", filters.identifierType);
   if (!sameStatuses(filters.statuses, defaults.statuses)) {
     for (const status of filters.statuses) next.append("status", status);
   }
@@ -186,6 +193,7 @@ export function buildRegistrationLastLocationSearch(current: URLSearchParams): U
     dateFrom: "",
     dateTo: "",
     modalityId: "",
+    identifierType: "",
     patientId: patientId ? String(patientId) : undefined,
     query: "",
     statuses: [...REGISTRATION_DEFAULT_STATUSES],
@@ -217,6 +225,7 @@ function normalizePositiveId(value: string | null): number | null {
 export function buildRegistrationAppointmentQuery(filters: RegistrationsFilters) {
   const query: Record<string, string | string[]> = {
     modalityId: filters.modalityId,
+    identifierType: filters.identifierType,
     q: filters.query,
     status: filters.statuses,
     sort: filters.sort,

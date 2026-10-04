@@ -29,6 +29,14 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
       { value: "3", label: "First 3 names / أول ثلاثة أسماء" },
     ],
   },
+  patient_identity_verification_mode: {
+    label: "Appointment identity verification / التحقق من هوية المريض عند إنشاء الموعد",
+    type: "dropdown",
+    options: [
+      { value: "ambiguous_only", label: "Similar-name patients only / المرضى ذوو الأسماء المتشابهة فقط" },
+      { value: "all_appointments", label: "All appointment creation / جميع المواعيد" },
+    ],
+  },
   phone1_required: { label: "", type: "dropdown", options: [
     { value: "required", label: "مطلوب" },
     { value: "optional", label: "اختياري" }
@@ -242,6 +250,11 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
       )}
       {Object.entries(settingsValues)
         .filter(([key]) => !(category === "patient_registration" && key === "mrn_prefix"))
+        .sort(([leftKey], [rightKey]) => {
+          if (category !== "patient_registration") return 0;
+          const order = (key: string) => key === "patient_identity_name_match_components" ? 0 : key === "patient_identity_verification_mode" ? 1 : 2;
+          return order(leftKey) - order(rightKey);
+        })
         .map(([key, value]) => {
         const control = inferSettingControl(key, value);
         const label = control.label || friendlySettingLabel(category, key, t);

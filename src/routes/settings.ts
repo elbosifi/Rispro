@@ -110,6 +110,13 @@ export function validatePatientRegistrationSettings(entries: Array<{ key: string
   if (matchDepth && value !== "2" && value !== "3") {
     throw new HttpError(400, "patient_identity_name_match_components must be 2 or 3.");
   }
+  const verificationMode = entries.find((entry) => entry.key === "patient_identity_verification_mode");
+  const verificationModeValue = verificationMode?.value && typeof verificationMode.value === "object" && !Array.isArray(verificationMode.value) && "value" in verificationMode.value
+    ? (verificationMode.value as { value?: unknown }).value
+    : verificationMode?.value;
+  if (verificationMode && verificationModeValue !== "ambiguous_only" && verificationModeValue !== "all_appointments") {
+    throw new HttpError(400, "patient_identity_verification_mode must be ambiguous_only or all_appointments.");
+  }
 }
 
 function validateNoShowSettings(entries: Array<{ key: string; value?: unknown }>): void {

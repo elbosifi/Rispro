@@ -38,6 +38,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
             phone1: patient.phone1 ?? patient.phone ?? null,
             estimatedDateOfBirth: patient.estimatedDateOfBirth,
             identityRisk: patient.identityRisk,
+            identityVerificationRequired: patient.identityVerificationRequired,
             similarPatientCount: patient.similarPatientCount,
             availableVerificationMethods: patient.availableVerificationMethods,
             patientIdentityVerificationProof: patient.patientIdentityVerificationProof,

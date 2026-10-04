@@ -17,3 +17,12 @@ test("patient identity name-match setting accepts only 2 or 3", () => {
     );
   }
 });
+
+test("patient identity verification mode accepts only supported modes", () => {
+  assert.doesNotThrow(() => validatePatientRegistrationSettings([{ key: "patient_identity_verification_mode", value: "ambiguous_only" }]));
+  assert.doesNotThrow(() => validatePatientRegistrationSettings([{ key: "patient_identity_verification_mode", value: { value: "all_appointments" } }]));
+  assert.throws(
+    () => validatePatientRegistrationSettings([{ key: "patient_identity_verification_mode", value: "invalid" }]),
+    (error: unknown) => error instanceof Error && "statusCode" in error && error.statusCode === 400,
+  );
+});
