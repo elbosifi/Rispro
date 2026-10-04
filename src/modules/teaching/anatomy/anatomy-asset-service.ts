@@ -21,7 +21,9 @@ async function beginsWithLfsPointer(filePath: string): Promise<boolean> {
   }
 }
 
-async function verifyAssetFile(directory: string, manifest: AnatomyAtlasManifest, assetKey: string, root?: string, verifyIntegrity = true): Promise<void> {
+export interface ResolvedTeachingAnatomyAsset { filePath: string; mediaType: string; sizeBytes: number; etag: string; versioned: boolean }
+
+async function verifyAssetFile(directory: string, manifest: AnatomyAtlasManifest, assetKey: string, root?: string, verifyIntegrity = false): Promise<{ sizeBytes: number; mtimeMs: number }> {
   const filePath = anatomyAssetPath(directory, manifest, assetKey);
   const actualPath = await realpath(filePath);
   const resolvedRoot = root ?? await realpath(directory);
@@ -37,6 +39,7 @@ async function verifyAssetFile(directory: string, manifest: AnatomyAtlasManifest
     }
   }
   if (await beginsWithLfsPointer(actualPath)) throw new Error(`Anatomy asset ${assetKey} is a Git LFS pointer, not the installed binary file.`);
+  return { sizeBytes: fileStat.size, mtimeMs: fileStat.mtimeMs };
 }
 
 async function verifyDeclaredAssets(directory: string, manifest: AnatomyAtlasManifest, verifyIntegrity: boolean): Promise<void> {
@@ -72,7 +75,17 @@ export async function readTeachingAnatomyManifest(atlasId = "spl-liver", configu
 export async function readTeachingAnatomyCatalog(configuredRoot = env.teachingAnatomyAssetRoot): Promise<TeachingAnatomyAtlasCatalogEntry[]> {
   return Promise.all(TEACHING_ANATOMY_CATALOG.map(async (entry) => {
     try {
-      const manifest = await readTeachingAnatomyManifest(entry.atlasId, configuredRoot, "presence");
+      const directory = teachingAnatomyAtlasDirectory(entry.atlasId, configuredRoot);
+      // Readiness is an O(1) activation-record check. Per-asset checks happen only
+      // when that asset is served; a landing-page request must not stat 1,258 meshes.
+      const activation = JSON.parse(await readFile(path.join(directory, "installed-atlas.json"), "utf8")) as { schemaVersion?: unknown; atlasId?: unknown; managedVersion?: unknown; manifestSha256?: unknown; validationStatus?: unknown };
+      const legacyActivation = activation.schemaVersion === "1.0" && typeof activation.managedVersion === "string";
+      if (activation.atlasId !== entry.atlasId || (activation.validationStatus !== "passed" && !legacyActivation)) return { ...entry, status: "unavailable" as const };
+      if (typeof activation.manifestSha256 === "string") {
+        const manifestText = await readFile(path.join(directory, "manifest.json"));
+        if (createHash("sha256").update(manifestText).digest("hex") !== activation.manifestSha256) return { ...entry, status: "unavailable" as const };
+      }
+      const manifest = await readTeachingAnatomyManifest(entry.atlasId, configuredRoot, false);
       if (!manifest) return { ...entry };
       return {
         ...entry,
@@ -101,11 +114,16 @@ export async function readTeachingAnatomyCatalog(configuredRoot = env.teachingAn
   }));
 }
 
-export async function resolveTeachingAnatomyAsset(atlasId: string, assetKey: string): Promise<{ filePath: string; mediaType: string } | null> {
+export async function resolveTeachingAnatomyAsset(atlasId: string, assetKey: string): Promise<ResolvedTeachingAnatomyAsset | null> {
   const manifest = await readTeachingAnatomyManifest(atlasId, env.teachingAnatomyAssetRoot, false);
   if (!manifest) return null;
   const directory = teachingAnatomyAtlasDirectory(atlasId);
   const filePath = anatomyAssetPath(directory, manifest, assetKey);
-  await verifyAssetFile(directory, manifest, assetKey);
-  return { filePath, mediaType: manifest.assets[assetKey]!.mediaType };
+  // Installation verifies complete SHA-256 metadata before atomic activation. Runtime
+  // validates confinement, declaration, size and LFS state only; it must not reread an
+  // 80 MB volume simply to hash it for every authenticated request.
+  const file = await verifyAssetFile(directory, manifest, assetKey);
+  const integrity = manifest.assets[assetKey]!.integrity;
+  const etag = integrity ? `\"${integrity.sha256}\"` : `W/\"${file.sizeBytes.toString(16)}-${Math.floor(file.mtimeMs).toString(16)}\"`;
+  return { filePath, mediaType: manifest.assets[assetKey]!.mediaType, sizeBytes: file.sizeBytes, etag, versioned: Boolean(integrity) };
 }

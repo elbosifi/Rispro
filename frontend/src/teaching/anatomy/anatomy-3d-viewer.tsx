@@ -217,20 +217,11 @@ export function Anatomy3dViewer({ manifest, geometry, plane, sliceIndex, selecte
       fitCamera(volumeBounds(geometry));
     }
 
-    const clearLoadedObjects = () => {
-      for (const object of [...anatomyGroup.children]) {
-        anatomyGroup.remove(object);
-        disposeObject(object);
-      }
-      objects.clear();
-    };
-
     loadSelectedRef.current = (structureId: string | null) => {
       if (!lazyLoad || disposed) return;
       selectedAbortController?.abort();
       selectedAbortController = null;
       const generation = ++selectionGeneration;
-      clearLoadedObjects();
       if (!structureId) {
         setStatus({ loading: false, error: null });
         return;
@@ -248,7 +239,7 @@ export function Anatomy3dViewer({ manifest, geometry, plane, sliceIndex, selecte
       const request = new AbortController();
       selectedAbortController = request;
       setStatus({ loading: true, error: null });
-      void fetchTeachingAnatomyAtlasAsset(manifest.atlasId, structure.meshAsset, request.signal).then((buffer) => {
+      void fetchTeachingAnatomyAtlasAsset(manifest.atlasId, structure.meshAsset, request.signal, asset.integrity?.sha256).then((buffer) => {
         if (disposed || request.signal.aborted || generation !== selectionGeneration) return;
         const object = makeStructureObject(buffer, asset.mediaType, asset.file, manifest, structure, selectedStructureRef.current === structure.id);
         try {
@@ -258,8 +249,9 @@ export function Anatomy3dViewer({ manifest, geometry, plane, sliceIndex, selecte
           throw error;
         }
         object.visible = !hiddenStructureIdsRef.current.includes(structure.id) && (!isolatedStructureIdRef.current || isolatedStructureIdRef.current === structure.id);
-        anatomyGroup.add(object);
-        objects.set(structure.id, object);
+        const previous = objects.get(structure.id);
+        if (previous) { anatomyGroup.remove(previous); disposeObject(previous); }
+        anatomyGroup.add(object); objects.set(structure.id, object);
         if (!geometry) fitCamera(new THREE.Box3().setFromObject(object));
         setStatus({ loading: false, error: null });
       }).catch((error: unknown) => {
@@ -297,7 +289,7 @@ export function Anatomy3dViewer({ manifest, geometry, plane, sliceIndex, selecte
         if (abortController.signal.aborted) return;
         const asset = manifest.assets[structure.meshAsset!];
         if (!asset || !asset.mediaType.startsWith("model/")) throw new Error(`The atlas manifest does not declare a mesh for ${structure.name}.`);
-        const buffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, structure.meshAsset!, abortController.signal);
+        const buffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, structure.meshAsset!, abortController.signal, asset.integrity?.sha256);
         if (disposed) return;
         const object = makeStructureObject(buffer, asset.mediaType, asset.file, manifest, structure, selectedStructureRef.current === structure.id);
         if (geometry) validateMeshBounds(object, volumeBounds(geometry), structure, geometry);
@@ -313,11 +305,21 @@ export function Anatomy3dViewer({ manifest, geometry, plane, sliceIndex, selecte
       setStatus({ loading: false, error: null });
     };
 
-    setStatus({ loading: !lazyLoad, error: null });
+    const loadOverview = async () => {
+      if (!manifest.overviewAsset) return;
+      const asset = manifest.assets[manifest.overviewAsset];
+      if (!asset) return;
+      const overview = makeStructureObject(await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, manifest.overviewAsset, abortController.signal, asset.integrity?.sha256), asset.mediaType, asset.file, manifest, { id: "overview", name: "Whole-body overview", category: "overview", synonyms: [], color: "#9aa7b8", note: "" }, false);
+      overview.userData.isOverview = true;
+      overview.traverse((child) => { if (child instanceof THREE.Mesh) { const material = child.material as THREE.MeshStandardMaterial; material.transparent = true; material.opacity = .42; } });
+      anatomyGroup.add(overview);
+      if (!geometry) fitCamera(new THREE.Box3().setFromObject(anatomyGroup));
+    };
+    setStatus({ loading: !lazyLoad || Boolean(manifest.overviewAsset), error: null });
     if (!lazyLoad) void fetchAllModels().catch((error: unknown) => {
       if (!disposed) setStatus({ loading: false, error: error instanceof Error ? error.message : "An atlas mesh could not be loaded." });
     });
-    else setStatus({ loading: false, error: null });
+    else void loadOverview().then(() => { if (!disposed) setStatus({ loading: false, error: null }); }).catch((error: unknown) => { if (!disposed) setStatus({ loading: false, error: error instanceof Error ? error.message : "Whole-body overview could not be loaded." }); });
 
     return () => {
       disposed = true;

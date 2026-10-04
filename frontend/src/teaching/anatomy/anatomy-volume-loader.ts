@@ -10,14 +10,14 @@ export async function loadTeachingAnatomyVolumes(manifest: TeachingAnatomyManife
   const primaryVolume = manifest.volumes.primary;
   const segmentationVolume = manifest.volumes.segmentation;
   if (!primaryVolume) return { primary: null, segmentation: null };
-  const primaryBuffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, primaryVolume.assetKey, signal);
+  const primaryBuffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, primaryVolume.assetKey, signal, manifest.assets[primaryVolume.assetKey]?.integrity?.sha256);
   const primary = await parseAnatomyNrrd(primaryBuffer);
   validateAnatomyGeometry(primary.geometry);
   if (primary.geometry.coordinateSystem !== manifest.coordinateSystem) {
     throw new Error(`The ${primaryVolume.modality} volume declares ${primary.geometry.coordinateSystem} coordinates but the manifest declares ${manifest.coordinateSystem}.`);
   }
   if (!segmentationVolume) return { primary, segmentation: null };
-  const labelBuffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, segmentationVolume.assetKey, signal);
+  const labelBuffer = await fetchTeachingAnatomyAtlasAsset(manifest.atlasId, segmentationVolume.assetKey, signal, manifest.assets[segmentationVolume.assetKey]?.integrity?.sha256);
   const segmentation = await parseAnatomyNrrd(labelBuffer);
   validateCompatibleAnatomyGeometry(primary.geometry, segmentation.geometry);
   const labeledStructures = manifest.structures.filter((structure): structure is typeof structure & { labelValue: number } => structure.labelValue !== undefined);

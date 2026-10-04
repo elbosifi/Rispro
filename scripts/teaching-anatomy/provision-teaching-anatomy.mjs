@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import AdmZip from "adm-zip";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,7 +28,7 @@ function verifyUrl(value) {
   return url;
 }
 
-async function downloadPinned({ name, url, sizeBytes, sha256, fetchImpl = globalThis.fetch, log = () => undefined }) {
+async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetchImpl = globalThis.fetch, log = () => undefined }) {
   if (typeof fetchImpl !== "function" || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || !/^[a-f0-9]{64}$/i.test(sha256)) {
     throw new Error(`${name} download lock is invalid or HTTPS fetch is unavailable.`);
   }
@@ -51,27 +51,23 @@ async function downloadPinned({ name, url, sizeBytes, sha256, fetchImpl = global
     throw new Error(`${name} response size does not match the pinned source lock.`);
   }
   const hash = createHash("sha256");
-  const chunks = [];
+  const chunks = destination ? null : [];
+  const output = destination ? await open(destination, "wx", 0o600) : null;
   let received = 0;
   let nextReport = 8 * 1024 * 1024;
-  for await (const chunk of response.body) {
-    const bytes = Buffer.from(chunk);
-    received += bytes.length;
+  try { for await (const chunk of response.body) {
+    const bytes = Buffer.from(chunk); received += bytes.length;
     if (received > sizeBytes) throw new Error(`${name} download exceeded the pinned byte size.`);
-    hash.update(bytes);
-    chunks.push(bytes);
-    if (received >= nextReport) {
-      log(`[progress] ${name}: downloaded ${received}/${sizeBytes} bytes.`);
-      nextReport += 8 * 1024 * 1024;
-    }
-  }
+    hash.update(bytes); if (output) await output.write(bytes); else chunks.push(bytes);
+    if (received >= nextReport) { log(`[progress] ${name}: downloaded ${received}/${sizeBytes} bytes.`); nextReport += 8 * 1024 * 1024; }
+  } } finally { await output?.close(); }
   if (received !== sizeBytes || hash.digest("hex") !== sha256.toLowerCase()) throw new Error(`${name} size or SHA-256 does not match its pinned source lock.`);
   log(`[progress] ${name}: verified ${received} bytes and SHA-256.`);
-  return Buffer.concat(chunks, received);
+  return destination ?? Buffer.concat(chunks, received);
 }
 
-async function extractLockedArchive(buffer, destination, { expectedRoot, kind, maximumUncompressedBytes, log = () => undefined }) {
-  const zip = new AdmZip(buffer);
+async function extractLockedArchive(archive, destination, { expectedRoot, kind, maximumUncompressedBytes, log = () => undefined }) {
+  const zip = new AdmZip(archive);
   const rootPrefix = `${expectedRoot}/`;
   let totalBytes = 0;
   let extracted = 0;
@@ -123,7 +119,7 @@ export async function ensureOpenAnatomyAtlas({ atlasId, assetRoot, fetchImpl = g
     if (!entry) throw new Error(`No pinned Open Anatomy archive is configured for ${atlasId}.`);
     if (verifyInstalledOpenAtlas && await verifyInstalledOpenAtlas(assetRoot, entry)) return { status: "already-current", atlasId };
     workingDirectory = await mkdtemp(path.join(os.tmpdir(), `rispro-${atlasId}-`));
-    const zip = await downloadPinned({ name: atlasId, url: entry.url, sizeBytes: entry.sizeBytes, sha256: entry.sha256, fetchImpl, log });
+    const zip = await downloadPinned({ name: atlasId, url: entry.url, sizeBytes: entry.sizeBytes, sha256: entry.sha256, destination: path.join(workingDirectory, "source.zip"), fetchImpl, log });
     const sourceDirectory = path.join(workingDirectory, "source");
     await mkdir(sourceDirectory, { recursive: true, mode: 0o700 });
     await extractLockedArchive(zip, sourceDirectory, { expectedRoot: entry.archiveRoot, kind: "open-anatomy", maximumUncompressedBytes: 300 * 1024 * 1024, log });
@@ -146,7 +142,7 @@ export async function ensureBodyParts3d({ assetRoot, fetchImpl = globalThis.fetc
     }
     if (verifyInstalledBodyParts3d && await verifyInstalledBodyParts3d(assetRoot, source)) return { status: "already-current", atlasId: source.atlasId };
     workingDirectory = await mkdtemp(path.join(os.tmpdir(), "rispro-bodyparts3d-"));
-    const archive = await downloadPinned({ name: "BodyParts3D OBJ archive", ...source.archive, fetchImpl, log });
+    const archive = await downloadPinned({ name: "BodyParts3D OBJ archive", ...source.archive, destination: path.join(workingDirectory, "bodyparts3d.zip"), fetchImpl, log });
     const sourceDirectory = path.join(workingDirectory, "source");
     await mkdir(sourceDirectory, { recursive: true, mode: 0o700 });
     await extractLockedArchive(archive, sourceDirectory, { expectedRoot: "partof_BP3D_4.0_obj_99", kind: "bodyparts3d", maximumUncompressedBytes: 300 * 1024 * 1024, log });

@@ -215,9 +215,17 @@ export function createTeachingRouter(): Router {
     }
     res.setHeader("Content-Type", asset.mediaType);
     res.setHeader("Content-Disposition", `inline; filename="${asset.filePath.split(/[\\/]/).at(-1)}"`);
-    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("ETag", asset.etag);
     res.setHeader("Vary", "Cookie");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    if (req.headers["if-none-match"] === asset.etag) {
+      res.setHeader("Cache-Control", asset.versioned ? "private, max-age=31536000, immutable" : "private, max-age=0, must-revalidate");
+      res.status(304).end();
+      return;
+    }
+    const requestedVersion = typeof req.query.v === "string" ? req.query.v.toLowerCase() : "";
+    const versionedRequest = asset.versioned && requestedVersion === asset.etag.slice(1, -1);
+    res.setHeader("Cache-Control", versionedRequest ? "private, max-age=31536000, immutable" : "private, max-age=0, must-revalidate");
     res.sendFile(asset.filePath, (error) => { if (error) next(error); });
   };
 

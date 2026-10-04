@@ -7,7 +7,7 @@ import { fetchTeachingAnatomyManifest, type TeachingAnatomyManifest, type Teachi
 import { Anatomy3dViewer } from "../anatomy/anatomy-3d-viewer";
 import { anatomySelectionReducer, initialAnatomySelectionState } from "../anatomy/anatomy-selection";
 import { CrossSectionStackViewer } from "../anatomy/cross-section-stack-viewer";
-import { getAnatomyPlaneSpec, type AnatomyPlane } from "../anatomy/anatomy-nrrd";
+import { anatomyPlaneIndexFromWorldPoint, anatomyVolumeCenterLps, type AnatomyPlane } from "../anatomy/anatomy-nrrd";
 import { loadTeachingAnatomyVolumes, type LoadedAnatomyVolumes } from "../anatomy/anatomy-volume-loader";
 
 interface VolumeState {
@@ -64,8 +64,7 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   const [selection, dispatch] = useReducer(anatomySelectionReducer, initialAnatomySelectionState);
   const [volumeLoadAttempt, setVolumeLoadAttempt] = useState(0);
   const [volumeState, setVolumeState] = useState<VolumeState | null>(null);
-  const [plane, setPlane] = useState<AnatomyPlane>("axial");
-  const [sliceIndex, setSliceIndex] = useState(0);
+  const [worldPointLps, setWorldPointLps] = useState<[number, number, number] | null>(null);
   const [structureSearch, setStructureSearch] = useState("");
   const [expandedStructureIds, setExpandedStructureIds] = useState<string[]>([]);
   const [hiddenStructureIds, setHiddenStructureIds] = useState<string[]>([]);
@@ -73,7 +72,11 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   const manifest = manifestQuery.data?.available ? manifestQuery.data.manifest : null;
   const selectedStructure = manifest?.structures.find((structure) => structure.id === selection.selectedStructureId) ?? null;
   const visibleTreeIds = useMemo(() => manifest ? matchingTreeIds(manifest.structures, structureSearch.trim().toLocaleLowerCase()) : new Set<string>(), [manifest, structureSearch]);
-  const selectStructure = useCallback((structureId: string) => dispatch({ type: "select-structure", structureId }), []);
+  const selectStructure = useCallback((structureId: string) => {
+    dispatch({ type: "select-structure", structureId });
+    const structure = manifest?.structures.find((entry) => entry.id === structureId);
+    if (structure?.representativePointLps) setWorldPointLps(structure.representativePointLps);
+  }, [manifest]);
 
   useEffect(() => {
     if (!manifest) return;
@@ -83,12 +86,7 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
       if (controller.signal.aborted) return;
       setVolumeState({ manifest, attempt, data, error: null });
       if (data.primary) {
-        const initialPlane = manifest.initialSlice?.plane ?? manifest.supportedPlanes[0] ?? "axial";
-        const spec = getAnatomyPlaneSpec(data.primary.geometry, initialPlane);
-        setPlane(initialPlane);
-        setSliceIndex(manifest.initialSlice?.index !== undefined && manifest.initialSlice.index < spec.sliceCount
-          ? manifest.initialSlice.index
-          : Math.floor(spec.sliceCount / 2));
+        setWorldPointLps(anatomyVolumeCenterLps(data.primary.geometry));
       }
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) setVolumeState({ manifest, attempt, data: null, error: error instanceof Error ? error.message : "Atlas data could not be loaded." });
@@ -118,11 +116,10 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   if (currentVolumeState.error || !currentVolumeState.data) return <ErrorState message={`${activeManifest.title} could not be validated: ${currentVolumeState.error ?? "atlas data unavailable"}`} onRetry={() => setVolumeLoadAttempt((attempt) => attempt + 1)} />;
 
   const { primary, segmentation } = currentVolumeState.data;
-  const activePlane: AnatomyPlane = activeManifest.supportedPlanes.includes(plane) ? plane : activeManifest.supportedPlanes[0] ?? "axial";
-  const planeSpec = primary ? getAnatomyPlaneSpec(primary.geometry, activePlane) : null;
+  const activePlane: AnatomyPlane = "axial";
+  const activeWorldPoint = primary ? (worldPointLps ?? anatomyVolumeCenterLps(primary.geometry)) : null;
   const canOverlaySelected = Boolean(segmentation && selectedStructure?.labelValue !== undefined);
-  const canOpenLiverAtlas = activeManifest.atlasId === "bodyparts3d" && selectedStructure !== null
-    && [selectedStructure.name, selectedStructure.organ, ...selectedStructure.synonyms].some((value) => value?.toLocaleLowerCase().includes("liver"));
+  const relatedAtlasIds = selectedStructure?.relatedAtlasIds ?? [];
   const roots = groupedRoots(activeManifest);
   const childrenByParent = new Map<string, TeachingAnatomyStructure[]>();
   for (const structure of activeManifest.structures) {
@@ -173,7 +170,7 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
         </div>
       </header>
 
-      <div className={`grid items-stretch gap-3 ${primary ? "xl:grid-cols-[15rem_minmax(18rem,1fr)_minmax(20rem,1.1fr)]" : "xl:grid-cols-[18rem_minmax(0,1fr)]"}`}>
+      <div className={`grid items-stretch gap-3 ${primary ? "xl:grid-cols-[15rem_minmax(0,1fr)]" : "xl:grid-cols-[18rem_minmax(0,1fr)]"}`}>
         <aside aria-label="Anatomical structures" className="max-h-[38rem] min-w-0 overflow-auto rounded-xl border bg-card p-3" style={{ borderColor: "var(--border)" }}>
           <h2 className="px-2 pb-2 text-sm font-semibold text-foreground">Structures</h2>
           <SearchInput aria-label="Search structures and synonyms" className="mb-3" value={structureSearch} onChange={(event) => setStructureSearch(event.target.value)} placeholder="Search structures" showClearButton onClear={() => setStructureSearch("")} />
@@ -189,15 +186,18 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
           </nav>
         </aside>
 
-        <Anatomy3dViewer manifest={activeManifest} geometry={primary?.geometry ?? null} plane={activePlane} sliceIndex={sliceIndex} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={hiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} />
-        {primary && planeSpec && activeManifest.volumes.primary ? <CrossSectionStackViewer primary={primary} segmentation={segmentation} modality={activeManifest.volumes.primary.modality} display={activeManifest.volumes.primary} plane={activePlane} supportedPlanes={activeManifest.supportedPlanes} planeSpec={planeSpec} sliceIndex={sliceIndex} onPlaneChange={(nextPlane) => { setPlane(nextPlane); setSliceIndex(Math.floor(getAnatomyPlaneSpec(primary.geometry, nextPlane).sliceCount / 2)); }} onSliceChange={setSliceIndex} selectedLabel={selectedStructure?.labelValue ?? null} selectedColor={selectedStructure?.color ?? null} overlayEnabled={selection.overlayMode === "selected" && canOverlaySelected} />
-          : <Card className="flex min-h-[30rem] items-center justify-center p-6 text-center" role="status"><p className="max-w-sm text-sm text-muted-foreground">Cross-sectional reference atlas not yet available.</p></Card>}
+        <div className={primary ? "grid min-w-0 gap-3 lg:grid-cols-2" : "min-w-0"}>
+          {primary && activeWorldPoint && activeManifest.volumes.primary ? <>
+            {(["axial", "sagittal", "coronal"] as AnatomyPlane[]).map((viewPlane) => <CrossSectionStackViewer key={viewPlane} primary={primary} segmentation={segmentation} modality={activeManifest.volumes.primary!.modality} display={activeManifest.volumes.primary} plane={viewPlane} worldPointLps={activeWorldPoint} onWorldPointLpsChange={setWorldPointLps} selectedLabel={selectedStructure?.labelValue ?? null} selectedColor={selectedStructure?.color ?? null} overlayEnabled={selection.overlayMode === "selected" && canOverlaySelected} />)}
+            <Anatomy3dViewer manifest={activeManifest} geometry={primary.geometry} plane={activePlane} sliceIndex={anatomyPlaneIndexFromWorldPoint(primary.geometry, activePlane, activeWorldPoint)} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={hiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} />
+          </> : <><Anatomy3dViewer manifest={activeManifest} geometry={null} plane={activePlane} sliceIndex={0} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={hiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} /><Card className="flex min-h-[18rem] items-center justify-center p-6 text-center" role="status"><p className="max-w-sm text-sm text-muted-foreground">Cross-sectional reference atlas not yet available.</p></Card></>}
+        </div>
       </div>
 
       <Card className="flex flex-wrap items-start gap-x-6 gap-y-2 px-4 py-3">
         <div className="min-w-48"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Selected structure</p><p className="mt-1 text-sm font-semibold text-foreground">{selectedStructure?.name ?? "Choose a structure in the list or 3D model"}</p></div>
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">{selectedStructure?.note || "Select a structure to view its anatomical label and educational note."}</p>
-        {canOpenLiverAtlas && <Link to="/teaching/anatomy/liver" className="self-center rounded-md border px-3 py-2 text-sm font-medium text-primary hover:bg-muted">Open dedicated Liver atlas</Link>}
+        {relatedAtlasIds.map((relatedAtlasId) => <Link key={relatedAtlasId} to={`/teaching/anatomy/atlas/${relatedAtlasId}`} className="self-center rounded-md border px-3 py-2 text-sm font-medium text-primary hover:bg-muted">Open radiology atlas</Link>)}
       </Card>
       <p className="text-[0.68rem] text-muted-foreground">Educational reference atlas · {activeManifest.provenance.project} · <Link to="/teaching/anatomy/sources" className="font-medium underline-offset-4 hover:underline">Source and license details</Link></p>
     </section>

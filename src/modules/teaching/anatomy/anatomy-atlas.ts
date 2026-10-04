@@ -17,6 +17,7 @@ export interface AnatomyImagingVolume {
   modality: "CT" | "MRI";
   windowLevel?: { width: number; level: number };
   intensityRange?: { min: number; max: number };
+  displayPresets?: Array<{ id: string; label: string; windowLevel?: { width: number; level: number }; intensityRange?: { min: number; max: number } }>;
 }
 
 export interface AnatomyStructure {
@@ -31,6 +32,11 @@ export interface AnatomyStructure {
   system?: string;
   color: string;
   meshAsset?: string;
+  /** Stable atlas links, never inferred from a display name. */
+  relatedAtlasIds?: string[];
+  /** Precomputed during installation in LPS millimetres. */
+  representativePointLps?: [number, number, number];
+  sourceConceptId?: string;
   note: string;
 }
 
@@ -52,6 +58,8 @@ export interface AnatomyAtlasManifest {
     segmentation?: { assetKey: string; file: string };
   };
   assets: Record<string, AnatomyAsset>;
+  /** Small context geometry for progressive whole-body reference atlases. */
+  overviewAsset?: string;
   structures: AnatomyStructure[];
   provenance: {
     sourceRepository: string;
@@ -143,6 +151,14 @@ function parseImageVolume(value: unknown, assets: Record<string, AnatomyAsset>):
       throw new Error("The primary image volume has an invalid intensity range.");
     }
     output.intensityRange = { min: value.intensityRange.min, max: value.intensityRange.max };
+  }
+  if (value.displayPresets !== undefined) {
+    if (!Array.isArray(value.displayPresets) || value.displayPresets.some((preset) => !isRecord(preset) || typeof preset.id !== "string" || !assetKeyPattern.test(preset.id) || typeof preset.label !== "string" || !preset.label.trim())) throw new Error("The primary image volume has invalid display presets.");
+    output.displayPresets = value.displayPresets.map((preset) => ({
+      id: preset.id as string, label: preset.label as string,
+      ...(isRecord(preset.windowLevel) && typeof preset.windowLevel.width === "number" && typeof preset.windowLevel.level === "number" ? { windowLevel: { width: preset.windowLevel.width, level: preset.windowLevel.level } } : {}),
+      ...(isRecord(preset.intensityRange) && typeof preset.intensityRange.min === "number" && typeof preset.intensityRange.max === "number" ? { intensityRange: { min: preset.intensityRange.min, max: preset.intensityRange.max } } : {}),
+    }));
   }
   if (value.modality === "CT" && output.intensityRange) throw new Error("CT display settings must use Hounsfield window and level values.");
   if (value.modality === "MRI" && output.windowLevel) throw new Error("MRI display settings must use an intensity range, not CT window and level values.");
@@ -292,6 +308,15 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
       ...(typeof rawStructure.system === "string" ? { system: rawStructure.system } : {}),
       color: rawStructure.color,
       ...(typeof rawStructure.meshAsset === "string" ? { meshAsset: rawStructure.meshAsset } : {}),
+      ...(rawStructure.relatedAtlasIds === undefined ? {} : { relatedAtlasIds: parseStrings(rawStructure.relatedAtlasIds, `related atlas IDs for ${rawStructure.id}`).map((atlasId) => {
+        if (!isSafeAnatomyAtlasId(atlasId)) throw new Error(`The anatomy structure ${rawStructure.id} has an invalid related atlas ID.`);
+        return atlasId;
+      }) }),
+      ...(rawStructure.representativePointLps === undefined ? {} : { representativePointLps: (() => {
+        if (!Array.isArray(rawStructure.representativePointLps) || rawStructure.representativePointLps.length !== 3 || rawStructure.representativePointLps.some((point) => typeof point !== "number" || !Number.isFinite(point))) throw new Error(`The anatomy structure ${rawStructure.id} has an invalid representative LPS point.`);
+        return rawStructure.representativePointLps as [number, number, number];
+      })() }),
+      ...(typeof rawStructure.sourceConceptId === "string" && rawStructure.sourceConceptId.trim() ? { sourceConceptId: rawStructure.sourceConceptId } : {}),
       note: typeof rawStructure.note === "string" ? rawStructure.note : "",
     };
   });
@@ -329,6 +354,8 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
     throw new Error("The anatomy atlas manifest provenance links must use HTTPS.");
   }
   const spatialValidation = parseSpatialValidation(value.spatialValidation, structures, correlatedImaging);
+  const overviewAsset = typeof value.overviewAsset === "string" ? value.overviewAsset : undefined;
+  if (overviewAsset && (!assets[overviewAsset] || !assets[overviewAsset].mediaType.startsWith("model/"))) throw new Error("The anatomy overview asset is not declared as a model.");
 
   return {
     schemaVersion: "2.0",
@@ -345,6 +372,7 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
     meshCoordinateSystem: value.meshCoordinateSystem,
     volumes: { ...(primary ? { primary } : {}), ...(segmentation ? { segmentation } : {}) },
     assets,
+    ...(overviewAsset ? { overviewAsset } : {}),
     structures,
     provenance,
     spatialValidation,

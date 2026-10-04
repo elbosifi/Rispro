@@ -31,9 +31,9 @@ vi.mock("../anatomy/anatomy-3d-viewer", () => ({
   },
 }));
 vi.mock("../anatomy/cross-section-stack-viewer", () => ({
-  CrossSectionStackViewer: ({ sliceIndex, onSliceChange, onPlaneChange, selectedLabel, overlayEnabled, plane, modality }: { sliceIndex: number; onSliceChange: (index: number) => void; onPlaneChange: (plane: string) => void; selectedLabel: number | null; overlayEnabled: boolean; plane: string; modality: string }) => (
-    <section><h2>{`${plane[0]!.toLocaleUpperCase()}${plane.slice(1)} ${modality}`}</h2><div data-testid="mock-cross-section" data-slice={sliceIndex} data-plane={plane} data-selected-label={selectedLabel ?? "none"} data-overlay-enabled={String(overlayEnabled)}>
-      <button type="button" onClick={() => onSliceChange(sliceIndex + 1)}>Next slice</button><button type="button" onClick={() => onPlaneChange("coronal")}>Coronal plane</button>
+  CrossSectionStackViewer: ({ worldPointLps, onWorldPointLpsChange, selectedLabel, overlayEnabled, plane, modality }: { worldPointLps: [number, number, number]; onWorldPointLpsChange: (point: [number, number, number]) => void; selectedLabel: number | null; overlayEnabled: boolean; plane: string; modality: string }) => (
+    <section><h2>{`${plane[0]!.toLocaleUpperCase()}${plane.slice(1)} ${modality}`}</h2><div data-testid={`mock-cross-section-${plane}`} data-world-point={worldPointLps.join(",")} data-plane={plane} data-selected-label={selectedLabel ?? "none"} data-overlay-enabled={String(overlayEnabled)}>
+      <button type="button" onClick={() => onWorldPointLpsChange([9, 8, 7])}>Move shared point</button>
     </div></section>
   ),
 }));
@@ -86,7 +86,7 @@ const wholeBodyManifest: TeachingAnatomyManifest = {
   volumes: {},
   assets: { "whole-liver": { file: "liver.obj", mediaType: "model/obj" }, "whole-liver-lobe": { file: "liver-lobe.obj", mediaType: "model/obj" } },
   structures: [
-    { id: "liver", name: "Liver", category: "Abdominal organs", synonyms: ["hepatic organ"], organ: "Liver", color: "#53ad7a", meshAsset: "whole-liver", note: "Whole-body reference model." },
+    { id: "liver", name: "Liver", category: "Abdominal organs", synonyms: ["hepatic organ"], organ: "Liver", color: "#53ad7a", meshAsset: "whole-liver", relatedAtlasIds: ["spl-liver"], note: "Whole-body reference model." },
     { id: "liver-lobe", parentId: "liver", name: "Hepatic lobe", category: "Abdominal organs", synonyms: [], organ: "Liver", color: "#53ad7a", meshAsset: "whole-liver-lobe", note: "Component surface." },
   ],
   provenance: { ...provenance, project: "BodyParts3D", license: "CC BY 4.0", licenseUrl: "https://example.org/cc-by-4.0" },
@@ -164,19 +164,14 @@ describe("Teaching anatomy routes and interaction", () => {
     expect(await screen.findByRole("heading", { name: "3D anatomy" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Axial CT" })).toBeTruthy();
     await waitFor(() => expect(anatomyMocks.loadVolumes).toHaveBeenCalledWith(manifest, expect.any(AbortSignal)));
-    const volumeView = screen.getByTestId("mock-cross-section");
-    expect(volumeView.getAttribute("data-overlay-enabled")).toBe("false");
+    const volumeViews = ["axial", "sagittal", "coronal"].map((plane) => screen.getByTestId(`mock-cross-section-${plane}`));
+    expect(volumeViews[0].getAttribute("data-overlay-enabled")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Select Segment VIII in 3D" }));
     expect(screen.getByText("Anterosuperior right liver.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Selected structure" }));
-    expect(volumeView.getAttribute("data-overlay-enabled")).toBe("true");
-    expect(volumeView.getAttribute("data-selected-label")).toBe("33");
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Next slice" })));
-    expect(volumeView.getAttribute("data-slice")).toBe("2");
-    fireEvent.click(screen.getByRole("button", { name: "Coronal plane" }));
-    expect(await screen.findByRole("heading", { name: "Coronal CT" })).toBeTruthy();
-    expect(screen.getByTestId("mock-3d-viewer").getAttribute("data-plane")).toBe("coronal");
-    expect(screen.getByTestId("mock-cross-section").getAttribute("data-plane")).toBe("coronal");
+    for (const view of volumeViews) { expect(view.getAttribute("data-overlay-enabled")).toBe("true"); expect(view.getAttribute("data-selected-label")).toBe("33"); }
+    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Move shared point" })[0]!));
+    for (const plane of ["axial", "sagittal", "coronal"]) expect(screen.getByTestId(`mock-cross-section-${plane}`).getAttribute("data-world-point")).toBe("9,8,7");
   });
 
   it("keeps a whole-body 3D reference usable without inventing a cross-sectional registration", async () => {
@@ -189,6 +184,6 @@ describe("Teaching anatomy routes and interaction", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand Liver" }));
     expect(screen.getByRole("button", { name: "Hepatic lobe" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Select Liver in 3D" }));
-    expect(screen.getByRole("link", { name: "Open dedicated Liver atlas" }).getAttribute("href")).toBe("/teaching/anatomy/liver");
+    expect(screen.getByRole("link", { name: "Open radiology atlas" }).getAttribute("href")).toBe("/teaching/anatomy/atlas/spl-liver");
   });
 });

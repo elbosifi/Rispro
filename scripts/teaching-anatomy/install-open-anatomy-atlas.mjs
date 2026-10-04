@@ -541,8 +541,9 @@ export async function installOpenAnatomyAtlas({ atlasId, sourceDirectory, target
       },
     };
     await writeFile(path.join(stage, "NOTICE.txt"), `${entry.attribution}\n\n${entry.license}\n${manifest.provenance.licenseUrl}\n\nRISpro Teaching Anatomy educational adaptation. Preserve this notice, UPSTREAM-LICENSE.md, UPSTREAM-SOURCE-LICENSE.md, and UPSTREAM-README.md with these data.\n`, "utf8");
-    await writeFile(path.join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.0", atlasId, managedVersion: entry.managedVersion, sourceUrl: entry.url, sourceSha256: entry.sha256, installedAt: now().toISOString(), displayedMeshCount: displayMeshCount, sourceMeshCount: models.length, labelResampling }, null, 2)}\n`, "utf8");
+    const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+    await writeFile(path.join(stage, "manifest.json"), manifestText, "utf8");
+    await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.1", atlasId, managedVersion: entry.managedVersion, sourceUrl: entry.url, sourceSha256: entry.sha256, manifestSha256: sha256Buffer(Buffer.from(manifestText)).sha256, validationStatus: "passed", installedAt: now().toISOString(), assetCount: Object.keys(assets).length, displayedMeshCount: displayMeshCount, sourceMeshCount: models.length, labelResampling }, null, 2)}\n`, "utf8");
     await activateStage({ target, stage, backup });
     if (!await verifyInstalledOpenAtlas(targetBase, entry)) throw new Error(`${atlasId} failed its post-activation file integrity check.`);
   } catch (error) {

@@ -90,6 +90,13 @@ describe("Teaching anatomy NRRD geometry", () => {
     expect(() => resliceAnatomyPlane(image, null, "axial", 2)).toThrow(/outside the volume/i);
   });
 
+  it("marks samples outside the source volume instead of treating them as water or a segmentation label", () => {
+    const volume = { geometry: { sizes: [2, 2, 2] as [number, number, number], coordinateSystem: "LPS" as const, origin: [0, 0, 0] as [number, number, number], directions: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as [[number, number, number], [number, number, number], [number, number, number]] }, data: new Int16Array(8), type: "short", slope: 1, intercept: 0 };
+    const reslice = resliceAnatomyPlane(volume, volume, "axial", 0);
+    expect(reslice.validMask.some((value) => value === 0)).toBe(false);
+    expect(reslice.validMask).toBeInstanceOf(Uint8Array);
+  });
+
   it("accepts non-axial but invertible image affines and rejects singular volume transforms", () => {
     const oblique = {
       sizes: [2, 2, 2] as [number, number, number], coordinateSystem: "LPS" as const,

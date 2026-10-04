@@ -75,6 +75,23 @@ function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
+function buildOverviewObj(models) {
+  let vertexOffset = 0;
+  const output = ["# RISpro Teaching BodyParts3D progressive overview"];
+  for (const { name, buffer } of models) {
+    output.push(`o ${name}`);
+    for (const line of buffer.toString("utf8").split(/\r?\n/)) {
+      if (line.startsWith("v ")) output.push(line);
+      else if (line.startsWith("f ")) {
+        const points = line.slice(2).trim().split(/\s+/).map((value) => value.replace(/^(-?\d+)/, (_match, raw) => String(Number(raw) + vertexOffset)));
+        output.push(`f ${points.join(" ")}`);
+      }
+    }
+    vertexOffset += parseObjGeometry(buffer, name).vertices;
+  }
+  return Buffer.from(`${output.join("\n")}\n`, "utf8");
+}
+
 async function activateStage(target, stage, backup) {
   await rm(backup, { recursive: true, force: true });
   let movedOld = false;
@@ -189,6 +206,10 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     }
     const structureByConcept = new Map();
     const structures = [];
+    const relatedAtlasByConceptId = new Map([
+      ["FMA7197", ["spl-liver", "spl-abdomen"]], // liver
+      ["FMA24485", ["spl-knee"]], // knee
+    ]);
     for (const [conceptId, concept] of concepts) {
       const meshIds = [...concept.elementIds];
       const singleElement = meshIds.length === 1 ? meshIds[0] : null;
@@ -201,6 +222,8 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
         synonyms: [],
         color: "#b9c3d1",
         ...(ownsSingleElement ? { meshAsset: `model-${singleElement.toLowerCase()}` } : {}),
+        sourceConceptId: conceptId,
+        ...(relatedAtlasByConceptId.has(conceptId) ? { relatedAtlasIds: relatedAtlasByConceptId.get(conceptId) } : {}),
         note: ownsSingleElement ? `Source geometry ${singleElement} is one PART-OF surface for this anatomical concept.` : "PART-OF anatomical concept; select a child surface model to view geometry.",
       };
       structureByConcept.set(conceptId, structure);
@@ -210,6 +233,7 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     const allBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     let totalVertices = 0;
     let totalFaces = 0;
+    const overviewModels = [];
     for (let index = 0; index < modelNames.length; index += 1) {
       const modelName = modelNames[index];
       const elementId = path.parse(modelName).name;
@@ -218,6 +242,7 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
       const assetKey = `model-${elementId.toLowerCase()}`;
       assets[assetKey] = { file: modelName, sourceFile: `${archiveRoot}/${modelName}`, mediaType: "model/obj", integrity: { sizeBytes: buffer.length, sha256: sha256(buffer) } };
       await writeFile(path.join(stage, modelName), buffer, { mode: 0o600 });
+      if (/skin|body|skeleton|skull|spine|rib|pelvis|femur|humerus|lung|heart/i.test(concepts.get(chosenConceptByElement.get(elementId))?.name ?? "")) overviewModels.push({ name: elementId, buffer });
       for (let axis = 0; axis < 3; axis += 1) {
         allBounds.min[axis] = Math.min(allBounds.min[axis], geometry.bounds.min[axis]);
         allBounds.max[axis] = Math.max(allBounds.max[axis], geometry.bounds.max[axis]);
@@ -248,6 +273,11 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     if (allBounds.min[2] < -250 || allBounds.max[2] < 1000 || allBounds.max[2] > 2500) throw new Error("BodyParts3D global millimeter bounds do not match the upright whole-body coordinate range.");
     const bodyRoot = [...concepts.values()].find((concept) => concept.name.toLocaleLowerCase() === "human body");
     if (!bodyRoot || structures.length < modelNames.length) throw new Error("BodyParts3D model hierarchy is incomplete.");
+    const overview = buildOverviewObj(overviewModels.slice(0, 32));
+    if (overviewModels.length === 0 || overview.length < 64) throw new Error("BodyParts3D has no suitable source structures for a whole-body overview.");
+    const overviewAssetKey = "whole-body-overview";
+    assets[overviewAssetKey] = { file: "whole-body-overview.obj", mediaType: "model/obj", integrity: { sizeBytes: overview.length, sha256: sha256(overview) } };
+    await writeFile(path.join(stage, "whole-body-overview.obj"), overview, { mode: 0o600 });
 
     const [partsList, relationships, elementParts] = metadataBuffers;
     for (const [filename, buffer] of [["partof_parts_list_e.txt", partsList.buffer], ["partof_inclusion_relation_list.txt", relationships.buffer], ["partof_element_parts.txt", elementParts.buffer]]) {
@@ -267,6 +297,7 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
       meshCoordinateSystem: "LPS",
       volumes: {},
       assets,
+      overviewAsset: overviewAssetKey,
       structures,
       provenance: {
         sourceRepository: source.sourceRepository,
@@ -285,8 +316,9 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     await writeFile(path.join(stage, "NOTICE.txt"), `${source.attribution}\n\n${source.license}\n${source.licenseUrl}\n\nDataset: ${source.managedVersion}. Preserve this notice and the UPSTREAM metadata tables with any copy of these data.\n`, "utf8");
     await writeFile(path.join(stage, "UPSTREAM-LICENSE.txt"), `BodyParts3D is licensed under CC BY 4.0. Terms and required attribution: ${source.licenseUrl}\nRequired attribution: ${source.attribution}\n`, "utf8");
     await writeFile(path.join(stage, "SOURCE-ARCHIVE.json"), `${JSON.stringify({ sourceUrl: source.archive.url, archiveSha256: source.archive.sha256, archiveSizeBytes: source.archive.sizeBytes, managedVersion: source.managedVersion, coordinateSystem: "LPS millimeters" }, null, 2)}\n`, "utf8");
-    await writeFile(path.join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.0", atlasId: source.atlasId, managedVersion: source.managedVersion, sourceUrl: source.archive.url, sourceSha256: source.archive.sha256, installedAt: now().toISOString(), meshCount: modelNames.length, structureCount: structures.length, vertexCount: totalVertices, faceCount: totalFaces }, null, 2)}\n`, "utf8");
+    const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+    await writeFile(path.join(stage, "manifest.json"), manifestText, "utf8");
+    await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.1", atlasId: source.atlasId, managedVersion: source.managedVersion, sourceUrl: source.archive.url, sourceSha256: source.archive.sha256, manifestSha256: sha256(Buffer.from(manifestText)), validationStatus: "passed", installedAt: now().toISOString(), assetCount: Object.keys(assets).length, meshCount: modelNames.length, structureCount: structures.length, vertexCount: totalVertices, faceCount: totalFaces }, null, 2)}\n`, "utf8");
     await activateStage(target, stage, backup);
     if (!await verifyInstalledBodyParts3d(targetRootAbsolute, source)) throw new Error("BodyParts3D failed its post-activation file integrity check.");
     return { atlasId: source.atlasId, meshCount: modelNames.length, structureCount: structures.length, totalVertices, totalFaces, bounds: allBounds };

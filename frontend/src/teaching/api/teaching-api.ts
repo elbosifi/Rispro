@@ -43,6 +43,9 @@ export interface TeachingAnatomyStructure {
   system?: string;
   color: string;
   meshAsset?: string;
+  relatedAtlasIds?: string[];
+  representativePointLps?: [number, number, number];
+  sourceConceptId?: string;
   note: string;
 }
 
@@ -66,10 +69,12 @@ export interface TeachingAnatomyManifest {
       modality: "CT" | "MRI";
       windowLevel?: { width: number; level: number };
       intensityRange?: { min: number; max: number };
+      displayPresets?: Array<{ id: string; label: string; windowLevel?: { width: number; level: number }; intensityRange?: { min: number; max: number } }>;
     };
     segmentation?: { assetKey: string; file: string };
   };
   assets: Record<string, TeachingAnatomyAsset>;
+  overviewAsset?: string;
   structures: TeachingAnatomyStructure[];
   provenance: { sourceRepository: string; project: string; attribution: string; license: string; licenseUrl: string; use: string; citation?: string };
   spatialValidation: { status: "passed" | "not-applicable"; method: string; minimumMeshLabelAgreement?: number; meshLabelAgreement?: Record<string, number> };
@@ -463,10 +468,11 @@ export async function fetchTeachingAnatomyManifest(atlasId = "spl-liver"): Promi
   return api<TeachingAnatomyManifestResult>(`/teaching/anatomy/atlas/${encodeURIComponent(atlasId)}/manifest`);
 }
 
-export async function fetchTeachingAnatomyAtlasAsset(atlasId: string, assetKey: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  const response = await fetch(`/api/teaching/anatomy/atlas/${encodeURIComponent(atlasId)}/assets/${encodeURIComponent(assetKey)}`, {
+export async function fetchTeachingAnatomyAtlasAsset(atlasId: string, assetKey: string, signal?: AbortSignal, version?: string): Promise<ArrayBuffer> {
+  const query = version ? `?v=${encodeURIComponent(version)}` : "";
+  const response = await fetch(`/api/teaching/anatomy/atlas/${encodeURIComponent(atlasId)}/assets/${encodeURIComponent(assetKey)}${query}`, {
     credentials: "include",
-    cache: "no-store",
+    cache: "default",
     signal,
   });
   if (!response.ok) {

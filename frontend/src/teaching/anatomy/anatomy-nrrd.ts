@@ -40,6 +40,7 @@ export interface ReslicedAnatomyPlane {
   spacingX: number;
   spacingY: number;
   values: Float32Array;
+  validMask: Uint8Array;
   labels: Int32Array | null;
   markers: { left: "R" | "A"; right: "L" | "P" };
 }
@@ -278,6 +279,31 @@ function voxelCoordinatesFromLps(geometry: AnatomyNrrdGeometry, lpsPoint: readon
   return [dot(relative, crossYZ) / determinant, dot(relative, crossZX) / determinant, dot(relative, crossXY) / determinant];
 }
 
+export function anatomyPlaneIndexFromWorldPoint(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, worldPointLps: readonly number[]): number {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  return Math.max(0, Math.min(spec.sliceCount - 1, Math.round((dot(worldPointLps, spec.normal) - spec.normalMin) / spec.spacingNormal)));
+}
+
+export function anatomyVolumeCenterLps(geometry: AnatomyNrrdGeometry): [number, number, number] {
+  return [0, 1, 2].map((axis) => {
+    const point = geometry.origin[axis]! + geometry.directions[0][axis]! * (geometry.sizes[0] - 1) / 2 + geometry.directions[1][axis]! * (geometry.sizes[1] - 1) / 2 + geometry.directions[2][axis]! * (geometry.sizes[2] - 1) / 2;
+    return geometry.coordinateSystem === "RAS" && axis < 2 ? -point : point;
+  }) as [number, number, number];
+}
+
+export function anatomyWorldPointFromPlanePixel(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, sliceIndex: number, pixelX: number, pixelY: number): [number, number, number] {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  const normal = spec.normalMin + sliceIndex * spec.spacingNormal;
+  const horizontal = spec.uMin + Math.max(0, Math.min(spec.width - 1, pixelX)) * spec.spacingX;
+  const vertical = spec.vMin + Math.max(0, Math.min(spec.height - 1, spec.height - 1 - pixelY)) * spec.spacingY;
+  return [0, 1, 2].map((axis) => spec.horizontal[axis]! * horizontal + spec.vertical[axis]! * vertical + spec.normal[axis]! * normal) as [number, number, number];
+}
+
+export function anatomyCrosshairPixel(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, worldPointLps: readonly number[]): { x: number; y: number } {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  return { x: (dot(worldPointLps, spec.horizontal) - spec.uMin) / spec.spacingX, y: spec.height - 1 - (dot(worldPointLps, spec.vertical) - spec.vMin) / spec.spacingY };
+}
+
 export function anatomyPlaneWorldTransform(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, sliceIndex: number): {
   point: [number, number, number];
   horizontal: [number, number, number];
@@ -314,12 +340,12 @@ export function anatomyPlaneWorldTransform(geometry: AnatomyNrrdGeometry, plane:
   };
 }
 
-function sampleVoxel(data: AnatomyVoxelData, geometry: AnatomyNrrdGeometry, coordinates: readonly number[], nearest: boolean): number {
+function sampleVoxel(data: AnatomyVoxelData, geometry: AnatomyNrrdGeometry, coordinates: readonly number[], nearest: boolean): { value: number; valid: boolean } {
   const [x, y, z] = coordinates;
   const [width, height, depth] = geometry.sizes;
-  if (x! < 0 || y! < 0 || z! < 0 || x! > width - 1 || y! > height - 1 || z! > depth - 1) return 0;
+  if (x! < 0 || y! < 0 || z! < 0 || x! > width - 1 || y! > height - 1 || z! > depth - 1) return { value: 0, valid: false };
   const index = (i: number, j: number, k: number) => i + width * (j + height * k);
-  if (nearest) return Number(data[index(Math.round(x!), Math.round(y!), Math.round(z!))]);
+  if (nearest) return { value: Number(data[index(Math.round(x!), Math.round(y!), Math.round(z!))]), valid: true };
   const x0 = Math.floor(x!); const y0 = Math.floor(y!); const z0 = Math.floor(z!);
   const x1 = Math.min(width - 1, x0 + 1); const y1 = Math.min(height - 1, y0 + 1); const z1 = Math.min(depth - 1, z0 + 1);
   const fx = x! - x0; const fy = y! - y0; const fz = z! - z0;
@@ -330,7 +356,7 @@ function sampleVoxel(data: AnatomyVoxelData, geometry: AnatomyNrrdGeometry, coor
   const c11 = at(x0, y1, z1) * (1 - fx) + at(x1, y1, z1) * fx;
   const c0 = c00 * (1 - fy) + c10 * fy;
   const c1 = c01 * (1 - fy) + c11 * fy;
-  return c0 * (1 - fz) + c1 * fz;
+  return { value: c0 * (1 - fz) + c1 * fz, valid: true };
 }
 
 export function resliceAnatomyPlane(primary: ParsedAnatomyNrrd, segmentation: ParsedAnatomyNrrd | null, plane: AnatomyPlane, sliceIndex: number): ReslicedAnatomyPlane {
@@ -338,6 +364,7 @@ export function resliceAnatomyPlane(primary: ParsedAnatomyNrrd, segmentation: Pa
   const spec = getAnatomyPlaneSpec(primary.geometry, plane);
   if (!Number.isInteger(sliceIndex) || sliceIndex < 0 || sliceIndex >= spec.sliceCount) throw new Error("Anatomy plane index is outside the volume.");
   const values = new Float32Array(spec.width * spec.height);
+  const validMask = new Uint8Array(spec.width * spec.height);
   const labels = segmentation ? new Int32Array(spec.width * spec.height) : null;
   const normalValue = spec.normalMin + sliceIndex * spec.spacingNormal;
   let outputIndex = 0;
@@ -348,8 +375,10 @@ export function resliceAnatomyPlane(primary: ParsedAnatomyNrrd, segmentation: Pa
       const worldLps = [0, 1, 2].map((component) => spec.horizontal[component]! * horizontalValue
         + spec.vertical[component]! * verticalValue + spec.normal[component]! * normalValue);
       const voxel = voxelCoordinatesFromLps(primary.geometry, worldLps);
-      values[outputIndex] = sampleVoxel(primary.data, primary.geometry, voxel, false) * primary.slope + primary.intercept;
-      if (labels && segmentation) labels[outputIndex] = Math.round(sampleVoxel(segmentation.data, segmentation.geometry, voxel, true));
+      const imageSample = sampleVoxel(primary.data, primary.geometry, voxel, false);
+      validMask[outputIndex] = imageSample.valid ? 1 : 0;
+      values[outputIndex] = imageSample.valid ? imageSample.value * primary.slope + primary.intercept : 0;
+      if (labels && segmentation && imageSample.valid) labels[outputIndex] = Math.round(sampleVoxel(segmentation.data, segmentation.geometry, voxel, true).value);
       outputIndex += 1;
     }
   }
@@ -360,6 +389,7 @@ export function resliceAnatomyPlane(primary: ParsedAnatomyNrrd, segmentation: Pa
     spacingX: spec.spacingX,
     spacingY: spec.spacingY,
     values,
+    validMask,
     labels,
     markers: { left: axes.leftMarker, right: axes.rightMarker },
   };
