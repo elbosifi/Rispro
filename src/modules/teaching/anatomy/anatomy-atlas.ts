@@ -37,6 +37,8 @@ export interface AnatomyStructure {
   /** Precomputed during installation in LPS millimetres. */
   representativePointLps?: [number, number, number];
   sourceConceptId?: string;
+  /** Teaching-owned reviewed radiology note overlay, distinct from upstream metadata. */
+  radiologyNote?: string;
   note: string;
 }
 
@@ -94,6 +96,11 @@ function isHttpsUrl(value: unknown): value is string {
   catch { return false; }
 }
 
+function isSafeCitation(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || value.length > 2000) return false;
+  return isHttpsUrl(value) || !/^[a-z][a-z0-9+.-]*:/i.test(value);
+}
+
 export function isSafeAnatomyAtlasId(value: unknown): value is string {
   return typeof value === "string" && assetKeyPattern.test(value) && !value.includes("..");
 }
@@ -104,11 +111,18 @@ function safeAssetFilename(value: unknown): value is string {
   return supportedExtensions.has(extension) || value.toLowerCase().endsWith(".nii.gz");
 }
 
+function safeSourceAssetPath(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 512 || value.includes("\\") || value.includes(":")) return false;
+  const segments = value.split("/");
+  return segments.length > 0 && segments.every((segment) => segment !== "" && segment !== "." && segment !== ".."
+    && !segment.includes("..") && assetFilenamePattern.test(segment));
+}
+
 function parseAsset(value: unknown, key: string): AnatomyAsset {
   if (!assetKeyPattern.test(key) || !isRecord(value) || typeof value.mediaType !== "string" || !value.mediaType.trim() || !safeAssetFilename(value.file)) {
     throw new Error(`The anatomy atlas manifest contains an unsafe or invalid asset entry for ${key}.`);
   }
-  if (value.sourceFile !== undefined && (typeof value.sourceFile !== "string" || !assetFilenamePattern.test(value.sourceFile) || value.sourceFile.includes("..") || path.basename(value.sourceFile) !== value.sourceFile)) {
+  if (value.sourceFile !== undefined && !safeSourceAssetPath(value.sourceFile)) {
     throw new Error(`The anatomy atlas manifest contains an unsafe source filename for ${key}.`);
   }
   let integrity: AnatomyAsset["integrity"];
@@ -230,6 +244,11 @@ function parseV1(value: Record<string, unknown>): AnatomyAtlasManifest {
         file: isRecord(ct) ? ct.file : undefined,
         modality,
         windowLevel: { width: 400, level: 40 },
+        displayPresets: [
+          { id: "soft-tissue", label: "Soft tissue", windowLevel: { width: 400, level: 40 } },
+          { id: "bone", label: "Bone", windowLevel: { width: 2000, level: 300 } },
+          { id: "lung", label: "Lung", windowLevel: { width: 1500, level: -600 } },
+        ],
       },
       segmentation: volumes.segmentation,
     },
@@ -291,7 +310,8 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
       || (rawStructure.labelValue !== undefined && (!Number.isSafeInteger(rawStructure.labelValue) || Number(rawStructure.labelValue) < 1 || seenLabels.has(Number(rawStructure.labelValue))))
       || (rawStructure.meshAsset !== undefined && (typeof rawStructure.meshAsset !== "string" || !assets[rawStructure.meshAsset] || !assets[rawStructure.meshAsset]?.mediaType.startsWith("model/")))
       || (rawStructure.parentId !== undefined && (typeof rawStructure.parentId !== "string" || !structureIdPattern.test(rawStructure.parentId)))
-      || (rawStructure.note !== undefined && typeof rawStructure.note !== "string")) {
+      || (rawStructure.note !== undefined && typeof rawStructure.note !== "string")
+      || (rawStructure.radiologyNote !== undefined && typeof rawStructure.radiologyNote !== "string")) {
       throw new Error("The anatomy atlas manifest contains an invalid or duplicate structure entry.");
     }
     seenIds.add(rawStructure.id);
@@ -317,6 +337,7 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
         return rawStructure.representativePointLps as [number, number, number];
       })() }),
       ...(typeof rawStructure.sourceConceptId === "string" && rawStructure.sourceConceptId.trim() ? { sourceConceptId: rawStructure.sourceConceptId } : {}),
+      ...(typeof rawStructure.radiologyNote === "string" && rawStructure.radiologyNote.trim() ? { radiologyNote: rawStructure.radiologyNote } : {}),
       note: typeof rawStructure.note === "string" ? rawStructure.note : "",
     };
   });
@@ -349,9 +370,11 @@ function parseV2(value: Record<string, unknown>, suppliedAssets?: Record<string,
     use: value.provenance.use as string,
     ...(typeof value.provenance.citation === "string" ? { citation: value.provenance.citation } : {}),
   };
-  if (!isHttpsUrl(provenance.sourceRepository) || !isHttpsUrl(provenance.licenseUrl)
-    || (provenance.citation !== undefined && !isHttpsUrl(provenance.citation))) {
+  if (!isHttpsUrl(provenance.sourceRepository) || !isHttpsUrl(provenance.licenseUrl)) {
     throw new Error("The anatomy atlas manifest provenance links must use HTTPS.");
+  }
+  if (provenance.citation !== undefined && !isSafeCitation(provenance.citation)) {
+    throw new Error("The anatomy atlas citation must be plain text or an HTTPS link.");
   }
   const spatialValidation = parseSpatialValidation(value.spatialValidation, structures, correlatedImaging);
   const overviewAsset = typeof value.overviewAsset === "string" ? value.overviewAsset : undefined;

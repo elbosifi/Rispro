@@ -61,18 +61,24 @@ test("Teaching anatomy V2 accepts a 3D-only structure atlas while retaining attr
     meshCoordinateSystem: "RAS",
     volumes: {},
     assets: { liver: { file: "liver.obj", mediaType: "model/obj", integrity: { sizeBytes: 128, sha256: "a".repeat(64) } } },
-    structures: [{ id: "liver", name: "Liver", category: "Abdominal organs", synonyms: ["hepatic organ"], organ: "Liver", color: "#53ad7a", meshAsset: "liver" }],
-    provenance: { sourceRepository: "https://example.org/source", project: "BodyParts3D", attribution: "BodyParts3D contributors.", license: "CC BY 4.0", licenseUrl: "https://example.org/license", use: "Internal educational use." },
+    structures: [{ id: "liver", name: "Liver", category: "Abdominal organs", synonyms: ["hepatic organ"], organ: "Liver", color: "#53ad7a", meshAsset: "liver", relatedAtlasIds: ["spl-liver"], representativePointLps: [-12, 40, 78], sourceConceptId: "FMA7197" }],
+    provenance: { sourceRepository: "https://example.org/source", project: "BodyParts3D", attribution: "BodyParts3D contributors.", license: "CC BY 4.0", licenseUrl: "https://example.org/license", use: "Internal educational use.", citation: "Mitsuhashi N et al. BodyParts3D: 3D structure database for anatomical concepts. PMID:18835852." },
     spatialValidation: { status: "not-applicable", method: "Independent 3D reference; not registered to a regional image atlas." },
   };
   const manifest = parseAnatomyAtlasManifest(source);
   assert.equal(manifest.modality, "3D");
   assert.equal(manifest.volumes.primary, undefined);
   assert.deepEqual(manifest.structures[0]?.synonyms, ["hepatic organ"]);
+  assert.deepEqual(manifest.structures[0]?.relatedAtlasIds, ["spl-liver"]);
+  assert.deepEqual(manifest.structures[0]?.representativePointLps, [-12, 40, 78]);
+  assert.equal(manifest.structures[0]?.sourceConceptId, "FMA7197");
+  assert.equal(manifest.provenance.citation, "Mitsuhashi N et al. BodyParts3D: 3D structure database for anatomical concepts. PMID:18835852.");
   assert.equal(manifest.assets.liver?.integrity?.sizeBytes, 128);
   assert.throws(() => parseAnatomyAtlasManifest({ ...source, atlasId: "../outside" }), /missing required fields|unsupported schema/i);
   assert.throws(() => parseAnatomyAtlasManifest({ ...source, assets: { liver: { file: "liver.obj", mediaType: "model/obj", integrity: { sizeBytes: 128, sha256: "invalid" } } } }), /integrity metadata/i);
   assert.throws(() => parseAnatomyAtlasManifest({ ...source, provenance: { ...source.provenance, licenseUrl: "http://example.org/license" } }), /must use HTTPS/i);
+  assert.throws(() => parseAnatomyAtlasManifest({ ...source, provenance: { ...source.provenance, citation: "javascript:alert(1)" } }), /citation must be plain text or an HTTPS link/i);
+  assert.throws(() => parseAnatomyAtlasManifest({ ...source, provenance: { ...source.provenance, citation: "http://example.org/citation" } }), /citation must be plain text or an HTTPS link/i);
 });
 
 test("Teaching anatomy catalog IDs and provenance remain unique, safe, and source linked", () => {
@@ -101,6 +107,21 @@ test("Teaching anatomy manifest rejects unsafe asset paths and inconsistent stru
   const structures = inconsistent.structures as Array<Record<string, unknown>>;
   structures[0]!.labelValue = 33;
   assert.throws(() => parseAnatomyAtlasManifest(inconsistent), /duplicate structure/i);
+});
+
+test("Teaching anatomy accepts nested source archive paths while rejecting traversal and platform-specific paths", async () => {
+  const fixture = await installedFixture();
+  const assets = fixture.assets as Record<string, Record<string, unknown>>;
+  assets.ct!.sourceFile = "Data/I.nrrd";
+  const parsed = parseAnatomyAtlasManifest(fixture);
+  assert.equal(parsed.assets.ct?.sourceFile, "Data/I.nrrd");
+
+  for (const sourceFile of ["../outside.nrrd", "Data/../outside.nrrd", "/Data/I.nrrd", "C:/Data/I.nrrd", "Data\\I.nrrd"]) {
+    const unsafe = structuredClone(fixture) as Record<string, unknown>;
+    const unsafeAssets = unsafe.assets as Record<string, Record<string, unknown>>;
+    unsafeAssets.ct!.sourceFile = sourceFile;
+    assert.throws(() => parseAnatomyAtlasManifest(unsafe), /unsafe source filename/i, sourceFile);
+  }
 });
 
 test("Teaching anatomy asset resolver accepts only declared manifest asset IDs", async () => {

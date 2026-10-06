@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync, gunzipSync } from "node:zlib";
@@ -201,6 +201,26 @@ function collectLabelValues(labels) {
   return present;
 }
 
+export function calculateLabelCentroidsLps(labels, structures) {
+  const byLabel = new Map(structures.map(({ labelValue }) => [labelValue, { count: 0, sums: [0, 0, 0] }]));
+  const [sizeX, sizeY] = labels.sizes;
+  const sliceSize = sizeX * sizeY;
+  const voxelCount = labels.sizes.reduce((product, size) => product * size, 1);
+  for (let index = 0; index < voxelCount; index += 1) {
+    const accumulator = byLabel.get(readVoxel(labels, index));
+    if (!accumulator) continue;
+    const i = index % sizeX;
+    const j = Math.floor(index / sizeX) % sizeY;
+    const k = Math.floor(index / sliceSize);
+    accumulator.count += 1;
+    for (let axis = 0; axis < 3; axis += 1) accumulator.sums[axis] += labels.origin[axis] + labels.directions[0][axis] * i + labels.directions[1][axis] * j + labels.directions[2][axis] * k;
+  }
+  return new Map([...byLabel].filter(([, value]) => value.count > 0).map(([label, value]) => [label, value.sums.map((coordinate, axis) => {
+    const native = coordinate / value.count;
+    return labels.space === "RAS" && axis < 2 ? -native : native;
+  })]));
+}
+
 function resampleSegmentationToImageGrid(image, segmentation, labelValues) {
   const inverse = inverseGeometryAffine(segmentation);
   const transform = [0, 1, 2].map((axis) => [0, 1, 2].map((imageAxis) => (
@@ -342,20 +362,22 @@ function sha256Buffer(data) {
   return { sizeBytes: data.length, sha256: createHash("sha256").update(data).digest("hex") };
 }
 
-async function activateStage({ target, stage, backup }) {
+async function activateStage({ target, stage, backup, validate }) {
   await mkdir(path.dirname(target), { recursive: true });
   await rm(backup, { recursive: true, force: true });
   let movedOld = false;
   try {
     try { await rename(target, backup); movedOld = true; } catch (error) { if (error.code !== "ENOENT") throw error; }
     await rename(stage, target);
-    if (movedOld) await rm(backup, { recursive: true, force: true });
+    if (!await validate()) throw new Error("Staged Open Anatomy atlas failed its post-activation integrity check.");
   } catch (error) {
     if (movedOld) {
-      try { await stat(target); } catch { await rename(backup, target); }
-    }
+      await rm(target, { recursive: true, force: true });
+      await rename(backup, target);
+    } else await rm(target, { recursive: true, force: true });
     throw error;
   }
+  if (movedOld) await rm(backup, { recursive: true, force: true });
 }
 
 async function loadLock() {
@@ -377,11 +399,16 @@ function validateSourceLock(entry) {
 export async function verifyInstalledOpenAtlas(targetRoot, entry) {
   const directory = path.join(path.resolve(targetRoot), entry.atlasId);
   try {
-    const [metadata, manifest] = await Promise.all([
-      readFile(path.join(directory, "installed-atlas.json"), "utf8").then(JSON.parse),
-      readFile(path.join(directory, "manifest.json"), "utf8").then(JSON.parse),
+    const [metadataText, manifestText] = await Promise.all([
+      readFile(path.join(directory, "installed-atlas.json"), "utf8"),
+      readFile(path.join(directory, "manifest.json"), "utf8"),
     ]);
+    const metadata = JSON.parse(metadataText);
+    const manifest = JSON.parse(manifestText);
     if (metadata.atlasId !== entry.atlasId || metadata.managedVersion !== entry.managedVersion || metadata.sourceSha256 !== entry.sha256
+      || metadata.schemaVersion !== "1.1" || metadata.validationStatus !== "passed"
+      || metadata.manifestSha256 !== createHash("sha256").update(manifestText).digest("hex")
+      || !Number.isSafeInteger(metadata.assetCount) || metadata.assetCount !== Object.keys(manifest.assets ?? {}).length
       || manifest.atlasId !== entry.atlasId || manifest.spatialValidation?.status !== "passed" || !Array.isArray(manifest.structures)) return false;
     for (const asset of Object.values(manifest.assets ?? {})) {
       const integrity = asset.integrity;
@@ -426,8 +453,11 @@ export async function installOpenAnatomyAtlas({ atlasId, sourceDirectory, target
     if (!sameGeometry(image, segmentation)) throw new Error(`${atlasId} label-map resampling did not produce the image physical geometry.`);
   }
   const presentLabels = collectLabelValues(segmentation);
+  const representativePoints = calculateLabelCentroidsLps(segmentation, structureEntries);
   for (const structure of structureEntries) {
     if (!presentLabels.has(structure.labelValue)) throw new Error(`${atlasId} normalized segmentation does not contain the declared label ${structure.labelValue} (${structure.name}).`);
+    structure.representativePointLps = representativePoints.get(structure.labelValue);
+    if (!structure.representativePointLps) throw new Error(`${atlasId} could not calculate the representative point for ${structure.name}.`);
   }
 
   const models = [];
@@ -489,10 +519,11 @@ export async function installOpenAnatomyAtlas({ atlasId, sourceDirectory, target
       meshAgreement[model.structure.id] = assessment.agreement;
       if ((index + 1) % 20 === 0 || index + 1 === models.length) log(`[progress] ${atlasId}: normalized ${index + 1}/${models.length} source meshes.`);
     }
-    const structures = [
+  const structures = [
       ...groupEntries,
       ...structureEntries.map(({ sourceId, sourceFile, ...structure }) => structure),
     ];
+    const defaultIntensityRange = entry.modality === "MRI" ? sampledIntensityRange(image) : undefined;
     await copyFile(licenseSource, path.join(stage, "UPSTREAM-SOURCE-LICENSE.md"));
     await copyFile(readmeSource, path.join(stage, "UPSTREAM-README.md"));
     const slicerLicensePartB = await readFile(path.join(scriptDirectory, "slicer-license-part-b.txt"), "utf8");
@@ -517,7 +548,14 @@ export async function installOpenAnatomyAtlas({ atlasId, sourceDirectory, target
           assetKey: "primary-volume",
           file: assets["primary-volume"].file,
           modality: entry.modality,
-          ...(entry.modality === "CT" ? { windowLevel: { width: 400, level: 40 } } : { intensityRange: sampledIntensityRange(image) }),
+          ...(entry.modality === "CT" ? {
+            windowLevel: { width: 400, level: 40 },
+            displayPresets: [
+              { id: "soft-tissue", label: "Soft tissue", windowLevel: { width: 400, level: 40 } },
+              { id: "bone", label: "Bone", windowLevel: { width: 2000, level: 300 } },
+              ...(atlasId === "spl-abdomen" ? [{ id: "lung", label: "Lung", windowLevel: { width: 1500, level: -600 } }] : []),
+            ],
+          } : { intensityRange: defaultIntensityRange, displayPresets: [{ id: "dataset-default", label: "Dataset default intensity", intensityRange: defaultIntensityRange }] }),
         },
         segmentation: { assetKey: "segmentation", file: assets.segmentation.file },
       },
@@ -544,8 +582,7 @@ export async function installOpenAnatomyAtlas({ atlasId, sourceDirectory, target
     const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
     await writeFile(path.join(stage, "manifest.json"), manifestText, "utf8");
     await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.1", atlasId, managedVersion: entry.managedVersion, sourceUrl: entry.url, sourceSha256: entry.sha256, manifestSha256: sha256Buffer(Buffer.from(manifestText)).sha256, validationStatus: "passed", installedAt: now().toISOString(), assetCount: Object.keys(assets).length, displayedMeshCount: displayMeshCount, sourceMeshCount: models.length, labelResampling }, null, 2)}\n`, "utf8");
-    await activateStage({ target, stage, backup });
-    if (!await verifyInstalledOpenAtlas(targetBase, entry)) throw new Error(`${atlasId} failed its post-activation file integrity check.`);
+    await activateStage({ target, stage, backup, validate: () => verifyInstalledOpenAtlas(targetBase, entry) });
   } catch (error) {
     await rm(stage, { recursive: true, force: true });
     throw error;

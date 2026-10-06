@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "atlases": {
+    "spl-liver": {
+      "ivc": "The IVC runs posterior to the liver and receives the hepatic veins.",
+      "main-portal-vein": "The main portal vein enters at the porta hepatis and divides into right and left branches.",
+      "left-hepatic-vein": "The left hepatic vein drains the left liver toward the IVC.",
+      "middle-hepatic-vein": "The middle hepatic vein follows the principal plane separating functional right and left liver.",
+      "right-hepatic-vein": "The right hepatic vein marks the right intersegmental plane and drains to the IVC.",
+      "left-portal-vein": "The left portal vein supplies the left liver and gives rise to segmental branches.",
+      "right-portal-vein": "The right portal vein divides into anterior and posterior sectoral branches.",
+      "segment-ii": "Segment II lies in the superior part of the left lateral section.",
+      "segment-iii": "Segment III lies in the inferior part of the left lateral section.",
+      "segment-vi": "Segment VI is in the inferior posterior right liver.",
+      "segment-iva": "Segment IVa occupies the superior medial left liver.",
+      "segment-ivb": "Segment IVb occupies the inferior medial left liver.",
+      "segment-i": "Segment I is the caudate lobe, posterior to the porta hepatis and close to the IVC.",
+      "segment-v": "Segment V is in the inferior anterior right liver.",
+      "segment-vii": "Segment VII is in the superior posterior right liver.",
+      "segment-viii": "Segment VIII is anterosuperior in the right liver, between the middle and right hepatic veins; its portal branches course within the segment.",
+      "gallbladder": "The gallbladder lies along the inferior surface of the right liver near segments IVb and V."
+    }
+  }
+}

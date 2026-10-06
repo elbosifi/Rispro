@@ -3,6 +3,16 @@ import { Card, ErrorState, LoadingState } from "@/components/shared";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTeachingAnatomyCatalog } from "../api/teaching-api";
 
+function safeCitationHref(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function TeachingAnatomySourcesPage() {
   const catalog = useQuery({ queryKey: ["teaching", "anatomy", "catalog"], queryFn: fetchTeachingAnatomyCatalog });
   if (catalog.isLoading) return <LoadingState message="Loading atlas source and license records" />;
@@ -18,7 +28,9 @@ export function TeachingAnatomySourcesPage() {
         <p className="mt-2 text-sm text-muted-foreground">Attribution and license details are kept with each atlas. Follow the linked terms and citation before reusing or redistributing atlas data.</p>
       </header>
       <section aria-label="Atlas source records" className="space-y-3">
-        {catalog.data.items.map((item) => (
+        {catalog.data.items.map((item) => {
+          const citationHref = safeCitationHref(item.provenance.citation);
+          return (
           <Card key={item.atlasId} className="space-y-3 p-4 sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-semibold text-foreground"><Link to={`/teaching/anatomy/atlas/${encodeURIComponent(item.atlasId)}`} className="underline-offset-4 hover:underline">{item.title}</Link></h2>
@@ -31,10 +43,12 @@ export function TeachingAnatomySourcesPage() {
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
               <a href={item.provenance.sourceRepository} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">Upstream source</a>
               <a href={item.provenance.licenseUrl} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">License terms</a>
-              {item.provenance.citation && <a href={item.provenance.citation} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">Citation</a>}
+              {citationHref && <a href={citationHref} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">Citation</a>}
             </div>
+            {item.provenance.citation && !citationHref && <p className="text-sm"><span className="font-medium">Citation:</span> {item.provenance.citation}</p>}
           </Card>
-        ))}
+          );
+        })}
       </section>
     </main>
   );

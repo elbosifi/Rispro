@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-import AdmZip from "adm-zip";
 import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import yauzl from "yauzl";
 import { ensureSplLiverAtlas } from "./provision-spl-liver-atlas.mjs";
 import { installOpenAnatomyAtlas, verifyInstalledOpenAtlas } from "./install-open-anatomy-atlas.mjs";
 import { installBodyParts3d, verifyInstalledBodyParts3d } from "./install-bodyparts3d.mjs";
@@ -14,7 +16,7 @@ const lockPath = path.join(scriptDirectory, "open-atlas-sources.lock.json");
 const allowedHosts = new Set(["www.openanatomy.org", "openanatomy.org", "dbarchive.biosciencedbc.jp"]);
 const maximumRedirects = 4;
 
-function safeEntryName(value) {
+export function safeEntryName(value) {
   if (typeof value !== "string" || value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) throw new Error("Archive contains an unsafe path.");
   const normalized = value.replace(/\/$/, "");
   const parts = normalized.split("/");
@@ -28,7 +30,7 @@ function verifyUrl(value) {
   return url;
 }
 
-async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetchImpl = globalThis.fetch, log = () => undefined }) {
+export async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetchImpl = globalThis.fetch, log = () => undefined }) {
   if (typeof fetchImpl !== "function" || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || !/^[a-f0-9]{64}$/i.test(sha256)) {
     throw new Error(`${name} download lock is invalid or HTTPS fetch is unavailable.`);
   }
@@ -58,7 +60,7 @@ async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetch
   try { for await (const chunk of response.body) {
     const bytes = Buffer.from(chunk); received += bytes.length;
     if (received > sizeBytes) throw new Error(`${name} download exceeded the pinned byte size.`);
-    hash.update(bytes); if (output) await output.write(bytes); else chunks.push(bytes);
+    hash.update(bytes); if (output) await output.writeFile(bytes); else chunks.push(bytes);
     if (received >= nextReport) { log(`[progress] ${name}: downloaded ${received}/${sizeBytes} bytes.`); nextReport += 8 * 1024 * 1024; }
   } } finally { await output?.close(); }
   if (received !== sizeBytes || hash.digest("hex") !== sha256.toLowerCase()) throw new Error(`${name} size or SHA-256 does not match its pinned source lock.`);
@@ -66,37 +68,71 @@ async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetch
   return destination ?? Buffer.concat(chunks, received);
 }
 
-async function extractLockedArchive(archive, destination, { expectedRoot, kind, maximumUncompressedBytes, log = () => undefined }) {
-  const zip = new AdmZip(archive);
+export async function extractLockedArchive(archive, destination, { expectedRoot, kind, maximumUncompressedBytes, log = () => undefined }) {
   const rootPrefix = `${expectedRoot}/`;
   let totalBytes = 0;
   let extracted = 0;
-  const entries = zip.getEntries();
-  for (const entry of entries) {
-    const entryName = safeEntryName(entry.entryName);
-    if (entry.isDirectory) continue;
-    if (!entryName.startsWith(rootPrefix)) throw new Error(`Archive entry ${entryName} is outside its pinned package root.`);
-    if (!Number.isSafeInteger(entry.header.size) || entry.header.size < 1) throw new Error(`Archive entry ${entryName} has an invalid declared size.`);
-    totalBytes += entry.header.size;
-    if (totalBytes > maximumUncompressedBytes) throw new Error("Archive exceeds the allowed uncompressed size.");
-    const extension = path.extname(entryName).toLowerCase();
-    if (kind === "bodyparts3d" && (!/^partof_BP3D_4\.0_obj_99\/FJ\d+M?\.obj$/i.test(entryName) || extension !== ".obj")) {
-      throw new Error(`BodyParts3D archive includes an unexpected file: ${entryName}.`);
-    }
-    if (kind === "open-anatomy" && ![".vtk", ".nrrd", ".json", ".md", ".txt", ".ctbl"].includes(extension)) continue;
-    const data = entry.getData();
-    if (data.length !== entry.header.size) throw new Error(`Archive entry ${entryName} did not extract to its declared size.`);
-    const target = path.resolve(destination, ...safeEntryName(entryName).split("/"));
-    const base = path.resolve(destination);
-    if (!target.startsWith(`${base}${path.sep}`)) throw new Error(`Archive entry ${entryName} resolves outside the extraction directory.`);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { mode: 0o600, flag: "wx" });
-    extracted += 1;
-    if (kind === "bodyparts3d" && extracted % 100 === 0) log(`[progress] BodyParts3D: unpacked ${extracted} OBJ surfaces.`);
-  }
-  if (extracted === 0) throw new Error("Pinned archive contains no installable source assets.");
-  log(`[progress] Extracted ${extracted} verified archive files (${totalBytes} uncompressed bytes).`);
-  return { extracted, uncompressedBytes: totalBytes };
+  const base = path.resolve(destination);
+  await mkdir(base, { recursive: true, mode: 0o700 });
+  return await new Promise((resolve, reject) => {
+    yauzl.open(archive, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (openError, zip) => {
+      if (openError || !zip) { reject(openError ?? new Error("Pinned ZIP could not be opened.")); return; }
+      let settled = false;
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        zip.close();
+        reject(error);
+      };
+      zip.on("error", fail);
+      zip.on("entry", (entry) => {
+        void (async () => {
+          const isDirectory = entry.fileName.endsWith("/");
+          const entryName = safeEntryName(entry.fileName);
+          const fileType = (entry.externalFileAttributes >>> 16) & 0o170000;
+          if (fileType && fileType !== 0o100000 && fileType !== 0o040000) throw new Error(`Archive entry ${entryName} has an unexpected file type.`);
+          if (entryName !== expectedRoot && !entryName.startsWith(rootPrefix)) throw new Error(`Archive entry ${entryName} is outside its pinned package root.`);
+          if (entryName === expectedRoot && !isDirectory) throw new Error("Archive package root is not a directory.");
+          if (isDirectory) return;
+          if (!Number.isSafeInteger(entry.uncompressedSize) || entry.uncompressedSize < 1) throw new Error(`Archive entry ${entryName} has an invalid declared size.`);
+          totalBytes += entry.uncompressedSize;
+          if (totalBytes > maximumUncompressedBytes) throw new Error("Archive exceeds the allowed uncompressed size.");
+          const extension = path.extname(entryName).toLowerCase();
+          if (kind === "bodyparts3d" && (!/^partof_BP3D_4\.0_obj_99\/FJ\d+M?\.obj$/i.test(entryName) || extension !== ".obj")) {
+            throw new Error(`BodyParts3D archive includes an unexpected file: ${entryName}.`);
+          }
+          const supportedOpenExtension = [".vtk", ".nrrd", ".json", ".md", ".txt", ".ctbl"].includes(extension);
+          if (kind === "open-anatomy" && !supportedOpenExtension) return;
+          const target = path.resolve(base, ...entryName.split("/"));
+          if (!target.startsWith(`${base}${path.sep}`)) throw new Error(`Archive entry ${entryName} resolves outside the extraction directory.`);
+          await mkdir(path.dirname(target), { recursive: true });
+          const readStream = await new Promise((resolveStream, rejectStream) => zip.openReadStream(entry, (streamError, stream) => streamError ? rejectStream(streamError) : resolveStream(stream)));
+          let actualBytes = 0;
+          const { Transform } = await import("node:stream");
+          const sizeGuard = new Transform({ transform(chunk, _encoding, callback) {
+            actualBytes += chunk.length;
+            if (actualBytes > entry.uncompressedSize || actualBytes > maximumUncompressedBytes) callback(new Error(`Archive entry ${entryName} expanded beyond its declared size.`));
+            else callback(null, chunk);
+          } });
+          await pipeline(readStream, sizeGuard, createWriteStream(target, { flags: "wx", mode: 0o600 }));
+          if (actualBytes !== entry.uncompressedSize) throw new Error(`Archive entry ${entryName} did not extract to its declared size.`);
+          extracted += 1;
+          if (kind === "bodyparts3d" && extracted % 100 === 0) log(`[progress] BodyParts3D: unpacked ${extracted} OBJ surfaces.`);
+        })().then(() => { if (!settled) zip.readEntry(); }).catch(fail);
+      });
+      zip.on("end", () => {
+        if (settled) return;
+        settled = true;
+        zip.close();
+        if (extracted === 0) reject(new Error("Pinned archive contains no installable source assets."));
+        else {
+          log(`[progress] Extracted ${extracted} verified archive files (${totalBytes} uncompressed bytes).`);
+          resolve({ extracted, uncompressedBytes: totalBytes });
+        }
+      });
+      zip.readEntry();
+    });
+  });
 }
 
 async function readLockedSources() {
@@ -150,8 +186,7 @@ export async function ensureBodyParts3d({ assetRoot, fetchImpl = globalThis.fetc
     const files = await readdir(modelDirectory);
     if (files.length !== source.expectedModelCount) throw new Error(`BodyParts3D contains ${files.length} models; expected ${source.expectedModelCount}.`);
     for (const metadata of source.metadata) {
-      const buffer = await downloadPinned({ name: `BodyParts3D ${metadata.name}`, ...metadata, fetchImpl, log });
-      await writeFile(path.join(sourceDirectory, metadata.name), buffer, { mode: 0o600, flag: "wx" });
+      await downloadPinned({ name: `BodyParts3D ${metadata.name}`, ...metadata, destination: path.join(sourceDirectory, metadata.name), fetchImpl, log });
     }
     const result = await installBodyParts3d({ sourceDirectory, targetRoot: assetRoot, sourceSha256: source.archive.sha256, now, log });
     return { status: "ready", ...result };

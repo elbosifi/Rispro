@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -8,6 +8,27 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const lockPath = path.join(scriptDirectory, "open-atlas-sources.lock.json");
 const archiveRoot = "partof_BP3D_4.0_obj_99";
 const expectedAttribution = "BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International";
+
+export const bodyParts3dRelatedAtlasByConceptId = new Map([
+  ["FMA7197", ["spl-liver", "spl-abdomen"]],
+  ["FMA7198", ["spl-abdomen"]], ["FMA7148", ["spl-abdomen"]],
+  ["FMA7200", ["spl-abdomen"]], ["FMA7201", ["spl-abdomen"]], ["FMA7202", ["spl-abdomen"]],
+  ["FMA7204", ["spl-abdomen"]], ["FMA7205", ["spl-abdomen"]],
+  ["FMA7206", ["spl-abdomen"]], ["FMA7207", ["spl-abdomen"]], ["FMA7208", ["spl-abdomen"]],
+  ["FMA7154", ["spl-head-neck"]], ["FMA7155", ["spl-head-neck"]],
+  ["FMA50801", ["spl-brain"]],
+  ["FMA24977", ["spl-knee"]], ["FMA24978", ["spl-knee"]],
+]);
+
+export function relatedAtlasIdsForBodyPartsConcept(conceptId, parentByChild) {
+  const related = new Set();
+  let current = conceptId;
+  while (current) {
+    for (const atlasId of bodyParts3dRelatedAtlasByConceptId.get(current) ?? []) related.add(atlasId);
+    current = parentByChild.get(current);
+  }
+  return [...related];
+}
 
 function safeRelativePath(value, name) {
   if (typeof value !== "string" || !value || value.includes("\\") || value.startsWith("/")) throw new Error(`${name} must be a safe POSIX relative path.`);
@@ -37,11 +58,12 @@ function parseTsv(text, expectedColumns, filename) {
   return { header, rows: lines.slice(1).map((line) => line.split("\t")) };
 }
 
-function parseObjGeometry(buffer, filename) {
+export function parseObjGeometry(buffer, filename) {
   const text = buffer.toString("utf8");
   const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   let vertices = 0;
   let faces = 0;
+  const sums = [0, 0, 0];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
@@ -53,6 +75,7 @@ function parseObjGeometry(buffer, filename) {
       for (let axis = 0; axis < 3; axis += 1) {
         bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
         bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+        sums[axis] += point[axis];
       }
       vertices += 1;
     } else if (tokens[0] === "f") {
@@ -68,43 +91,50 @@ function parseObjGeometry(buffer, filename) {
   }
   if (vertices < 3 || faces === 0 || bounds.min.some((coordinate) => !Number.isFinite(coordinate))) throw new Error(`${filename} contains no usable polygon surface.`);
   if (bounds.min.some((coordinate, axis) => Math.abs(coordinate) > 2000 || Math.abs(bounds.max[axis]) > 2000)) throw new Error(`${filename} is outside the BodyParts3D millimeter coordinate range.`);
-  return { bounds, vertices, faces };
+  return { bounds, centroidLps: bounds.min.map((value, axis) => (value + bounds.max[axis]) / 2), vertexCentroidLps: sums.map((value) => value / vertices), vertices, faces };
 }
 
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
-function buildOverviewObj(models) {
+export function buildOverviewObj(models) {
   let vertexOffset = 0;
   const output = ["# RISpro Teaching BodyParts3D progressive overview"];
-  for (const { name, buffer } of models) {
-    output.push(`o ${name}`);
+  for (const { structureId, name, buffer } of models) {
+    output.push(`o RISPRO_STRUCTURE_ID_${structureId ?? name}`);
+    const localGeometry = parseObjGeometry(buffer, name);
+    let localVertexCount = 0;
     for (const line of buffer.toString("utf8").split(/\r?\n/)) {
-      if (line.startsWith("v ")) output.push(line);
+      if (line.startsWith("v ")) { output.push(line); localVertexCount += 1; }
       else if (line.startsWith("f ")) {
-        const points = line.slice(2).trim().split(/\s+/).map((value) => value.replace(/^(-?\d+)/, (_match, raw) => String(Number(raw) + vertexOffset)));
+        const points = line.slice(2).trim().split(/\s+/).map((value) => value.replace(/^(-?\d+)/, (_match, raw) => {
+          const index = Number(raw);
+          return String(index > 0 ? vertexOffset + index : vertexOffset + localGeometry.vertices + index + 1);
+        }));
         output.push(`f ${points.join(" ")}`);
       }
     }
-    vertexOffset += parseObjGeometry(buffer, name).vertices;
+    vertexOffset += localVertexCount;
   }
   return Buffer.from(`${output.join("\n")}\n`, "utf8");
 }
 
-async function activateStage(target, stage, backup) {
+async function activateStage(target, stage, backup, validate) {
   await rm(backup, { recursive: true, force: true });
   let movedOld = false;
   try {
     try { await rename(target, backup); movedOld = true; } catch (error) { if (error.code !== "ENOENT") throw error; }
     await rename(stage, target);
-    if (movedOld) await rm(backup, { recursive: true, force: true });
+    if (!await validate()) throw new Error("Staged BodyParts3D atlas failed its post-activation integrity check.");
   } catch (error) {
     if (movedOld) {
-      try { await stat(target); } catch { await rename(backup, target); }
-    }
+      await rm(target, { recursive: true, force: true });
+      await rename(backup, target);
+    } else await rm(target, { recursive: true, force: true });
     throw error;
   }
+  if (movedOld) await rm(backup, { recursive: true, force: true });
 }
 
 async function sourceLock() {
@@ -119,11 +149,16 @@ async function sourceLock() {
 export async function verifyInstalledBodyParts3d(targetRoot, source) {
   const directory = path.join(path.resolve(targetRoot), source.atlasId);
   try {
-    const [metadata, manifest] = await Promise.all([
-      readFile(path.join(directory, "installed-atlas.json"), "utf8").then(JSON.parse),
-      readFile(path.join(directory, "manifest.json"), "utf8").then(JSON.parse),
+    const [metadataText, manifestText] = await Promise.all([
+      readFile(path.join(directory, "installed-atlas.json"), "utf8"),
+      readFile(path.join(directory, "manifest.json"), "utf8"),
     ]);
+    const metadata = JSON.parse(metadataText);
+    const manifest = JSON.parse(manifestText);
     if (metadata.atlasId !== source.atlasId || metadata.managedVersion !== source.managedVersion || metadata.sourceSha256 !== source.archive.sha256
+      || metadata.schemaVersion !== "1.1" || metadata.validationStatus !== "passed"
+      || metadata.manifestSha256 !== sha256(Buffer.from(manifestText))
+      || !Number.isSafeInteger(metadata.assetCount) || metadata.assetCount !== Object.keys(manifest.assets ?? {}).length
       || manifest.atlasId !== source.atlasId || manifest.spatialValidation?.status !== "not-applicable") return false;
     for (const asset of Object.values(manifest.assets ?? {})) {
       if (!asset.integrity || !/^[a-f0-9]{64}$/.test(asset.integrity.sha256)) return false;
@@ -206,10 +241,20 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     }
     const structureByConcept = new Map();
     const structures = [];
-    const relatedAtlasByConceptId = new Map([
-      ["FMA7197", ["spl-liver", "spl-abdomen"]], // liver
-      ["FMA24485", ["spl-knee"]], // knee
+    const bodyRegionByConceptId = new Set(["FMA7154", "FMA7155", "FMA7181", "FMA7184", "FMA7185", "FMA7186", "FMA7187", "FMA7188", "FMA9576", "FMA9577", "FMA9578", "FMA9579"]);
+    const systemByConceptId = new Map([
+      ["FMA7152", "Gastrointestinal"], ["FMA7157", "Nervous"], ["FMA7158", "Respiratory"],
+      ["FMA7159", "Urinary"], ["FMA7160", "Reproductive"], ["FMA7161", "Cardiovascular"],
+      ["FMA7482", "Musculoskeletal"], ["FMA7483", "Skeletal"],
     ]);
+    const ancestorValue = (conceptId, values, mapValue = (id) => concepts.get(id)?.name) => {
+      let current = conceptId;
+      while (current) {
+        if (values.has(current)) return mapValue(current);
+        current = parentByChild.get(current);
+      }
+      return undefined;
+    };
     for (const [conceptId, concept] of concepts) {
       const meshIds = [...concept.elementIds];
       const singleElement = meshIds.length === 1 ? meshIds[0] : null;
@@ -219,11 +264,13 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
         name: concept.name,
         category: "BodyParts3D PART-OF anatomy",
         ...(parentByChild.has(conceptId) ? { parentId: fmaStructureIds.get(parentByChild.get(conceptId)) } : {}),
+        ...(ancestorValue(conceptId, bodyRegionByConceptId) ? { bodyRegion: ancestorValue(conceptId, bodyRegionByConceptId) } : {}),
+        ...(ancestorValue(conceptId, systemByConceptId, (id) => systemByConceptId.get(id)) ? { system: ancestorValue(conceptId, systemByConceptId, (id) => systemByConceptId.get(id)) } : {}),
         synonyms: [],
         color: "#b9c3d1",
         ...(ownsSingleElement ? { meshAsset: `model-${singleElement.toLowerCase()}` } : {}),
         sourceConceptId: conceptId,
-        ...(relatedAtlasByConceptId.has(conceptId) ? { relatedAtlasIds: relatedAtlasByConceptId.get(conceptId) } : {}),
+        ...(relatedAtlasIdsForBodyPartsConcept(conceptId, parentByChild).length ? { relatedAtlasIds: relatedAtlasIdsForBodyPartsConcept(conceptId, parentByChild) } : {}),
         note: ownsSingleElement ? `Source geometry ${singleElement} is one PART-OF surface for this anatomical concept.` : "PART-OF anatomical concept; select a child surface model to view geometry.",
       };
       structureByConcept.set(conceptId, structure);
@@ -234,6 +281,11 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     let totalVertices = 0;
     let totalFaces = 0;
     const overviewModels = [];
+    const structureIdForElement = (elementId) => {
+      const conceptId = chosenConceptByElement.get(elementId);
+      const assetKey = `model-${elementId.toLowerCase()}`;
+      return structureByConcept.get(conceptId)?.meshAsset === assetKey ? fmaStructureIds.get(conceptId) : `element-${elementId.toLowerCase()}`;
+    };
     for (let index = 0; index < modelNames.length; index += 1) {
       const modelName = modelNames[index];
       const elementId = path.parse(modelName).name;
@@ -242,7 +294,10 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
       const assetKey = `model-${elementId.toLowerCase()}`;
       assets[assetKey] = { file: modelName, sourceFile: `${archiveRoot}/${modelName}`, mediaType: "model/obj", integrity: { sizeBytes: buffer.length, sha256: sha256(buffer) } };
       await writeFile(path.join(stage, modelName), buffer, { mode: 0o600 });
-      if (/skin|body|skeleton|skull|spine|rib|pelvis|femur|humerus|lung|heart/i.test(concepts.get(chosenConceptByElement.get(elementId))?.name ?? "")) overviewModels.push({ name: elementId, buffer });
+      const conceptId = chosenConceptByElement.get(elementId);
+      if (!conceptId) throw new Error(`BodyParts3D mesh ${elementId} has no official anatomical concept mapping.`);
+      const isSkinSurface = conceptId === "FMA7163" || [...elementConceptsById.get(elementId)].includes("FMA7163");
+      if (isSkinSurface) overviewModels.push({ name: elementId, structureId: structureIdForElement(elementId), buffer });
       for (let axis = 0; axis < 3; axis += 1) {
         allBounds.min[axis] = Math.min(allBounds.min[axis], geometry.bounds.min[axis]);
         allBounds.max[axis] = Math.max(allBounds.max[axis], geometry.bounds.max[axis]);
@@ -250,10 +305,8 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
       totalVertices += geometry.vertices;
       totalFaces += geometry.faces;
 
-      const conceptId = chosenConceptByElement.get(elementId);
-      if (!conceptId) throw new Error(`BodyParts3D mesh ${elementId} has no official anatomical concept mapping.`);
       if (structureByConcept.get(conceptId).meshAsset === assetKey) {
-        // The one-mesh concept node already represents this OBJ.
+        structureByConcept.get(conceptId).representativePointLps = geometry.centroidLps;
       } else {
         const concept = concepts.get(conceptId);
         const allNames = [...elementConceptsById.get(elementId)].map((id) => concepts.get(id).name).filter((name) => name !== concept.name);
@@ -265,6 +318,7 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
           synonyms: [...new Set([elementId, ...allNames])].slice(0, 40),
           color: "#a7b4c5",
           meshAsset: assetKey,
+          representativePointLps: geometry.centroidLps,
           note: `This OBJ surface ${elementId} is listed under ${concept.name} in the official BodyParts3D PART-OF element mapping table.`,
         });
       }
@@ -273,7 +327,17 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     if (allBounds.min[2] < -250 || allBounds.max[2] < 1000 || allBounds.max[2] > 2500) throw new Error("BodyParts3D global millimeter bounds do not match the upright whole-body coordinate range.");
     const bodyRoot = [...concepts.values()].find((concept) => concept.name.toLocaleLowerCase() === "human body");
     if (!bodyRoot || structures.length < modelNames.length) throw new Error("BodyParts3D model hierarchy is incomplete.");
-    const overview = buildOverviewObj(overviewModels.slice(0, 32));
+    if (overviewModels.length === 0) {
+      const regionalSurfaceConcepts = new Set(["FMA7181", "FMA7184", "FMA7185", "FMA7186", "FMA7187", "FMA7188", "FMA7154", "FMA7155"]);
+      for (const modelName of modelNames) {
+        const elementId = path.parse(modelName).name;
+        const conceptId = chosenConceptByElement.get(elementId);
+        if (regionalSurfaceConcepts.has(conceptId) || [...elementConceptsById.get(elementId)].some((candidate) => regionalSurfaceConcepts.has(candidate))) {
+          overviewModels.push({ name: elementId, structureId: structureIdForElement(elementId), buffer: await readFile(inside(sourceDirectory, `${archiveRoot}/${modelName}`, "BodyParts3D overview source model")) });
+        }
+      }
+    }
+    const overview = buildOverviewObj(overviewModels);
     if (overviewModels.length === 0 || overview.length < 64) throw new Error("BodyParts3D has no suitable source structures for a whole-body overview.");
     const overviewAssetKey = "whole-body-overview";
     assets[overviewAssetKey] = { file: "whole-body-overview.obj", mediaType: "model/obj", integrity: { sizeBytes: overview.length, sha256: sha256(overview) } };
@@ -319,8 +383,7 @@ export async function installBodyParts3d({ sourceDirectory, targetRoot, sourceSh
     const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
     await writeFile(path.join(stage, "manifest.json"), manifestText, "utf8");
     await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ schemaVersion: "1.1", atlasId: source.atlasId, managedVersion: source.managedVersion, sourceUrl: source.archive.url, sourceSha256: source.archive.sha256, manifestSha256: sha256(Buffer.from(manifestText)), validationStatus: "passed", installedAt: now().toISOString(), assetCount: Object.keys(assets).length, meshCount: modelNames.length, structureCount: structures.length, vertexCount: totalVertices, faceCount: totalFaces }, null, 2)}\n`, "utf8");
-    await activateStage(target, stage, backup);
-    if (!await verifyInstalledBodyParts3d(targetRootAbsolute, source)) throw new Error("BodyParts3D failed its post-activation file integrity check.");
+    await activateStage(target, stage, backup, () => verifyInstalledBodyParts3d(targetRootAbsolute, source));
     return { atlasId: source.atlasId, meshCount: modelNames.length, structureCount: structures.length, totalVertices, totalFaces, bounds: allBounds };
   } catch (error) {
     await rm(stage, { recursive: true, force: true });

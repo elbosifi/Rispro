@@ -142,7 +142,7 @@ async function hashFile(filePath, expectedSize) {
 }
 
 function sameMetadata(metadata, lock) {
-  return metadata && metadata.schemaVersion === "1.0" && metadata.atlasId === lock.atlasId
+  return metadata && ["1.0", "1.1"].includes(metadata.schemaVersion) && metadata.atlasId === lock.atlasId
     && metadata.managedVersion === lock.managedVersion && metadata.upstreamCommit === lock.upstream.commit
     && Array.isArray(metadata.assets) && metadata.assets.length === lock.assets.length
     && lock.assets.every((asset) => metadata.assets.some((stored) => stored.path === asset.path && stored.size === asset.size && stored.sha256 === asset.sha256));
@@ -240,13 +240,14 @@ async function downloadAsset(asset, sourceDirectory, fetchImpl) {
 
 function installedMetadata(lock, now) {
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     atlasId: lock.atlasId,
     managedVersion: lock.managedVersion,
+    sourceSha256: createHash("sha256").update(JSON.stringify(lock.assets.map(({ path: assetPath, size, sha256 }) => ({ path: assetPath, size, sha256 })))).digest("hex"),
     upstreamRepository: lock.upstream.repository,
     upstreamCommit: lock.upstream.commit,
     installedAt: now().toISOString(),
-    assets: lock.assets.map(({ path: sourcePath, size, sha256 }) => ({ path: sourcePath, size, sha256 })),
+    assets: lock.assets.map(({ path: sourcePath, size, sha256, targetFile }) => ({ path: sourcePath, size, sha256, targetFile })),
   };
 }
 

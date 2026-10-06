@@ -299,6 +299,17 @@ export function anatomyWorldPointFromPlanePixel(geometry: AnatomyNrrdGeometry, p
   return [0, 1, 2].map((axis) => spec.horizontal[axis]! * horizontal + spec.vertical[axis]! * vertical + spec.normal[axis]! * normal) as [number, number, number];
 }
 
+/** Move the shared physical point along one plane normal without recentering its in-plane position. */
+export function anatomyWorldPointOnPlaneAtIndex(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, sliceIndex: number, worldPointLps: readonly number[]): [number, number, number] {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  if (!Number.isInteger(sliceIndex) || sliceIndex < 0 || sliceIndex >= spec.sliceCount) throw new Error("Anatomy plane index is outside the volume.");
+  const normalCoordinate = spec.normalMin + sliceIndex * spec.spacingNormal;
+  const horizontalCoordinate = dot(worldPointLps, spec.horizontal);
+  const verticalCoordinate = dot(worldPointLps, spec.vertical);
+  return [0, 1, 2].map((axis) => spec.horizontal[axis]! * horizontalCoordinate
+    + spec.vertical[axis]! * verticalCoordinate + spec.normal[axis]! * normalCoordinate) as [number, number, number];
+}
+
 export function anatomyCrosshairPixel(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, worldPointLps: readonly number[]): { x: number; y: number } {
   const spec = getAnatomyPlaneSpec(geometry, plane);
   return { x: (dot(worldPointLps, spec.horizontal) - spec.uMin) / spec.spacingX, y: spec.height - 1 - (dot(worldPointLps, spec.vertical) - spec.vMin) / spec.spacingY };
@@ -338,6 +349,27 @@ export function anatomyPlaneWorldTransform(geometry: AnatomyNrrdGeometry, plane:
     spacingX: spec.spacingX,
     spacingY: spec.spacingY,
   };
+}
+
+/** Physical rectangular section plane through the single shared LPS point. */
+export function anatomyPlaneWorldTransformAtPoint(geometry: AnatomyNrrdGeometry, plane: AnatomyPlane, worldPointLps: readonly number[]): {
+  point: [number, number, number];
+  horizontal: [number, number, number];
+  vertical: [number, number, number];
+  normal: [number, number, number];
+  width: number;
+  height: number;
+  spacingX: number;
+  spacingY: number;
+} {
+  const spec = getAnatomyPlaneSpec(geometry, plane);
+  const pointLps = [0, 1, 2].map((axis) => spec.horizontal[axis]! * dot(worldPointLps, spec.horizontal)
+    + spec.vertical[axis]! * dot(worldPointLps, spec.vertical)
+    + spec.normal[axis]! * dot(worldPointLps, spec.normal));
+  const fromLps = (vector: readonly number[]) => geometry.coordinateSystem === "RAS"
+    ? [-vector[0]!, -vector[1]!, vector[2]!] as [number, number, number]
+    : [vector[0]!, vector[1]!, vector[2]!] as [number, number, number];
+  return { point: fromLps(pointLps), horizontal: fromLps(spec.horizontal), vertical: fromLps(spec.vertical), normal: fromLps(spec.normal), width: spec.width, height: spec.height, spacingX: spec.spacingX, spacingY: spec.spacingY };
 }
 
 function sampleVoxel(data: AnatomyVoxelData, geometry: AnatomyNrrdGeometry, coordinates: readonly number[], nearest: boolean): { value: number; valid: boolean } {

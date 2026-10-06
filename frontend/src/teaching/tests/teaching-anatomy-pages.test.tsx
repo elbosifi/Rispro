@@ -25,9 +25,9 @@ vi.mock("../api/teaching-api", async (importOriginal) => {
 });
 vi.mock("../anatomy/anatomy-volume-loader", () => ({ loadTeachingAnatomyVolumes: anatomyMocks.loadVolumes }));
 vi.mock("../anatomy/anatomy-3d-viewer", () => ({
-  Anatomy3dViewer: ({ onSelectStructure, plane, sliceIndex, manifest }: { onSelectStructure: (structureId: string) => void; plane: string; sliceIndex: number; manifest: TeachingAnatomyManifest }) => {
+  Anatomy3dViewer: ({ onSelectStructure, worldPointLps, sectionPlanesVisible, manifest }: { onSelectStructure: (structureId: string) => void; worldPointLps: [number, number, number] | null; sectionPlanesVisible: boolean; manifest: TeachingAnatomyManifest }) => {
     const structure = manifest.structures[0];
-    return <section data-testid="mock-3d-viewer" data-plane={plane} data-slice={sliceIndex}><h2>3D anatomy</h2>{structure && <button type="button" onClick={() => onSelectStructure(structure.id)}>{structure.id === "segment-viii" ? "Select Segment VIII in 3D" : `Select ${structure.name} in 3D`}</button>}</section>;
+    return <section data-testid="mock-3d-viewer" data-world-point={worldPointLps?.join(",")} data-section-planes-visible={String(sectionPlanesVisible)}><h2>3D anatomy</h2>{structure && <button type="button" onClick={() => onSelectStructure(structure.id)}>{structure.id === "segment-viii" ? "Select Segment VIII in 3D" : `Select ${structure.name} in 3D`}</button>}</section>;
   },
 }));
 vi.mock("../anatomy/cross-section-stack-viewer", () => ({
@@ -57,7 +57,7 @@ const manifest: TeachingAnatomyManifest = {
     labels: { file: "labels.nrrd", mediaType: "application/octet-stream" },
     "mesh-segment-viii": { file: "segment-viii.stl", mediaType: "model/stl" },
   },
-  structures: [{ id: "segment-viii", labelValue: 33, name: "Liver Segment VIII", category: "Liver segments", synonyms: ["anterior superior right hepatic segment"], color: "#53ad7a", meshAsset: "mesh-segment-viii", note: "Anterosuperior right liver." }],
+  structures: [{ id: "segment-viii", labelValue: 33, name: "Liver Segment VIII", category: "Liver segments", synonyms: ["anterior superior right hepatic segment"], color: "#53ad7a", meshAsset: "mesh-segment-viii", representativePointLps: [1, 0, 0], radiologyNote: "Anterosuperior right liver.", note: "Source description." }],
   provenance,
   spatialValidation: { status: "passed", method: "synthetic fixture", minimumMeshLabelAgreement: 0.2, meshLabelAgreement: { "segment-viii": 0.5 } },
 };
@@ -84,20 +84,21 @@ const wholeBodyManifest: TeachingAnatomyManifest = {
   correlatedImaging: false,
   supportedPlanes: [],
   volumes: {},
-  assets: { "whole-liver": { file: "liver.obj", mediaType: "model/obj" }, "whole-liver-lobe": { file: "liver-lobe.obj", mediaType: "model/obj" } },
+  assets: { "whole-liver": { file: "liver.obj", mediaType: "model/obj" }, "whole-liver-lobe": { file: "liver-lobe.obj", mediaType: "model/obj" }, "whole-knee": { file: "knee.obj", mediaType: "model/obj" } },
   structures: [
     { id: "liver", name: "Liver", category: "Abdominal organs", synonyms: ["hepatic organ"], organ: "Liver", color: "#53ad7a", meshAsset: "whole-liver", relatedAtlasIds: ["spl-liver"], note: "Whole-body reference model." },
     { id: "liver-lobe", parentId: "liver", name: "Hepatic lobe", category: "Abdominal organs", synonyms: [], organ: "Liver", color: "#53ad7a", meshAsset: "whole-liver-lobe", note: "Component surface." },
+    { id: "knee", name: "Knee", category: "Lower limb", synonyms: [], organ: "Knee", color: "#53ad7a", meshAsset: "whole-knee", relatedAtlasIds: ["spl-knee"], note: "Source reference model." },
   ],
-  provenance: { ...provenance, project: "BodyParts3D", license: "CC BY 4.0", licenseUrl: "https://example.org/cc-by-4.0" },
+  provenance: { ...provenance, project: "BodyParts3D", license: "CC BY 4.0", licenseUrl: "https://example.org/cc-by-4.0", citation: "Mitsuhashi N et al. BodyParts3D: 3D structure database for anatomical concepts. PMID:18835852." },
   spatialValidation: { status: "not-applicable", method: "Independent 3D reference; no regional image registration." },
 };
 
 const catalog: TeachingAnatomyCatalog = {
   items: [
-    { atlasId: "spl-liver", title: "SPL Liver Atlas", bodyRegion: "Abdomen", organs: ["Liver", "Gallbladder"], systems: ["Gastrointestinal", "Vascular"], modality: "CT", crossSectionPlanes: ["axial"], description: "Liver segments and hepatic vessels.", correlatedImaging: true, status: "not-installed", structureCount: 17, provenance },
-    { atlasId: "spl-knee", title: "SPL Knee Atlas", bodyRegion: "Lower limb", organs: ["Knee"], systems: ["Musculoskeletal"], modality: "MRI", crossSectionPlanes: [], description: "MRI knee reference.", correlatedImaging: true, status: "pending-source-validation", structureCount: null, provenance: { ...provenance, project: "SPL Knee Atlas" } },
-    { atlasId: "bodyparts3d", title: "Whole-body 3D Navigator", bodyRegion: "Whole body", organs: ["Liver", "Knee"], systems: ["CNS", "Musculoskeletal"], modality: "3D", crossSectionPlanes: [], description: "Independent whole-body 3D reference.", correlatedImaging: false, status: "pending-source-validation", structureCount: null, provenance: { ...provenance, project: "BodyParts3D" } },
+    { atlasId: "spl-liver", title: "SPL Liver Atlas", bodyRegion: "Abdomen", organs: ["Liver", "Gallbladder"], systems: ["Gastrointestinal", "Vascular"], modality: "CT", crossSectionPlanes: ["axial"], description: "Liver segments and hepatic vessels.", correlatedImaging: true, status: "ready", structureCount: 17, provenance },
+    { atlasId: "spl-knee", title: "SPL Knee Atlas", bodyRegion: "Lower limb", organs: ["Knee"], systems: ["Musculoskeletal"], modality: "MRI", crossSectionPlanes: [], description: "MRI knee reference.", correlatedImaging: true, status: "ready", structureCount: 42, provenance: { ...provenance, project: "SPL Knee Atlas" } },
+    { atlasId: "bodyparts3d", title: "Whole-body 3D Navigator", bodyRegion: "Whole body", organs: ["Liver", "Knee"], systems: ["CNS", "Musculoskeletal"], modality: "3D", crossSectionPlanes: [], description: "Independent whole-body 3D reference.", correlatedImaging: false, status: "pending-source-validation", structureCount: null, provenance: { ...provenance, project: "BodyParts3D", citation: "Mitsuhashi N et al. BodyParts3D: 3D structure database for anatomical concepts. PMID:18835852." } },
   ],
 };
 
@@ -150,11 +151,13 @@ describe("Teaching anatomy routes and interaction", () => {
     expect(screen.getAllByText(/Upstream attribution/).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "License terms" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "Upstream source" }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Mitsuhashi N et al\. BodyParts3D/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Citation" })).toBeNull();
   });
 
   it("shows the compatible graceful not-installed state on the legacy liver route", async () => {
     renderTeaching("/teaching/anatomy/liver");
-    expect(await screen.findByRole("heading", { name: "Liver anatomy" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "SPL Liver Atlas" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Dataset not installed" })).toBeTruthy();
   });
 
@@ -168,6 +171,9 @@ describe("Teaching anatomy routes and interaction", () => {
     expect(volumeViews[0].getAttribute("data-overlay-enabled")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Select Segment VIII in 3D" }));
     expect(screen.getByText("Anterosuperior right liver.")).toBeTruthy();
+    for (const view of volumeViews) expect(view.getAttribute("data-world-point")).toBe("1,0,0");
+    expect(screen.getByTestId("mock-3d-viewer").getAttribute("data-world-point")).toBe("1,0,0");
+    expect(screen.getByRole("button", { name: "Hide section planes" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Selected structure" }));
     for (const view of volumeViews) { expect(view.getAttribute("data-overlay-enabled")).toBe("true"); expect(view.getAttribute("data-selected-label")).toBe("33"); }
     await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Move shared point" })[0]!));
@@ -179,11 +185,15 @@ describe("Teaching anatomy routes and interaction", () => {
     anatomyMocks.loadVolumes.mockResolvedValue({ primary: null, segmentation: null } satisfies LoadedAnatomyVolumes);
     renderTeaching("/teaching/anatomy/atlas/bodyparts3d");
     expect(await screen.findByRole("heading", { name: "Whole-body 3D Navigator" })).toBeTruthy();
-    expect(screen.getByText("Cross-sectional reference atlas not yet available.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "3D anatomy" })).toBeTruthy();
+    expect(screen.queryByText("Cross-sectional reference atlas not yet available.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Hepatic lobe" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand Liver" }));
     expect(screen.getByRole("button", { name: "Hepatic lobe" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Select Liver in 3D" }));
-    expect(screen.getByRole("link", { name: "Open radiology atlas" }).getAttribute("href")).toBe("/teaching/anatomy/atlas/spl-liver");
+    expect(screen.getByRole("link", { name: "Open radiology atlas: SPL Liver Atlas" }).getAttribute("href")).toBe("/teaching/anatomy/atlas/spl-liver");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search structures and synonyms" }), { target: { value: "Knee" } });
+    fireEvent.click(screen.getByRole("button", { name: "Knee" }));
+    expect(screen.getByRole("link", { name: "Open radiology atlas: SPL Knee Atlas" }).getAttribute("href")).toBe("/teaching/anatomy/atlas/spl-knee");
   });
 });

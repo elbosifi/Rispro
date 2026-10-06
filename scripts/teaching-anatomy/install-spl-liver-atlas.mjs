@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -117,6 +118,30 @@ function readVoxel(volume, index) {
     case "double": return volume.littleEndian ? view.readDoubleLE(offset) : view.readDoubleBE(offset);
     default: throw new Error(`Unsupported NRRD type ${volume.type}.`);
   }
+}
+
+export function calculateLabelCentroidsLps(labels, structures) {
+  const accumulators = new Map(structures.map(({ labelValue }) => [labelValue, { count: 0, sums: [0, 0, 0] }]));
+  const [sizeX, sizeY] = labels.sizes;
+  const sliceSize = sizeX * sizeY;
+  const voxelCount = labels.sizes.reduce((product, size) => product * size, 1);
+  for (let index = 0; index < voxelCount; index += 1) {
+    const accumulator = accumulators.get(readVoxel(labels, index));
+    if (!accumulator) continue;
+    const i = index % sizeX;
+    const j = Math.floor(index / sizeX) % sizeY;
+    const k = Math.floor(index / sliceSize);
+    accumulator.count += 1;
+    for (let axis = 0; axis < 3; axis += 1) accumulator.sums[axis] += labels.origin[axis] + labels.directions[0][axis] * i + labels.directions[1][axis] * j + labels.directions[2][axis] * k;
+  }
+  return new Map([...accumulators].filter(([, item]) => item.count > 0).map(([label, item]) => [label, item.sums.map((value, axis) => {
+    const native = value / item.count;
+    return labels.space === "RAS" && axis < 2 ? -native : native;
+  })]));
+}
+
+function sha256File(filePath) {
+  return readFile(filePath).then((buffer) => createHash("sha256").update(buffer).digest("hex"));
 }
 
 function parseColorTable(buffer, filename) {
@@ -284,6 +309,13 @@ export async function install(options) {
     if (requiredLabels.has(value)) foundLabels.add(value);
   }
   for (const labelValue of requiredLabels) if (!foundLabels.has(labelValue)) throw new Error(`The label-map volume contains no voxels with required label ${labelValue}.`);
+  const representativePoints = calculateLabelCentroidsLps(labels, template.structures);
+  for (const structure of template.structures) {
+    structure.representativePointLps = representativePoints.get(structure.labelValue);
+    if (!structure.representativePointLps) throw new Error(`Could not calculate a representative point for ${structure.name}.`);
+    // Reviewed RISpro teaching prose is served from the separate note overlay, not attributed to SPL source metadata.
+    delete structure.note;
+  }
   const meshEntries = await readdir(meshPath, { withFileTypes: true });
   const meshDirectory = new Map(meshEntries.map((entry) => [entry.name, entry]));
   const spatialAgreement = {};
@@ -321,6 +353,14 @@ export async function install(options) {
       await copyFile(sourceInfo.sourceFile, path.join(stage, asset.file));
       asset.sourceFile = sourceInfo.sourceFilename;
     }
+    const targetsByFilename = new Map((options.managedMetadata?.assets ?? []).filter((asset) => asset.targetFile).map((asset) => [asset.targetFile, asset]));
+    for (const asset of Object.values(template.assets)) {
+      const pinned = targetsByFilename.get(asset.file);
+      const stagedFile = path.join(stage, asset.file);
+      asset.integrity = pinned
+        ? { sizeBytes: pinned.size, sha256: pinned.sha256 }
+        : { sizeBytes: (await stat(stagedFile)).size, sha256: await sha256File(stagedFile) };
+    }
     await copyFile(upstreamReadme, path.join(stage, "UPSTREAM-README.md"));
     if (licenseSource) await copyFile(licenseSource, path.join(stage, "UPSTREAM-SOURCE-LICENSE.txt"));
     const slicerLicensePartB = await readFile(path.join(scriptDirectory, "slicer-license-part-b.txt"), "utf8");
@@ -342,9 +382,10 @@ export async function install(options) {
       "Installed by RISpro as educational material. Preserve UPSTREAM-README.md, UPSTREAM-LICENSE.txt, any UPSTREAM-SOURCE-LICENSE.txt, and this notice with the atlas files.",
     ].join("\n\n") + "\n";
     await writeFile(path.join(stage, "NOTICE.txt"), notice, "utf8");
-    await writeFile(path.join(stage, "manifest.json"), `${JSON.stringify(template, null, 2)}\n`, "utf8");
+    const manifestText = `${JSON.stringify(template, null, 2)}\n`;
+    await writeFile(path.join(stage, "manifest.json"), manifestText, "utf8");
     if (options.managedMetadata) {
-      await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify(options.managedMetadata, null, 2)}\n`, "utf8");
+      await writeFile(path.join(stage, "installed-atlas.json"), `${JSON.stringify({ ...options.managedMetadata, schemaVersion: "1.1", validationStatus: "passed", manifestSha256: createHash("sha256").update(manifestText).digest("hex"), assetCount: Object.keys(template.assets).length }, null, 2)}\n`, "utf8");
     }
     if (await exists(target)) await rename(target, backup);
     try {

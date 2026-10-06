@@ -46,6 +46,7 @@ export interface TeachingAnatomyStructure {
   relatedAtlasIds?: string[];
   representativePointLps?: [number, number, number];
   sourceConceptId?: string;
+  radiologyNote?: string;
   note: string;
 }
 

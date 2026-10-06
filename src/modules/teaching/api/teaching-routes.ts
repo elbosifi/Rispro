@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../../middleware/auth.js";
 import { asyncRoute } from "../../../utils/async-route.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { readTeachingAnatomyCatalog, readTeachingAnatomyManifest, resolveTeachingAnatomyAsset } from "../anatomy/anatomy-asset-service.js";
+import { readTeachingAnatomyCatalog, readTeachingAnatomyManifest, resolveTeachingAnatomyAsset, teachingAnatomyAssetCacheControl, teachingAnatomyIfNoneMatchMatches } from "../anatomy/anatomy-asset-service.js";
 import { findTeachingAnatomyAtlas } from "../anatomy/anatomy-catalog.js";
 import { isSafeAnatomyAtlasId } from "../anatomy/anatomy-atlas.js";
 import { requireTeachingCapabilities, requireTeachingLearner, type TeachingRequest } from "./teaching-route-auth.js";
@@ -183,7 +183,7 @@ export function createTeachingRouter(): Router {
     await requireTeachingCapabilities(req, []);
     const entry = findTeachingAnatomyAtlas(atlasId);
     if (!isSafeAnatomyAtlasId(atlasId) || !entry) throw new HttpError(404, "Teaching anatomy atlas was not found.");
-    const manifest = await readTeachingAnatomyManifest(atlasId, undefined, "presence");
+    const manifest = await readTeachingAnatomyManifest(atlasId, undefined, false);
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("Vary", "Cookie");
     res.json(manifest ? { available: true, manifest } : {
@@ -218,14 +218,14 @@ export function createTeachingRouter(): Router {
     res.setHeader("ETag", asset.etag);
     res.setHeader("Vary", "Cookie");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (req.headers["if-none-match"] === asset.etag) {
-      res.setHeader("Cache-Control", asset.versioned ? "private, max-age=31536000, immutable" : "private, max-age=0, must-revalidate");
+    const requestedVersion = typeof req.query.v === "string" ? req.query.v.toLowerCase() : "";
+    const cacheControl = teachingAnatomyAssetCacheControl(asset.versioned, asset.etag, requestedVersion);
+    if (teachingAnatomyIfNoneMatchMatches(req.headers["if-none-match"], asset.etag)) {
+      res.setHeader("Cache-Control", cacheControl);
       res.status(304).end();
       return;
     }
-    const requestedVersion = typeof req.query.v === "string" ? req.query.v.toLowerCase() : "";
-    const versionedRequest = asset.versioned && requestedVersion === asset.etag.slice(1, -1);
-    res.setHeader("Cache-Control", versionedRequest ? "private, max-age=31536000, immutable" : "private, max-age=0, must-revalidate");
+    res.setHeader("Cache-Control", cacheControl);
     res.sendFile(asset.filePath, (error) => { if (error) next(error); });
   };
 

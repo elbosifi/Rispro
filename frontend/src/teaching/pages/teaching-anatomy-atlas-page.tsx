@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Layers3 } from "lucide-react";
 import { Badge, Card, ErrorState, LoadingState, SearchInput } from "@/components/shared";
-import { fetchTeachingAnatomyManifest, type TeachingAnatomyManifest, type TeachingAnatomyStructure } from "../api/teaching-api";
+import { fetchTeachingAnatomyCatalog, fetchTeachingAnatomyManifest, type TeachingAnatomyManifest, type TeachingAnatomyStructure } from "../api/teaching-api";
 import { Anatomy3dViewer } from "../anatomy/anatomy-3d-viewer";
+import { canRenderAnatomyStructure } from "../anatomy/anatomy-structure-mesh-selection";
 import { anatomySelectionReducer, initialAnatomySelectionState } from "../anatomy/anatomy-selection";
 import { CrossSectionStackViewer } from "../anatomy/cross-section-stack-viewer";
-import { anatomyPlaneIndexFromWorldPoint, anatomyVolumeCenterLps, type AnatomyPlane } from "../anatomy/anatomy-nrrd";
+import { anatomyVolumeCenterLps, type AnatomyPlane } from "../anatomy/anatomy-nrrd";
 import { loadTeachingAnatomyVolumes, type LoadedAnatomyVolumes } from "../anatomy/anatomy-volume-loader";
 
 interface VolumeState {
@@ -17,10 +18,6 @@ interface VolumeState {
   error: string | null;
 }
 
-function displayTitle(atlasId: string, title: string): string {
-  return atlasId === "spl-liver" ? "Liver anatomy" : title;
-}
-
 function structureMatches(structure: TeachingAnatomyStructure, query: string): boolean {
   if (!query) return true;
   return [structure.name, structure.id, structure.category, structure.organ, structure.bodyRegion, structure.system, ...structure.synonyms]
@@ -28,12 +25,12 @@ function structureMatches(structure: TeachingAnatomyStructure, query: string): b
     .some((value) => value!.toLocaleLowerCase().includes(query));
 }
 
-function matchingTreeIds(structures: TeachingAnatomyStructure[], query: string): Set<string> {
-  if (!query) return new Set(structures.map(({ id }) => id));
+function matchingTreeIds(structures: TeachingAnatomyStructure[], query: string, bodyRegion: string, system: string): Set<string> {
+  if (!query && !bodyRegion && !system) return new Set(structures.map(({ id }) => id));
   const byId = new Map(structures.map((structure) => [structure.id, structure]));
   const result = new Set<string>();
   for (const structure of structures) {
-    if (!structureMatches(structure, query)) continue;
+    if (!structureMatches(structure, query) || (bodyRegion && structure.bodyRegion !== bodyRegion) || (system && structure.system !== system)) continue;
     let current: TeachingAnatomyStructure | undefined = structure;
     while (current && !result.has(current.id)) {
       result.add(current.id);
@@ -60,7 +57,9 @@ export function TeachingAnatomyAtlasPage({ atlasId }: { atlasId: string }) {
 }
 
 function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
+  const workspaceRef = useRef<HTMLElement>(null);
   const manifestQuery = useQuery({ queryKey: ["teaching", "anatomy", "manifest", atlasId], queryFn: () => fetchTeachingAnatomyManifest(atlasId), staleTime: 30_000 });
+  const catalogQuery = useQuery({ queryKey: ["teaching", "anatomy", "catalog"], queryFn: fetchTeachingAnatomyCatalog, staleTime: 30_000 });
   const [selection, dispatch] = useReducer(anatomySelectionReducer, initialAnatomySelectionState);
   const [volumeLoadAttempt, setVolumeLoadAttempt] = useState(0);
   const [volumeState, setVolumeState] = useState<VolumeState | null>(null);
@@ -69,14 +68,30 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   const [expandedStructureIds, setExpandedStructureIds] = useState<string[]>([]);
   const [hiddenStructureIds, setHiddenStructureIds] = useState<string[]>([]);
   const [isolatedStructureId, setIsolatedStructureId] = useState<string | null>(null);
+  const [sectionPlanesVisible, setSectionPlanesVisible] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState<"axial" | "sagittal" | "coronal" | "3d">("axial");
+  const [bodyRegionFilter, setBodyRegionFilter] = useState("");
+  const [systemFilter, setSystemFilter] = useState("");
   const manifest = manifestQuery.data?.available ? manifestQuery.data.manifest : null;
   const selectedStructure = manifest?.structures.find((structure) => structure.id === selection.selectedStructureId) ?? null;
-  const visibleTreeIds = useMemo(() => manifest ? matchingTreeIds(manifest.structures, structureSearch.trim().toLocaleLowerCase()) : new Set<string>(), [manifest, structureSearch]);
+  const visibleTreeIds = useMemo(() => manifest ? matchingTreeIds(manifest.structures, structureSearch.trim().toLocaleLowerCase(), bodyRegionFilter, systemFilter) : new Set<string>(), [manifest, structureSearch, bodyRegionFilter, systemFilter]);
   const selectStructure = useCallback((structureId: string) => {
     dispatch({ type: "select-structure", structureId });
     const structure = manifest?.structures.find((entry) => entry.id === structureId);
     if (structure?.representativePointLps) setWorldPointLps(structure.representativePointLps);
   }, [manifest]);
+
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === workspaceRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement === workspaceRef.current) await document.exitFullscreen();
+    else await workspaceRef.current?.requestFullscreen();
+  };
 
   useEffect(() => {
     if (!manifest) return;
@@ -99,8 +114,8 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   if (!manifestQuery.data.available) {
     return (
       <section className="mx-auto w-full max-w-5xl space-y-5 px-4 py-5 sm:px-6 lg:px-8">
-        <AnatomyBreadcrumbs title={displayTitle(atlasId, manifestQuery.data.title)} />
-        <header><h1 className="text-2xl font-semibold text-foreground">{displayTitle(atlasId, manifestQuery.data.title)}</h1><p className="mt-1 text-sm text-muted-foreground">Anatomy reference atlas</p></header>
+        <AnatomyBreadcrumbs title={manifestQuery.data.title} />
+        <header><h1 className="text-2xl font-semibold text-foreground">{manifestQuery.data.title}</h1><p className="mt-1 text-sm text-muted-foreground">Anatomy reference atlas</p></header>
         <Card className="space-y-2 border border-amber-200 bg-amber-50 p-5" role="status">
             <h2 className="font-semibold text-foreground">{manifestQuery.data.status === "pending-source-validation" ? "Pending source validation" : "Dataset not installed"}</h2>
           <p className="text-sm text-muted-foreground">{manifestQuery.data.message}</p>
@@ -116,10 +131,14 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   if (currentVolumeState.error || !currentVolumeState.data) return <ErrorState message={`${activeManifest.title} could not be validated: ${currentVolumeState.error ?? "atlas data unavailable"}`} onRetry={() => setVolumeLoadAttempt((attempt) => attempt + 1)} />;
 
   const { primary, segmentation } = currentVolumeState.data;
-  const activePlane: AnatomyPlane = "axial";
   const activeWorldPoint = primary ? (worldPointLps ?? anatomyVolumeCenterLps(primary.geometry)) : null;
   const canOverlaySelected = Boolean(segmentation && selectedStructure?.labelValue !== undefined);
   const relatedAtlasIds = selectedStructure?.relatedAtlasIds ?? [];
+  const bodyRegionOptions = [...new Set(activeManifest.structures.map(({ bodyRegion }) => bodyRegion).filter((value): value is string => Boolean(value)))].sort();
+  const systemOptions = [...new Set(activeManifest.structures.map(({ system }) => system).filter((value): value is string => Boolean(value)))].sort();
+  const filteredOutMeshIds = activeManifest.structures.filter((structure) => structure.meshAsset
+    && ((bodyRegionFilter && structure.bodyRegion !== bodyRegionFilter) || (systemFilter && structure.system !== systemFilter))).map(({ id }) => id);
+  const effectiveHiddenStructureIds = [...new Set([...hiddenStructureIds, ...filteredOutMeshIds])];
   const roots = groupedRoots(activeManifest);
   const childrenByParent = new Map<string, TeachingAnatomyStructure[]>();
   for (const structure of activeManifest.structures) {
@@ -131,6 +150,7 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   const renderStructure = (structure: TeachingAnatomyStructure, depth = 0): React.ReactNode => {
     if (!visibleTreeIds.has(structure.id)) return null;
     const children = childrenByParent.get(structure.id) ?? [];
+    const has3dGeometry = canRenderAnatomyStructure(activeManifest, structure.id);
     const searchActive = structureSearch.trim().length > 0;
     const expanded = searchActive || expandedStructureIds.includes(structure.id);
     const hidden = hiddenStructureIds.includes(structure.id);
@@ -143,8 +163,8 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
             <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-black/15" style={{ backgroundColor: structure.color }} aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">{structure.name}</span>
           </button>
-          {structure.meshAsset && <button type="button" aria-label={`${hidden ? "Show" : "Hide"} ${structure.name}`} aria-pressed={!hidden} onClick={() => setHiddenStructureIds((current) => hidden ? current.filter((id) => id !== structure.id) : [...current, structure.id])} className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">{hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
-          {structure.meshAsset && <button type="button" aria-label={`${isolated ? "Restore all structures" : `Isolate ${structure.name}`}`} aria-pressed={isolated} onClick={() => setIsolatedStructureId((current) => current === structure.id ? null : structure.id)} className={`rounded px-1.5 py-1 text-[0.65rem] ${isolated ? "bg-muted text-accent" : "text-muted-foreground hover:bg-muted"}`}>{isolated ? "Restore" : "Isolate"}</button>}
+          {has3dGeometry && <button type="button" aria-label={`${hidden ? "Show" : "Hide"} ${structure.name}`} aria-pressed={!hidden} onClick={() => setHiddenStructureIds((current) => hidden ? current.filter((id) => id !== structure.id) : [...current, structure.id])} className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">{hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
+          {has3dGeometry && <button type="button" aria-label={`${isolated ? "Restore all structures" : `Isolate ${structure.name}`}`} aria-pressed={isolated} onClick={() => setIsolatedStructureId((current) => current === structure.id ? null : structure.id)} className={`rounded px-1.5 py-1 text-[0.65rem] ${isolated ? "bg-muted text-accent" : "text-muted-foreground hover:bg-muted"}`}>{isolated ? "Restore" : "Isolate"}</button>}
         </div>
         {children.length > 0 && expanded && <ul className="mt-0.5 space-y-0.5">{children.map((child) => renderStructure(child, depth + 1))}</ul>}
       </li>
@@ -152,11 +172,11 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
   };
 
   return (
-    <section aria-labelledby="anatomy-atlas-title" className="space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-      <AnatomyBreadcrumbs title={displayTitle(atlasId, activeManifest.title)} />
+    <section ref={workspaceRef} aria-labelledby="anatomy-atlas-title" className={`min-w-0 max-w-full space-y-4 overflow-x-hidden px-4 py-4 sm:px-6 lg:px-8 ${fullscreen ? "h-screen overflow-y-auto bg-background" : ""}`}>
+      <AnatomyBreadcrumbs title={activeManifest.title} />
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 id="anatomy-atlas-title" className="text-2xl font-semibold text-foreground">{displayTitle(atlasId, activeManifest.title)}</h1>
+          <h1 id="anatomy-atlas-title" className="text-2xl font-semibold text-foreground">{activeManifest.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{activeManifest.bodyRegion} · {activeManifest.modality} · {activeManifest.structures.length} structures · {activeManifest.coordinateSystem} physical coordinates</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -166,7 +186,9 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
             <button type="button" aria-pressed={selection.overlayMode === "off"} onClick={() => dispatch({ type: "set-overlay-mode", overlayMode: "off" })} className={`rounded px-2 py-1 ${selection.overlayMode === "off" ? "bg-muted font-semibold text-accent" : "hover:bg-muted"}`}>Off</button>
             <button type="button" aria-pressed={selection.overlayMode === "selected"} disabled={!canOverlaySelected} onClick={() => dispatch({ type: "set-overlay-mode", overlayMode: "selected" })} className={`rounded px-2 py-1 disabled:opacity-50 ${selection.overlayMode === "selected" ? "bg-muted font-semibold text-accent" : "hover:bg-muted"}`}>Selected structure</button>
           </div>}
+          {primary && <button type="button" aria-pressed={sectionPlanesVisible} onClick={() => setSectionPlanesVisible((visible) => !visible)} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">{sectionPlanesVisible ? "Hide section planes" : "Show section planes"}</button>}
           {hiddenStructureIds.length > 0 && <button type="button" onClick={() => setHiddenStructureIds([])} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">Show all</button>}
+          {primary && <button type="button" onClick={() => void toggleFullscreen()} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted" aria-label={fullscreen ? "Exit full screen radiology workspace" : "Enter full screen radiology workspace"}>{fullscreen ? "Exit fullscreen" : "Fullscreen workspace"}</button>}
         </div>
       </header>
 
@@ -174,6 +196,8 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
         <aside aria-label="Anatomical structures" className="max-h-[38rem] min-w-0 overflow-auto rounded-xl border bg-card p-3" style={{ borderColor: "var(--border)" }}>
           <h2 className="px-2 pb-2 text-sm font-semibold text-foreground">Structures</h2>
           <SearchInput aria-label="Search structures and synonyms" className="mb-3" value={structureSearch} onChange={(event) => setStructureSearch(event.target.value)} placeholder="Search structures" showClearButton onClear={() => setStructureSearch("")} />
+          {bodyRegionOptions.length > 1 && <label className="mb-2 block px-2 text-xs text-muted-foreground">Body region<select aria-label="Filter structures by body region" className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-foreground" value={bodyRegionFilter} onChange={(event) => setBodyRegionFilter(event.target.value)}><option value="">All regions</option>{bodyRegionOptions.map((value) => <option key={value}>{value}</option>)}</select></label>}
+          {systemOptions.length > 1 && <label className="mb-2 block px-2 text-xs text-muted-foreground">System<select aria-label="Filter structures by system" className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-foreground" value={systemFilter} onChange={(event) => setSystemFilter(event.target.value)}><option value="">All systems</option>{systemOptions.map((value) => <option key={value}>{value}</option>)}</select></label>}
           <p className="mb-2 px-2 text-xs text-muted-foreground">Search names or synonyms, or expand a row to browse its children.</p>
           <nav>
             {roots.map(([category, structures]) => (
@@ -186,18 +210,29 @@ function TeachingAnatomyAtlasPageContent({ atlasId }: { atlasId: string }) {
           </nav>
         </aside>
 
-        <div className={primary ? "grid min-w-0 gap-3 lg:grid-cols-2" : "min-w-0"}>
+        <div className="min-w-0">
           {primary && activeWorldPoint && activeManifest.volumes.primary ? <>
-            {(["axial", "sagittal", "coronal"] as AnatomyPlane[]).map((viewPlane) => <CrossSectionStackViewer key={viewPlane} primary={primary} segmentation={segmentation} modality={activeManifest.volumes.primary!.modality} display={activeManifest.volumes.primary} plane={viewPlane} worldPointLps={activeWorldPoint} onWorldPointLpsChange={setWorldPointLps} selectedLabel={selectedStructure?.labelValue ?? null} selectedColor={selectedStructure?.color ?? null} overlayEnabled={selection.overlayMode === "selected" && canOverlaySelected} />)}
-            <Anatomy3dViewer manifest={activeManifest} geometry={primary.geometry} plane={activePlane} sliceIndex={anatomyPlaneIndexFromWorldPoint(primary.geometry, activePlane, activeWorldPoint)} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={hiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} />
-          </> : <><Anatomy3dViewer manifest={activeManifest} geometry={null} plane={activePlane} sliceIndex={0} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={hiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} /><Card className="flex min-h-[18rem] items-center justify-center p-6 text-center" role="status"><p className="max-w-sm text-sm text-muted-foreground">Cross-sectional reference atlas not yet available.</p></Card></>}
+            <div role="tablist" aria-label="Radiology viewport" className="mb-3 flex gap-1 overflow-x-auto lg:hidden">
+              {(["axial", "sagittal", "coronal", "3d"] as const).map((viewport) => <button key={viewport} type="button" role="tab" aria-selected={mobileViewport === viewport} onClick={() => setMobileViewport(viewport)} className={`shrink-0 rounded-lg border px-3 py-2 text-sm ${mobileViewport === viewport ? "bg-muted font-semibold text-accent" : "text-muted-foreground"}`}>{viewport === "3d" ? "3D" : viewport[0]!.toUpperCase() + viewport.slice(1)}</button>)}
+            </div>
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+              {(["axial", "sagittal", "coronal"] as AnatomyPlane[]).map((viewPlane) => <div key={viewPlane} className={`${mobileViewport === viewPlane ? "block" : "hidden"} min-w-0 lg:block`}><CrossSectionStackViewer primary={primary} segmentation={segmentation} modality={activeManifest.volumes.primary!.modality} display={activeManifest.volumes.primary} plane={viewPlane} worldPointLps={activeWorldPoint} onWorldPointLpsChange={setWorldPointLps} selectedLabel={selectedStructure?.labelValue ?? null} selectedColor={selectedStructure?.color ?? null} overlayEnabled={selection.overlayMode === "selected" && canOverlaySelected} /></div>)}
+              <div className={`${mobileViewport === "3d" ? "block" : "hidden"} min-w-0 lg:block`}><Anatomy3dViewer manifest={activeManifest} geometry={primary.geometry} worldPointLps={activeWorldPoint} sectionPlanesVisible={sectionPlanesVisible} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={effectiveHiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} /></div>
+            </div>
+          </> : <Anatomy3dViewer manifest={activeManifest} geometry={null} worldPointLps={null} sectionPlanesVisible={false} selectedStructureId={selection.selectedStructureId} hiddenStructureIds={effectiveHiddenStructureIds} isolatedStructureId={isolatedStructureId} onSelectStructure={selectStructure} />}
         </div>
       </div>
 
       <Card className="flex flex-wrap items-start gap-x-6 gap-y-2 px-4 py-3">
         <div className="min-w-48"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Selected structure</p><p className="mt-1 text-sm font-semibold text-foreground">{selectedStructure?.name ?? "Choose a structure in the list or 3D model"}</p></div>
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">{selectedStructure?.note || "Select a structure to view its anatomical label and educational note."}</p>
-        {relatedAtlasIds.map((relatedAtlasId) => <Link key={relatedAtlasId} to={`/teaching/anatomy/atlas/${relatedAtlasId}`} className="self-center rounded-md border px-3 py-2 text-sm font-medium text-primary hover:bg-muted">Open radiology atlas</Link>)}
+        {(selectedStructure?.radiologyNote || selectedStructure?.note) && <div className="min-w-0 flex-1 space-y-1 text-sm text-muted-foreground">{selectedStructure.radiologyNote && <p><span className="font-medium text-foreground">Radiology teaching note. </span>{selectedStructure.radiologyNote}</p>}{selectedStructure.note && <p><span className="font-medium text-foreground">Source anatomy metadata. </span>{selectedStructure.note}</p>}</div>}
+        {relatedAtlasIds.map((relatedAtlasId) => {
+          const relatedAtlas = catalogQuery.data?.items.find((item) => item.atlasId === relatedAtlasId);
+          if (!relatedAtlas) return null;
+          if (relatedAtlas.status === "ready") return <Link key={relatedAtlasId} to={`/teaching/anatomy/atlas/${relatedAtlasId}`} className="self-center rounded-md border px-3 py-2 text-sm font-medium text-primary hover:bg-muted">Open radiology atlas: {relatedAtlas.title}</Link>;
+          const status = relatedAtlas.status === "pending-source-validation" ? "pending validation" : relatedAtlas.status === "unavailable" ? "unavailable" : "not installed";
+          return <span key={relatedAtlasId} className="self-center rounded-md border px-3 py-2 text-xs text-muted-foreground" role="status">{relatedAtlas.title} - {status}</span>;
+        })}
       </Card>
       <p className="text-[0.68rem] text-muted-foreground">Educational reference atlas · {activeManifest.provenance.project} · <Link to="/teaching/anatomy/sources" className="font-medium underline-offset-4 hover:underline">Source and license details</Link></p>
     </section>
