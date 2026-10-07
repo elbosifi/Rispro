@@ -743,6 +743,119 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     }
   });
 
+  it("reuses requester verification for a non-ambiguous patient in all-appointments mode without retaining verification secrets", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-05-12";
+    await fillNonOncologyCategory(date);
+    const patientId = await createPatient();
+    const identifier = (await pool.query<{ identifier_value: string }>(`select identifier_value from patients where id = $1`, [patientId])).rows[0]!.identifier_value;
+
+    await withSystemSetting("patient_registration", "patient_identity_verification_mode", { value: "all_appointments" }, async () => {
+      const risk = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patientId}/risk`);
+      assert.equal(risk.status, 200);
+      assert.equal((risk.data as { patient: { identityRisk: string; identityVerificationRequired: boolean } }).patient.identityRisk, "none");
+      assert.equal((risk.data as { patient: { identityVerificationRequired: boolean } }).patient.identityVerificationRequired, true);
+
+      const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patientId}/verify`, {
+        method: "POST",
+        body: { method: "primary_identifier", evidence: identifier },
+      });
+      assert.equal(verification.status, 200, JSON.stringify(verification.data));
+      const proof = String((verification.data as { proof?: unknown }).proof || "");
+      assert.ok(proof);
+
+      const requested = await requestCategoryOverride(date, patientId, receptionistCookie, proof);
+      assert.equal(requested.status, 201, JSON.stringify(requested.data));
+      assert.equal(JSON.stringify(requested.data).includes("patientIdentityVerificationFingerprint"), false);
+      const requestId = Number((requested.data as any).request.id);
+      const stored = await getRequestFromDb(requestId);
+      const assertion = stored.request_payload_json.createPayload.patientIdentityVerificationAssertion;
+      assert.deepEqual(
+        {
+          patientId: assertion.patientId,
+          verifierUserId: assertion.verifierUserId,
+          verificationMethod: assertion.verificationMethod,
+          ambiguityRuleVersion: assertion.ambiguityRuleVersion,
+        },
+        {
+          patientId,
+          verifierUserId: receptionistId,
+          verificationMethod: "primary_identifier",
+          ambiguityRuleVersion: "name_prefix_configurable_primary_identifier_v3",
+        }
+      );
+      assert.equal(typeof assertion.verifiedAt, "string");
+      assert.ok(stored.patient_identity_verification_fingerprint);
+      const deferredJson = JSON.stringify(stored.request_payload_json);
+      for (const secret of [identifier, proof, "identityFingerprint"]) {
+        assert.equal(deferredJson.includes(secret), false);
+      }
+
+      const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+        method: "POST",
+        body: { approverReason: "Requester identity verification remains valid." },
+      });
+      assert.equal(approved.status, 200, JSON.stringify(approved.data));
+      assert.equal((approved.data as any).request.status, "approved");
+      assert.equal(await countBookings(date, patientId), 1);
+    });
+  });
+
+  it("requires requester verification before submitting a non-ambiguous deferred request in all-appointments mode", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-05-13";
+    await fillNonOncologyCategory(date);
+    const patientId = await createPatient();
+
+    await withSystemSetting("patient_registration", "patient_identity_verification_mode", { value: "all_appointments" }, async () => {
+      const requested = await requestCategoryOverride(date, patientId);
+      assert.equal(requested.status, 422, JSON.stringify(requested.data));
+      assert.match(JSON.stringify(requested.data), /patient_identity_verification_required/);
+      const requests = await pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from appointments_v2.scheduling_override_requests
+         where patient_id = $1 and requested_booking_date = $2::date`,
+        [patientId, date]
+      );
+      assert.equal(requests.rows[0]?.count ?? 0, 0);
+      assert.equal(await countBookings(date, patientId), 0);
+    });
+  });
+
+  it("requires re-verification when non-ambiguous patient identity changes before all-appointments deferred approval", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-05-14";
+    await fillNonOncologyCategory(date);
+    const patientId = await createPatient();
+    const identifier = (await pool.query<{ identifier_value: string }>(`select identifier_value from patients where id = $1`, [patientId])).rows[0]!.identifier_value;
+
+    await withSystemSetting("patient_registration", "patient_identity_verification_mode", { value: "all_appointments" }, async () => {
+      const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patientId}/verify`, {
+        method: "POST",
+        body: { method: "primary_identifier", evidence: identifier },
+      });
+      assert.equal(verification.status, 200, JSON.stringify(verification.data));
+      const proof = String((verification.data as { proof?: unknown }).proof || "");
+      assert.ok(proof);
+
+      const requested = await requestCategoryOverride(date, patientId, receptionistCookie, proof);
+      assert.equal(requested.status, 201, JSON.stringify(requested.data));
+      const requestId = Number((requested.data as any).request.id);
+      await pool.query(`update patients set phone_1 = '0910009999' where id = $1`, [patientId]);
+
+      const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+        method: "POST",
+        body: { approverReason: "Identity details changed after request." },
+      });
+      assert.equal(approved.status, 422, JSON.stringify(approved.data));
+      assert.match(JSON.stringify(approved.data), /patient_identity_reverification_required/);
+      assert.equal(await countBookings(date, patientId), 0);
+    });
+  });
+
   it("rejects a tampered ambiguous-patient proof without persisting secrets", async () => {
     if (!testData) return;
     await setCapacityLimits();

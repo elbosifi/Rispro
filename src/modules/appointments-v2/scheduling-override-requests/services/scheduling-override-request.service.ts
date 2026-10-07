@@ -13,7 +13,7 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
-import { PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
+import { isPatientIdentityVerificationRequired, PATIENT_IDENTITY_RULE_VERSION, resolvePatientIdentityRisk, resolvePatientIdentityVerificationMode, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import { canRoleAccessPage, readPageVisibilityMatrix } from "../../../../services/page-visibility-settings-service.js";
@@ -740,7 +740,8 @@ export async function createSchedulingOverrideRequest(
       if (!modality) throw new SchedulingError(404, "Modality not found.", ["modality_not_found"]);
       validateModalitySafetyForCreate(modality, createPayload);
       const identityRisk = await resolvePatientIdentityRisk(createPayload.patientId, client);
-      if (identityRisk.identityRisk === "ambiguous") {
+      const verificationMode = await resolvePatientIdentityVerificationMode(client);
+      if (isPatientIdentityVerificationRequired(identityRisk, verificationMode)) {
         const proofAssertion = validatePatientIdentityVerificationProof(
           createPayload.patientIdentityVerificationProof,
           { patientId: createPayload.patientId, userId, risk: identityRisk }
