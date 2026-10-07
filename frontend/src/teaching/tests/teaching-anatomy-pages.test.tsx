@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -143,6 +144,24 @@ describe("Teaching anatomy routes and interaction", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Search anatomy atlases" }), { target: { value: "SPL Knee" } });
     expect(screen.getByRole("heading", { name: "SPL Knee Atlas" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "SPL Liver Atlas" })).toBeNull();
+  });
+
+  it("makes every atlas card's primary title link navigable while keeping provenance links independent", async () => {
+    const user = userEvent.setup();
+    renderTeaching("/teaching/anatomy");
+    const liver = await screen.findByRole("link", { name: "SPL Liver Atlas" });
+    expect(liver.getAttribute("href")).toBe("/teaching/anatomy/atlas/spl-liver");
+    expect(screen.getByRole("link", { name: "Whole-body 3D Navigator" }).getAttribute("href")).toBe("/teaching/anatomy/atlas/bodyparts3d");
+    const license = screen.getAllByRole("link", { name: "License terms" })[0]!;
+    const source = screen.getAllByRole("link", { name: "Source" })[0]!;
+    expect(license.getAttribute("href")).toBe("https://example.org/license");
+    expect(source.getAttribute("href")).toBe("https://example.org/source");
+    expect(fireEvent.click(license)).toBe(true);
+    expect(fireEvent.click(source)).toBe(true);
+    expect(screen.getByRole("heading", { name: "Anatomy atlas library" })).toBeTruthy();
+    liver.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("heading", { name: "Dataset not installed" })).toBeTruthy();
   });
 
   it("shows attribution and license details for every catalog entry", async () => {

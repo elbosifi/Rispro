@@ -72,12 +72,75 @@ test("pinned downloads reject streamed size overflow and checksum mismatch", asy
   await assert.rejects(downloadPinned({ name: "wrong archive", url: "https://openanatomy.org/source.zip", sizeBytes: 3, sha256: "a".repeat(64), destination: checksumPath, fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])) }), /size or SHA-256/i);
 }));
 
+test("pinned downloads have no total-transfer timeout while data continues to arrive", async () => withTemporaryDirectory(async (directory) => {
+  const bytes = Buffer.from("slow-but-steady-download");
+  let offset = 0;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (offset >= bytes.length) { controller.close(); return; }
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      controller.enqueue(bytes.subarray(offset, offset + 1));
+      offset += 1;
+    },
+  });
+  await downloadPinned({ name: "slow archive", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination: path.join(directory, "slow.zip"), connectionTimeout: 5, inactivityTimeout: 30, attempts: 1, fetchImpl: async () => new Response(stream) });
+}));
+
+test("pinned downloads timeout only when the response stops producing bytes", async () => withTemporaryDirectory(async (directory) => {
+  const stalled = new ReadableStream({ start() {} });
+  await assert.rejects(downloadPinned({ name: "stalled archive", url: "https://openanatomy.org/source.zip", sizeBytes: 1, sha256: sha256(Buffer.from("x")), destination: path.join(directory, "stalled.zip"), inactivityTimeout: 10, attempts: 1, fetchImpl: async () => new Response(stalled) }), /stalled: no data received for 0 seconds/i);
+}));
+
+test("pinned downloads resume valid partials, restart safely when Range is ignored, and reuse verified complete files", async () => withTemporaryDirectory(async (directory) => {
+  const bytes = Buffer.from("hello world");
+  const destination = path.join(directory, "resume.zip");
+  await writeFile(destination, bytes.subarray(0, 6));
+  let requestedRange = "";
+  await downloadPinned({ name: "resumed archive", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, fetchImpl: async (_url, options) => {
+    requestedRange = options.headers.range;
+    return new Response(bytes.subarray(6), { status: 206, headers: { "content-range": "bytes 6-10/11", "content-length": "5" } });
+  } });
+  assert.equal(requestedRange, "bytes=6-");
+  assert.deepEqual(await readFile(destination), bytes);
+  let requests = 0;
+  await downloadPinned({ name: "complete archive", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, fetchImpl: async () => { requests += 1; throw new Error("should not fetch"); } });
+  assert.equal(requests, 0);
+  await writeFile(destination, bytes.subarray(0, 6));
+  await downloadPinned({ name: "range ignored archive", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, fetchImpl: async () => new Response(bytes, { headers: { "content-length": String(bytes.length) } }) });
+  assert.deepEqual(await readFile(destination), bytes);
+}));
+
+test("invalid partials restart and transient stream failures resume their retained bytes", async () => withTemporaryDirectory(async (directory) => {
+  const bytes = Buffer.from("hello world");
+  const destination = path.join(directory, "retry.zip");
+  await writeFile(destination, Buffer.concat([bytes, Buffer.from("oversized")]));
+  let firstRange = "unexpected";
+  await downloadPinned({ name: "oversized partial", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, fetchImpl: async (_url, options) => { firstRange = options.headers.range ?? ""; return new Response(bytes); } });
+  assert.equal(firstRange, "");
+  await writeFile(destination, Buffer.from("wrong-hash!"));
+  let wrongHashRange = "unexpected";
+  await downloadPinned({ name: "wrong complete partial", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, fetchImpl: async (_url, options) => { wrongHashRange = options.headers.range ?? ""; return new Response(bytes); } });
+  assert.equal(wrongHashRange, "");
+  await writeFile(destination, bytes.subarray(0, 6));
+  let attempt = 0;
+  await downloadPinned({ name: "retry archive", url: "https://openanatomy.org/source.zip", sizeBytes: bytes.length, sha256: sha256(bytes), destination, sleepImpl: async () => undefined, fetchImpl: async (_url, options) => {
+    attempt += 1;
+    if (attempt === 1) {
+      let reads = 0;
+      return new Response(new ReadableStream({ pull(controller) { if (reads++ === 0) controller.enqueue(bytes.subarray(6, 8)); else controller.error(new Error("reset")); } }), { status: 206, headers: { "content-range": "bytes 6-10/11", "content-length": "5" } });
+    }
+    assert.equal(options.headers.range, "bytes=8-");
+    return new Response(bytes.subarray(8), { status: 206, headers: { "content-range": "bytes 8-10/11", "content-length": "3" } });
+  } });
+  assert.deepEqual(await readFile(destination), bytes);
+}));
+
 test("pinned download redirect loops and interrupted streams fail closed", async () => withTemporaryDirectory(async (directory) => {
   let redirects = 0;
   await assert.rejects(downloadPinned({ name: "redirected archive", url: "https://openanatomy.org/source.zip", sizeBytes: 1, sha256: "a".repeat(64), destination: path.join(directory, "redirect.zip"), fetchImpl: async () => { redirects += 1; return new Response(null, { status: 302, headers: { location: "https://openanatomy.org/again.zip" } }); } }), /redirect limit/i);
   assert.equal(redirects, 5);
   const interrupted = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.error(new Error("connection interrupted")); } });
-  await assert.rejects(downloadPinned({ name: "interrupted archive", url: "https://openanatomy.org/source.zip", sizeBytes: 2, sha256: "a".repeat(64), destination: path.join(directory, "interrupted.zip"), fetchImpl: async () => new Response(interrupted) }), /connection interrupted/i);
+  await assert.rejects(downloadPinned({ name: "interrupted archive", url: "https://openanatomy.org/source.zip", sizeBytes: 2, sha256: "a".repeat(64), destination: path.join(directory, "interrupted.zip"), attempts: 1, fetchImpl: async () => new Response(interrupted) }), /stream failed|connection failed/i);
 }));
 
 test("ZIP extraction reads a temporary archive file, constrains roots and bounds expansion", async () => withTemporaryDirectory(async (directory) => {

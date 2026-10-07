@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, open, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -15,6 +15,45 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const lockPath = path.join(scriptDirectory, "open-atlas-sources.lock.json");
 const allowedHosts = new Set(["www.openanatomy.org", "openanatomy.org", "dbarchive.biosciencedbc.jp"]);
 const maximumRedirects = 4;
+const connectionTimeoutMs = 120_000;
+const inactivityTimeoutMs = 180_000;
+const downloadAttempts = 3;
+const progressBytes = 4 * 1024 * 1024;
+
+class DownloadError extends Error {
+  constructor(message, { transient = false } = {}) { super(message); this.transient = transient; }
+}
+
+function partialPath(assetRoot, sha256) {
+  return path.join(assetRoot, ".downloads", `${sha256.toLowerCase()}.partial`);
+}
+
+async function fileSize(filePath) {
+  try { return (await stat(filePath)).size; } catch (error) { if (error?.code === "ENOENT") return 0; throw error; }
+}
+
+async function hashFile(filePath) {
+  const handle = await open(filePath, "r");
+  const hash = createHash("sha256");
+  try {
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+  } finally { await handle.close(); }
+  return hash.digest("hex");
+}
+
+function parseContentRange(value, offset, sizeBytes) {
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(value ?? "");
+  return Boolean(match && Number(match[1]) === offset && Number(match[2]) === sizeBytes - 1 && Number(match[3]) === sizeBytes);
+}
+
+function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 export function safeEntryName(value) {
   if (typeof value !== "string" || value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) throw new Error("Archive contains an unsafe path.");
@@ -30,42 +69,82 @@ function verifyUrl(value) {
   return url;
 }
 
-export async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetchImpl = globalThis.fetch, log = () => undefined }) {
+export async function downloadPinned({ name, url, sizeBytes, sha256, destination, fetchImpl = globalThis.fetch, log = () => undefined, connectionTimeout = connectionTimeoutMs, inactivityTimeout = inactivityTimeoutMs, attempts = downloadAttempts, sleepImpl = sleep }) {
   if (typeof fetchImpl !== "function" || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || !/^[a-f0-9]{64}$/i.test(sha256)) {
     throw new Error(`${name} download lock is invalid or HTTPS fetch is unavailable.`);
   }
-  let current = verifyUrl(url);
-  let response;
-  for (let redirect = 0; redirect <= maximumRedirects; redirect += 1) {
-    response = await fetchImpl(current, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(600_000),
-      headers: { "user-agent": "RISpro-Teaching-Anatomy-Provisioner/1.0" },
-    });
-    if (![301, 302, 303, 307, 308].includes(response.status)) break;
-    const location = response.headers.get("location");
-    if (!location || redirect === maximumRedirects) throw new Error(`${name} download exceeded the redirect limit.`);
-    current = verifyUrl(new URL(location, current).toString());
+  if (!destination) throw new Error(`${name} download requires a persistent destination.`);
+  await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+  let existing = await fileSize(destination);
+  if (existing === sizeBytes) {
+    if (await hashFile(destination) === sha256.toLowerCase()) { log(`[resume] ${name}: using verified ${existing}/${sizeBytes} byte partial.`); return destination; }
+    await unlink(destination);
+    existing = 0;
+  } else if (existing > sizeBytes) {
+    await unlink(destination);
+    existing = 0;
   }
-  if (!response?.ok || !response.body) throw new Error(`${name} download failed with HTTP ${response?.status ?? "no response"}.`);
-  const advertised = response.headers.get("content-length");
-  if (advertised && !response.headers.get("content-encoding") && (!/^\d+$/.test(advertised) || Number(advertised) !== sizeBytes)) {
-    throw new Error(`${name} response size does not match the pinned source lock.`);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      let current = verifyUrl(url);
+      let response;
+      const requestedOffset = existing;
+      for (let redirect = 0; redirect <= maximumRedirects; redirect += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), connectionTimeout);
+        try {
+          response = await fetchImpl(current, { redirect: "manual", signal: controller.signal, headers: { "user-agent": "RISpro-Teaching-Anatomy-Provisioner/1.0", ...(requestedOffset ? { range: `bytes=${requestedOffset}-` } : {}) } });
+        } catch (error) {
+          throw new DownloadError(controller.signal.aborted ? `${name} connection timed out after ${Math.round(connectionTimeout / 1000)} seconds.` : `${name} download connection failed: ${error instanceof Error ? error.message : "unknown error"}.`, { transient: true });
+        } finally { clearTimeout(timer); }
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const location = response.headers.get("location");
+        if (!location || redirect === maximumRedirects) throw new DownloadError(`${name} download exceeded the redirect limit.`);
+        current = verifyUrl(new URL(location, current).toString());
+      }
+      if (!response?.body) throw new DownloadError(`${name} download failed with HTTP ${response?.status ?? "no response"}.`, { transient: [408, 429].includes(response?.status) || (response?.status >= 500 && response?.status <= 599) });
+      let append = requestedOffset > 0;
+      if (append && response.status === 200) { await writeFile(destination, Buffer.alloc(0), { mode: 0o600 }); existing = 0; append = false; log(`[resume] ${name}: upstream ignored Range; restarting from 0/${sizeBytes} bytes.`); }
+      else if (append && (response.status !== 206 || !parseContentRange(response.headers.get("content-range"), requestedOffset, sizeBytes))) throw new DownloadError(`${name} resume response does not match the requested byte range.`);
+      else if (!append && response.status !== 200) throw new DownloadError(`${name} download failed with HTTP ${response.status}.`, { transient: [408, 429].includes(response.status) || (response.status >= 500 && response.status <= 599) });
+      const advertised = response.headers.get("content-length");
+      const expectedResponseBytes = sizeBytes - existing;
+      if (advertised && !response.headers.get("content-encoding") && (!/^\d+$/.test(advertised) || Number(advertised) !== expectedResponseBytes)) throw new DownloadError(`${name} response size does not match the pinned source lock.`);
+      if (append) log(`[resume] ${name}: continuing from ${existing}/${sizeBytes} bytes.`);
+      const output = await open(destination, append ? "a" : "w", 0o600);
+      let received = existing;
+      let nextReport = Math.floor(received / progressBytes + 1) * progressBytes;
+      const reader = response.body.getReader();
+      let complete = false;
+      try {
+        while (true) {
+          let timeout;
+          const next = await Promise.race([
+            reader.read().catch((error) => Promise.reject(new DownloadError(`${name} download stream failed: ${error instanceof Error ? error.message : "unknown error"}.`, { transient: true }))),
+            new Promise((_, reject) => { timeout = setTimeout(() => reject(new DownloadError(`${name} download stalled: no data received for ${Math.round(inactivityTimeout / 1000)} seconds.`, { transient: true })), inactivityTimeout); }),
+          ]).finally(() => clearTimeout(timeout));
+          if (next.done) { complete = true; break; }
+          const bytes = Buffer.from(next.value); received += bytes.length;
+          if (received > sizeBytes) throw new DownloadError(`${name} download exceeded the pinned byte size.`);
+          await output.writeFile(bytes);
+          if (received >= nextReport) { log(`[progress] ${name}: downloaded ${received}/${sizeBytes} bytes.`); nextReport += progressBytes; }
+        }
+      } finally {
+        if (!complete) await reader.cancel().catch(() => undefined);
+        await output.close();
+        reader.releaseLock();
+      }
+      if (received !== sizeBytes || await hashFile(destination) !== sha256.toLowerCase()) { await unlink(destination); throw new DownloadError(`${name} size or SHA-256 does not match its pinned source lock.`); }
+      log(`[progress] ${name}: verified ${received} bytes and SHA-256.`);
+      return destination;
+    } catch (error) {
+      if (!(error instanceof DownloadError) || !error.transient || attempt === attempts) throw error;
+      log(`[retry] ${name}: ${error.message} Retrying (${attempt + 1}/${attempts}).`);
+      await sleepImpl(Math.min(2_000, 250 * attempt));
+      existing = await fileSize(destination);
+    }
   }
-  const hash = createHash("sha256");
-  const chunks = destination ? null : [];
-  const output = destination ? await open(destination, "wx", 0o600) : null;
-  let received = 0;
-  let nextReport = 8 * 1024 * 1024;
-  try { for await (const chunk of response.body) {
-    const bytes = Buffer.from(chunk); received += bytes.length;
-    if (received > sizeBytes) throw new Error(`${name} download exceeded the pinned byte size.`);
-    hash.update(bytes); if (output) await output.writeFile(bytes); else chunks.push(bytes);
-    if (received >= nextReport) { log(`[progress] ${name}: downloaded ${received}/${sizeBytes} bytes.`); nextReport += 8 * 1024 * 1024; }
-  } } finally { await output?.close(); }
-  if (received !== sizeBytes || hash.digest("hex") !== sha256.toLowerCase()) throw new Error(`${name} size or SHA-256 does not match its pinned source lock.`);
-  log(`[progress] ${name}: verified ${received} bytes and SHA-256.`);
-  return destination ?? Buffer.concat(chunks, received);
+  throw new Error(`${name} download failed.`);
 }
 
 export async function extractLockedArchive(archive, destination, { expectedRoot, kind, maximumUncompressedBytes, log = () => undefined }) {
@@ -149,17 +228,20 @@ async function readLockedSources() {
 
 export async function ensureOpenAnatomyAtlas({ atlasId, assetRoot, fetchImpl = globalThis.fetch, now = () => new Date(), log = () => undefined }) {
   let workingDirectory;
+  let cachedArchive;
   try {
     const lock = await readLockedSources();
     const entry = lock.openAnatomy.find((candidate) => candidate.atlasId === atlasId);
     if (!entry) throw new Error(`No pinned Open Anatomy archive is configured for ${atlasId}.`);
     if (verifyInstalledOpenAtlas && await verifyInstalledOpenAtlas(assetRoot, entry)) return { status: "already-current", atlasId };
     workingDirectory = await mkdtemp(path.join(os.tmpdir(), `rispro-${atlasId}-`));
-    const zip = await downloadPinned({ name: atlasId, url: entry.url, sizeBytes: entry.sizeBytes, sha256: entry.sha256, destination: path.join(workingDirectory, "source.zip"), fetchImpl, log });
+    cachedArchive = partialPath(assetRoot, entry.sha256);
+    const zip = await downloadPinned({ name: atlasId, url: entry.url, sizeBytes: entry.sizeBytes, sha256: entry.sha256, destination: cachedArchive, fetchImpl, log });
     const sourceDirectory = path.join(workingDirectory, "source");
     await mkdir(sourceDirectory, { recursive: true, mode: 0o700 });
     await extractLockedArchive(zip, sourceDirectory, { expectedRoot: entry.archiveRoot, kind: "open-anatomy", maximumUncompressedBytes: 300 * 1024 * 1024, log });
     const result = await installOpenAnatomyAtlas({ atlasId, sourceDirectory, targetRoot: assetRoot, sourceSha256: entry.sha256, now, log });
+    await unlink(cachedArchive);
     return { status: "ready", ...result };
   } catch (error) {
     return { status: "unavailable", atlasId, error: error instanceof Error ? error.message : "Unknown Open Anatomy provisioning failure." };
@@ -170,6 +252,7 @@ export async function ensureOpenAnatomyAtlas({ atlasId, assetRoot, fetchImpl = g
 
 export async function ensureBodyParts3d({ assetRoot, fetchImpl = globalThis.fetch, now = () => new Date(), log = () => undefined }) {
   let workingDirectory;
+  const cachedFiles = [];
   try {
     const lock = await readLockedSources();
     const source = lock.bodyParts3d;
@@ -178,7 +261,9 @@ export async function ensureBodyParts3d({ assetRoot, fetchImpl = globalThis.fetc
     }
     if (verifyInstalledBodyParts3d && await verifyInstalledBodyParts3d(assetRoot, source)) return { status: "already-current", atlasId: source.atlasId };
     workingDirectory = await mkdtemp(path.join(os.tmpdir(), "rispro-bodyparts3d-"));
-    const archive = await downloadPinned({ name: "BodyParts3D OBJ archive", ...source.archive, destination: path.join(workingDirectory, "bodyparts3d.zip"), fetchImpl, log });
+    const archive = partialPath(assetRoot, source.archive.sha256);
+    cachedFiles.push(archive);
+    await downloadPinned({ name: "BodyParts3D OBJ archive", ...source.archive, destination: archive, fetchImpl, log });
     const sourceDirectory = path.join(workingDirectory, "source");
     await mkdir(sourceDirectory, { recursive: true, mode: 0o700 });
     await extractLockedArchive(archive, sourceDirectory, { expectedRoot: "partof_BP3D_4.0_obj_99", kind: "bodyparts3d", maximumUncompressedBytes: 300 * 1024 * 1024, log });
@@ -186,9 +271,13 @@ export async function ensureBodyParts3d({ assetRoot, fetchImpl = globalThis.fetc
     const files = await readdir(modelDirectory);
     if (files.length !== source.expectedModelCount) throw new Error(`BodyParts3D contains ${files.length} models; expected ${source.expectedModelCount}.`);
     for (const metadata of source.metadata) {
-      await downloadPinned({ name: `BodyParts3D ${metadata.name}`, ...metadata, destination: path.join(sourceDirectory, metadata.name), fetchImpl, log });
+      const cachedMetadata = partialPath(assetRoot, metadata.sha256);
+      cachedFiles.push(cachedMetadata);
+      await downloadPinned({ name: `BodyParts3D ${metadata.name}`, ...metadata, destination: cachedMetadata, fetchImpl, log });
+      await copyFile(cachedMetadata, path.join(sourceDirectory, metadata.name));
     }
     const result = await installBodyParts3d({ sourceDirectory, targetRoot: assetRoot, sourceSha256: source.archive.sha256, now, log });
+    await Promise.all(cachedFiles.map((file) => unlink(file)));
     return { status: "ready", ...result };
   } catch (error) {
     return { status: "unavailable", atlasId: "bodyparts3d", error: error instanceof Error ? error.message : "Unknown BodyParts3D provisioning failure." };

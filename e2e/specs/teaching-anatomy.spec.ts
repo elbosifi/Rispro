@@ -44,6 +44,24 @@ async function authenticate(page: Parameters<typeof signInWithSession>[0]) {
   await page.addInitScript(() => localStorage.setItem("rispro-language", "en"));
 }
 
+test("atlas cards navigate from their main area while provenance links remain separate", async ({ page }) => {
+  await authenticate(page);
+  const unavailable = { ...catalogItem("bodyparts3d", "Whole-body 3D Navigator", "3D", 0), status: "unavailable", structureCount: null };
+  await page.route("**/api/teaching/anatomy/catalog", (route) => route.fulfill({ json: { items: [catalogItem("spl-liver", "SPL Liver Atlas", "CT", 1), unavailable] } }));
+  await page.goto("/teaching/anatomy");
+  const liverLink = page.getByRole("link", { name: "SPL Liver Atlas" });
+  await expect(liverLink).toHaveAttribute("href", "/teaching/anatomy/atlas/spl-liver");
+  await expect(page.getByRole("link", { name: "Whole-body 3D Navigator" })).toHaveAttribute("href", "/teaching/anatomy/atlas/bodyparts3d");
+  await expect(page.getByRole("link", { name: "License terms" }).first()).toHaveAttribute("href", "https://example.org/license");
+  await expect(page.getByRole("link", { name: "Source", exact: true }).first()).toHaveAttribute("href", "https://example.org/source");
+  await page.getByText("Synthetic browser journey fixture.").first().click();
+  await expect(page).toHaveURL(/\/teaching\/anatomy\/atlas\/spl-liver$/);
+  await page.goto("/teaching/anatomy");
+  await page.getByRole("link", { name: "Whole-body 3D Navigator" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/teaching\/anatomy\/atlas\/bodyparts3d$/);
+});
+
 test("SPL Liver correlated workspace synchronizes three MPRs, 3D planes, interaction, and mobile fallback", async ({ page }, testInfo) => {
   await authenticate(page);
   const ctValues = Array.from({ length: width * height * depth }, (_, index) => index % 120);

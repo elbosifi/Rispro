@@ -83,6 +83,14 @@ test("declared assets use manifest SHA ETags without runtime full-file hashing; 
   }
 });
 
+test("persistent download partials are not addressable as Teaching atlas assets", async () => {
+  const downloads = path.join(runtimeRoot, ".downloads");
+  await mkdir(downloads, { recursive: true });
+  await writeFile(path.join(downloads, `${"a".repeat(64)}.partial`), "incomplete pinned archive");
+  assert.throws(() => service.teachingAnatomyAtlasDirectory(".downloads"), /Unknown Teaching anatomy atlas ID/i);
+  await assert.rejects(service.resolveTeachingAnatomyAsset(".downloads", "partial"), /Unknown Teaching anatomy atlas ID/i);
+});
+
 test("anatomy asset conditional requests use weak ETag comparison, lists and wildcard", () => {
   const etag = `"${"a".repeat(64)}"`;
   assert.equal(service.teachingAnatomyIfNoneMatchMatches(etag, etag), true);

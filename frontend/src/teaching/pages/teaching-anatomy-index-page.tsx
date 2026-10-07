@@ -91,10 +91,17 @@ export function TeachingAnatomyIndexPage() {
       {filtered.length === 0 ? <Card><EmptyState message="No atlases match these filters. Clear the search or choose another region, organ, or system." /></Card> : (
         <section aria-label="Anatomy atlases" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((item) => (
-            <Card key={item.atlasId} className="flex h-full flex-col gap-4 p-4 sm:p-5">
+            <Card key={item.atlasId} className="relative flex h-full flex-col gap-4 p-4 transition-colors hover:border-primary/60 hover:shadow-sm focus-within:border-primary/60 sm:p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">{item.title}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">
+                    <Link
+                      className="before:absolute before:inset-0 before:z-0 before:rounded-[inherit] before:content-[''] focus-visible:before:ring-2 focus-visible:before:ring-primary focus-visible:before:ring-offset-2"
+                      to={`/teaching/anatomy/atlas/${encodeURIComponent(item.atlasId)}`}
+                    >
+                      {item.title}
+                    </Link>
+                  </h2>
                   <p className="mt-1 text-sm text-muted-foreground">{item.bodyRegion} · {item.modality}</p>
                 </div>
                 <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
@@ -108,10 +115,9 @@ export function TeachingAnatomyIndexPage() {
               <div className="mt-auto border-t border-border pt-3 text-xs text-muted-foreground">
                 <p>{item.provenance.license}</p>
                 <p className="mt-1 line-clamp-2">{item.provenance.attribution}</p>
-                <div className="mt-3 flex flex-wrap gap-4">
+                <div className="relative z-10 mt-3 flex flex-wrap gap-4">
                   <a href={item.provenance.licenseUrl} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">License terms</a>
                   {item.provenance.sourceRepository.startsWith("https://") && <a href={item.provenance.sourceRepository} target="_blank" rel="noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">Source</a>}
-                  <Link className="font-medium text-primary underline-offset-4 hover:underline" to={`/teaching/anatomy/atlas/${encodeURIComponent(item.atlasId)}`} aria-label={`Open ${item.title}`}>Atlas details</Link>
                 </div>
               </div>
             </Card>
