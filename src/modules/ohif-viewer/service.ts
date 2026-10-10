@@ -349,7 +349,7 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
 }
 
 export async function proxyAuthorizedDicomWebRequest(input: {
-  userId: UserId; launchToken: string; relativePathWithQuery: string; headers: Record<string, string>;
+  userId: UserId; launchToken: string; relativePathWithQuery: string; headers: Record<string, string>; signal?: AbortSignal;
 }): Promise<globalThis.Response> {
   if (!input.launchToken) throw new HttpError(401, "Viewer session is required.");
   const session = await findAuthorizedViewerSession(hashLaunchToken(input.launchToken), input.userId);
@@ -362,12 +362,12 @@ export async function proxyAuthorizedDicomWebRequest(input: {
   if (session.accessStrategy === "native_dicomweb") {
     const endpoint = session.sourcePacsNodeId == null ? null : await findPacsWebEndpoint(session.sourcePacsNodeId);
     if (!endpoint?.enabled) throw new HttpError(503, "DICOMweb source configuration is unavailable.");
-    return proxyNativeDicomWebRequest(endpoint, input.relativePathWithQuery, input.headers);
+    return proxyNativeDicomWebRequest(endpoint, input.relativePathWithQuery, input.headers, input.signal);
   }
   if (session.accessStrategy === "authoritative_orthanc") {
-    return proxyAuthoritativeOrthancDicomWebRequest(input.relativePathWithQuery, input.headers);
+    return proxyAuthoritativeOrthancDicomWebRequest(input.relativePathWithQuery, input.headers, input.signal);
   }
-  return proxyOrthancDicomWebRequest(input.relativePathWithQuery, input.headers);
+  return proxyOrthancDicomWebRequest(input.relativePathWithQuery, input.headers, input.signal);
 }
 
 export async function runOhifDiagnostic(value: unknown, actor: Actor) {

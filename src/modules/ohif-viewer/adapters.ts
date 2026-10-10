@@ -295,28 +295,28 @@ export async function createImagingSourceAdapter(configuration: OhifViewerConfig
   return OrthancGatewaySourceAdapter.create(settings.orthancModalityKey || "");
 }
 
-export async function proxyNativeDicomWebRequest(endpoint: PacsWebEndpoint, relativePath: string, requestHeaders: Record<string, string>): Promise<Response> {
+export async function proxyNativeDicomWebRequest(endpoint: PacsWebEndpoint, relativePath: string, requestHeaders: Record<string, string>, signal?: AbortSignal): Promise<Response> {
   const upstream = joinUrl(endpoint.dicomwebBaseUrl, relativePath);
   const headers: Record<string, string> = {
     Accept: requestHeaders.accept || "application/dicom+json, multipart/related, application/octet-stream",
     ...credentialHeaders(endpoint),
   };
   if (requestHeaders.range) headers.Range = requestHeaders.range;
-  return streamFetch(upstream, { headers, timeoutSeconds: endpoint.timeoutSeconds, verifyTls: endpoint.verifyTls });
+  return streamFetch(upstream, { headers, timeoutSeconds: endpoint.timeoutSeconds, verifyTls: endpoint.verifyTls, signal });
 }
 
-export async function proxyOrthancDicomWebRequest(relativePath: string, requestHeaders: Record<string, string>): Promise<Response> {
+export async function proxyOrthancDicomWebRequest(relativePath: string, requestHeaders: Record<string, string>, signal?: AbortSignal): Promise<Response> {
   const settings = await resolveOrthancSettings();
   if (!settings.baseUrl) throw new ImagingSourceError("network", "Orthanc base URL is not configured.");
   const headers: Record<string, string> = { Accept: requestHeaders.accept || "application/dicom+json, multipart/related, application/octet-stream" };
   if (settings.username) headers.Authorization = `Basic ${Buffer.from(`${settings.username}:${settings.password}`).toString("base64")}`;
   if (requestHeaders.range) headers.Range = requestHeaders.range;
   return streamFetch(joinUrl(settings.baseUrl, `/dicom-web/${relativePath}`), {
-    headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls,
+    headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls, signal,
   });
 }
 
-export async function proxyAuthoritativeOrthancDicomWebRequest(relativePath: string, requestHeaders: Record<string, string>): Promise<Response> {
+export async function proxyAuthoritativeOrthancDicomWebRequest(relativePath: string, requestHeaders: Record<string, string>, signal?: AbortSignal): Promise<Response> {
   const settings = await readAuthoritativeOrthancSettings();
   assertAuthoritativeOrthancConfigured(settings);
   const headers: Record<string, string> = {
@@ -325,13 +325,17 @@ export async function proxyAuthoritativeOrthancDicomWebRequest(relativePath: str
   };
   if (requestHeaders.range) headers.Range = requestHeaders.range;
   return streamFetch(joinUrl(joinUrl(settings.baseUrl, "/dicom-web"), relativePath), {
-    headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls,
+    headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls, signal,
   });
 }
 
 async function streamFetch(url: string, options: RequestInit & { timeoutSeconds: number; verifyTls?: boolean }): Promise<Response> {
   try {
-    const init: RequestInit & { dispatcher?: unknown } = { ...options, signal: AbortSignal.timeout(Math.max(1, options.timeoutSeconds) * 1000) };
+    const timeoutSignal = AbortSignal.timeout(Math.max(1, options.timeoutSeconds) * 1000);
+    const init: RequestInit & { dispatcher?: unknown } = {
+      ...options,
+      signal: options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal,
+    };
     delete (init as Partial<typeof options>).timeoutSeconds;
     delete (init as Partial<typeof options>).verifyTls;
     if (options.verifyTls === false && url.toLowerCase().startsWith("https://")) {

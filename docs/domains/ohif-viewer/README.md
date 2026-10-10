@@ -67,6 +67,10 @@ The gateway applies lossless HTTP gzip compression to `/ohif-dicomweb/` response
 
 OHIF limits simultaneous image loads to four interaction requests, one thumbnail, and one prefetch. This reduces competition from background images on slower connections while leaving room for multiple visible viewports.
 
+The OHIF origin compresses JavaScript, CSS, WASM, SVG and JSON startup assets with gzip level 1. A disconnected DICOMweb response aborts its upstream request while preserving the archive timeout and exact-study session checks. Normal completed responses keep their existing behavior.
+
+See the [phase-2 performance assessment](../../plans/completed/ohif-performance-phase-2.md) for synthetic measurements, thumbnail compatibility findings, reproduction, and rollback. Focused synthetic validation passed in Chromium and WebKit; real LAN/public HTTPS, actual Safari and future exact-commit CI remain unverified. Existing unrelated CI failures still prevent deployment gating.
+
 Compression savings depend on the source transfer syntax. Already compressed images can have little additional reduction. This does not introduce a lower-resolution preview or a full-quality toggle; that requires separate OHIF loading behavior and archive capability validation. Investigate a slow first image using the frame request's time to first byte, download duration, transferred bytes, and the viewport render timing.
 
 ## Known Limits

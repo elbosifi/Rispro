@@ -3842,7 +3842,17 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const series = Array.from({ length: 20 }, (_, index) => ({ ...current, "0020000E": { Value: [`${uid}.${index + 1}`] } }));
     const seriesJson = JSON.stringify(series);
     const compressedSeries = gzipSync(seriesJson);
-    const archiveSeriesServer = createServer((_req, res) => {
+    let frameClosed: () => void = () => {};
+    const canceledFrameClosed = new Promise<void>((resolve) => { frameClosed = resolve; });
+    const cancellationPath = `/dicom-web/studies/${uid}/series/1.2.3/instances/1.2.999/frames/1`;
+    const archiveSeriesServer = createServer((req, res) => {
+      if (req.url === cancellationPath) {
+        res.writeHead(200, { "content-type": 'multipart/related; type="application/octet-stream"; boundary=canceled-frame' });
+        res.write('--canceled-frame\r\nContent-Type: application/octet-stream\r\n\r\n');
+        const timer = setInterval(() => res.write(Buffer.alloc(16384, 1)), 10);
+        res.once("close", () => { clearInterval(timer); frameClosed(); });
+        return;
+      }
       res.writeHead(200, {
         "content-type": "application/dicom+json", "content-encoding": "gzip",
         "content-length": String(compressedSeries.byteLength),
@@ -3863,6 +3873,7 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
       assert.equal(init?.method || "GET", "GET");
       assert.equal(new Headers(init?.headers).get("Authorization"), `Basic ${Buffer.from("archive-reader:test-secret").toString("base64")}`);
       if (resultMode === "offline") throw new Error("Archive unavailable");
+      if (url.pathname === cancellationPath) return originalFetch(`http://127.0.0.1:${archiveAddress.port}${url.pathname}`, init);
       if (url.pathname.endsWith("/frames/1")) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/octet-stream", "content-length": "3" } });
       if (url.pathname === `/dicom-web/studies/${uid}/series`) {
         return originalFetch(`http://127.0.0.1:${archiveAddress.port}${url.pathname}${url.search}`, init);
@@ -3919,6 +3930,20 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal(frameResponse.status, 200);
     assert.equal(frameResponse.headers.get("content-length"), "3");
     assert.deepEqual(new Uint8Array(await frameResponse.arrayBuffer()), new Uint8Array([1, 2, 3]));
+    const cancellation = new AbortController();
+    const pendingFrame = await originalFetch(`${app.baseUrl}${env.ohifDicomWebProxyPath}${cancellationPath.replace("/dicom-web", "")}`, {
+      headers: { Cookie: scopedCookie }, signal: cancellation.signal,
+    });
+    assert.equal(pendingFrame.status, 200);
+    assert.ok(pendingFrame.body);
+    assert.equal((await pendingFrame.body.getReader().read()).done, false);
+    cancellation.abort();
+    let cancellationDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([canceledFrameClosed, new Promise<never>((_resolve, reject) => {
+        cancellationDeadline = setTimeout(() => reject(new Error("Canceled frame did not close its upstream transfer")), 1000);
+      })]);
+    } finally { clearTimeout(cancellationDeadline); }
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies?PatientID=${encodeURIComponent(patientId)}`)).status, 403);
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/9.9.9/series`)).status, 403);
     assert.equal((await rawApi("", `${env.ohifDicomWebProxyPath}/studies/${uid}/series`)).status, 401);
@@ -3932,6 +3957,12 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     await assert.rejects(() => ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: otherDoctor.id, launchToken: viewerCookie, relativePathWithQuery: `/studies/${uid}/metadata`, headers: {} }), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 401);
     await pool.query(`update viewer_launch_sessions set expires_at=now()-interval '1 second' where appointment_id=$1`, [appointmentId]);
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
+    const reopened = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, false);
+    assert.ok(reopened.status === "ready");
+    await ohifViewerService.exchangeViewerLaunchToken(reopened.launchUrl.split("/").at(-1)!, doctor.id, response);
+    const reopenedFrame = await rawApi(`${doctor.cookie}; ${env.ohifSessionCookieName}=${viewerCookie}`, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`);
+    assert.equal(reopenedFrame.status, 200);
+    assert.deepEqual(new Uint8Array(await reopenedFrame.arrayBuffer()), new Uint8Array([1, 2, 3]));
     await assert.rejects(() => ohifViewerService.launchReportingBoardCaseInOhif({ userId: otherDoctor.id, appRole: "doctor" }, appointmentId, true), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
     for (const [mode, expected] of [["wrong_patient", "not_found"], ["ambiguous", "ambiguous"], ["missing", "not_found"], ["offline", "source_unavailable"]] as const) {
       resultMode = mode;

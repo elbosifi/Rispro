@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { createServer } from "node:http";
 
 process.env.DATABASE_URL ||= "postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test";
 process.env.JWT_SECRET ||= "test-secret-test-secret-test-secret";
 
-const { ImagingSourceError, NativeDicomWebSourceAdapter } = await import("./adapters.js");
+const { ImagingSourceError, NativeDicomWebSourceAdapter, proxyNativeDicomWebRequest } = await import("./adapters.js");
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -27,6 +28,52 @@ function endpoint(authType: "none" | "basic" = "none") {
 }
 
 describe("NativeDicomWebSourceAdapter", () => {
+  it("cancels an upstream request before headers while retaining the source deadline and request headers", async (t) => {
+    let upstreamClosed: () => void = () => {};
+    let upstreamStarted: () => void = () => {};
+    const closed = new Promise<void>((resolve) => { upstreamClosed = resolve; });
+    const started = new Promise<void>((resolve) => { upstreamStarted = resolve; });
+    const server = createServer((req, res) => {
+      assert.equal(req.headers.accept, 'multipart/related; type="application/octet-stream"; transfer-syntax=*');
+      assert.equal(req.headers.range, "bytes=0-1023");
+      const timer = setTimeout(() => res.end("unexpected late response"), 5000);
+      res.once("close", () => { clearTimeout(timer); upstreamClosed(); });
+      upstreamStarted();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const controller = new AbortController();
+    const request = proxyNativeDicomWebRequest({ ...endpoint(), dicomwebBaseUrl: `http://127.0.0.1:${address.port}` }, "/studies/1.2.3/metadata", {
+      accept: 'multipart/related; type="application/octet-stream"; transfer-syntax=*', range: "bytes=0-1023",
+    }, controller.signal);
+    await started;
+    controller.abort();
+    await assert.rejects(request, ImagingSourceError);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([closed, new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new Error("Canceled upstream remained open")), 1000);
+      })]);
+    } finally { clearTimeout(deadline); }
+
+    let combined: AbortSignal | null | undefined;
+    globalThis.fetch = async (_url, init) => { combined = init?.signal; return new Response("ok"); };
+    const caller = new AbortController();
+    await proxyNativeDicomWebRequest({ ...endpoint(), timeoutSeconds: 1 }, "/studies/1.2.3/metadata", {}, caller.signal);
+    // The caller signal must not replace the configured source timeout.
+    assert.ok(combined);
+    assert.equal(combined.aborted, false);
+    let timeoutDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([new Promise<void>((resolve) => combined!.addEventListener("abort", () => resolve(), { once: true })), new Promise<never>((_resolve, reject) => {
+        timeoutDeadline = setTimeout(() => reject(new Error("Source timeout was lost")), 2000);
+      })]);
+    } finally { clearTimeout(timeoutDeadline); }
+    assert.equal(caller.signal.aborted, false);
+  });
+
   it("performs exact-accession QIDO and maps DICOM JSON including StudyInstanceUID", async () => {
     let requestedUrl = "";
     globalThis.fetch = async (input) => {

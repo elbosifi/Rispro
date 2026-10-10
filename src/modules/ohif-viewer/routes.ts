@@ -103,12 +103,23 @@ ohifDicomWebProxyRouter.get(
   "*",
   asyncRoute(async (req: OhifRequest, res: Response) => {
     const current = user(req);
-    const response = await proxyAuthorizedDicomWebRequest({
-      userId: current.sub,
-      launchToken: String(req.cookies?.[env.ohifSessionCookieName] || ""),
-      relativePathWithQuery: req.url,
-      headers: { accept: String(req.headers.accept || ""), range: String(req.headers.range || "") },
+    const controller = new AbortController();
+    res.once("close", () => {
+      if (!res.writableFinished) controller.abort();
     });
+    let response: globalThis.Response;
+    try {
+      response = await proxyAuthorizedDicomWebRequest({
+        userId: current.sub,
+        launchToken: String(req.cookies?.[env.ohifSessionCookieName] || ""),
+        relativePathWithQuery: req.url,
+        headers: { accept: String(req.headers.accept || ""), range: String(req.headers.range || "") },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted && res.destroyed) return;
+      throw error;
+    }
     res.status(response.status);
     for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
       // Fetch decodes compressed bodies but retains their original Content-Length.
