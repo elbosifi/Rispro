@@ -20,12 +20,13 @@ function session(overrides: Partial<SessionRow> = {}): SessionRow {
 function memoryExecutor(row: SessionRow): DbExecutor {
   return {
     async query<T>(sql: string, params: unknown[] = []) {
-      const [tokenHash, userId, viewerSessionHash] = params as [string, number, string?];
+      const [tokenHash, userId, viewerSessionHash, viewerSessionExpiresAt] = params as [string, number, string?, string?];
       const valid = Number(row.user_id) === Number(userId) && row.revoked_at == null && Date.parse(String(row.expires_at)) > Date.now();
       if (sql.includes("set used_at=now()")) {
         if (!valid || row.used_at != null || row.token_hash !== tokenHash) return { rows: [] as T[] };
         row.used_at = new Date().toISOString();
         row.viewer_session_token_hash = viewerSessionHash || null;
+        row.expires_at = viewerSessionExpiresAt;
         return { rows: [row as T] };
       }
       if (!valid || row.used_at == null || row.viewer_session_token_hash !== tokenHash) return { rows: [] as T[] };
@@ -38,17 +39,19 @@ describe("OHIF viewer launch/session tokens", () => {
   it("exchanges a launch token once and leaves the separate viewer session usable", async () => {
     const row = session();
     const db = memoryExecutor(row);
-    assert.ok(await consumeViewerLaunchToken("launch-hash", 10, "viewer-hash", db));
-    assert.equal(await consumeViewerLaunchToken("launch-hash", 10, "second-viewer-hash", db), null);
+    const viewerSessionExpiresAt = new Date(Date.now() + 3_600_000);
+    assert.ok(await consumeViewerLaunchToken("launch-hash", 10, "viewer-hash", viewerSessionExpiresAt, db));
+    assert.equal(await consumeViewerLaunchToken("launch-hash", 10, "second-viewer-hash", viewerSessionExpiresAt, db), null);
     assert.ok(await findAuthorizedViewerSession("viewer-hash", 10, db));
   });
 
   it("rejects expired, wrong-user, and revoked session access", async () => {
     const expired = memoryExecutor(session({ expires_at: new Date(Date.now() - 1_000).toISOString() }));
-    assert.equal(await consumeViewerLaunchToken("launch-hash", 10, "viewer-hash", expired), null);
+    const viewerSessionExpiresAt = new Date(Date.now() + 3_600_000);
+    assert.equal(await consumeViewerLaunchToken("launch-hash", 10, "viewer-hash", viewerSessionExpiresAt, expired), null);
 
     const wrongUser = memoryExecutor(session());
-    assert.equal(await consumeViewerLaunchToken("launch-hash", 11, "viewer-hash", wrongUser), null);
+    assert.equal(await consumeViewerLaunchToken("launch-hash", 11, "viewer-hash", viewerSessionExpiresAt, wrongUser), null);
 
     const revoked = memoryExecutor(session({ used_at: new Date().toISOString(), viewer_session_token_hash: "viewer-hash", revoked_at: new Date().toISOString() }));
     assert.equal(await findAuthorizedViewerSession("viewer-hash", 10, revoked), null);

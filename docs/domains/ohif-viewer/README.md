@@ -55,11 +55,19 @@ Repository defaults prove only the legacy DIMSE assumption (`OSIRIXR` and port 1
 ## Security and Audit
 
 - Reporting Board authorization is re-evaluated server-side for every launch.
-- Launch tokens and viewer-session cookie secrets are separate 256-bit random values stored only as SHA-256 hashes. A launch token is exchanged once, while its scoped HttpOnly `/ohif-dicomweb` viewer session remains valid until expiry.
+- Launch tokens and viewer-session cookie secrets are separate 256-bit random values stored only as SHA-256 hashes. A launch token is exchanged once before its short deadline. The exchanged HttpOnly `/ohif-dicomweb` viewer session receives a fresh lifetime of `SESSION_HOURS` (default eight hours); every request also requires a valid RISpro login, and revoked or expired viewer sessions are rejected.
 - Browser requests cannot choose an upstream URL and cannot search the PACS by PatientID/name.
 - Generic OHIF study-list browsing is disabled because the proxy permits only launch-session StudyInstanceUIDs.
 - Credentials, authorization headers, complete metadata, patient names, PatientIDs, and accession values are excluded from OHIF structured logs and diagnostic summaries.
 - Settings changes, diagnostics, resolution, retrieval, ready/failed launches, and proxy denials are audited.
+
+## Image Delivery
+
+The gateway applies lossless HTTP gzip compression to `/ohif-dicomweb/` responses when the browser accepts gzip. The browser restores the exact original pixel bytes before OHIF decodes them. Multipart boundary headers are preserved; partial-range responses retain their original byte ranges. Image responses remain private and are not stored in a shared cache.
+
+OHIF limits simultaneous image loads to four interaction requests, one thumbnail, and one prefetch. This reduces competition from background images on slower connections while leaving room for multiple visible viewports.
+
+Compression savings depend on the source transfer syntax. Already compressed images can have little additional reduction. This does not introduce a lower-resolution preview or a full-quality toggle; that requires separate OHIF loading behavior and archive capability validation. Investigate a slow first image using the frame request's time to first byte, download duration, transferred bytes, and the viewport render timing.
 
 ## Known Limits
 

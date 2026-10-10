@@ -1,6 +1,12 @@
 window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
+  // Leave bandwidth available for visible images on slower connections.
+  maxNumRequests: {
+    interaction: 4,
+    thumbnail: 1,
+    prefetch: 1,
+  },
   extensions: [],
   modes: [],
   dataSources: [

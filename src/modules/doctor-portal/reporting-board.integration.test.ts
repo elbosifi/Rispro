@@ -3888,12 +3888,26 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const resolutions = await pool.query(`select source_kind,source_pacs_node_id from study_source_resolutions where appointment_id=$1`, [appointmentId]);
     assert.equal(resolutions.rows[0]?.source_kind, "authoritative_orthanc");
     assert.equal(resolutions.rows[0]?.source_pacs_node_id, null);
+    // A launch link near its deadline must still create a usable viewing session.
+    await pool.query(`update viewer_launch_sessions set expires_at=now()+interval '5 seconds' where appointment_id=$1`, [appointmentId]);
     let viewerCookie = "";
-    const response = { cookie(_name: string, token: string) { viewerCookie = token; } } as unknown as import("express").Response;
+    let viewerCookieExpiresAt = new Date(0);
+    const response = { cookie(_name: string, token: string, options: { expires: Date }) {
+      viewerCookie = token;
+      viewerCookieExpiresAt = options.expires;
+    } } as unknown as import("express").Response;
     const launchToken = launch.launchUrl.split("/").at(-1)!;
+    const exchangedAt = Date.now();
     const redirect = await ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response);
     assert.ok(redirect.includes(uid) && redirect.includes(priorUid));
     const { env } = await import("../../config/env.js");
+    const sessionDurationMs = env.sessionHours * 60 * 60 * 1000;
+    assert.ok(viewerCookieExpiresAt.getTime() >= exchangedAt + sessionDurationMs - 1000);
+    assert.ok(viewerCookieExpiresAt.getTime() <= Date.now() + sessionDurationMs);
+    const activeSession = await pool.query(`select expires_at from viewer_launch_sessions where appointment_id=$1`, [appointmentId]);
+    // HTTP cookie expiry has whole-second precision.
+    assert.equal(Math.floor(new Date(activeSession.rows[0]?.expires_at).getTime() / 1000), Math.floor(viewerCookieExpiresAt.getTime() / 1000));
+    await assert.rejects(() => ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 404);
     const scopedCookie = `${doctor.cookie}; ${env.ohifSessionCookieName}=${viewerCookie}`;
     const seriesResponse = await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series?includefield=00080021%2C00080031%2C0008103E%2C00200011`);
     assert.equal(seriesResponse.status, 200);
@@ -3908,6 +3922,7 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies?PatientID=${encodeURIComponent(patientId)}`)).status, 403);
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/9.9.9/series`)).status, 403);
     assert.equal((await rawApi("", `${env.ohifDicomWebProxyPath}/studies/${uid}/series`)).status, 401);
+    assert.equal((await rawApi(doctor.cookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
     for (const relativePathWithQuery of [`/studies/${uid}/metadata`, `/studies/${priorUid}/series/1.2.3/instances/1.2.4/frames/1`]) {
       const proxied = await ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: doctor.id, launchToken: viewerCookie, relativePathWithQuery, headers: {} });
       assert.equal(proxied.status, 200);
@@ -3915,6 +3930,8 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     }
     await assert.rejects(() => ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: doctor.id, launchToken: viewerCookie, relativePathWithQuery: "/studies/9.9.9/metadata", headers: {} }), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
     await assert.rejects(() => ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: otherDoctor.id, launchToken: viewerCookie, relativePathWithQuery: `/studies/${uid}/metadata`, headers: {} }), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 401);
+    await pool.query(`update viewer_launch_sessions set expires_at=now()-interval '1 second' where appointment_id=$1`, [appointmentId]);
+    assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
     await assert.rejects(() => ohifViewerService.launchReportingBoardCaseInOhif({ userId: otherDoctor.id, appRole: "doctor" }, appointmentId, true), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
     for (const [mode, expected] of [["wrong_patient", "not_found"], ["ambiguous", "ambiguous"], ["missing", "not_found"], ["offline", "source_unavailable"]] as const) {
       resultMode = mode;

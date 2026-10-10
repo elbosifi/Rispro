@@ -225,12 +225,13 @@ export async function consumeViewerLaunchToken(
   launchTokenHash: string,
   userId: UserId,
   viewerSessionTokenHash: string,
+  viewerSessionExpiresAt: Date,
   executor: DbExecutor = pool,
 ): Promise<ViewerLaunchSessionRecord | null> {
   const result = await executor.query<Row>(
-    `update viewer_launch_sessions set used_at=now(), viewer_session_token_hash=$3
+    `update viewer_launch_sessions set used_at=now(), viewer_session_token_hash=$3, expires_at=$4
      where token_hash=$1 and user_id=$2 and used_at is null and revoked_at is null and expires_at>now()
-     returning *`, [launchTokenHash, userId, viewerSessionTokenHash]
+     returning *`, [launchTokenHash, userId, viewerSessionTokenHash, viewerSessionExpiresAt.toISOString()]
   );
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
