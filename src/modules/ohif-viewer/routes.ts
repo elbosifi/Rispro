@@ -111,6 +111,8 @@ ohifDicomWebProxyRouter.get(
     });
     res.status(response.status);
     for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+      // Fetch decodes compressed bodies but retains their original Content-Length.
+      if (header === "content-length" && response.headers.get("content-encoding")) continue;
       const value = response.headers.get(header);
       if (value) res.setHeader(header, value);
     }

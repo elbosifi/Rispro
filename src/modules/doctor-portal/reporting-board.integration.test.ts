@@ -1,6 +1,8 @@
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 
 if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -630,12 +632,15 @@ async function createDoctorPortalTestApp() {
   const http = await import("node:http");
   const { createDoctorPortalRouter } = await import("./index.js");
   const { reportingBoardPublicRouter } = await import("./reporting-board-public-routes.js");
+  const { ohifDicomWebProxyRouter } = await import("../ohif-viewer/routes.js");
+  const { env } = await import("../../config/env.js");
   const appInstance = express();
   appInstance.set("trust proxy", 1);
   appInstance.use(express.json({ limit: "10mb" }));
   appInstance.use(cookieParser());
   appInstance.use("/api/reporting", reportingBoardPublicRouter);
   appInstance.use("/api/doctor", createDoctorPortalRouter());
+  appInstance.use(env.ohifDicomWebProxyPath, ohifDicomWebProxyRouter);
   appInstance.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
   });
@@ -3834,6 +3839,23 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     let resultMode: "normal" | "wrong_patient" | "ambiguous" | "missing" | "offline" = "normal";
     const calls: string[] = [];
     const current = { "00080050": { Value: [accession] }, "00100020": { Value: [patientId] }, "0020000D": { Value: [uid] }, "00080020": { Value: [addDays(1).replaceAll("-", "")] }, "00080061": { Value: ["CT"] } };
+    const series = Array.from({ length: 20 }, (_, index) => ({ ...current, "0020000E": { Value: [`${uid}.${index + 1}`] } }));
+    const seriesJson = JSON.stringify(series);
+    const compressedSeries = gzipSync(seriesJson);
+    const archiveSeriesServer = createServer((_req, res) => {
+      res.writeHead(200, {
+        "content-type": "application/dicom+json", "content-encoding": "gzip",
+        "content-length": String(compressedSeries.byteLength),
+      });
+      res.end(compressedSeries);
+    });
+    await new Promise<void>((resolve) => archiveSeriesServer.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise<void>((resolve) => {
+      archiveSeriesServer.closeAllConnections();
+      archiveSeriesServer.close(() => resolve());
+    }));
+    const archiveAddress = archiveSeriesServer.address();
+    assert.ok(archiveAddress && typeof archiveAddress === "object");
     globalThis.fetch = async (input, init) => {
       const url = new URL(String(input));
       if (url.origin !== "http://archive.test:8042") return originalFetch(input, init);
@@ -3841,7 +3863,10 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
       assert.equal(init?.method || "GET", "GET");
       assert.equal(new Headers(init?.headers).get("Authorization"), `Basic ${Buffer.from("archive-reader:test-secret").toString("base64")}`);
       if (resultMode === "offline") throw new Error("Archive unavailable");
-      if (url.pathname.endsWith("/frames/1")) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/octet-stream" } });
+      if (url.pathname.endsWith("/frames/1")) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/octet-stream", "content-length": "3" } });
+      if (url.pathname === `/dicom-web/studies/${uid}/series`) {
+        return originalFetch(`http://127.0.0.1:${archiveAddress.port}${url.pathname}${url.search}`, init);
+      }
       if (url.pathname.endsWith("/metadata")) return Response.json([current]);
       assert.equal(url.pathname, "/dicom-web/studies");
       if (url.searchParams.has("PatientID")) return Response.json([current, { ...current, "00080050": { Value: ["PRIOR"] }, "0020000D": { Value: [priorUid] }, "00080020": { Value: [addDays(-1).replaceAll("-", "")] } }]);
@@ -3868,6 +3893,21 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const launchToken = launch.launchUrl.split("/").at(-1)!;
     const redirect = await ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response);
     assert.ok(redirect.includes(uid) && redirect.includes(priorUid));
+    const { env } = await import("../../config/env.js");
+    const scopedCookie = `${doctor.cookie}; ${env.ohifSessionCookieName}=${viewerCookie}`;
+    const seriesResponse = await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series?includefield=00080021%2C00080031%2C0008103E%2C00200011`);
+    assert.equal(seriesResponse.status, 200);
+    assert.deepEqual(await seriesResponse.json(), series);
+    assert.equal(seriesResponse.headers.get("content-type"), "application/dicom+json");
+    assert.equal(seriesResponse.headers.get("content-length"), null);
+    assert.equal(seriesResponse.headers.get("content-encoding"), null);
+    const frameResponse = await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`);
+    assert.equal(frameResponse.status, 200);
+    assert.equal(frameResponse.headers.get("content-length"), "3");
+    assert.deepEqual(new Uint8Array(await frameResponse.arrayBuffer()), new Uint8Array([1, 2, 3]));
+    assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies?PatientID=${encodeURIComponent(patientId)}`)).status, 403);
+    assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/9.9.9/series`)).status, 403);
+    assert.equal((await rawApi("", `${env.ohifDicomWebProxyPath}/studies/${uid}/series`)).status, 401);
     for (const relativePathWithQuery of [`/studies/${uid}/metadata`, `/studies/${priorUid}/series/1.2.3/instances/1.2.4/frames/1`]) {
       const proxied = await ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: doctor.id, launchToken: viewerCookie, relativePathWithQuery, headers: {} });
       assert.equal(proxied.status, 200);
