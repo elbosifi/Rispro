@@ -5,13 +5,14 @@ import { logAuditEntry } from "../../services/audit-service.js";
 import { recordDiagnosticEvent } from "../../services/system-diagnostics-service.js";
 import { listPacsNodes } from "../../services/pacs-node-service.js";
 import { testPacsConnectionWithNode } from "../../services/pacs-service.js";
+import { readAuthoritativeOrthancSettings } from "../../services/authoritative-orthanc-service.js";
 import { resolveOrthancSettings } from "../../services/orthanc-settings-resolver.js";
 import { getAuthorizedReportingBoardAppointment, getAuthorizedReportingBoardAppointmentRead, type Actor } from "../doctor-portal/reporting-board-service.js";
 import type { UserId, UnknownRecord } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { createLogger } from "../../observability/logger.js";
 import { asUnknownRecord } from "../../utils/records.js";
-import { createImagingSourceAdapter, ImagingSourceError, proxyNativeDicomWebRequest, proxyOrthancDicomWebRequest } from "./adapters.js";
+import { createImagingSourceAdapter, ImagingSourceError, proxyAuthoritativeOrthancDicomWebRequest, proxyNativeDicomWebRequest, proxyOrthancDicomWebRequest } from "./adapters.js";
 import {
   cleanupExpiredViewerSessionsAndJobs,
   consumeViewerLaunchToken,
@@ -26,7 +27,7 @@ import {
   updatePacsWebDiagnostic,
   upsertStudyResolution,
 } from "./repository.js";
-import type { ImagingStudy, OhifAuthType, OhifViewerConfiguration, ViewerLaunchResponse } from "./types.js";
+import type { ImagingStudy, OhifAccessStrategy, OhifAuthType, OhifViewerConfiguration, ViewerLaunchResponse } from "./types.js";
 import {
   assertSameDicomWebOrigin,
   createLaunchToken,
@@ -97,24 +98,33 @@ function publicConfiguration(configuration: OhifViewerConfiguration) {
 }
 
 export async function getOhifAdminConfiguration() {
-  const [configuration, pacsNodes] = await Promise.all([
+  const [configuration, pacsNodes, authoritative] = await Promise.all([
     readOhifViewerConfiguration(),
     listPacsNodes({ includeInactive: true }),
+    readAuthoritativeOrthancSettings(),
   ]);
-  return { configuration: publicConfiguration(configuration), pacsNodes };
+  return { configuration: {
+    ...publicConfiguration(configuration),
+    authoritativeOrthanc: { enabled: authoritative.enabled, configured: Boolean(authoritative.enabled && authoritative.baseUrl), displayName: authoritative.displayName },
+  }, pacsNodes };
 }
 
 export async function putOhifAdminConfiguration(value: unknown, userId: UserId) {
   const body = asUnknownRecord(value);
   const settingsInput = asUnknownRecord(body.settings ?? body);
   const endpointInput = asUnknownRecord(body.webEndpoint ?? {});
-  const selectedPacsNodeId = nullablePositiveInteger(settingsInput.selectedPacsNodeId, "selectedPacsNodeId");
   const accessStrategy = String(settingsInput.accessStrategy || "native_dicomweb");
-  if (!['native_dicomweb', 'orthanc_gateway'].includes(accessStrategy)) throw new HttpError(400, "accessStrategy is invalid.");
+  if (!['native_dicomweb', 'orthanc_gateway', 'authoritative_orthanc'].includes(accessStrategy)) throw new HttpError(400, "accessStrategy is invalid.");
+  const selectedPacsNodeId = accessStrategy === "authoritative_orthanc" ? null : nullablePositiveInteger(settingsInput.selectedPacsNodeId, "selectedPacsNodeId");
   const openMode = String(settingsInput.openMode || "new_tab");
   if (!['new_tab', 'same_tab'].includes(openMode)) throw new HttpError(400, "openMode is invalid.");
   const enabled = bool(settingsInput.enabled, false);
-  if (enabled && !selectedPacsNodeId) throw new HttpError(400, "An active OHIF image source is required before enabling OHIF.");
+  if (enabled && accessStrategy !== "authoritative_orthanc" && !selectedPacsNodeId) throw new HttpError(400, "An active OHIF image source is required before enabling OHIF.");
+
+  if (enabled && accessStrategy === "authoritative_orthanc") {
+    const authoritative = await readAuthoritativeOrthancSettings();
+    if (!authoritative.enabled || !authoritative.baseUrl) throw new HttpError(400, "Enable and configure Authoritative Orthanc in Settings before using it as the OHIF source.");
+  }
 
   const nodes = await listPacsNodes({ includeInactive: true });
   const selected = selectedPacsNodeId ? nodes.find((node) => Number(node.id) === selectedPacsNodeId) : null;
@@ -155,7 +165,7 @@ export async function putOhifAdminConfiguration(value: unknown, userId: UserId) 
       enabled,
       ohifPublicBaseUrl: normalizeViewerBasePath(settingsInput.ohifPublicBaseUrl, env.ohifPublicBaseUrl),
       selectedPacsNodeId,
-      accessStrategy: accessStrategy as "native_dicomweb" | "orthanc_gateway",
+      accessStrategy: accessStrategy as OhifAccessStrategy,
       orthancGatewayEnabled,
       orthancModalityKey: nullableText(settingsInput.orthancModalityKey),
       openMode: openMode as "new_tab" | "same_tab",
@@ -167,7 +177,7 @@ export async function putOhifAdminConfiguration(value: unknown, userId: UserId) 
     }, endpoint, userId,
   });
   await logAuditEntry({ entityType: "ohif_viewer_settings", actionType: "update", oldValues: publicConfiguration(previous), newValues: publicConfiguration(saved), changedByUserId: userId });
-  return { configuration: publicConfiguration(saved), pacsNodes: nodes };
+  return getOhifAdminConfiguration();
 }
 
 function failureMessage(status: ViewerLaunchResponse["status"]): string {
@@ -192,11 +202,11 @@ async function auditLaunch(actor: Actor, appointmentId: number, status: string, 
 
 async function resolveCurrentStudy(input: {
   appointmentId: number; accessionNumber: string; patientId: string | null; modality: string; studyDate: string;
-  persistedStudyUid: string | null; sourcePacsNodeId: number; adapter: Awaited<ReturnType<typeof createImagingSourceAdapter>>;
+  persistedStudyUid: string | null; sourcePacsNodeId: number | null; adapter: Awaited<ReturnType<typeof createImagingSourceAdapter>>;
 }) {
   const persisted = await findStudyResolution(input.appointmentId, input.sourcePacsNodeId);
   const candidateUid = persisted?.studyInstanceUid || (isValidDicomUid(input.persistedStudyUid) ? input.persistedStudyUid : null);
-  if (candidateUid && await input.adapter.verifyStudyAvailable(candidateUid)) {
+  if (input.adapter.strategy !== "authoritative_orthanc" && candidateUid && await input.adapter.verifyStudyAvailable(candidateUid)) {
     const study: ImagingStudy = {
       patientId: input.patientId || "", patientName: "", accessionNumber: input.accessionNumber,
       modality: input.modality, studyDescription: "", studyDate: input.studyDate, studyInstanceUid: candidateUid,
@@ -220,7 +230,7 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
     const { row } = await getAuthorizedReportingBoardAppointmentRead(actor, appointmentId, "You are not allowed to open this Reporting Board case in OHIF.");
     if (row.caseType !== "appointment") throw new HttpError(400, "OHIF launch currently supports appointment cases only.");
     const configuration = await readOhifViewerConfiguration();
-    if (!configuration.settings.enabled || !configuration.settings.selectedPacsNodeId) {
+    if (!configuration.settings.enabled || (configuration.settings.accessStrategy !== "authoritative_orthanc" && !configuration.settings.selectedPacsNodeId)) {
       await auditLaunch(actor, appointmentId, "configuration_error");
       return { status: "configuration_error", message: failureMessage("configuration_error") };
     }
@@ -250,7 +260,7 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
     }, changedByUserId: actor.userId });
 
     if (adapter.strategy === "orthanc_gateway" && !(await adapter.verifyStudyAvailable(currentStudy.studyInstanceUid))) {
-      const job = await enqueueRetrievalJob({ appointmentId, accessionNumber: row.accessionNumber, studyInstanceUid: currentStudy.studyInstanceUid, sourcePacsNodeId: configuration.settings.selectedPacsNodeId, userId: actor.userId });
+      const job = await enqueueRetrievalJob({ appointmentId, accessionNumber: row.accessionNumber, studyInstanceUid: currentStudy.studyInstanceUid, sourcePacsNodeId: configuration.settings.selectedPacsNodeId!, userId: actor.userId });
       await auditLaunch(actor, appointmentId, "retrieving", { retrievalJobId: job.id });
       logger.info("viewer_retrieval_joined", { appointmentId, jobId: job.id });
       return { status: "retrieving", message: failureMessage("retrieving"), retrievalJobId: job.id };
@@ -268,7 +278,7 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
             appointmentId,
             accessionNumber: prior.accessionNumber || prior.studyInstanceUid,
             studyInstanceUid: prior.studyInstanceUid,
-            sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
+            sourcePacsNodeId: configuration.settings.selectedPacsNodeId!,
             userId: actor.userId,
           });
           firstMissingJobId ??= job.id;
@@ -348,9 +358,12 @@ export async function proxyAuthorizedDicomWebRequest(input: {
     throw new HttpError(403, "This DICOMweb request is outside the authorized viewer session.");
   }
   if (session.accessStrategy === "native_dicomweb") {
-    const endpoint = await findPacsWebEndpoint(session.sourcePacsNodeId);
+    const endpoint = session.sourcePacsNodeId == null ? null : await findPacsWebEndpoint(session.sourcePacsNodeId);
     if (!endpoint?.enabled) throw new HttpError(503, "DICOMweb source configuration is unavailable.");
     return proxyNativeDicomWebRequest(endpoint, input.relativePathWithQuery, input.headers);
+  }
+  if (session.accessStrategy === "authoritative_orthanc") {
+    return proxyAuthoritativeOrthancDicomWebRequest(input.relativePathWithQuery, input.headers);
   }
   return proxyOrthancDicomWebRequest(input.relativePathWithQuery, input.headers);
 }
@@ -360,7 +373,7 @@ export async function runOhifDiagnostic(value: unknown, actor: Actor) {
   const action = String(body.action || "").trim();
   const userId = actor.userId;
   const configuration = await readOhifViewerConfiguration();
-  if (!configuration.settings.selectedPacsNodeId) throw new HttpError(400, "Select an OHIF PACS source first.");
+  if (configuration.settings.accessStrategy !== "authoritative_orthanc" && !configuration.settings.selectedPacsNodeId) throw new HttpError(400, "Select an OHIF PACS source first.");
   const adapter = await createImagingSourceAdapter(configuration);
   const started = performance.now();
   try {
@@ -376,7 +389,7 @@ export async function runOhifDiagnostic(value: unknown, actor: Actor) {
       await testPacsConnectionWithNode({ node: configuration.selectedPacsNode, currentUserId: userId });
       result = { ok: true, action, message: "PACS C-ECHO succeeded." };
     } else if (action === "test_orthanc_rest" || action === "test_orthanc_dicomweb") {
-      const orthanc = await resolveOrthancSettings();
+      const orthanc = configuration.settings.accessStrategy === "authoritative_orthanc" ? await readAuthoritativeOrthancSettings() : await resolveOrthancSettings();
       if (!orthanc.baseUrl) throw new HttpError(400, "Orthanc base URL is not configured.");
       const headers: Record<string, string> = { Accept: "application/json" };
       if (orthanc.username) headers.Authorization = `Basic ${Buffer.from(`${orthanc.username}:${orthanc.password}`).toString("base64")}`;
@@ -423,7 +436,7 @@ export async function runOhifDiagnostic(value: unknown, actor: Actor) {
     } else {
       throw new HttpError(400, "Unsupported OHIF diagnostic action.");
     }
-    await updatePacsWebDiagnostic(configuration.settings.selectedPacsNodeId, {
+    if (configuration.settings.selectedPacsNodeId) await updatePacsWebDiagnostic(configuration.settings.selectedPacsNodeId, {
       lastTestStatus: "success", lastTestMessage: String(result.message || "Diagnostic succeeded."),
       qidoLastStatus: action === "test_source" || action === "test_accession" ? "success" : undefined,
       wadoMetadataLastStatus: action === "test_wado_metadata" ? "success" : undefined,
@@ -435,7 +448,7 @@ export async function runOhifDiagnostic(value: unknown, actor: Actor) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "OHIF diagnostic failed.";
     const category = diagnosticFailureCategory(error);
-    await updatePacsWebDiagnostic(configuration.settings.selectedPacsNodeId, {
+    if (configuration.settings.selectedPacsNodeId) await updatePacsWebDiagnostic(configuration.settings.selectedPacsNodeId, {
       lastTestStatus: "failed", lastTestMessage: message,
       qidoLastStatus: action === "test_source" || action === "test_accession" ? "failed" : undefined,
       wadoMetadataLastStatus: action === "test_wado_metadata" ? "failed" : undefined,

@@ -8,7 +8,7 @@
    - `curl -f http://localhost:3000/api/health`
    - `curl -f http://localhost:3000/ohif/`
    - `docker compose ps` reports app, gateway, and OHIF healthy.
-4. Configure the independent PACS source and strategy in Settings.
+4. Configure the OHIF source and strategy in Settings. For Authoritative Orthanc, enable/configure the existing Authoritative Orthanc connection and its `/dicom-web` plugin, then select **Authoritative Orthanc** in OHIF Viewer. No PACS node or remote-modality key is required; current studies and automatic priors are read directly from the archive. Run REST, DICOMweb, accession, metadata, frame, and full-launch diagnostics before pilot use. Missing studies return not-found without retrieval or another-source fallback.
 5. Run each diagnostic and record exact outcomes. For OsiriX, use a known accession/UID and verify QIDO, WADO metadata, a real frame, and an authorized appointment full-launch preparation separately.
 6. For gateway mode, confirm the selected Orthanc modality can C-ECHO and C-MOVE to the Orthanc AE; confirm `/dicom-web/studies` works inside the network.
 7. Enable the database OHIF setting and verify `Open Images` for a controlled doctor/case. No `.env` or Docker change is required for ordinary enable/disable operations.
@@ -25,6 +25,8 @@ Inspect container logs with:
 ```bash
 docker compose logs gateway ohif app
 ```
+
+Authoritative Orthanc mode never creates retrieval jobs or deletes archived images. Its credentials remain server-side and its viewer requests retain normal RISpro authentication and exact-study session scope.
 
 Gateway mode retains completed retrieval-job records for the configured cache period. `OHIF_CACHE_CLEANUP_ENABLED=false` is the default. When an operator explicitly enables it, the cleanup worker evicts only a persisted Orthanc study ID that was proven to appear after that retrieval's pre-C-MOVE cache snapshot, after retention expires and after all launch sessions for that UID expire. It never searches-and-deletes by StudyInstanceUID, deletes a pre-existing Orthanc study, or deletes a source-PACS study.
 

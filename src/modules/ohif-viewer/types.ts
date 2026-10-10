@@ -1,6 +1,6 @@
 import type { PacsNodeRow } from "../../services/pacs-node-service.js";
 
-export type OhifAccessStrategy = "native_dicomweb" | "orthanc_gateway";
+export type OhifAccessStrategy = "native_dicomweb" | "orthanc_gateway" | "authoritative_orthanc";
 export type OhifOpenMode = "new_tab" | "same_tab";
 export type OhifAuthType = "none" | "basic" | "bearer";
 export type ViewerLaunchStatus =

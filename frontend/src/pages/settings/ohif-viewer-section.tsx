@@ -1,5 +1,6 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, AlertDescription, AlertTitle } from "@/components/shared";
 import { api, ApiError } from "@/lib/api-client";
 
 interface PacsNode {
@@ -20,7 +21,7 @@ interface OhifConfigurationResponse {
       enabled: boolean;
       ohifPublicBaseUrl: string;
       selectedPacsNodeId: number | null;
-      accessStrategy: "native_dicomweb" | "orthanc_gateway";
+      accessStrategy: "native_dicomweb" | "orthanc_gateway" | "authoritative_orthanc";
       orthancGatewayEnabled: boolean;
       orthancModalityKey: string | null;
       openMode: "new_tab" | "same_tab";
@@ -52,6 +53,7 @@ interface OhifConfigurationResponse {
       wadoMetadataLastStatus: string | null;
       wadoFrameLastStatus: string | null;
     } | null;
+    authoritativeOrthanc: { enabled: boolean; configured: boolean; displayName: string };
     environmentCredentialStatus: {
       usernameConfigured: boolean;
       passwordConfigured: boolean;
@@ -65,7 +67,7 @@ type FormState = {
   enabled: boolean;
   ohifPublicBaseUrl: string;
   selectedPacsNodeId: string;
-  accessStrategy: "native_dicomweb" | "orthanc_gateway";
+  accessStrategy: "native_dicomweb" | "orthanc_gateway" | "authoritative_orthanc";
   orthancGatewayEnabled: boolean;
   orthancModalityKey: string;
   openMode: "new_tab" | "same_tab";
@@ -155,20 +157,22 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
   };
   const selectedNode = useMemo(() => query.data?.pacsNodes.find((node) => Number(node.id) === Number(form.selectedPacsNodeId)) ?? null, [form.selectedPacsNodeId, query.data?.pacsNodes]);
 
+  const authoritativeSource = form.accessStrategy === "authoritative_orthanc";
+
   const save = useMutation({
     mutationFn: () => api<OhifConfigurationResponse>("/ohif/admin/configuration", {
       method: "PUT",
       body: JSON.stringify({
         settings: {
           enabled: form.enabled, ohifPublicBaseUrl: form.ohifPublicBaseUrl,
-          selectedPacsNodeId: form.selectedPacsNodeId ? Number(form.selectedPacsNodeId) : null,
+          selectedPacsNodeId: !authoritativeSource && form.selectedPacsNodeId ? Number(form.selectedPacsNodeId) : null,
           accessStrategy: form.accessStrategy, orthancGatewayEnabled: form.orthancGatewayEnabled,
           orthancModalityKey: form.orthancModalityKey || null, openMode: form.openMode,
           allowPriorStudies: form.allowPriorStudies, maxPriorStudies: Number(form.maxPriorStudies),
           launchTokenTtlSeconds: Number(form.launchTokenTtlSeconds), cacheRetentionHours: Number(form.cacheRetentionHours),
           retrievalTimeoutSeconds: Number(form.retrievalTimeoutSeconds),
         },
-        webEndpoint: {
+        webEndpoint: authoritativeSource ? null : {
           enabled: form.webEnabled, dicomwebBaseUrl: form.dicomwebBaseUrl, qidoRoot: form.qidoRoot,
           wadoRsRoot: form.wadoRsRoot, wadoUriRoot: form.wadoUriRoot || null, authType: form.authType,
           usernameEnvKey: form.usernameEnvKey || null, passwordEnvKey: form.passwordEnvKey || null,
@@ -222,9 +226,17 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
 
     <section className="space-y-4 rounded-xl border border-border p-4">
       <div><h4 className="font-semibold">OHIF image source</h4><p className="text-sm text-muted-foreground">Independent of the general RISpro default PACS. No automatic fallback to another node occurs.</p></div>
-      <label className={labelClass}><span>Active PACS node</span><select className={inputClass} value={form.selectedPacsNodeId} onChange={(event) => setForm({ ...form, selectedPacsNodeId: event.target.value })}><option value="">Select a PACS node</option>{query.data?.pacsNodes.filter((node) => node.is_active).map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>
-      {selectedNode && <div className="rounded-lg bg-muted/40 p-3 text-sm"><strong>{selectedNode.name}</strong><p>{selectedNode.host}:{selectedNode.port} · Called AE {selectedNode.called_ae_title} · Calling AE {selectedNode.calling_ae_title}</p><p>Status: {selectedNode.is_active ? "Active" : "Inactive"}</p></div>}
-      <label className={labelClass}><span>Access strategy</span><select className={inputClass} value={form.accessStrategy} onChange={(event) => { const accessStrategy = event.target.value as FormState["accessStrategy"]; setForm({ ...form, accessStrategy, orthancGatewayEnabled: accessStrategy === "orthanc_gateway" || form.orthancGatewayEnabled }); }}><option value="native_dicomweb">Native DICOMweb</option><option value="orthanc_gateway">Orthanc retrieval gateway</option></select></label>
+      {!authoritativeSource && <label className={labelClass}><span>Active PACS node</span><select className={inputClass} value={form.selectedPacsNodeId} onChange={(event) => setForm({ ...form, selectedPacsNodeId: event.target.value })}><option value="">Select a PACS node</option>{query.data?.pacsNodes.filter((node) => node.is_active).map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>}
+      {!authoritativeSource && selectedNode && <div className="rounded-lg bg-muted/40 p-3 text-sm"><strong>{selectedNode.name}</strong><p>{selectedNode.host}:{selectedNode.port} · Called AE {selectedNode.called_ae_title} · Calling AE {selectedNode.calling_ae_title}</p><p>Status: {selectedNode.is_active ? "Active" : "Inactive"}</p></div>}
+      <label className={labelClass}><span>Access strategy</span><select className={inputClass} value={form.accessStrategy} onChange={(event) => { const accessStrategy = event.target.value as FormState["accessStrategy"]; setForm({ ...form, accessStrategy, orthancGatewayEnabled: accessStrategy === "orthanc_gateway" || form.orthancGatewayEnabled }); }}><option value="native_dicomweb">Native DICOMweb</option><option value="orthanc_gateway">Orthanc retrieval gateway</option><option value="authoritative_orthanc">Authoritative Orthanc</option></select></label>
+      {authoritativeSource && <Alert variant={query.data?.configuration.authoritativeOrthanc?.configured ? "info" : "warning"}>
+        <AlertTitle>{query.data?.configuration.authoritativeOrthanc?.displayName || "Authoritative Orthanc"}</AlertTitle>
+        <AlertDescription>
+          {query.data?.configuration.authoritativeOrthanc?.configured ? "Connection configured. Run the diagnostics below to verify image access." : "Enable and configure Authoritative Orthanc before enabling this OHIF source."}
+          {" "}Current studies and automatic priors are read directly from the archive.
+          {" "}<a className="underline" href="/settings?section=authoritative_orthanc">Manage Authoritative Orthanc settings</a>
+        </AlertDescription>
+      </Alert>}
     </section>
 
     {form.accessStrategy === "native_dicomweb" ? <section className="space-y-4 rounded-xl border border-border p-4">
@@ -242,7 +254,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
         <label className={labelClass}><span>Verify TLS</span><input type="checkbox" checked={form.verifyTls} onChange={(event) => setForm({ ...form, verifyTls: event.target.checked })} /></label>
         <label className={labelClass}><span>Timeout (seconds)</span><input type="number" className={inputClass} value={form.timeoutSeconds} onChange={(event) => setForm({ ...form, timeoutSeconds: event.target.value })} /></label>
       </div>
-    </section> : <section className="space-y-4 rounded-xl border border-border p-4">
+    </section> : form.accessStrategy === "orthanc_gateway" ? <section className="space-y-4 rounded-xl border border-border p-4">
       <div><h4 className="font-semibold">Orthanc retrieval gateway</h4><p className="text-sm text-muted-foreground">Reuses the existing Orthanc connection. Orthanc is a temporary cache, not the source archive. Cache deletion is controlled by the server-side `OHIF_CACHE_CLEANUP_ENABLED` gate and requires a proven OHIF-owned Orthanc resource.</p></div>
       <div className="grid gap-4 md:grid-cols-2">
         <label className={labelClass}><span>Gateway enabled</span><input type="checkbox" checked={form.orthancGatewayEnabled} onChange={(event) => setForm({ ...form, orthancGatewayEnabled: event.target.checked })} /></label>
@@ -250,7 +262,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
         <label className={labelClass}><span>Retrieval timeout (seconds)</span><input type="number" className={inputClass} value={form.retrievalTimeoutSeconds} onChange={(event) => setForm({ ...form, retrievalTimeoutSeconds: event.target.value })} /></label>
         <label className={labelClass}><span>Cache retention (hours)</span><input type="number" className={inputClass} value={form.cacheRetentionHours} onChange={(event) => setForm({ ...form, cacheRetentionHours: event.target.value })} /></label>
       </div>
-    </section>}
+    </section> : null}
 
     <section className="space-y-3 rounded-xl border border-border p-4">
       <div><h4 className="font-semibold">Diagnostics</h4><p className="text-sm text-muted-foreground">Tests are separate so QIDO success is never presented as WADO success.</p></div>
@@ -259,7 +271,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
         ["test_ohif_url", "Test OHIF URL"], ["test_source", form.accessStrategy === "native_dicomweb" ? "Test QIDO study search" : "Test Orthanc REST + DICOMweb"],
         ["test_pacs_echo", "Test PACS C-ECHO"], ["test_orthanc_rest", "Test Orthanc REST"], ["test_orthanc_dicomweb", "Test Orthanc DICOMweb"],
         ["test_accession", "Test accession resolution"], ["test_wado_metadata", "Test WADO metadata"], ["test_wado_frame", "Test WADO frame"], ["test_full_launch", "Test authorized full launch"],
-      ].map(([action, label]) => <button key={action} type="button" disabled={diagnostic.isPending} onClick={() => diagnostic.mutate(action)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{label}</button>)}</div>
+      ].filter(([action]) => !authoritativeSource || action !== "test_pacs_echo").map(([action, label]) => <button key={action} type="button" disabled={diagnostic.isPending} onClick={() => diagnostic.mutate(action)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{label}</button>)}</div>
       {query.data?.configuration.webEndpoint?.lastTestedAt && <p className="text-xs text-muted-foreground">Last test: {query.data.configuration.webEndpoint.lastTestStatus || "unknown"} · {query.data.configuration.webEndpoint.lastTestMessage || "No summary"}</p>}
     </section>
 

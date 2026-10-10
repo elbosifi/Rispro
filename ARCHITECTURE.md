@@ -59,7 +59,7 @@ Keep Orthanc/PACS orchestration server-side. Frontend code should call RISpro AP
 
 ## OHIF Viewer
 
-OHIF is a separate pinned container served under `/ohif/` by `rispro-gateway`. `/ohif-dicomweb/` remains a RISpro route: it requires the normal authenticated user plus a short-lived, HttpOnly viewer-session cookie and permits only exact study UIDs authorized by the Reporting Board launch service. Native DICOMweb credentials are environment-backed and injected server-side. Orthanc gateway mode performs bounded on-demand DIMSE retrieval and exposes only its temporary DICOMweb projection; the source PACS remains authoritative. See [OHIF Viewer Integration](docs/domains/ohif-viewer/README.md).
+OHIF is a separate pinned container served under `/ohif/` by `rispro-gateway`. `/ohif-dicomweb/` remains a RISpro route: it requires the normal authenticated user plus a short-lived, HttpOnly viewer-session cookie and permits only exact study UIDs authorized by the Reporting Board launch service. Native DICOMweb credentials are environment-backed and injected server-side. Authoritative Orthanc mode reads the primary archive directly using the existing Authoritative Orthanc settings, without retrieval jobs or cache deletion. Orthanc gateway mode performs bounded on-demand DIMSE retrieval and exposes only its temporary DICOMweb projection; the source PACS remains authoritative. See [OHIF Viewer Integration](docs/domains/ohif-viewer/README.md).
 
 ## Where Future Agents Should Add Work
 

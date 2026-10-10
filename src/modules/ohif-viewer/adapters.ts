@@ -1,8 +1,9 @@
 import { HttpError } from "../../utils/http-error.js";
+import { readAuthoritativeOrthancSettings, type AuthoritativeOrthancSettings } from "../../services/authoritative-orthanc-service.js";
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "../../services/orthanc-settings-resolver.js";
 import { searchOrthancPacsStudies } from "../../services/orthanc-pacs-service.js";
 import type { UnknownRecord } from "../../types/http.js";
-import type { ImagingSourceAdapter, ImagingStudy, OhifViewerConfiguration, PacsWebEndpoint } from "./types.js";
+import type { ImagingSourceAdapter, ImagingStudy, OhifAccessStrategy, OhifViewerConfiguration, PacsWebEndpoint } from "./types.js";
 import { isValidDicomUid } from "./validation.js";
 
 export type ImagingSourceFailureCategory = "dns" | "tls" | "authentication" | "unsupported" | "malformed" | "timeout" | "network";
@@ -99,13 +100,18 @@ async function parseJsonResponse(result: FetchResult, operation: string): Promis
   }
 }
 
-export class NativeDicomWebSourceAdapter implements ImagingSourceAdapter {
-  readonly strategy = "native_dicomweb" as const;
-  constructor(readonly endpoint: PacsWebEndpoint) {}
+type DicomWebConnection = Pick<PacsWebEndpoint, "qidoRoot" | "wadoRsRoot" | "timeoutSeconds" | "verifyTls">;
+
+class DicomWebSourceAdapter implements ImagingSourceAdapter {
+  constructor(
+    readonly strategy: OhifAccessStrategy,
+    readonly endpoint: DicomWebConnection,
+    private readonly headers: () => Record<string, string>,
+  ) {}
 
   private async json(url: string, operation: string): Promise<unknown> {
     const result = await fetchBytes(url, {
-      headers: { Accept: "application/dicom+json, application/json", ...credentialHeaders(this.endpoint) },
+      headers: { Accept: "application/dicom+json, application/json", ...this.headers() },
       timeoutSeconds: this.endpoint.timeoutSeconds,
       verifyTls: this.endpoint.verifyTls,
     });
@@ -138,7 +144,7 @@ export class NativeDicomWebSourceAdapter implements ImagingSourceAdapter {
   async testFrameRetrieval(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string): Promise<{ bytes: number }> {
     const url = `${this.endpoint.wadoRsRoot}/studies/${encodeURIComponent(studyInstanceUid)}/series/${encodeURIComponent(seriesInstanceUid)}/instances/${encodeURIComponent(sopInstanceUid)}/frames/1`;
     const result = await fetchBytes(url, {
-      headers: { Accept: "multipart/related; type=application/octet-stream, application/octet-stream", ...credentialHeaders(this.endpoint) },
+      headers: { Accept: "multipart/related; type=application/octet-stream, application/octet-stream", ...this.headers() },
       timeoutSeconds: this.endpoint.timeoutSeconds, verifyTls: this.endpoint.verifyTls,
     });
     if (result.response.status === 401 || result.response.status === 403) throw new ImagingSourceError("authentication", "WADO-RS frame authentication failed.", result.response.status);
@@ -151,6 +157,37 @@ export class NativeDicomWebSourceAdapter implements ImagingSourceAdapter {
     const params = new URLSearchParams({ StudyInstanceUID: studyInstanceUid, includefield: "0020000D", limit: "2" });
     const payload = await this.json(`${this.endpoint.qidoRoot}/studies?${params}`, "QIDO StudyInstanceUID verification");
     return Array.isArray(payload) && payload.map(dicomJsonStudy).some((study) => study.studyInstanceUid === studyInstanceUid);
+  }
+}
+
+export class NativeDicomWebSourceAdapter extends DicomWebSourceAdapter {
+  constructor(readonly endpoint: PacsWebEndpoint) {
+    super("native_dicomweb", endpoint, () => credentialHeaders(endpoint));
+  }
+}
+
+function assertAuthoritativeOrthancConfigured(settings: AuthoritativeOrthancSettings): void {
+  if (!settings.enabled || !settings.baseUrl) throw new HttpError(400, "Enable and configure Authoritative Orthanc in Settings before using it as the OHIF source.");
+}
+
+function authoritativeHeaders(settings: AuthoritativeOrthancSettings): Record<string, string> {
+  return settings.username ? { Authorization: `Basic ${Buffer.from(`${settings.username}:${settings.password}`).toString("base64")}` } : {};
+}
+
+export class AuthoritativeOrthancSourceAdapter extends DicomWebSourceAdapter {
+  constructor(private readonly settings: AuthoritativeOrthancSettings) {
+    assertAuthoritativeOrthancConfigured(settings);
+    const root = joinUrl(settings.baseUrl, "/dicom-web");
+    super("authoritative_orthanc", { qidoRoot: root, wadoRsRoot: root, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls }, () => authoritativeHeaders(settings));
+  }
+
+  async testConnection(): Promise<{ ok: true; message: string }> {
+    await parseJsonResponse(await fetchBytes(joinUrl(this.settings.baseUrl, "/system"), {
+      headers: { Accept: "application/json", ...authoritativeHeaders(this.settings) },
+      timeoutSeconds: this.settings.timeoutSeconds, verifyTls: this.settings.verifyTls,
+    }), "Authoritative Orthanc REST test");
+    await super.testConnection();
+    return { ok: true, message: "Authoritative Orthanc REST and DICOMweb tests succeeded." };
   }
 }
 
@@ -246,6 +283,9 @@ export class OrthancGatewaySourceAdapter implements ImagingSourceAdapter {
 
 export async function createImagingSourceAdapter(configuration: OhifViewerConfiguration): Promise<ImagingSourceAdapter> {
   const { settings, selectedPacsNode, webEndpoint } = configuration;
+  if (settings.accessStrategy === "authoritative_orthanc") {
+    return new AuthoritativeOrthancSourceAdapter(await readAuthoritativeOrthancSettings());
+  }
   if (!selectedPacsNode || !selectedPacsNode.is_active) throw new HttpError(400, "The selected OHIF image source is missing or inactive.");
   if (settings.accessStrategy === "native_dicomweb") {
     if (!webEndpoint?.enabled) throw new HttpError(400, "Native DICOMweb is not configured for the selected OHIF image source.");
@@ -272,6 +312,19 @@ export async function proxyOrthancDicomWebRequest(relativePath: string, requestH
   if (settings.username) headers.Authorization = `Basic ${Buffer.from(`${settings.username}:${settings.password}`).toString("base64")}`;
   if (requestHeaders.range) headers.Range = requestHeaders.range;
   return streamFetch(joinUrl(settings.baseUrl, `/dicom-web/${relativePath}`), {
+    headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls,
+  });
+}
+
+export async function proxyAuthoritativeOrthancDicomWebRequest(relativePath: string, requestHeaders: Record<string, string>): Promise<Response> {
+  const settings = await readAuthoritativeOrthancSettings();
+  assertAuthoritativeOrthancConfigured(settings);
+  const headers: Record<string, string> = {
+    Accept: requestHeaders.accept || "application/dicom+json, multipart/related, application/octet-stream",
+    ...authoritativeHeaders(settings),
+  };
+  if (requestHeaders.range) headers.Range = requestHeaders.range;
+  return streamFetch(joinUrl(joinUrl(settings.baseUrl, "/dicom-web"), relativePath), {
     headers, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls,
   });
 }

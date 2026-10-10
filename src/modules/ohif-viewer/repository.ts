@@ -151,7 +151,7 @@ export interface PersistedStudyResolution {
   accessionNumber: string;
   patientIdValue: string | null;
   studyInstanceUid: string;
-  sourcePacsNodeId: number;
+  sourcePacsNodeId: number | null;
   resolutionMethod: string;
   lastVerifiedAt: string;
 }
@@ -160,37 +160,39 @@ function resolutionRow(row: Row): PersistedStudyResolution {
   return {
     id: Number(row.id), appointmentId: Number(row.appointment_id), accessionNumber: String(row.accession_number),
     patientIdValue: nullableText(row.patient_id_value), studyInstanceUid: String(row.study_instance_uid),
-    sourcePacsNodeId: Number(row.source_pacs_node_id), resolutionMethod: String(row.resolution_method),
+    sourcePacsNodeId: row.source_pacs_node_id == null ? null : Number(row.source_pacs_node_id), resolutionMethod: String(row.resolution_method),
     lastVerifiedAt: String(row.last_verified_at),
   };
 }
 
-export async function findStudyResolution(appointmentId: number, sourcePacsNodeId: number): Promise<PersistedStudyResolution | null> {
-  const result = await pool.query<Row>(`select * from study_source_resolutions where appointment_id=$1 and source_pacs_node_id=$2 limit 1`, [appointmentId, sourcePacsNodeId]);
+export async function findStudyResolution(appointmentId: number, sourcePacsNodeId: number | null): Promise<PersistedStudyResolution | null> {
+  const result = await pool.query<Row>(`select * from study_source_resolutions where appointment_id=$1 and source_pacs_node_id is not distinct from $2 and source_kind=$3 limit 1`, [appointmentId, sourcePacsNodeId, sourcePacsNodeId == null ? "authoritative_orthanc" : "pacs"]);
   return result.rows[0] ? resolutionRow(result.rows[0]) : null;
 }
 
 export async function upsertStudyResolution(input: {
   appointmentId: number; accessionNumber: string; patientIdValue: string | null; study: ImagingStudy;
-  sourcePacsNodeId: number; resolutionMethod: "persisted_uid_verified" | "exact_accession" | "orthanc_remote_query";
+  sourcePacsNodeId: number | null; resolutionMethod: "persisted_uid_verified" | "exact_accession" | "orthanc_remote_query";
   diagnostic: Record<string, unknown>;
 }): Promise<PersistedStudyResolution> {
   const result = await pool.query<Row>(
     `insert into study_source_resolutions
-      (appointment_id,accession_number,patient_id_value,study_instance_uid,source_pacs_node_id,resolution_method,safe_diagnostic_json)
-     values ($1,$2,$3,$4,$5,$6,$7::jsonb)
-     on conflict (appointment_id,source_pacs_node_id) do update set accession_number=excluded.accession_number,
+      (appointment_id,accession_number,patient_id_value,study_instance_uid,source_pacs_node_id,resolution_method,safe_diagnostic_json,source_kind)
+     values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+     on conflict ${input.sourcePacsNodeId == null
+       ? "(appointment_id) where source_kind='authoritative_orthanc'"
+       : "(appointment_id,source_pacs_node_id)"} do update set accession_number=excluded.accession_number,
        patient_id_value=excluded.patient_id_value,study_instance_uid=excluded.study_instance_uid,
        resolution_method=excluded.resolution_method,safe_diagnostic_json=excluded.safe_diagnostic_json,
        last_verified_at=now(),updated_at=now() returning *`,
     [input.appointmentId, input.accessionNumber, input.patientIdValue, input.study.studyInstanceUid,
-     input.sourcePacsNodeId, input.resolutionMethod, JSON.stringify(input.diagnostic)]
+     input.sourcePacsNodeId, input.resolutionMethod, JSON.stringify(input.diagnostic), input.sourcePacsNodeId == null ? "authoritative_orthanc" : "pacs"]
   );
   return resolutionRow(result.rows[0]);
 }
 
 export async function createViewerLaunchSession(input: {
-  userId: UserId; appointmentId: number; sourcePacsNodeId: number; accessStrategy: OhifAccessStrategy;
+  userId: UserId; appointmentId: number; sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy;
   currentStudyUid: string; permittedStudyUids: string[]; tokenHash: string; expiresAt: Date;
 }): Promise<number> {
   const result = await pool.query<{ id: string }>(
@@ -205,7 +207,7 @@ export async function createViewerLaunchSession(input: {
 
 export interface ViewerLaunchSessionRecord {
   id: number; userId: number; appointmentId: number; studyInstanceUid: string; permittedStudyUids: string[];
-  sourcePacsNodeId: number; accessStrategy: OhifAccessStrategy; expiresAt: string; usedAt: string | null; revokedAt: string | null;
+  sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy; expiresAt: string; usedAt: string | null; revokedAt: string | null;
 }
 
 function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
@@ -213,7 +215,7 @@ function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
     id: Number(row.id), userId: Number(row.user_id), appointmentId: Number(row.appointment_id),
     studyInstanceUid: String(row.study_instance_uid),
     permittedStudyUids: Array.isArray(row.permitted_study_uids) ? row.permitted_study_uids.map(String) : [],
-    sourcePacsNodeId: Number(row.source_pacs_node_id),
+    sourcePacsNodeId: row.source_pacs_node_id == null ? null : Number(row.source_pacs_node_id),
     accessStrategy: String(row.access_strategy) as OhifAccessStrategy, expiresAt: String(row.expires_at),
     usedAt: nullableText(row.used_at), revokedAt: nullableText(row.revoked_at),
   };

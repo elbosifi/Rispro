@@ -3799,6 +3799,91 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     });
   });
 
+  it("launches current study and automatic priors from Authoritative Orthanc without retrieval or cache deletion", async (t) => {
+    guard();
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(1), patientName: uniq("authoritative_ohif") });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    const patient = await pool.query<{ identifier_value: string }>(`select p.identifier_value from patients p join appointments_v2.bookings b on b.patient_id=p.id where b.id=$1`, [appointmentId]);
+    const patientId = patient.rows[0]!.identifier_value;
+    const accession = `V2-${String(appointmentId).padStart(6, "0")}`;
+    const uid = `1.2.840.42.${appointmentId}`;
+    const priorUid = `${uid}.1`;
+    const previousOhif = await pool.query(`select * from ohif_viewer_settings where singleton_key=true`);
+    const previousArchive = await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | null }>(`select setting_key,setting_value,updated_by_user_id from system_settings where category='authoritative_orthanc'`);
+    const originalFetch = globalThis.fetch;
+    t.after(async () => {
+      globalThis.fetch = originalFetch;
+      const old = previousOhif.rows[0]!;
+      await pool.query(`update ohif_viewer_settings set enabled=$1,access_strategy=$2,selected_pacs_node_id=$3,allow_prior_studies=$4,max_prior_studies=$5,updated_by_user_id=$6,updated_at=$7 where singleton_key=true`, [old.enabled, old.access_strategy, old.selected_pacs_node_id, old.allow_prior_studies, old.max_prior_studies, old.updated_by_user_id, old.updated_at]);
+      await pool.query(`delete from system_settings where category='authoritative_orthanc'`);
+      for (const row of previousArchive.rows) await pool.query(`insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values('authoritative_orthanc',$1,$2::jsonb,$3)`, [row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
+    });
+    for (const [key, value] of Object.entries({ enabled: "enabled", base_url: "http://archive.test:8042", username: "archive-reader", password: "test-secret", verify_tls: "true", timeout_seconds: "5" })) {
+      await pool.query(`insert into system_settings(category,setting_key,setting_value) values('authoritative_orthanc',$1,$2::jsonb) on conflict(category,setting_key) do update set setting_value=excluded.setting_value`, [key, JSON.stringify({ value })]);
+    }
+    const previousConfiguration = await ohifViewerService.getOhifAdminConfiguration();
+    const sourceSettings = { ...previousConfiguration.configuration.settings, enabled: true, accessStrategy: "authoritative_orthanc", selectedPacsNodeId: null, allowPriorStudies: true, maxPriorStudies: 5 };
+    await pool.query(`update system_settings set setting_value='{"value":"disabled"}'::jsonb where category='authoritative_orthanc' and setting_key='enabled'`);
+    await assert.rejects(() => ohifViewerService.putOhifAdminConfiguration({ settings: sourceSettings }, admin.id), /Enable and configure Authoritative Orthanc/);
+    await pool.query(`update system_settings set setting_value='{"value":"enabled"}'::jsonb where category='authoritative_orthanc' and setting_key='enabled'`);
+    const savedConfiguration = await ohifViewerService.putOhifAdminConfiguration({ settings: sourceSettings }, admin.id);
+    assert.equal(savedConfiguration.configuration.settings.accessStrategy, "authoritative_orthanc");
+    assert.equal(savedConfiguration.configuration.settings.selectedPacsNodeId, null);
+    assert.equal(savedConfiguration.configuration.authoritativeOrthanc.configured, true);
+    assert.equal(JSON.stringify(savedConfiguration).includes("test-secret"), false);
+    let resultMode: "normal" | "wrong_patient" | "ambiguous" | "missing" | "offline" = "normal";
+    const calls: string[] = [];
+    const current = { "00080050": { Value: [accession] }, "00100020": { Value: [patientId] }, "0020000D": { Value: [uid] }, "00080020": { Value: [addDays(1).replaceAll("-", "")] }, "00080061": { Value: ["CT"] } };
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input));
+      if (url.origin !== "http://archive.test:8042") return originalFetch(input, init);
+      calls.push(url.pathname);
+      assert.equal(init?.method || "GET", "GET");
+      assert.equal(new Headers(init?.headers).get("Authorization"), `Basic ${Buffer.from("archive-reader:test-secret").toString("base64")}`);
+      if (resultMode === "offline") throw new Error("Archive unavailable");
+      if (url.pathname.endsWith("/frames/1")) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/octet-stream" } });
+      if (url.pathname.endsWith("/metadata")) return Response.json([current]);
+      assert.equal(url.pathname, "/dicom-web/studies");
+      if (url.searchParams.has("PatientID")) return Response.json([current, { ...current, "00080050": { Value: ["PRIOR"] }, "0020000D": { Value: [priorUid] }, "00080020": { Value: [addDays(-1).replaceAll("-", "")] } }]);
+      if (resultMode === "missing") return Response.json([]);
+      if (resultMode === "wrong_patient") return Response.json([{ ...current, "00100020": { Value: ["OTHER-PATIENT"] } }]);
+      if (resultMode === "ambiguous") return Response.json([current, { ...current, "0020000D": { Value: [`${uid}.2`] } }]);
+      return Response.json([current]);
+    };
+    const actor = { userId: doctor.id, appRole: "doctor" as const };
+    const launch = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
+    assert.equal(launch.status, "ready");
+    assert.ok(launch.status === "ready");
+    assert.equal(launch.priorStudyCount, 1);
+    assert.equal(launch.currentStudy.studyInstanceUid, uid);
+    assert.equal(launch.priorStudies[0]?.studyInstanceUid, priorUid);
+    const session = await pool.query(`select access_strategy,source_pacs_node_id from viewer_launch_sessions where appointment_id=$1`, [appointmentId]);
+    assert.equal(session.rows[0]?.access_strategy, "authoritative_orthanc");
+    assert.equal(session.rows[0]?.source_pacs_node_id, null);
+    const resolutions = await pool.query(`select source_kind,source_pacs_node_id from study_source_resolutions where appointment_id=$1`, [appointmentId]);
+    assert.equal(resolutions.rows[0]?.source_kind, "authoritative_orthanc");
+    assert.equal(resolutions.rows[0]?.source_pacs_node_id, null);
+    let viewerCookie = "";
+    const response = { cookie(_name: string, token: string) { viewerCookie = token; } } as unknown as import("express").Response;
+    const launchToken = launch.launchUrl.split("/").at(-1)!;
+    const redirect = await ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response);
+    assert.ok(redirect.includes(uid) && redirect.includes(priorUid));
+    for (const relativePathWithQuery of [`/studies/${uid}/metadata`, `/studies/${priorUid}/series/1.2.3/instances/1.2.4/frames/1`]) {
+      const proxied = await ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: doctor.id, launchToken: viewerCookie, relativePathWithQuery, headers: {} });
+      assert.equal(proxied.status, 200);
+      assert.ok((await proxied.arrayBuffer()).byteLength > 0);
+    }
+    await assert.rejects(() => ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: doctor.id, launchToken: viewerCookie, relativePathWithQuery: "/studies/9.9.9/metadata", headers: {} }), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
+    await assert.rejects(() => ohifViewerService.proxyAuthorizedDicomWebRequest({ userId: otherDoctor.id, launchToken: viewerCookie, relativePathWithQuery: `/studies/${uid}/metadata`, headers: {} }), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 401);
+    await assert.rejects(() => ohifViewerService.launchReportingBoardCaseInOhif({ userId: otherDoctor.id, appRole: "doctor" }, appointmentId, true), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
+    for (const [mode, expected] of [["wrong_patient", "not_found"], ["ambiguous", "ambiguous"], ["missing", "not_found"], ["offline", "source_unavailable"]] as const) {
+      resultMode = mode;
+      assert.equal((await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true)).status, expected);
+    }
+    assert.equal((await pool.query(`select count(*)::int as count from ohif_retrieval_jobs where appointment_id=$1`, [appointmentId])).rows[0]?.count, 0);
+    assert.ok(calls.every((path) => path.startsWith("/dicom-web/")));
+  });
+
   it("authorizes finalized appointment and comparison read paths only to their finalizer", async () => {
     guard();
     const date = addDays(15);

@@ -25,6 +25,7 @@ const response = {
       lastTestedAt: null, lastTestStatus: null, lastTestMessage: null, qidoLastStatus: null,
       wadoMetadataLastStatus: null, wadoFrameLastStatus: null,
     },
+    authoritativeOrthanc: { enabled: true, configured: true, displayName: "Primary archive" },
     environmentCredentialStatus: { usernameConfigured: true, passwordConfigured: true, bearerTokenConfigured: false },
   },
   pacsNodes: [{ id: 5, name: "OsiriX MD", host: "10.0.0.5", port: 104, called_ae_title: "OSIRIX", calling_ae_title: "RISPRO", timeout_seconds: 10, is_active: true, is_default: false }],
@@ -76,4 +77,47 @@ describe("OhifViewerSection", () => {
     await user.click(screen.getByRole("button", { name: "Test QIDO study search" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/ohif/admin/diagnostics", expect.objectContaining({ method: "POST" })));
   });
+  it("uses Authoritative Orthanc without a PACS node or duplicate credentials and retains automatic priors", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findByText("OHIF image source");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Access strategy" }), "authoritative_orthanc");
+    expect(screen.getByText("Primary archive")).toBeTruthy();
+    expect(screen.getByText(/Connection configured/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage Authoritative Orthanc settings" }).getAttribute("href")).toBe("/settings?section=authoritative_orthanc");
+    expect(screen.queryByRole("combobox", { name: "Active PACS node" })).toBeNull();
+    expect(screen.queryByText("Orthanc modality key")).toBeNull();
+    expect(screen.queryByText("Retrieval timeout (seconds)")).toBeNull();
+    expect(screen.queryByText("Cache retention (hours)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Test PACS C-ECHO" })).toBeNull();
+    expect(screen.queryByText("Password environment key")).toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Allow prior studies" }) as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Save OHIF Viewer settings" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/ohif/admin/configuration", expect.objectContaining({ method: "PUT" })));
+    const call = vi.mocked(api).mock.calls.find(([, options]) => options?.method === "PUT");
+    const payload = JSON.parse(String(call?.[1]?.body));
+    expect(payload.settings.accessStrategy).toBe("authoritative_orthanc");
+    expect(payload.settings.selectedPacsNodeId).toBeNull();
+    expect(payload.webEndpoint).toBeNull();
+    expect(payload.settings.allowPriorStudies).toBe(true);
+  });
+
+  it("reloads authoritative mode and shows missing configuration without gateway controls", async () => {
+    vi.mocked(api).mockResolvedValue({ ...response, configuration: {
+      ...response.configuration,
+      settings: { ...response.configuration.settings, selectedPacsNodeId: null, accessStrategy: "authoritative_orthanc" },
+      webEndpoint: null,
+      authoritativeOrthanc: { enabled: false, configured: false, displayName: "" },
+    } });
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findByText(/Enable and configure Authoritative Orthanc before enabling/);
+    expect((screen.getByRole("combobox", { name: "Access strategy" }) as HTMLSelectElement).value).toBe("authoritative_orthanc");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Access strategy" }), "orthanc_gateway");
+    expect(screen.getByText("Orthanc modality key")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Active PACS node" })).toBeTruthy();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Access strategy" }), "native_dicomweb");
+    expect(screen.getByText("QIDO-RS root")).toBeTruthy();
+  });
+
 });

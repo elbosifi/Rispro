@@ -25,9 +25,9 @@ describe("OHIF schema integration", () => {
 
     const migrations = await pool.query<{ filename: string }>(
       `select filename from schema_migrations where filename = any($1::text[]) order by filename`,
-      [["123_ohif_viewer_integration.sql", "124_ohif_viewer_hardening.sql"]]
+      [["123_ohif_viewer_integration.sql", "124_ohif_viewer_hardening.sql", "229_ohif_authoritative_orthanc.sql"]]
     );
-    assert.deepEqual(migrations.rows.map((row) => row.filename), ["123_ohif_viewer_integration.sql", "124_ohif_viewer_hardening.sql"]);
+    assert.deepEqual(migrations.rows.map((row) => row.filename), ["123_ohif_viewer_integration.sql", "124_ohif_viewer_hardening.sql", "229_ohif_authoritative_orthanc.sql"]);
   });
 
   it("has viewer-session and exact-cache ownership columns with foreign keys", async () => {

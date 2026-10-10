@@ -13,6 +13,7 @@ Doctor browser
   -> /ohif/viewer?StudyInstanceUIDs=...
   -> /ohif-dicomweb/ (RISpro-authenticated, session-scoped proxy)
        -> selected native DICOMweb PACS
+       or -> Authoritative Orthanc /dicom-web primary archive
        or -> Orthanc /dicom-web temporary cache
                 -> bounded DIMSE retrieval from selected PACS
 ```
@@ -24,8 +25,9 @@ OHIF is built from the pinned `v3.12.6` source release with `PUBLIC_URL=/ohif/`.
 1. Run the supported setup/update deployment; it deploys OHIF infrastructure while the database setting remains disabled by default.
 2. Deploy and confirm `rispro-gateway`, `rispro-app`, and `rispro-ohif` health.
 3. Open Settings → Integrations → OHIF Viewer after supervisor re-authentication.
-4. Select an active `OHIF image source`; this is independent of the general default PACS.
+4. Select the OHIF access strategy. Native DICOMweb and retrieval gateway require an active PACS node independent of the general default PACS; Authoritative Orthanc does not require a PACS node.
 5. Choose exactly one strategy:
+   - Authoritative Orthanc: reuse Settings → Authoritative Orthanc enablement, URL, credentials, TLS verification, and timeout. Enable its DICOMweb plugin at `/dicom-web`. Read current studies and bounded automatic priors directly from the primary archive; no C-MOVE, fallback, or cache deletion occurs.
    - Native DICOMweb: enter real base/QIDO/WADO roots and environment credential references.
    - Orthanc retrieval gateway: reuse RISpro Orthanc settings and enter the Orthanc remote-modality key for the selected PACS.
 6. Record the installed OsiriX MD version and whether its DICOMweb server is enabled.

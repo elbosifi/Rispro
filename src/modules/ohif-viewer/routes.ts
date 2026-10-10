@@ -1,3 +1,4 @@
+import { readAuthoritativeOrthancSettings } from "../../services/authoritative-orthanc-service.js";
 import { Readable } from "node:stream";
 import { Router, type Request, type Response } from "express";
 import { env } from "../../config/env.js";
@@ -43,10 +44,11 @@ ohifViewerRouter.get(
   requireAuth,
   asyncRoute(async (_req: OhifRequest, res: Response) => {
     const configuration = await readOhifViewerConfiguration();
+    const authoritative = configuration.settings.accessStrategy === "authoritative_orthanc" ? await readAuthoritativeOrthancSettings() : null;
     res.json({
       enabled: env.ohifEnabled && configuration.settings.enabled,
       openMode: configuration.settings.openMode,
-      configured: Boolean(configuration.settings.selectedPacsNodeId),
+      configured: authoritative ? Boolean(authoritative.enabled && authoritative.baseUrl) : Boolean(configuration.settings.selectedPacsNodeId),
     });
   })
 );
