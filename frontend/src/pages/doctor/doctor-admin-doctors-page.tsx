@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
+import { Button, Checkbox, Input } from "@/components/shared";
 import {
   createDoctorWithUserForAdmin,
   createDoctorProfileForAdmin,
@@ -58,6 +60,7 @@ type ModalityPermissionDraft = {
 
 type AccountDraft = { username: string; email: string; fullName: string; englishName: string; coreRole: "doctor" | "supervisor"; active: boolean };
 type DrawerSection = "account" | "profile" | "modalities" | "security";
+type CreateDrawerMode = "new" | "link" | null;
 
 type ModalityDraftOverride = {
   profileId: number | null;
@@ -77,6 +80,13 @@ const MODALITY_PERMISSION_COLUMNS = [
   { key: "canProtocol", labelKey: "doctorAdmin.modality.protocol", descriptionKey: "doctorAdmin.modality.protocolDescription" },
   { key: "canReport", labelKey: "doctorAdmin.modality.report", descriptionKey: "doctorAdmin.modality.reportDescription" },
   { key: "canSupervise", labelKey: "doctorAdmin.modality.supervise", descriptionKey: "doctorAdmin.modality.superviseDescription" },
+] as const;
+
+const CREATE_PROFILE_PERMISSIONS = [
+  { key: "doctorProfileActive", labelKey: "doctorAdmin.profile.active", descriptionKey: "doctorAdmin.profile.activeDescription" },
+  { key: "canFinalizeReports", labelKey: "doctorAdmin.profile.canFinalizeReports", descriptionKey: "doctorAdmin.profile.canFinalizeReportsDescription" },
+  { key: "canAssignProtocols", labelKey: "doctorAdmin.profile.canAssignProtocols", descriptionKey: "doctorAdmin.profile.canAssignProtocolsDescription" },
+  { key: "canSupervise", labelKey: "doctorAdmin.profile.canSupervise", descriptionKey: "doctorAdmin.profile.canSuperviseDescription" },
 ] as const;
 
 const DEFAULT_PROFILE_DRAFT: DoctorProfileDraft = {
@@ -127,6 +137,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [importInspect, setImportInspect] = useState<{ format: "csv" | "xlsx"; columns: string[]; rowCount: number; missingColumns: string[] } | null>(null);
   const [importPreview, setImportPreview] = useState<DoctorImportPreview | null>(null);
   const [importResult, setImportResult] = useState<DoctorImportResult | null>(null);
+  const [createDrawerMode, setCreateDrawerMode] = useState<CreateDrawerMode>(null);
   const [createDoctorDraft, setCreateDoctorDraft] = useState<CreateDoctorDraft>(DEFAULT_CREATE_DOCTOR_DRAFT);
   const [createDoctorEmailEdited, setCreateDoctorEmailEdited] = useState(false);
   const [createDoctorModalities, setCreateDoctorModalities] = useState<Record<number, {
@@ -144,6 +155,9 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [confirmLifecycle, setConfirmLifecycle] = useState<DoctorProfile | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const createDrawerCloseRef = useRef<HTMLButtonElement>(null);
+  const createDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const handledLinkUserIdRef = useRef<number | null>(null);
   const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
     userId: "",
@@ -245,6 +259,10 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     onSuccess: async (profile) => {
       setSelectedProfileId(profile.id);
       setAdminMessage({ tone: "success", text: "Doctor profile created." });
+      setCreateDrawerMode(null);
+      setDraft({ userId: "", displayName: "", doctorRole: "consultant", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false });
+      setLinkUserSelectionChanged(false);
+      window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
       await invalidateProfiles();
     },
   });
@@ -262,6 +280,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       setCreateDoctorEmailEdited(false);
       setCreateDoctorModalities({});
       setAdminMessage({ tone: "success", text: "Doctor user and profile created." });
+      setCreateDrawerMode(null);
+      window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
       await invalidateProfiles();
       await queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -431,6 +451,30 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     window.setTimeout(() => drawerTriggerRef.current?.focus(), 0);
   };
 
+  const openCreateDrawer = (mode: Exclude<CreateDrawerMode, null>, trigger: HTMLButtonElement) => {
+    createDrawerTriggerRef.current = trigger;
+    createDoctorMutation.reset();
+    createMutation.reset();
+    setAdminMessage(null);
+    setCreateDrawerMode(mode);
+  };
+
+  const closeCreateDrawer = () => {
+    setCreateDrawerMode(null);
+    window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!requestedLinkUserId || !profilesQuery.isSuccess || !usersQuery.isSuccess) return;
+    if (handledLinkUserIdRef.current === requestedLinkUserId) return;
+    handledLinkUserIdRef.current = requestedLinkUserId;
+    if (!preselectedLinkUser) return;
+
+    setAdminMessage(null);
+    setLinkUserSelectionChanged(false);
+    setCreateDrawerMode("link");
+  }, [preselectedLinkUser, profilesQuery.isSuccess, requestedLinkUserId, usersQuery.isSuccess]);
+
   useEffect(() => {
     if (!editingProfile) return;
     const unlockBodyScroll = lockBodyScroll();
@@ -455,7 +499,31 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     return () => { unlockBodyScroll(); document.removeEventListener("keydown", onKeyDown); };
   }, [editingProfile]);
 
-  const formError = createDoctorMutation.error || createMutation.error || updateMutation.error || editMutation.error || accountMutation.error || modalityMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || lifecycleMutation.error;
+  useEffect(() => {
+    if (!createDrawerMode) return;
+    const unlockBodyScroll = lockBodyScroll();
+    createDrawerCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCreateDrawerMode(null);
+        window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = createDrawerCloseRef.current?.closest('[role="dialog"]');
+      const focusable = Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') ?? []);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { unlockBodyScroll(); document.removeEventListener("keydown", onKeyDown); };
+  }, [createDrawerMode]);
+
+  const createFormError = createDoctorMutation.error || createMutation.error;
+  const formError = updateMutation.error || editMutation.error || accountMutation.error || modalityMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || lifecycleMutation.error;
 
   if (!me.canManageDoctorProfiles) {
     return <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)" }}>Doctor profile management is not available for this user.</div>;
@@ -463,9 +531,15 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal Admin</p>
-        <h2 className="mt-1 text-2xl font-semibold text-foreground">Doctors</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal Admin</p>
+          <h2 className="mt-1 text-2xl font-semibold text-foreground">Doctors</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Manage doctor accounts, profiles and clinical permissions.</p>
+        </div>
+        <Button ref={createDrawerTriggerRef} type="button" onClick={(event) => openCreateDrawer("new", event.currentTarget)}>
+          <Plus aria-hidden="true" className="me-2 inline h-4 w-4" />Create doctor
+        </Button>
       </div>
 
       {formError && (
@@ -480,62 +554,45 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       )}
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <h3 className="font-semibold">Create login account and doctor profile</h3>
-        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Creates new RISpro credentials and requires the doctor to change the temporary password at first login.</p>
-        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-          Creates the RISpro login account and Doctor Portal profile together.
-        </p>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: createDoctorEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
-          <input aria-label="Email" value={createDoctorDraft.email} onChange={(event) => { setCreateDoctorEmailEdited(true); setCreateDoctorDraft((current) => ({ ...current, email: event.target.value })); }} placeholder="Email" className="rounded-lg border px-3 py-2 text-sm" />
-          <input aria-label={t("settings.arabicName")} value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, fullName: event.target.value }))} placeholder={t("settings.arabicName")} className="rounded-lg border px-3 py-2 text-sm" />
-          <input aria-label={t("settings.englishName")} value={createDoctorDraft.englishName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, englishName: event.target.value }))} placeholder={t("settings.englishName")} className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="password" value={createDoctorDraft.temporaryPassword} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} placeholder="Temporary password" className="rounded-lg border px-3 py-2 text-sm" />
-          <div className="grid gap-1 text-sm"><label htmlFor="create-core-role" className="font-medium">{t("doctorAdmin.coreRole.label")}</label><select id="create-core-role" aria-describedby="create-core-role-help" value={createDoctorDraft.coreRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, coreRole: event.target.value as "doctor" | "supervisor" }))} className="rounded-lg border px-3 py-2 text-sm">
-            <option value="doctor">{t("doctorAdmin.coreRole.doctor")}</option>
-            <option value="supervisor">{t("doctorAdmin.coreRole.supervisor")}</option>
-          </select><div id="create-core-role-help" className="text-xs text-muted-foreground"><span className="block">{t("doctorAdmin.coreRole.doctor")}: {t("doctorAdmin.coreRole.doctorDescription")}</span><span className="block">{t("doctorAdmin.coreRole.supervisor")}: {t("doctorAdmin.coreRole.supervisorDescription")}</span></div></div>
-          <div className="grid gap-1 text-sm"><label htmlFor="create-doctor-role" className="font-medium">{t("doctorAdmin.profile.doctorRole")}</label><select id="create-doctor-role" aria-describedby="create-doctor-role-help" value={createDoctorDraft.doctorRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
-            {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-          </select><span id="create-doctor-role-help" className="text-xs text-muted-foreground">{t("doctorAdmin.profile.doctorRoleDescription")}</span></div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-3 text-sm">
-          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.userActive} disabled /> User active</label>
-          <div className="max-w-sm"><label className="flex items-center gap-2"><input type="checkbox" aria-describedby="create-profile-active-help" checked={createDoctorDraft.doctorProfileActive} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorProfileActive: event.target.checked }))} /> {t("doctorAdmin.profile.active")}</label><p id="create-profile-active-help" className="mt-1 text-xs text-muted-foreground">{t("doctorAdmin.profile.activeDescription")}</p></div>
-          <div className="max-w-sm"><label className="flex items-center gap-2"><input type="checkbox" aria-describedby="create-finalize-reports-help" checked={createDoctorDraft.canFinalizeReports} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> {t("doctorAdmin.profile.canFinalizeReports")}</label><p id="create-finalize-reports-help" className="mt-1 text-xs text-muted-foreground">{t("doctorAdmin.profile.canFinalizeReportsDescription")}</p></div>
-          <div className="max-w-sm"><label className="flex items-center gap-2"><input type="checkbox" aria-describedby="create-assign-protocols-help" checked={createDoctorDraft.canAssignProtocols} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> {t("doctorAdmin.profile.canAssignProtocols")}</label><p id="create-assign-protocols-help" className="mt-1 text-xs text-muted-foreground">{t("doctorAdmin.profile.canAssignProtocolsDescription")}</p></div>
-          <div className="max-w-sm"><label className="flex items-center gap-2"><input type="checkbox" aria-describedby="create-can-supervise-help" checked={createDoctorDraft.canSupervise} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> {t("doctorAdmin.profile.canSupervise")}</label><p id="create-can-supervise-help" className="mt-1 text-xs text-muted-foreground">{t("doctorAdmin.profile.canSuperviseDescription")}</p></div>
-        </div>
-        {(lookupsQuery.data?.modalities ?? []).length > 0 && (
-          <div className="mt-4 overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-            <table className="min-w-full text-sm">
-              <thead><tr><th className="px-3 py-2 text-left text-xs uppercase" style={{ color: "var(--text-muted)" }}>{t("doctorAdmin.modality.initial")}</th>{MODALITY_PERMISSION_COLUMNS.map((column) => <th key={column.key} scope="col" className="px-3 py-2 text-left align-top" style={{ color: "var(--text-muted)" }}><span className="block text-xs font-semibold uppercase">{t(column.labelKey)}</span><span className="mt-1 block max-w-32 text-xs font-normal normal-case leading-snug text-muted-foreground">{t(column.descriptionKey)}</span></th>)}</tr></thead>
-              <tbody>
-                {(lookupsQuery.data?.modalities ?? []).map((modality) => {
-                  const permission = createDoctorModalities[modality.id] ?? { active: false, canProtocol: false, canReport: false, canSupervise: false };
-                  const label = modality.nameEn || modality.nameAr || modality.code || String(modality.id);
-                  return (
-                    <tr key={modality.id}>
-                      <td className="px-3 py-2 font-medium">{label}</td>
-                      {(["active", "canProtocol", "canReport", "canSupervise"] as const).map((key) => (
-                        <td key={key} className="px-3 py-2">
-                          <input type="checkbox" checked={permission[key]} onChange={(event) => setCreateDoctorModalities((current) => ({
-                            ...current,
-                            [modality.id]: { ...permission, [key]: event.target.checked },
-                          }))} />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3 className="font-semibold">Doctor directory</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Doctor accounts, clinical profiles and current permissions.</p>
           </div>
-        )}
-        <div className="mt-4">
-          <button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
-            Create login account and doctor profile
-          </button>
+        </div>
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+          <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+            <thead style={{ backgroundColor: "var(--card)" }}>
+              <tr>{["Name", "Username", "Core role", "User account", "Doctor role", "Profile", "Permissions", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+              {profiles.map((profile) => (
+                <tr key={profile.id}>
+                  <td className="px-3 py-2 font-medium">{getDoctorDisplayName(profile, language)}</td>
+                  <td className="px-3 py-2">{profile.username ?? usersById.get(profile.userId)?.username ?? profile.userId}</td>
+                  <td className="px-3 py-2">{profile.coreRole ?? usersById.get(profile.userId)?.role ?? "-"}</td>
+                  <td className="px-3 py-2">{profile.userActive ?? usersById.get(profile.userId)?.isActive ? "Active" : "Inactive"}</td>
+                  <td className="px-3 py-2">{profile.doctorRole.replaceAll("_", " ")}</td>
+                  <td className="px-3 py-2">{statusLabel(profile)}</td>
+                  <td className="px-3 py-2">
+                    {[profile.canFinalizeReports && "reports", profile.canAssignProtocols && "protocols", profile.canSupervise && "supervises"].filter(Boolean).join(", ") || "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={(event) => openDrawer(profile, "account", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
+                      <button type="button" onClick={(event) => openDrawer(profile, "modalities", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Modalities</button>
+                      <button type="button" disabled={lifecycleMutation.isPending} onClick={() => setConfirmLifecycle(profile)} className="rounded-lg border px-2 py-1 text-xs disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
+                        {(profile.userActive ?? profile.active) ? "Deactivate doctor" : "Reactivate doctor"}
+                      </button>
+                      <button type="button" onClick={() => updateMutation.mutate({ profileId: profile.id, patch: { canSupervise: !profile.canSupervise } })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
+                        {profile.canSupervise ? t("doctorAdmin.quickAction.disableClinicalSupervision") : t("doctorAdmin.quickAction.enableClinicalSupervision")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -579,70 +636,168 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         </section>
       )}
 
-      <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <h3 className="font-semibold">Link existing RISpro user to doctor profile</h3>
-        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Uses the selected account’s existing username, password, core role, and active state. No new login credentials are created.</p>
-        <div className="mt-3 grid gap-2 md:grid-cols-4">
-          <select value={linkDraft.userId} onChange={(event) => {
-            const user = usersById.get(Number(event.target.value));
-            setLinkUserSelectionChanged(true);
-            setDraft((current) => ({ ...current, userId: event.target.value, displayName: user?.fullName ?? current.displayName }));
-          }} className="rounded-lg border px-3 py-2 text-sm">
-            <option value="">Select user</option>
-            {(usersQuery.data?.users ?? []).filter((user) => !profilesByUserId.has(user.id)).map((user) => (
-              <option key={user.id} value={user.id}>{user.fullName} ({user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
-            ))}
-          </select>
-          <input value={linkDraft.displayName} onChange={(event) => {
-            setLinkUserSelectionChanged(true);
-            setDraft((current) => ({ ...current, displayName: event.target.value }));
-          }} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
-          <select value={linkDraft.doctorRole} onChange={(event) => {
-            setLinkUserSelectionChanged(true);
-            setDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }));
-          }} className="rounded-lg border px-3 py-2 text-sm">
-            {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-          </select>
-          <button type="button" disabled={!linkDraft.userId || !linkDraft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
-            Create profile
-          </button>
-        </div>
-      </section>
-
-      <section className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-        <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-          <thead style={{ backgroundColor: "var(--card)" }}>
-            <tr>{["Name", "Username", "Core role", "User account", "Doctor role", "Profile", "Permissions", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr>
-          </thead>
-          <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
-            {profiles.map((profile) => (
-              <tr key={profile.id}>
-                <td className="px-3 py-2 font-medium">{getDoctorDisplayName(profile, language)}</td>
-                <td className="px-3 py-2">{profile.username ?? usersById.get(profile.userId)?.username ?? profile.userId}</td>
-                <td className="px-3 py-2">{profile.coreRole ?? usersById.get(profile.userId)?.role ?? "-"}</td>
-                <td className="px-3 py-2">{profile.userActive ?? usersById.get(profile.userId)?.isActive ? "Active" : "Inactive"}</td>
-                <td className="px-3 py-2">{profile.doctorRole.replaceAll("_", " ")}</td>
-                <td className="px-3 py-2">{statusLabel(profile)}</td>
-                <td className="px-3 py-2">
-                  {[profile.canFinalizeReports && "reports", profile.canAssignProtocols && "protocols", profile.canSupervise && "supervises"].filter(Boolean).join(", ") || "-"}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={(event) => openDrawer(profile, "account", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
-                    <button type="button" onClick={(event) => openDrawer(profile, "modalities", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Modalities</button>
-                    <button type="button" disabled={lifecycleMutation.isPending} onClick={() => setConfirmLifecycle(profile)} className="rounded-lg border px-2 py-1 text-xs disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
-                      {(profile.userActive ?? profile.active) ? "Deactivate doctor" : "Reactivate doctor"}
-                    </button>
-                    <button type="button" onClick={() => updateMutation.mutate({ profileId: profile.id, patch: { canSupervise: !profile.canSupervise } })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
-                      {profile.canSupervise ? t("doctorAdmin.quickAction.disableClinicalSupervision") : t("doctorAdmin.quickAction.enableClinicalSupervision")}
-                    </button>
+      {createDrawerMode ? createPortal(
+        <div className="fixed inset-0 z-[70] flex justify-end bg-black/35" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateDrawer(); }}>
+          <aside data-testid="create-doctor-drawer" className="flex h-dvh w-full flex-col bg-background shadow-2xl sm:max-w-[620px] sm:border-s" role="dialog" aria-modal="true" aria-labelledby="create-doctor-title" aria-describedby="create-doctor-description">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <h2 id="create-doctor-title" className="font-semibold">Create doctor</h2>
+                <p id="create-doctor-description" className="text-sm text-muted-foreground">Create a RISpro account and clinical Doctor Portal profile.</p>
+              </div>
+              <Button ref={createDrawerCloseRef} type="button" variant="secondary" size="sm" onClick={closeCreateDrawer}>Close</Button>
+            </header>
+            <div className="flex shrink-0 overflow-x-auto border-b px-2 py-2" role="group" aria-label="Doctor creation workflow">
+              <button type="button" aria-pressed={createDrawerMode === "new"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("new"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${createDrawerMode === "new" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>New RISpro account</button>
+              <button type="button" aria-pressed={createDrawerMode === "link"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("link"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${createDrawerMode === "link" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>Link existing RISpro user</button>
+            </div>
+            <div data-testid="create-doctor-drawer-body" className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
+              {createFormError ? <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{createFormError instanceof Error ? createFormError.message : "Doctor admin action failed."}</div> : null}
+              {createDrawerMode === "new" ? <>
+                <section aria-labelledby="create-account-section-title" className="space-y-3">
+                  <div>
+                    <h3 id="create-account-section-title" className="font-semibold">Account</h3>
+                    <p className="text-sm text-muted-foreground">New credentials require a password change at first login.</p>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-medium">Username</span>
+                      <Input autoComplete="username" value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value, email: createDoctorEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))} />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-medium">Email</span>
+                      <Input type="email" autoComplete="email" value={createDoctorDraft.email} onChange={(event) => { setCreateDoctorEmailEdited(true); setCreateDoctorDraft((current) => ({ ...current, email: event.target.value })); }} />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-medium">{t("settings.arabicName")}</span>
+                      <Input value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, fullName: event.target.value }))} />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-medium">{t("settings.englishName")}</span>
+                      <Input value={createDoctorDraft.englishName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, englishName: event.target.value }))} />
+                    </label>
+                    <label className="grid gap-1 text-sm sm:col-span-2">
+                      <span className="font-medium">Temporary password</span>
+                      <Input type="password" autoComplete="new-password" value={createDoctorDraft.temporaryPassword} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} />
+                    </label>
+                  </div>
+                </section>
+
+                <section aria-labelledby="create-core-role-section-title" className="space-y-3 border-t pt-4">
+                  <div>
+                    <h3 id="create-core-role-section-title" className="font-semibold">Account role</h3>
+                    <p className="text-sm text-muted-foreground">RISpro security and administrative role.</p>
+                  </div>
+                  <div className="grid gap-1 text-sm">
+                    <label htmlFor="create-core-role" className="font-medium">{t("doctorAdmin.coreRole.label")}</label>
+                    <select id="create-core-role" aria-describedby="create-core-role-help" value={createDoctorDraft.coreRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, coreRole: event.target.value as "doctor" | "supervisor" }))} className="input-premium h-[var(--control-height-md)]">
+                      <option value="doctor">{t("doctorAdmin.coreRole.doctor")}</option>
+                      <option value="supervisor">{t("doctorAdmin.coreRole.supervisor")}</option>
+                    </select>
+                    <p id="create-core-role-help" className="text-xs text-muted-foreground">{t("doctorAdmin.coreRole.doctor")}: {t("doctorAdmin.coreRole.doctorDescription")} {t("doctorAdmin.coreRole.supervisor")}: {t("doctorAdmin.coreRole.supervisorDescription")}</p>
+                  </div>
+                </section>
+
+                <section aria-labelledby="create-profile-section-title" className="space-y-3 border-t pt-4">
+                  <div>
+                    <h3 id="create-profile-section-title" className="font-semibold">Clinical profile</h3>
+                    <p className="text-sm text-muted-foreground">Doctor role is a clinical grade, separate from the RISpro account role.</p>
+                  </div>
+                  <div className="grid gap-1 text-sm">
+                    <label htmlFor="create-doctor-role" className="font-medium">{t("doctorAdmin.profile.doctorRole")}</label>
+                    <select id="create-doctor-role" aria-describedby="create-doctor-role-help" value={createDoctorDraft.doctorRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="input-premium h-[var(--control-height-md)]">
+                      {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                    </select>
+                    <span id="create-doctor-role-help" className="text-xs text-muted-foreground">{t("doctorAdmin.profile.doctorRoleDescription")}</span>
+                  </div>
+                  <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <Checkbox checked={createDoctorDraft.userActive} disabled aria-label="User active" />User active
+                    </label>
+                    <p className="ms-6 mt-1 text-xs text-muted-foreground">New RISpro accounts are active by default.</p>
+                  </div>
+                  <div className="grid gap-2">
+                    {CREATE_PROFILE_PERMISSIONS.map((permission) => (
+                      <div key={permission.key} className="flex items-start gap-3 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+                        <Checkbox id={`create-${permission.key}`} aria-describedby={`create-${permission.key}-help`} checked={createDoctorDraft[permission.key]} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, [permission.key]: event.target.checked }))} />
+                        <div className="min-w-0">
+                          <label htmlFor={`create-${permission.key}`} className="text-sm font-medium">{t(permission.labelKey)}</label>
+                          <p id={`create-${permission.key}-help`} className="mt-1 text-xs text-muted-foreground">{t(permission.descriptionKey)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section aria-labelledby="create-modality-section-title" className="space-y-3 border-t pt-4">
+                  <div>
+                    <h3 id="create-modality-section-title" className="font-semibold">Modality permissions</h3>
+                    <div className="mt-2 grid gap-x-3 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+                      {MODALITY_PERMISSION_COLUMNS.map((column) => <p key={column.key}><span className="font-medium">{t(column.labelKey)}:</span> {t(column.descriptionKey)}</p>)}
+                    </div>
+                  </div>
+                  {(lookupsQuery.data?.modalities ?? []).length > 0 ? <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+                    <table className="min-w-[440px] text-sm">
+                      <thead><tr>
+                        <th scope="col" className="sticky left-0 z-20 border-r border-border bg-card px-3 py-2 text-left text-xs font-semibold uppercase text-muted-foreground">{t("doctorAdmin.modality.label")}</th>
+                        {MODALITY_PERMISSION_COLUMNS.map((column) => <th key={column.key} scope="col" className="px-3 py-2 text-center text-xs font-semibold uppercase text-muted-foreground">{t(column.labelKey)}</th>)}
+                      </tr></thead>
+                      <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+                        {(lookupsQuery.data?.modalities ?? []).map((modality) => {
+                          const permission = createDoctorModalities[modality.id] ?? { active: false, canProtocol: false, canReport: false, canSupervise: false };
+                          const label = modality.nameEn || modality.nameAr || modality.code || String(modality.id);
+                          return <tr key={modality.id}>
+                            <th scope="row" className="sticky left-0 z-10 border-r border-border bg-background px-3 py-2 text-left font-medium">{label}</th>
+                            {MODALITY_PERMISSION_COLUMNS.map((column) => <td key={column.key} className="px-3 py-2 text-center">
+                              <Checkbox aria-label={`${label} ${t(column.labelKey)}`} checked={permission[column.key]} onChange={(event) => setCreateDoctorModalities((current) => ({ ...current, [modality.id]: { ...permission, [column.key]: event.target.checked } }))} />
+                            </td>)}
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div> : lookupsQuery.isLoading ? <p role="status" className="text-sm text-muted-foreground">Loading modalities…</p> : null}
+                </section>
+              </> : <section aria-labelledby="link-user-section-title" className="space-y-4">
+                <div>
+                  <h3 id="link-user-section-title" className="font-semibold">Link existing RISpro user to doctor profile</h3>
+                  <p className="text-sm text-muted-foreground">Uses the selected account’s existing username, password, core role, and active state. No new login credentials are created.</p>
+                </div>
+                <label className="grid gap-1 text-sm">
+                  <span className="font-medium">Select user</span>
+                  <select aria-label="Select user" value={linkDraft.userId} onChange={(event) => {
+                    const user = usersById.get(Number(event.target.value));
+                    setLinkUserSelectionChanged(true);
+                    setDraft((current) => ({ ...current, userId: event.target.value, displayName: user?.fullName ?? current.displayName }));
+                  }} className="input-premium h-[var(--control-height-md)]">
+                    <option value="">Select user</option>
+                    {(usersQuery.data?.users ?? []).filter((user) => !profilesByUserId.has(user.id)).map((user) => (
+                      <option key={user.id} value={user.id}>{user.fullName} ({user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="font-medium">Display name</span>
+                  <Input value={linkDraft.displayName} onChange={(event) => {
+                    setLinkUserSelectionChanged(true);
+                    setDraft((current) => ({ ...current, displayName: event.target.value }));
+                  }} />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="font-medium">{t("doctorAdmin.profile.doctorRole")}</span>
+                  <select aria-label={t("doctorAdmin.profile.doctorRole")} value={linkDraft.doctorRole} onChange={(event) => {
+                    setLinkUserSelectionChanged(true);
+                    setDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }));
+                  }} className="input-premium h-[var(--control-height-md)]">
+                    {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                  </select>
+                </label>
+              </section>}
+            </div>
+            <footer className="flex shrink-0 justify-between gap-3 border-t bg-background px-4 py-3 sm:px-5">
+              <Button type="button" variant="secondary" onClick={closeCreateDrawer}>Cancel</Button>
+              {createDrawerMode === "new" ? <Button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()}>{createDoctorMutation.isPending ? "Creating doctor…" : "Create doctor"}</Button> : <Button type="button" disabled={!linkDraft.userId || !linkDraft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Creating profile…" : "Create profile"}</Button>}
+            </footer>
+          </aside>
+        </div>, document.body) : null}
 
       {editingProfile && selectedProfile ? createPortal(
         <div className="fixed inset-0 z-[70] flex justify-end bg-black/35" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>

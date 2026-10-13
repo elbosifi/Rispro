@@ -17,6 +17,9 @@ const resetDoctorUserTemporaryPasswordMock = vi.fn();
 const forceDoctorUserPasswordChangeMock = vi.fn();
 const updateDoctorLinkedUserForAdminMock = vi.fn();
 const setDoctorIdentityActiveMock = vi.fn();
+const inspectDoctorImportMock = vi.fn();
+const previewDoctorImportMock = vi.fn();
+const confirmDoctorImportMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorProfilesForAdmin: () => fetchDoctorProfilesForAdminMock(),
@@ -31,9 +34,9 @@ vi.mock("@/lib/api-hooks", () => ({
   forceDoctorUserPasswordChange: (...args: unknown[]) => forceDoctorUserPasswordChangeMock(...args),
   updateDoctorLinkedUserForAdmin: (...args: unknown[]) => updateDoctorLinkedUserForAdminMock(...args),
   setDoctorIdentityActive: (...args: unknown[]) => setDoctorIdentityActiveMock(...args),
-  inspectDoctorImport: vi.fn(),
-  previewDoctorImport: vi.fn(),
-  confirmDoctorImport: vi.fn(),
+  inspectDoctorImport: (...args: unknown[]) => inspectDoctorImportMock(...args),
+  previewDoctorImport: (...args: unknown[]) => previewDoctorImportMock(...args),
+  confirmDoctorImport: (...args: unknown[]) => confirmDoctorImportMock(...args),
 }));
 
 const adminMe = {
@@ -109,84 +112,162 @@ describe("DoctorAdminDoctorsPage", () => {
     forceDoctorUserPasswordChangeMock.mockResolvedValue(users[0]);
     updateDoctorLinkedUserForAdminMock.mockResolvedValue({ user: users[0], profile: profiles[0] });
     setDoctorIdentityActiveMock.mockResolvedValue({ user: users[0], profile: profiles[0] });
+    inspectDoctorImportMock.mockResolvedValue({ workbook: { format: "csv", columns: ["username", "full_name"], rowCount: 1, missingColumns: [] } });
+    previewDoctorImportMock.mockResolvedValue({ rows: [{ rowNumber: 1, values: { username: "fresh.doc" }, action: "create", errors: [] }], canConfirm: true });
+    confirmDoctorImportMock.mockResolvedValue({ createdUsers: 1, updatedUsers: 0, createdProfiles: 1, updatedProfiles: 0, disabledProfiles: 0, modalityPermissionsUpdated: 0, skippedRows: 0, failedRows: [] });
     vi.clearAllMocks();
   });
 
-  it("preselects a requested unlinked user without creating a profile", async () => {
+  it("opens Link existing mode for a requested unlinked user without creating a profile", async () => {
     window.history.replaceState({}, "", "/doctor/doctors-directory?linkUserId=11");
     renderPage();
 
-    const select = await screen.findByDisplayValue(
-      "New Profile (new.profile) - doctor - user active",
-    );
-    expect((select as HTMLSelectElement).value).toBe("11");
-    expect((screen.getByPlaceholderText("Display name") as HTMLInputElement).value).toBe(
-      "New Profile",
-    );
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    expect(within(drawer).getByRole("button", { name: "Link existing RISpro user" }).getAttribute("aria-pressed")).toBe("true");
+    expect((within(drawer).getByLabelText("Select user") as HTMLSelectElement).value).toBe("11");
+    expect(within(drawer).getByLabelText("Display name")).toHaveProperty("value", "New Profile");
     expect(createDoctorProfileForAdminMock).not.toHaveBeenCalled();
   });
 
   it.each(["invalid", "10"])(
-    "leaves the existing link form unchanged for an invalid or linked linkUserId (%s)",
+    "does not open or select a user for an invalid or already-linked linkUserId (%s)",
     async (linkUserId) => {
       window.history.replaceState({}, "", `/doctor/doctors-directory?linkUserId=${linkUserId}`);
       renderPage();
 
-      const select = await screen.findByDisplayValue("Select user");
-      expect((select as HTMLSelectElement).value).toBe("");
-      expect((screen.getByPlaceholderText("Display name") as HTMLInputElement).value).toBe("");
+      await screen.findByRole("button", { name: "Edit" });
+      expect(screen.queryByRole("dialog", { name: "Create doctor" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Create doctor" })).toBeTruthy();
       expect(createDoctorProfileForAdminMock).not.toHaveBeenCalled();
     },
   );
 
-  it("clearly labels account creation and submits a new user plus profile", async () => {
+  it("keeps creation fields out of the directory and opens them from Create doctor", async () => {
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText("Username"), { target: { value: "fresh.doc" } });
-    fireEvent.change(screen.getByLabelText("Arabic Name"), { target: { value: "Fresh Doctor" } });
-    fireEvent.change(screen.getByLabelText("English Name"), { target: { value: "Fresh Doctor English" } });
-    fireEvent.change(screen.getByPlaceholderText("Temporary password"), { target: { value: "Temp123!" } });
-    expect(screen.queryByPlaceholderText("Doctor display name")).toBeNull();
-    const createModalityRow = (await screen.findByText("CT")).closest("tr")!;
-    fireEvent.click(within(createModalityRow).getAllByRole("checkbox")[0]);
-    expect(screen.getByRole("heading", { name: "Create login account and doctor profile" })).toBeTruthy();
-    expect(screen.getByText(/Creates new RISpro credentials/)).toBeTruthy();
-    expect(screen.getByText("Link existing RISpro user to doctor profile")).toBeTruthy();
-    expect(screen.getByText(/No new login credentials are created/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Create login account and doctor profile" }));
+    expect(screen.getByRole("heading", { name: "Doctors" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Doctor directory" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create doctor" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Username" })).toBeNull();
+    expect(screen.queryByLabelText("Temporary password")).toBeNull();
+    expect(screen.queryByText("Modality permissions")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    expect(within(drawer).getByLabelText("Username")).toBeTruthy();
+    expect(within(drawer).getByLabelText("Email")).toBeTruthy();
+    expect(within(drawer).getByLabelText("Arabic Name")).toBeTruthy();
+    expect(within(drawer).getByLabelText("English Name")).toBeTruthy();
+    expect(within(drawer).getByLabelText("Temporary password")).toBeTruthy();
+    expect(within(drawer).getByRole("combobox", { name: "Core role" })).toBeTruthy();
+    expect(within(drawer).getByRole("combobox", { name: "Doctor role" })).toBeTruthy();
+    expect(await within(drawer).findByRole("checkbox", { name: "CT Active" })).toBeTruthy();
+    expect(within(drawer).getByRole("checkbox", { name: "CT Protocol" })).toBeTruthy();
+    expect(within(drawer).getByRole("checkbox", { name: "CT Report" })).toBeTruthy();
+    expect(within(drawer).getByRole("checkbox", { name: "CT Supervise" })).toBeTruthy();
+  });
+
+  it("submits the existing account, profile and modality payload", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+
+    fireEvent.change(within(drawer).getByLabelText("Username"), { target: { value: "fresh.doc" } });
+    fireEvent.change(within(drawer).getByLabelText("Email"), { target: { value: "fresh@example.org" } });
+    fireEvent.change(within(drawer).getByLabelText("Arabic Name"), { target: { value: "Fresh Doctor" } });
+    fireEvent.change(within(drawer).getByLabelText("English Name"), { target: { value: "Fresh Doctor English" } });
+    fireEvent.change(within(drawer).getByLabelText("Temporary password"), { target: { value: "Temp123!" } });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Core role" }), { target: { value: "supervisor" } });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Doctor role" }), { target: { value: "resident" } });
+    await within(drawer).findByRole("checkbox", { name: "CT Active" });
+    fireEvent.click(within(drawer).getByLabelText("Profile active"));
+    fireEvent.click(within(drawer).getByLabelText("Can assign protocols"));
+    fireEvent.click(within(drawer).getByLabelText("Can supervise"));
+    for (const permission of ["Active", "Protocol", "Report", "Supervise"]) {
+      fireEvent.click(within(drawer).getByRole("checkbox", { name: `CT ${permission}` }));
+    }
+    fireEvent.click(within(drawer).getByRole("button", { name: "Create doctor" }));
 
     await waitFor(() => expect(createDoctorWithUserForAdminMock).toHaveBeenCalled());
     expect(createDoctorWithUserForAdminMock.mock.calls[0][0]).toMatchObject({
       username: "fresh.doc",
-      email: "",
+      email: "fresh@example.org",
       fullName: "Fresh Doctor",
       englishName: "Fresh Doctor English",
       temporaryPassword: "Temp123!",
+      coreRole: "supervisor",
+      doctorRole: "resident",
       doctorDisplayName: "",
       userActive: true,
-      modalityPermissions: [{ modalityId: 5, active: true }],
+      doctorProfileActive: false,
+      canFinalizeReports: true,
+      canAssignProtocols: false,
+      canSupervise: true,
+      modalityPermissions: [{ modalityId: 5, active: true, canProtocol: true, canReport: true, canSupervise: true }],
     });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create doctor" })).toBeNull());
+    expect(screen.getByText("Doctor user and profile created.")).toBeTruthy();
+    await waitFor(() => expect(fetchDoctorProfilesForAdminMock).toHaveBeenCalledTimes(2));
+    expect(fetchUsersMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const reopenedDrawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    expect(within(reopenedDrawer).getByLabelText("Username")).toHaveProperty("value", "");
+    expect(within(reopenedDrawer).getByLabelText("Temporary password")).toHaveProperty("value", "");
+    expect((within(reopenedDrawer).getByRole("checkbox", { name: "CT Active" }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("closes without creating when the creation drawer is cancelled", async () => {
+    renderPage();
+    const createAction = screen.getByRole("button", { name: "Create doctor" });
+    fireEvent.click(createAction);
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    fireEvent.change(within(drawer).getByLabelText("Username"), { target: { value: "draft.doc" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create doctor" })).toBeNull());
+    expect(createDoctorWithUserForAdminMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(createAction));
+  });
+
+  it("keeps entered account details and the drawer open after a create error", async () => {
+    createDoctorWithUserForAdminMock.mockRejectedValueOnce(new Error("A user with that username already exists."));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    fireEvent.change(within(drawer).getByLabelText("Username"), { target: { value: "duplicate.doc" } });
+    fireEvent.change(within(drawer).getByLabelText("Arabic Name"), { target: { value: "Entered Doctor" } });
+    fireEvent.change(within(drawer).getByLabelText("Temporary password"), { target: { value: "Temp123!" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Create doctor" }));
+
+    expect((await within(drawer).findByRole("alert")).textContent).toContain("already exists");
+    expect(screen.getByRole("dialog", { name: "Create doctor" })).toBeTruthy();
+    expect(within(drawer).getByLabelText("Username")).toHaveProperty("value", "duplicate.doc");
+    expect(within(drawer).getByLabelText("Arabic Name")).toHaveProperty("value", "Entered Doctor");
+    expect(within(drawer).getByLabelText("Temporary password")).toHaveProperty("value", "Temp123!");
   });
 
   it("explains core roles, doctor profile permissions, and modality permissions in create and edit", async () => {
     renderPage();
 
-    await screen.findByRole("heading", { name: "Create login account and doctor profile" });
-    expect(screen.getByRole("combobox", { name: "Core role" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Doctor" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Supervisor" })).toBeTruthy();
-    expect(screen.getByText("Doctor: Standard RISpro doctor account.")).toBeTruthy();
-    expect(screen.getByText(/Supervisor: RISpro administrative and scheduling privileges/)).toBeTruthy();
-    expect(screen.getByText("Clinical grade used for roster eligibility and validation; not a security role.")).toBeTruthy();
-    expect(screen.getByText("Enables clinical Doctor Portal access independently of login account status.")).toBeTruthy();
-    expect(screen.getByText("Allows eligible reporting assignments and manual finalization of assigned completed cases.")).toBeTruthy();
-    expect(screen.getByText("Enables Doctor Protocol workflows, subject to relevant modality permissions.")).toBeTruthy();
-    expect(screen.getByText(/Enables Doctor Portal supervision, such as roster and Reporting Board management/)).toBeTruthy();
-    await screen.findByText("Enables this modality permission record.");
-    expect(screen.getByText("Authorizes protocoling for this modality.")).toBeTruthy();
-    expect(screen.getByText("Makes the doctor eligible for reporting assignments in this modality.")).toBeTruthy();
-    expect(screen.getByText(/Enables directed overbooking approval eligibility for this modality/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const createDrawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    expect(within(createDrawer).getByRole("combobox", { name: "Core role" })).toBeTruthy();
+    expect(within(createDrawer).getByRole("option", { name: "Doctor" })).toBeTruthy();
+    expect(within(createDrawer).getByRole("option", { name: "Supervisor" })).toBeTruthy();
+    expect(within(createDrawer).getByText(/Doctor: Standard RISpro doctor account\./)).toBeTruthy();
+    expect(within(createDrawer).getByText(/Supervisor: RISpro administrative and scheduling privileges/)).toBeTruthy();
+    expect(within(createDrawer).getByText("Clinical grade used for roster eligibility and validation; not a security role.")).toBeTruthy();
+    expect(within(createDrawer).getByText("Enables clinical Doctor Portal access independently of login account status.")).toBeTruthy();
+    expect(within(createDrawer).getByText("Allows eligible reporting assignments and manual finalization of assigned completed cases.")).toBeTruthy();
+    expect(within(createDrawer).getByText("Enables Doctor Protocol workflows, subject to relevant modality permissions.")).toBeTruthy();
+    expect(within(createDrawer).getByText(/Enables Doctor Portal supervision, such as roster and Reporting Board management/)).toBeTruthy();
+    expect(within(createDrawer).getByText("Enables this modality permission record.")).toBeTruthy();
+    expect(within(createDrawer).getByText("Authorizes protocoling for this modality.")).toBeTruthy();
+    expect(within(createDrawer).getByText("Makes the doctor eligible for reporting assignments in this modality.")).toBeTruthy();
+    expect(within(createDrawer).getByText(/Enables directed overbooking approval eligibility for this modality/)).toBeTruthy();
 
+    fireEvent.click(within(createDrawer).getByRole("button", { name: "Cancel" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const drawer = screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
     expect(within(drawer).getByRole("combobox", { name: "Core role" })).toBeTruthy();
@@ -221,7 +302,7 @@ describe("DoctorAdminDoctorsPage", () => {
   it("hides doctor import and export controls in the default directory", async () => {
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "Create login account and doctor profile" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Doctor directory" })).toBeTruthy();
     expect(screen.queryByText("Doctor CSV/XLSX import and export")).toBeNull();
     expect(screen.queryByText("Download CSV template")).toBeNull();
     expect(screen.queryByText("Download XLSX template")).toBeNull();
@@ -236,6 +317,7 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage(adminMe, { advanced: true });
 
     expect(await screen.findByText("Doctor CSV/XLSX import and export")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Doctor directory" })).toBeTruthy();
     expect(screen.getByText("Download CSV template")).toBeTruthy();
     expect(screen.getByText("Download XLSX template")).toBeTruthy();
     expect(screen.getByText("Export CSV")).toBeTruthy();
@@ -243,6 +325,27 @@ describe("DoctorAdminDoctorsPage", () => {
     expect(screen.getByText("Import CSV/XLSX")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Preview import" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm import" })).toBeTruthy();
+  });
+
+  it("keeps advanced doctor import, preview, confirm and export actions working", async () => {
+    renderPage(adminMe, { advanced: true });
+    const file = new File(["username,full_name\nfresh.doc,Fresh Doctor"], "doctors.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Import CSV/XLSX"), { target: { files: [file] } });
+
+    await screen.findByText(/CSV file: 1 rows, 2 columns/);
+    expect(inspectDoctorImportMock.mock.calls[0][0]).toMatchObject({ format: "csv", fileName: "doctors.csv" });
+    const payload = inspectDoctorImportMock.mock.calls[0][0];
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
+    await waitFor(() => expect(previewDoctorImportMock.mock.calls[0]?.[0]).toEqual(payload));
+    await screen.findByText("Row 1: create");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+    await waitFor(() => expect(confirmDoctorImportMock.mock.calls[0]?.[0]).toEqual(payload));
+    await screen.findByText(/Import complete: 1 users created, 0 users updated/);
+
+    expect(screen.getByRole("link", { name: "Download CSV template" }).getAttribute("href")).toBe("/api/doctor/admin/doctors/import/template?format=csv");
+    expect(screen.getByRole("link", { name: "Download XLSX template" }).getAttribute("href")).toBe("/api/doctor/admin/doctors/import/template?format=xlsx");
+    expect(screen.getByRole("link", { name: "Export CSV" }).getAttribute("href")).toBe("/api/doctor/admin/doctors/export?format=csv");
+    expect(screen.getByRole("link", { name: "Export XLSX" }).getAttribute("href")).toBe("/api/doctor/admin/doctors/export?format=xlsx");
   });
 
   it("opens the drawer on Account without automatically opening Modalities and saves profile changes", async () => {
@@ -286,11 +389,14 @@ describe("DoctorAdminDoctorsPage", () => {
     expect((within(row).getAllByRole("checkbox")[1] as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(updateDoctorProfileModalitiesMock).toHaveBeenCalledWith(1, expect.arrayContaining([expect.objectContaining({ modalityId: 5, canProtocol: true })])));
 
-    await screen.findByRole("option", { name: "New Profile (new.profile) - doctor - user active" });
-    fireEvent.change(screen.getByDisplayValue("Select user"), { target: { value: "11" } });
-    fireEvent.change(screen.getByPlaceholderText("Display name"), { target: { value: "New Profile" } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "Create profile" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const createDrawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    fireEvent.click(within(createDrawer).getByRole("button", { name: "Link existing RISpro user" }));
+    fireEvent.change(within(createDrawer).getByLabelText("Select user"), { target: { value: "11" } });
+    fireEvent.change(within(createDrawer).getByLabelText("Display name"), { target: { value: "New Profile" } });
+    await waitFor(() => expect((within(createDrawer).getByRole("button", { name: "Create profile" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(within(createDrawer).getByRole("button", { name: "Create profile" }));
     await waitFor(() => expect(createDoctorProfileForAdminMock).toHaveBeenCalledWith(expect.objectContaining({ userId: 11, displayName: "New Profile" })));
   });
 
@@ -344,8 +450,10 @@ describe("DoctorAdminDoctorsPage", () => {
 
   it("auto-fills only an untouched create email and preserves manual edits or clears", async () => {
     renderPage();
-    const username = screen.getByPlaceholderText("Username");
-    const email = screen.getByPlaceholderText("Email");
+    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    const username = within(drawer).getByLabelText("Username");
+    const email = within(drawer).getByLabelText("Email");
     fireEvent.change(username, { target: { value: "doctor@nccb.ly" } });
     expect(email).toHaveProperty("value", "doctor@nccb.ly");
     fireEvent.change(username, { target: { value: "doctor.login" } });
