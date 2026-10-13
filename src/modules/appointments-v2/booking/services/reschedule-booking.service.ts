@@ -312,7 +312,9 @@ export async function rescheduleBookingInternal(
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
   const capacityModeUnchanged = effectiveCapacityResolutionMode === booking.capacityResolutionMode;
   const examTypeChangePolicy = await getExamTypeChangePolicy(client);
-  validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
+  if (!isDoctorProtocolReportOnlyUpdate) {
+    validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
+  }
 
   if (effectiveExamTypeId != null) {
     const examType = await findExamTypeById(client, effectiveExamTypeId);

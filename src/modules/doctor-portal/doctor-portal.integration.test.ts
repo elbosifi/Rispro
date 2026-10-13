@@ -638,6 +638,14 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     const nextExamType = await insertExamType(testData.modalityId, "Generic Policy Exam");
     await pool.query(`update appointments_v2.bookings set created_by_user_id = $2 where id = $1`, [appointmentId, normal.id]);
     try {
+      for (const capacityResolutionMode of ["category_override", "total_capacity_override"] as const) {
+        const response = await api(normal.cookie, `/api/v2/appointments/${appointmentId}`, {
+          method: "PUT",
+          body: { bookingDate: today, capacityResolutionMode, policySetKey: testData.policySetKey },
+        });
+        assert.equal(response.status, 403, JSON.stringify(response.data));
+        assert.match(String((response.data as any).error), /supervisor role is required for non-standard capacity resolution mode/i);
+      }
       await withExamTypeChangePolicy("supervisor_required", async () => {
         const response = await api(normal.cookie, `/api/v2/appointments/${appointmentId}`, {
           method: "PUT",
@@ -979,6 +987,84 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     assert.equal(response.status, 200, JSON.stringify(response.data));
     assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, true);
+  });
+
+  it("allows Doctor Protocol report-only updates on historical capacity overrides without changing booking state", async () => {
+    guard();
+    for (const capacityResolutionMode of ["category_override", "total_capacity_override"] as const) {
+      const patientId = await createPatient(`Protocol ${capacityResolutionMode} Report Requirement`);
+      const reportAppointmentId = await createBooking(testData, today, patientId, {
+        caseCategory: "non_oncology",
+        requiresReport: false,
+      });
+      await pool.query(
+        `update appointments_v2.bookings set capacity_resolution_mode = $2 where id = $1`,
+        [reportAppointmentId, capacityResolutionMode]
+      );
+      const path = `/api/doctor/protocoling/appointments/${reportAppointmentId}/report-requirement`;
+      const before = await pool.query<{
+        booking_date: string;
+        booking_time: string | null;
+        case_category: string;
+        capacity_resolution_mode: string;
+        uses_special_quota: boolean;
+        special_reason_code: string | null;
+        special_reason_note: string | null;
+      }>(
+        `select booking_date::text, booking_time::text, case_category, capacity_resolution_mode,
+                uses_special_quota, special_reason_code, special_reason_note
+         from appointments_v2.bookings where id = $1`,
+        [reportAppointmentId]
+      );
+
+      const unauthorized = await api(nonDoctorCookie, path, {
+        method: "PATCH",
+        body: { requiresReport: true, policySetKey: testData.policySetKey },
+      });
+      assert.equal(unauthorized.status, 403);
+
+      const enabled = await api(normal.cookie, path, {
+        method: "PATCH",
+        body: { requiresReport: true, policySetKey: testData.policySetKey },
+      });
+      assert.equal(enabled.status, 200, JSON.stringify(enabled.data));
+      assert.equal((enabled.data as { booking: { requiresReport: boolean } }).booking.requiresReport, true);
+
+      const disabled = await api(normal.cookie, path, {
+        method: "PATCH",
+        body: { requiresReport: false, policySetKey: testData.policySetKey },
+      });
+      assert.equal(disabled.status, 200, JSON.stringify(disabled.data));
+      assert.equal((disabled.data as { booking: { requiresReport: boolean } }).booking.requiresReport, false);
+
+      const after = await pool.query<typeof before.rows[0] & { requires_report: boolean }>(
+        `select requires_report, booking_date::text, booking_time::text, case_category, capacity_resolution_mode,
+                uses_special_quota, special_reason_code, special_reason_note
+         from appointments_v2.bookings where id = $1`,
+        [reportAppointmentId]
+      );
+      assert.equal(after.rows[0]?.requires_report, false);
+      assert.deepEqual(
+        {
+          booking_date: after.rows[0]?.booking_date,
+          booking_time: after.rows[0]?.booking_time,
+          case_category: after.rows[0]?.case_category,
+          capacity_resolution_mode: after.rows[0]?.capacity_resolution_mode,
+          uses_special_quota: after.rows[0]?.uses_special_quota,
+          special_reason_code: after.rows[0]?.special_reason_code,
+          special_reason_note: after.rows[0]?.special_reason_note,
+        },
+        before.rows[0]
+      );
+      const audit = await pool.query<{ count: number; changed_by_user_id: number }>(
+        `select count(*)::int as count, min(changed_by_user_id)::int as changed_by_user_id
+         from appointments_v2.reschedule_audit_events
+         where booking_id = $1`,
+        [reportAppointmentId]
+      );
+      assert.equal(audit.rows[0]?.count, 2);
+      assert.equal(audit.rows[0]?.changed_by_user_id, normal.id);
+    }
   });
 
   it("allows Doctor Protocol to clear report required on a completed appointment without changing its schedule", async () => {
