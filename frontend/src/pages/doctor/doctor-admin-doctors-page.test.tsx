@@ -168,6 +168,56 @@ describe("DoctorAdminDoctorsPage", () => {
     });
   });
 
+  it("explains core roles, doctor profile permissions, and modality permissions in create and edit", async () => {
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Create login account and doctor profile" });
+    expect(screen.getByRole("combobox", { name: "Core role" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Doctor" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Supervisor" })).toBeTruthy();
+    expect(screen.getByText("Doctor: Standard RISpro doctor account.")).toBeTruthy();
+    expect(screen.getByText(/Supervisor: RISpro administrative and scheduling privileges/)).toBeTruthy();
+    expect(screen.getByText("Clinical grade used for roster eligibility and validation; not a security role.")).toBeTruthy();
+    expect(screen.getByText("Enables clinical Doctor Portal access independently of login account status.")).toBeTruthy();
+    expect(screen.getByText("Allows eligible reporting assignments and manual finalization of assigned completed cases.")).toBeTruthy();
+    expect(screen.getByText("Enables Doctor Protocol workflows, subject to relevant modality permissions.")).toBeTruthy();
+    expect(screen.getByText(/Enables Doctor Portal supervision, such as roster and Reporting Board management/)).toBeTruthy();
+    await screen.findByText("Enables this modality permission record.");
+    expect(screen.getByText("Authorizes protocoling for this modality.")).toBeTruthy();
+    expect(screen.getByText("Makes the doctor eligible for reporting assignments in this modality.")).toBeTruthy();
+    expect(screen.getByText(/Enables directed overbooking approval eligibility for this modality/)).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Existing Doctor English" });
+    expect(within(drawer).getByRole("combobox", { name: "Core role" })).toBeTruthy();
+    expect(within(drawer).getByText("Doctor: Standard RISpro doctor account.")).toBeTruthy();
+    expect(within(drawer).getByText(/Supervisor: RISpro administrative and scheduling privileges/)).toBeTruthy();
+
+    fireEvent.click(within(drawer).getByRole("tab", { name: "Doctor profile" }));
+    expect(within(drawer).getByText("Clinical grade used for roster eligibility and validation; not a security role.")).toBeTruthy();
+    expect(within(drawer).getByText("Enables clinical Doctor Portal access independently of login account status.")).toBeTruthy();
+    expect(within(drawer).getByText("Allows eligible reporting assignments and manual finalization of assigned completed cases.")).toBeTruthy();
+    expect(within(drawer).getByText("Enables Doctor Protocol workflows, subject to relevant modality permissions.")).toBeTruthy();
+    expect(within(drawer).getByText(/Enables Doctor Portal supervision, such as roster and Reporting Board management/)).toBeTruthy();
+
+    fireEvent.click(within(drawer).getByRole("tab", { name: "Modalities" }));
+    await within(drawer).findByText("Enables this modality permission record.");
+    expect(within(drawer).getByText("Authorizes protocoling for this modality.")).toBeTruthy();
+    expect(within(drawer).getByText("Makes the doctor eligible for reporting assignments in this modality.")).toBeTruthy();
+    expect(within(drawer).getByText(/Enables directed overbooking approval eligibility for this modality/)).toBeTruthy();
+  });
+
+  it.each([
+    [false, "Enable clinical supervision", true],
+    [true, "Disable clinical supervision", false],
+  ] as const)("uses the clinical-supervision quick action label and only toggles that profile field", async (currentValue, label, nextValue) => {
+    fetchDoctorProfilesForAdminMock.mockResolvedValue([{ ...profiles[0], canSupervise: currentValue }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: label }));
+    await waitFor(() => expect(updateDoctorProfileForAdminMock).toHaveBeenCalledWith(1, { canSupervise: nextValue }));
+  });
+
   it("hides doctor import and export controls in the default directory", async () => {
     renderPage();
 
