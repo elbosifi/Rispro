@@ -2130,7 +2130,10 @@ function ProtocolAssignmentModal({
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
   const selectedVersionId = selectedProtocol?.activeVersionId ?? null;
-  const examTypesQuery = useV2ExamTypes(appointment.modalityId);
+  const canEditExamType = ["scheduled", "arrived", "waiting"].includes(appointment.appointmentStatus);
+  const examTypeEditingUnavailableMessage = "Examination type can be changed only while the appointment is scheduled, arrived, or waiting.";
+  const examTypesQueryResult = useV2ExamTypes(appointment.modalityId);
+  const examTypesQuery = { ...examTypesQueryResult, isLoading: examTypesQueryResult.isLoading || !canEditExamType };
   const examTypeOptions = useMemo(() => {
     const search = examTypeSearch.trim().toLowerCase();
     return (examTypesQuery.data ?? []).filter((examType) => examType.isActive && Number(examType.modalityId) === Number(appointment.modalityId) && (!search || [examType.name, examType.nameEn, examType.nameAr, examType.code].filter(Boolean).some((value) => String(value).toLowerCase().includes(search))));
@@ -2400,6 +2403,7 @@ function ProtocolAssignmentModal({
               <div className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)}{appointment.appointmentTime?.trim() ? ` · ${appointment.appointmentTime.trim().slice(0, 5)}` : ""}</span></span>
                 <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
+                {!canEditExamType ? <span className="text-muted-foreground">{examTypeEditingUnavailableMessage}</span> : null}
                 <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
               <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
               {appointment.latestComplementaryRecall ? <Badge variant={appointment.latestComplementaryRecall.status === "completed" ? "success" : appointment.latestComplementaryRecall.status === "cancelled" ? "neutral" : appointment.latestComplementaryRecall.status === "pending_scheduling" ? "warning" : "info"} size="sm" className={appointment.latestComplementaryRecall.status === "pending_scheduling" ? "border-amber-300 bg-amber-50 text-amber-800" : ""}>{appointment.latestComplementaryRecall.status === "pending_scheduling" ? "Additional imaging pending · Needs booking" : appointment.latestComplementaryRecall.status === "scheduled" ? "Additional imaging pending · Scheduled" : appointment.latestComplementaryRecall.status === "completed" ? "Additional imaging completed" : "Additional imaging withdrawn"}</Badge> : null}

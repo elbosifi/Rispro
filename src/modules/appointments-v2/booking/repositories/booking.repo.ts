@@ -207,6 +207,27 @@ const UPDATE_RESCHEDULE_SQL = `
   where id = $14
 `;
 
+const UPDATE_EXAM_TYPE_ONLY_SQL = `
+  update appointments_v2.bookings
+  set exam_type_id = $1,
+      updated_at = now(),
+      updated_by_user_id = $2
+  where id = $3
+`;
+
+/**
+ * Clinical correction used by Doctor Protocoling. Deliberately leaves every
+ * scheduling, policy, reporting, quota-justification, and study field intact.
+ */
+export async function updateBookingExamTypeOnly(
+  client: PoolClient,
+  bookingId: number,
+  examTypeId: number,
+  userId: number
+): Promise<void> {
+  await client.query(UPDATE_EXAM_TYPE_ONLY_SQL, [examTypeId, userId, bookingId]);
+}
+
 export async function updateBookingForReschedule(
   client: PoolClient,
   bookingId: number,

@@ -509,6 +509,49 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         assert.equal(Number((response.data as any).booking.examTypeId), sameModalityExamB.id);
       });
 
+      for (const capacityResolutionMode of ["category_override", "total_capacity_override"] as const) {
+        await pool.query(
+          `update appointments_v2.bookings
+           set capacity_resolution_mode = $2, policy_version_id = $3, study_instance_uid = '1.2.840.protocoling-history', notes = 'retain clinical note'
+           where id = $1`,
+          [appointmentId, capacityResolutionMode, testData.policyVersionId]
+        );
+        const before = await pool.query(
+          `select booking_date::text as booking_date, booking_time, modality_id, patient_id, case_category, requires_report,
+                  policy_version_id, capacity_resolution_mode, special_reason_code, special_reason_note, study_instance_uid, notes
+           from appointments_v2.bookings where id = $1`,
+          [appointmentId]
+        );
+        const expectedExamTypeId = capacityResolutionMode === "category_override" ? sameModalityExamA.id : sameModalityExamB.id;
+        const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: expectedExamTypeId } });
+        assert.equal(response.status, 200, JSON.stringify(response.data));
+        const after = await pool.query(
+          `select booking_date::text as booking_date, booking_time, modality_id, patient_id, case_category, requires_report,
+                  policy_version_id, capacity_resolution_mode, special_reason_code, special_reason_note, study_instance_uid, notes, exam_type_id
+           from appointments_v2.bookings where id = $1`,
+          [appointmentId]
+        );
+        assert.deepEqual(after.rows[0] && {
+          booking_date: after.rows[0].booking_date,
+          booking_time: after.rows[0].booking_time,
+          modality_id: after.rows[0].modality_id,
+          patient_id: after.rows[0].patient_id,
+          case_category: after.rows[0].case_category,
+          requires_report: after.rows[0].requires_report,
+          policy_version_id: after.rows[0].policy_version_id,
+          capacity_resolution_mode: after.rows[0].capacity_resolution_mode,
+          special_reason_code: after.rows[0].special_reason_code,
+          special_reason_note: after.rows[0].special_reason_note,
+          study_instance_uid: after.rows[0].study_instance_uid,
+          notes: after.rows[0].notes,
+        }, before.rows[0]);
+        assert.equal(Number(after.rows[0]?.exam_type_id), expectedExamTypeId);
+      }
+
+      await pool.query(`update appointments_v2.bookings set status = 'completed' where id = $1`, [appointmentId]);
+      await attemptExamChange(sameModalityExamA.id, 409, sameModalityExamB.id);
+      await pool.query(`update appointments_v2.bookings set status = 'scheduled' where id = $1`, [appointmentId]);
+
       const validAudits = await pool.query<{
         action_type: string;
         entity_id: number;
@@ -523,8 +566,8 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
          order by id`,
         [appointmentId]
       );
-      assert.equal(validAudits.rowCount, 2);
-      assert.deepEqual(validAudits.rows.map((row) => ({
+      assert.equal(validAudits.rowCount, 4);
+      assert.deepEqual(validAudits.rows.slice(0, 2).map((row) => ({
         action: row.action_type,
         appointmentId: Number(row.entity_id),
         actor: Number(row.changed_by_user_id),
@@ -612,14 +655,30 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
              and action_type = 'doctor_protocoling_exam_type_changed'`,
           [appointmentId]
         );
-        assert.equal(auditCount.rows[0]?.count, 2);
+        assert.equal(auditCount.rows[0]?.count, 4);
       } finally {
         await pool.query(`drop trigger if exists ${auditTrigger} on audit_log`);
         await pool.query(`drop function if exists public.${auditFunction}()`);
       }
+
+      const assigned = await api(normal.cookie, `/api/doctor/protocoling/appointments/${appointmentId}/assignment`, {
+        method: "POST",
+        body: { freeTextProtocol: "Keep existing clinical assignment", status: "ASSIGNED" },
+      });
+      assert.equal(assigned.status, 201, JSON.stringify(assigned.data));
+      await attemptExamChange(sameModalityExamA.id, 409, sameModalityExamB.id);
+      const activeProtocol = await pool.query<{ count: number }>(
+        `select count(*)::int as count from appointment_protocol_assignments where appointment_id = $1`,
+        [appointmentId]
+      );
+      assert.equal(activeProtocol.rows[0]?.count, 1);
+      const cancelled = await api(normal.cookie, `/api/doctor/protocoling/appointments/${appointmentId}/assignment`, { method: "DELETE" });
+      assert.equal(cancelled.status, 200, JSON.stringify(cancelled.data));
     } finally {
       await pool.query(
-        `update appointments_v2.bookings set exam_type_id = $2, policy_version_id = $3 where id = $1`,
+        `update appointments_v2.bookings
+         set exam_type_id = $2, policy_version_id = $3, capacity_resolution_mode = 'standard', study_instance_uid = null, notes = 'integration indication'
+         where id = $1`,
         [appointmentId, originalExamTypeId, testData.policyVersionId]
       );
       await pool.query(`update doctor_portal.doctor_profiles set active = true, can_assign_protocols = true where id = $1`, [normal.doctorId]);
@@ -1110,6 +1169,25 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     assert.equal(response.status, 200, JSON.stringify(response.data));
     assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, false);
+  });
+
+  it("allows Doctor Protocol examination corrections for an existing patient missing booking requirements", async () => {
+    guard();
+    const patientId = await createPatient("Protocol Exam Correction Missing Registration");
+    await pool.query(
+      `update patients set phone_1 = null, national_id = null, identifier_type = null, identifier_value = null where id = $1`,
+      [patientId]
+    );
+    const examAppointmentId = await createBooking(testData, today, patientId);
+    const nextExamType = await insertExamType(testData.modalityId, "Protocol Correction Missing Registration");
+
+    const response = await api(normal.cookie, `/api/doctor/protocoling/appointments/${examAppointmentId}/exam-type`, {
+      method: "PATCH",
+      body: { examTypeId: nextExamType.id },
+    });
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(await appointmentExamTypeId(examAppointmentId), nextExamType.id);
   });
 
   it("authorizes Patient Identity Reconciliation by active modality canProtocol, not either canSupervise flag", async () => {

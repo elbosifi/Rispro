@@ -1026,6 +1026,17 @@ describe("Doctor protocoling request documents", () => {
     expect(await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByText("CT Chest Abdomen")).toBeTruthy();
   });
 
+  it("disables examination editing for appointments outside reschedulable statuses", async () => {
+    mockFetchAppointments.mockResolvedValue([{ ...appointment, appointmentStatus: "completed" }]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: { ...appointment, appointmentStatus: "completed" }, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect((screen.getByRole("button", { name: "Edit examination type" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Examination type can be changed only while the appointment is scheduled, arrived, or waiting.")).toBeTruthy();
+  });
+
   it("preserves entered protocol text when an examination update fails", async () => {
     mockUpdateProtocolExamType.mockRejectedValue(new Error("Exam update denied"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });

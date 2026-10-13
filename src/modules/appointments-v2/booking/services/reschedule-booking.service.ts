@@ -28,7 +28,7 @@ import {
   getSpecialQuotaConsumptionCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
-import { findBookingById, findBookingByIdForUpdate, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
+import { findBookingById, findBookingByIdForUpdate, updateBookingDateTime, updateBookingExamTypeOnly, updateBookingForReschedule } from "../repositories/booking.repo.js";
 import { acquireBucketLocks, acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
@@ -90,6 +90,31 @@ function sameSlotDetailsEditCapacityReasonsAreResolved(
     reasons.length > 0 &&
     reasons.every((reason) => RESOLVED_CAPACITY_REASON_CODES.has(reason.code))
   );
+}
+
+function isDoctorProtocolExamTypeOnlyBypassedReason(reason: { code: string }): boolean {
+  return RESOLVED_CAPACITY_REASON_CODES.has(reason.code) || reason.code.includes("closed_weekday");
+}
+
+async function assertNoActiveProtocolAssignment(client: PoolClient, bookingId: number): Promise<void> {
+  const result = await client.query<{ active: boolean }>(
+    `
+      select exists (
+        select 1
+        from appointment_protocol_assignments
+        where appointment_id = $1
+          and status in ('ASSIGNED', 'MODIFIED')
+      ) as active
+    `,
+    [bookingId]
+  );
+  if (result.rows[0]?.active) {
+    throw new SchedulingError(
+      409,
+      "The existing protocol must be cancelled or revised through the protocol workflow before changing the examination type.",
+      ["active_protocol_assignment"]
+    );
+  }
 }
 
 async function getExamTypeChangePolicy(client: PoolClient): Promise<ExamTypeChangePolicy> {
@@ -250,9 +275,25 @@ export async function rescheduleBookingInternal(
     noShowAuthorizationReason === null &&
     studyInstanceUid === undefined &&
     approvedOverrideContext === undefined;
+  const isDoctorProtocolExamTypeOnlyUpdate =
+    doctorProtocolExamTypeUpdateAuthorized === true &&
+    newExamTypeId != null &&
+    newDate === null &&
+    newTime === undefined &&
+    reportingPriorityId === null &&
+    notes === null &&
+    override === undefined &&
+    capacityResolutionMode === undefined &&
+    specialReasonCode === null &&
+    specialReasonNote === null &&
+    rescheduleReason === null &&
+    noShowAuthorizationReason === null &&
+    requiresReport === undefined &&
+    studyInstanceUid === undefined &&
+    approvedOverrideContext === undefined;
 
   let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
-  if (!isDoctorProtocolReportOnlyUpdate) {
+  if (!isDoctorProtocolReportOnlyUpdate && !isDoctorProtocolExamTypeOnlyUpdate) {
     await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
     if (await isNoShowBookingBlocked(client, booking.patientId)) {
       if (approvedOverrideContext?.source === "recent_reauth") {
@@ -310,9 +351,11 @@ export async function rescheduleBookingInternal(
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
+  const effectiveSpecialReasonCode = isDoctorProtocolExamTypeOnlyUpdate ? booking.specialReasonCode ?? null : specialReasonCode;
+  const effectiveSpecialReasonNote = isDoctorProtocolExamTypeOnlyUpdate ? booking.specialReasonNote ?? null : specialReasonNote;
   const capacityModeUnchanged = effectiveCapacityResolutionMode === booking.capacityResolutionMode;
   const examTypeChangePolicy = await getExamTypeChangePolicy(client);
-  if (!isDoctorProtocolReportOnlyUpdate) {
+  if (!isDoctorProtocolReportOnlyUpdate && !isDoctorProtocolExamTypeOnlyUpdate) {
     validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
   }
 
@@ -371,6 +414,10 @@ export async function rescheduleBookingInternal(
         ["booking_not_reschedulable"]
       );
     }
+  }
+
+  if (isDoctorProtocolExamTypeOnlyUpdate && examTypeChanged) {
+    await assertNoActiveProtocolAssignment(client, bookingId);
   }
 
   // If schedule fields are unchanged, update editable booking details only.
@@ -515,6 +562,21 @@ export async function rescheduleBookingInternal(
   await acquireSpecialQuotaBucketLocks(client, quotaLockKeys);
   const sourceConsumption = await findActiveSpecialQuotaConsumption(client, bookingId, { forUpdate: true });
 
+  if (isDoctorProtocolExamTypeOnlyUpdate && (booking.usesSpecialQuota || sourceConsumption)) {
+    const keepsExistingQuotaPool =
+      sourceConsumption != null &&
+      effectiveCapacityResolutionMode === "special_quota_extra" &&
+      sourceConsumption.bookingDate === effectiveDate &&
+      applicableTargetQuotas.some((quota) => quota.logicalKey === sourceConsumption.quotaLogicalKey);
+    if (!keepsExistingQuotaPool) {
+      throw new SchedulingError(
+        409,
+        "The new examination is not eligible for the existing special quota. Supervisor intervention is required.",
+        ["doctor_protocol_special_quota_change_requires_supervisor"]
+      );
+    }
+  }
+
   let currentSpecialQuotaConsumptionCount = 0;
   if (effectiveCapacityResolutionMode === "special_quota_extra" && applicableTargetQuotas.length === 1) {
     currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
@@ -582,7 +644,7 @@ export async function rescheduleBookingInternal(
     useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
     // `specialReasonCode` remains metadata/audit justification only and does
     // not create independent scheduling policy behavior.
-    specialReasonCode,
+    specialReasonCode: effectiveSpecialReasonCode,
     includeOverrideEvaluation: override != null,
     bypassExamMixQuota: requestedOverrideTypes.includes("exam_mix_override"),
     context,
@@ -604,12 +666,21 @@ export async function rescheduleBookingInternal(
 
   const capacityModePreserved = capacityResolutionMode === undefined;
   const existingBookingCapacityAlreadyAccountedFor = capacityModePreserved && dateUnchanged && timeUnchanged;
-  const authorityDecision = existingBookingCapacityAlreadyAccountedFor
+  const capacityResolvedDecision = existingBookingCapacityAlreadyAccountedFor
     ? {
         ...decision,
         reasons: decision.reasons.filter((reason) => !RESOLVED_CAPACITY_REASON_CODES.has(reason.code)),
       }
     : decision;
+  const authorityDecision = isDoctorProtocolExamTypeOnlyUpdate
+    ? {
+        ...capacityResolvedDecision,
+        reasons: capacityResolvedDecision.reasons.filter((reason) => !isDoctorProtocolExamTypeOnlyBypassedReason(reason)),
+        requiresSupervisorOverride:
+          capacityResolvedDecision.requiresSupervisorOverride &&
+          capacityResolvedDecision.reasons.some((reason) => !isDoctorProtocolExamTypeOnlyBypassedReason(reason)),
+      }
+    : capacityResolvedDecision;
 
   validateDecisionAuthority(authorityDecision, userRole, effectiveCapacityResolutionMode, directedDoctorOverbookingApprovalAuthorized);
 
@@ -629,21 +700,21 @@ export async function rescheduleBookingInternal(
   validateFinalOverrideTypesConsistency(requiredOverrideTypes, requestedOverrideTypes);
 
   if (
-    decision.displayStatus === "blocked" &&
-    !decision.requiresSupervisorOverride &&
-    !sameSlotDetailsEditCapacityReasonsAreResolved(decision.reasons, existingBookingCapacityAlreadyAccountedFor)
+    authorityDecision.displayStatus === "blocked" &&
+    !authorityDecision.requiresSupervisorOverride &&
+    !sameSlotDetailsEditCapacityReasonsAreResolved(authorityDecision.reasons, existingBookingCapacityAlreadyAccountedFor)
   ) {
     throw new SchedulingError(
       409,
       "Reschedule is not allowed for the new date/category.",
-      decision.reasons.map((r) => r.code),
-      { decision }
+      authorityDecision.reasons.map((r) => r.code),
+      { decision: authorityDecision }
     );
   }
 
   validateFinalOverrideRoleAuthority(requiredOverrideTypes, userRole, directedDoctorOverbookingApprovalAuthorized);
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
+  if (authorityDecision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
     if (approvedOverrideContext) {
       if (!approvedOverrideContext.reason.trim()) {
         throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
@@ -684,7 +755,7 @@ export async function rescheduleBookingInternal(
     }
   }
 
-  if (effectiveCapacityResolutionMode === "special_quota_extra" && !specialReasonCode) {
+  if (effectiveCapacityResolutionMode === "special_quota_extra" && !effectiveSpecialReasonCode) {
     throw new SchedulingError(
       400,
       "Special quota extra mode requires specialReasonCode.",
@@ -702,7 +773,7 @@ export async function rescheduleBookingInternal(
     targetQuota != null &&
     sourceConsumption.quotaLogicalKey === targetQuota.logicalKey &&
     sourceConsumption.bookingDate === effectiveDate &&
-    Number(sourceConsumption.examTypeId) === Number(effectiveExamTypeId);
+    (isDoctorProtocolExamTypeOnlyUpdate || Number(sourceConsumption.examTypeId) === Number(effectiveExamTypeId));
 
   if (sourceConsumption && !keepExistingConsumption) {
     await releaseActiveSpecialQuotaConsumption(client, {
@@ -712,24 +783,39 @@ export async function rescheduleBookingInternal(
     });
   }
 
-  await updateBookingForReschedule(
-    client,
-    bookingId,
-    effectiveDate,
-    effectiveTime,
-    publishedVersion.id,
-    userId,
-    effectiveCapacityResolutionMode,
-    // Recompute uses_special_quota for the new booking state
-    decision.consumedCapacityMode === "special",
-    specialReasonCode,
-    specialReasonNote,
-    effectiveExamTypeId,
-    effectiveReportingPriorityId,
-    effectiveNotes,
-    effectiveRequiresReport,
-    effectiveStudyInstanceUid
-  );
+  if (isDoctorProtocolExamTypeOnlyUpdate) {
+    if (effectiveExamTypeId == null) {
+      throw new SchedulingError(500, "Doctor Protocol examination update did not identify an exam type.", ["exam_type_missing"]);
+    }
+    await updateBookingExamTypeOnly(client, bookingId, effectiveExamTypeId, userId);
+    if (keepExistingConsumption && sourceConsumption && Number(sourceConsumption.examTypeId) !== Number(effectiveExamTypeId)) {
+      await client.query(
+        `update appointments_v2.special_quota_consumptions
+         set exam_type_id = $1
+         where booking_id = $2 and released_at is null`,
+        [effectiveExamTypeId, bookingId]
+      );
+    }
+  } else {
+    await updateBookingForReschedule(
+      client,
+      bookingId,
+      effectiveDate,
+      effectiveTime,
+      publishedVersion.id,
+      userId,
+      effectiveCapacityResolutionMode,
+      // Recompute uses_special_quota for the new booking state
+      decision.consumedCapacityMode === "special",
+      effectiveSpecialReasonCode,
+      effectiveSpecialReasonNote,
+      effectiveExamTypeId,
+      effectiveReportingPriorityId,
+      effectiveNotes,
+      effectiveRequiresReport,
+      effectiveStudyInstanceUid
+    );
+  }
   if (targetQuota && !keepExistingConsumption) {
     if (effectiveExamTypeId == null) {
       throw new SchedulingError(500, "Special Quota decision did not identify an exam type.", ["special_quota_exam_missing"]);
