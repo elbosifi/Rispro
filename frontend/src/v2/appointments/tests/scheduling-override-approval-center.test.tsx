@@ -126,6 +126,38 @@ function request(overrides: Partial<SchedulingOverrideRequestDto> = {}): Schedul
   };
 }
 
+type DecisionContext = NonNullable<SchedulingOverrideRequestDto["decisionContext"]>;
+
+function decisionContext(overrides: Partial<DecisionContext> = {}): DecisionContext {
+  return {
+    violatedRuleLabel: null,
+    violatedRuleType: null,
+    currentCapacity: null,
+    totalCapacity: null,
+    remainingCapacity: null,
+    afterApprovalCapacity: null,
+    overbookAmount: null,
+    modalityCapacityBreakdown: null,
+    categoryBreakdown: null,
+    specialQuotaBreakdown: null,
+    sameDayAppointmentCount: 0,
+    sameDayAppointmentSummary: [],
+    patientPreviousNoShowCount: 0,
+    patientPreviousCancelledCount: 0,
+    patientFutureAppointmentCount: 0,
+    duplicateFutureAppointmentWarning: null,
+    requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+    submittedAt: "2042-02-01T08:00:00Z",
+    requestAgeMinutes: 1,
+    approvalNoteRequired: false,
+    approvalConsequenceText: null,
+    currentDecisionAllowed: null,
+    currentRequiredOverrideTypes: null,
+    availabilityRefreshedAt: null,
+    ...overrides,
+  };
+}
+
 function user(role: User["role"], id = 1): User {
   return {
     id,
@@ -242,8 +274,11 @@ describe("SchedulingOverrideApprovalCenter", () => {
         afterApprovalCapacity: 10,
         overbookAmount: 0,
         modalityCapacityBreakdown: null,
-        categoryBreakdown: null,
-        specialQuotaBreakdown: null,
+        categoryBreakdown: [
+          { caseCategory: "non_oncology", booked: 4, limit: 5, remaining: 1 },
+          { caseCategory: "oncology", booked: 5, limit: 5, remaining: 0 },
+        ],
+        specialQuotaBreakdown: { examTypeId: 8, consumed: 1, configured: 2, remaining: 1 },
         sameDayAppointmentCount: 9,
         sameDayAppointmentSummary: [],
         patientPreviousNoShowCount: 0,
@@ -262,11 +297,21 @@ describe("SchedulingOverrideApprovalCenter", () => {
     })];
     renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
 
+    const historicalSection = screen.getByText("Rule:").parentElement?.parentElement as HTMLElement;
     expect(screen.getByText("Why approval was requested")).toBeTruthy();
     expect(screen.getByText("Total MRI capacity exceeded when requested")).toBeTruthy();
+    expect(within(historicalSection).getByText("total_capacity_override")).toBeTruthy();
+    expect(within(historicalSection).queryByText(/Current capacity:/)).toBeNull();
     expect(screen.getByText("No override is currently required.")).toBeTruthy();
     expect(screen.getByText("Capacity is currently available. Approval will book this appointment without a capacity override.")).toBeTruthy();
-    expect(screen.getByText(/Availability refreshed/)).toBeTruthy();
+    const currentState = screen.getByText("No override is currently required.").parentElement?.parentElement as HTMLElement;
+    expect(within(currentState).getByText(/Current capacity:/)).toBeTruthy();
+    expect(within(currentState).getByText(/After approval:/)).toBeTruthy();
+    expect(within(currentState).getByText(/Overbook:/)).toBeTruthy();
+    expect(within(currentState).getByText("Non-oncology: 4 / 5")).toBeTruthy();
+    expect(within(currentState).getByText("Special quota: 1 / 2")).toBeTruthy();
+    expect(within(currentState).getByText(/Availability refreshed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   });
 
   it("keeps approval success invalidation for request, availability, and booking queries", async () => {
@@ -352,12 +397,46 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect(screen.getByText("11 / 10")).toBeTruthy();
     expect(screen.getByText("+1 case")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
     expect(screen.getByText("Supervisor cannot approve total capacity overrides. Superadmin approval is required.")).toBeTruthy();
 
     rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 12"), { target: { value: "Total capacity approved" } });
     expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows Reject to a supervisor according to the original category request type", async () => {
+    mockRequests = [request({
+      overrideType: "category_override",
+      overrideTypes: ["category_override"],
+      decisionContext: decisionContext({
+        currentDecisionAllowed: false,
+        currentRequiredOverrideTypes: ["total_capacity_override"],
+      }),
+    })];
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+  });
+
+  it("does not grant Reject from a lower-risk current state when the original request was high-risk", async () => {
+    mockRequests = [request({
+      overrideType: "total_capacity_override",
+      overrideTypes: ["total_capacity_override"],
+      decisionContext: decisionContext({
+        currentDecisionAllowed: true,
+        currentRequiredOverrideTypes: [],
+      }),
+    })];
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   });
 
   it("shows a directed total-capacity request only as actionable for its selected doctor", async () => {
@@ -401,6 +480,7 @@ describe("SchedulingOverrideApprovalCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
     expect(screen.getByText("Requested doctor")).toBeTruthy();
     expect(screen.getByText("Dr Selected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 31"), { target: { value: "Clinically appropriate" } });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(mockApprove).toHaveBeenCalledWith({

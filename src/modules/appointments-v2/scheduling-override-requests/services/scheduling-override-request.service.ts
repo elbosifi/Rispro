@@ -528,6 +528,12 @@ async function canApproveRequest(request: SchedulingOverrideRequestRow, userId: 
   return role === "supervisor";
 }
 
+async function canRejectRequest(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<boolean> {
+  if (role === "super_admin") return true;
+  if (request.requestedApproverUserId != null) return hasDirectedDoctorApprovalAuthority(request, userId);
+  return role === "supervisor" && canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes);
+}
+
 function getString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -1173,7 +1179,7 @@ export async function rejectSchedulingOverrideRequest(
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
-    if (!(await canApproveRequest(request, approverUserId, role))) {
+    if (!(await canRejectRequest(request, approverUserId, role))) {
       throw new SchedulingError(403, "You do not have permission to reject this override type.", ["override_rejection_forbidden"]);
     }
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim()));

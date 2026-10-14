@@ -67,6 +67,14 @@ function canDoctorApproveDirectedRequest(user: User | null, doctorMe: DoctorMe |
     isDirectedDoctorTarget(user, doctorMe, request);
 }
 
+function canRejectOverrideRequest(user: User | null, doctorMe: DoctorMe | null | undefined, request: SchedulingOverrideRequestDto): boolean {
+  if (user?.role === "super_admin") return true;
+  if (request.requestedApproverUserId != null) {
+    return isDirectedDoctorOverbookingTypes(effectiveOverrideTypes(request)) && isDirectedDoctorTarget(user, doctorMe, request);
+  }
+  return user?.role === "supervisor" && canRoleApproveOverrideTypes(user.role, effectiveOverrideTypes(request));
+}
+
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
@@ -559,6 +567,7 @@ function RequestCard({
   const context = request.decisionContext ?? null;
   const unsupportedCurrentBlocker = context?.currentDecisionAllowed === false && currentOverrideTypes.length === 0;
   const canApprove = isPending && !unsupportedCurrentBlocker && (canDoctorApproveDirectedRequest(user, doctorMe, request) || canRoleApproveOverrideTypes(user.role, currentOverrideTypes));
+  const canReject = isPending && canRejectOverrideRequest(user, doctorMe, request);
   const isOwn = Number(request.requesterUserId) === Number(user.id);
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
   const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && currentOverrideTypes.includes("total_capacity_override");
@@ -586,6 +595,9 @@ function RequestCard({
     context?.afterApprovalCapacity != null &&
     context.totalCapacity != null &&
     context.afterApprovalCapacity <= context.totalCapacity;
+  const hasCurrentAvailabilityDetails = context?.currentCapacity != null || context?.totalCapacity != null ||
+    context?.afterApprovalCapacity != null || Boolean(context?.categoryBreakdown?.length) ||
+    context?.specialQuotaBreakdown != null || context?.availabilityRefreshedAt != null;
 
   return (
     <article className="rounded-2xl border border-border bg-card p-3 shadow-sm">
@@ -647,32 +659,30 @@ function RequestCard({
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
         <p><span className="font-semibold">Rule:</span> {context?.violatedRuleLabel || overrideTypes.map(formatOverrideType).join(", ")}</p>
         {context?.violatedRuleType ? <p className="mt-1 text-amber-800"><span className="font-semibold">Rule type:</span> {context.violatedRuleType}</p> : null}
-        {context?.currentCapacity != null || context?.totalCapacity != null ? (
-          <div className="mt-2 grid gap-1">
-            <p><span className="font-semibold">Current capacity:</span> {formatCapacity(context?.currentCapacity, context?.totalCapacity)}</p>
-            <p><span className="font-semibold">After approval:</span> {formatCapacity(context?.afterApprovalCapacity, context?.totalCapacity)}</p>
-            <p><span className="font-semibold">Overbook:</span> {context?.overbookAmount == null ? "Not available" : `+${context.overbookAmount} case${context.overbookAmount === 1 ? "" : "s"}`}</p>
-          </div>
-        ) : (
-          <p className="mt-2 text-amber-800">Capacity impact is not available for this request.</p>
-        )}
-        {context?.categoryBreakdown?.length ? (
-          <div className="mt-2 text-amber-800">
-            {context.categoryBreakdown.map((item) => (
-              <p key={item.caseCategory}>{`${formatCategory(item.caseCategory)}: ${item.booked}${item.limit == null ? "" : ` / ${item.limit}`}`}</p>
-            ))}
-          </div>
-        ) : null}
-        {context?.specialQuotaBreakdown ? (
-          <p className="mt-2 text-amber-800">{`Special quota: ${context.specialQuotaBreakdown.consumed} / ${context.specialQuotaBreakdown.configured}`}</p>
-        ) : null}
       </div>
 
-      {currentApprovalStatus ? (
+      {currentApprovalStatus || hasCurrentAvailabilityDetails ? (
         <div className="mt-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">
-          <p>{currentApprovalStatus}</p>
+          {currentApprovalStatus ? <p>{currentApprovalStatus}</p> : null}
           {currentCapacityAvailableForTotalRequest ? (
             <p className="mt-1">Capacity is currently available. Approval will book this appointment without a capacity override.</p>
+          ) : null}
+          {context?.currentCapacity != null || context?.totalCapacity != null ? (
+            <div className="mt-2 grid gap-1">
+              <p><span className="font-semibold">Current capacity:</span> {formatCapacity(context?.currentCapacity, context?.totalCapacity)}</p>
+              <p><span className="font-semibold">After approval:</span> {formatCapacity(context?.afterApprovalCapacity, context?.totalCapacity)}</p>
+              <p><span className="font-semibold">Overbook:</span> {context?.overbookAmount == null ? "Not available" : `+${context.overbookAmount} case${context.overbookAmount === 1 ? "" : "s"}`}</p>
+            </div>
+          ) : null}
+          {context?.categoryBreakdown?.length ? (
+            <div className="mt-2 text-muted-foreground">
+              {context.categoryBreakdown.map((item) => (
+                <p key={item.caseCategory}>{`${formatCategory(item.caseCategory)}: ${item.booked}${item.limit == null ? "" : ` / ${item.limit}`}`}</p>
+              ))}
+            </div>
+          ) : null}
+          {context?.specialQuotaBreakdown ? (
+            <p className="mt-2 text-muted-foreground">{`Special quota: ${context.specialQuotaBreakdown.consumed} / ${context.specialQuotaBreakdown.configured}`}</p>
           ) : null}
           {context?.availabilityRefreshedAt ? (
             <p className="mt-1 text-muted-foreground">Availability refreshed {new Date(context.availabilityRefreshedAt).toLocaleString()}.</p>
@@ -716,13 +726,13 @@ function RequestCard({
         <p className="mt-2 text-xs text-muted-foreground">{t(language, "overrideRequests.supervisorTotalCapacityBlocked")}</p>
       ) : null}
 
-      {canApprove ? (
+      {canApprove || canReject ? (
         <div className="mt-3 space-y-2">
           <SectionTitle>Actions</SectionTitle>
-          {context?.approvalConsequenceText ? (
+          {canApprove && context?.approvalConsequenceText ? (
             <p className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">{context.approvalConsequenceText}</p>
           ) : null}
-          <div className="grid gap-2 rounded-lg border border-border bg-muted/20 p-2 text-xs">
+          {canApprove ? <div className="grid gap-2 rounded-lg border border-border bg-muted/20 p-2 text-xs">
             <label className="flex items-center gap-2">
               <input
                 type="radio"
@@ -760,24 +770,26 @@ function RequestCard({
                 <p className="col-span-2 text-[11px] text-muted-foreground">Capacity and scheduling rules will be re-checked before approval.</p>
               </div>
             ) : null}
-          </div>
-          <Input
-            aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
-            className="h-9 text-xs"
-            value={approveReason}
-            onChange={(event) => onChangeApproveReason(event.target.value)}
-            placeholder={approvalNoteRequired ? "Approval note required" : t(language, "overrideRequests.optionalApprovalNote")}
-            required={approvalNoteRequired}
-          />
-          {approvalNoteRequired ? <p className="text-[11px] text-muted-foreground">{changedDateMode ? "Approval note required when changing the booking date." : "Approval note required for this high-risk override."}</p> : null}
+          </div> : null}
+          {canApprove ? <>
+            <Input
+              aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
+              className="h-9 text-xs"
+              value={approveReason}
+              onChange={(event) => onChangeApproveReason(event.target.value)}
+              placeholder={approvalNoteRequired ? "Approval note required" : t(language, "overrideRequests.optionalApprovalNote")}
+              required={approvalNoteRequired}
+            />
+            {approvalNoteRequired ? <p className="text-[11px] text-muted-foreground">{changedDateMode ? "Approval note required when changing the booking date." : "Approval note required for this high-risk override."}</p> : null}
+          </> : null}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" onClick={onApprove} disabled={approveDisabled}>{t(language, "overrideRequests.approve")}</Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>{t(language, "overrideRequests.reject")}</Button>
+            {canApprove ? <Button type="button" size="sm" onClick={onApprove} disabled={approveDisabled}>{t(language, "overrideRequests.approve")}</Button> : null}
+            {canReject ? <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>{t(language, "overrideRequests.reject")}</Button> : null}
           </div>
         </div>
       ) : null}
 
-      {rejecting ? (
+      {rejecting && canReject ? (
         <div className="mt-3 rounded-xl border border-border bg-muted/30 p-2">
           <textarea
             aria-label={t(language, "overrideRequests.rejectionReasonForRequest", { id: request.id })}

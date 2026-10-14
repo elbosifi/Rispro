@@ -401,17 +401,20 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     return requestCategoryOverride(date, 0, cookie, null, requestedApproverUserId);
   }
 
-  async function insertLegacyUntargetedRequest(requesterUserId: number): Promise<number> {
+  async function insertLegacyUntargetedRequest(
+    requesterUserId: number,
+    overrideType: "category_override" | "total_capacity_override" | "exam_mix_override" = "category_override"
+  ): Promise<number> {
     const result = await pool.query<{ id: number }>(
       `insert into appointments_v2.scheduling_override_requests (
          request_type, override_type, override_types, status, requester_user_id, requested_approver_user_id,
          patient_id, modality_id, exam_type_id, requested_booking_date, request_payload_json,
          original_decision_snapshot_json, requester_reason, expires_at
        ) values (
-         'create_booking', 'category_override', array['category_override']::text[], 'pending', $1, null,
-         $2, $3, $4, '2043-01-10'::date, '{}'::jsonb, '{}'::jsonb, 'legacy visibility test', now() + interval '72 hours'
+         'create_booking', $2, array[$2::text], 'pending', $1, null,
+         $3, $4, $5, '2043-01-10'::date, '{}'::jsonb, '{}'::jsonb, 'legacy visibility test', now() + interval '72 hours'
        ) returning id`,
-      [requesterUserId, testData.patientId, testData.modalityId, testData.examTypeId]
+      [requesterUserId, overrideType, testData.patientId, testData.modalityId, testData.examTypeId]
     );
     return Number(result.rows[0].id);
   }
@@ -1022,6 +1025,69 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const ownList = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests");
     assert.equal(ownList.status, 200);
     assert.ok((ownList.data as any).requests.every((row: any) => Number(row.requesterUserId) === receptionistId));
+  });
+
+  it("limits untargeted rejection to the original override authority", async () => {
+    if (!testData) return;
+    await setCapacityLimits(5, 5);
+
+    const totalId = await insertLegacyUntargetedRequest(receptionistId, "total_capacity_override");
+    assert.equal((await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${totalId}`)).status, 200);
+
+    const totalRejected = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${totalId}/reject`, {
+      method: "POST",
+      body: { approverReason: "Supervisor cannot reject a total-capacity request" },
+    });
+    assert.equal(totalRejected.status, 403, JSON.stringify(totalRejected.data));
+
+    const examMixId = await insertLegacyUntargetedRequest(receptionistId, "exam_mix_override");
+    const examMixRejected = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${examMixId}/reject`, {
+      method: "POST",
+      body: { approverReason: "Supervisor cannot reject an exam-mix request" },
+    });
+    assert.equal(examMixRejected.status, 403, JSON.stringify(examMixRejected.data));
+
+    for (const requestId of [totalId, examMixId]) {
+      const stored = await pool.query<{
+        status: string;
+        rejected_at: Date | null;
+        approver_user_id: number | null;
+        approver_reason: string | null;
+      }>(
+        `select status, rejected_at, approver_user_id, approver_reason
+         from appointments_v2.scheduling_override_requests
+         where id = $1`,
+        [requestId]
+      );
+      assert.deepEqual(stored.rows[0], {
+        status: "pending",
+        rejected_at: null,
+        approver_user_id: null,
+        approver_reason: null,
+      });
+    }
+
+    const categoryDate = "2044-01-11";
+    await setCapacityLimits();
+    await fillNonOncologyCategory(categoryDate, 5);
+    const categoryRequested = await requestCategoryOverride(categoryDate);
+    assert.equal(categoryRequested.status, 201, JSON.stringify(categoryRequested.data));
+    const categoryId = Number((categoryRequested.data as any).request.id);
+    assert.deepEqual((categoryRequested.data as any).request.overrideTypes, ["category_override"]);
+    const categoryRejected = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${categoryId}/reject`, {
+      method: "POST",
+      body: { approverReason: "Category request is not justified" },
+    });
+    assert.equal(categoryRejected.status, 200, JSON.stringify(categoryRejected.data));
+    assert.equal((categoryRejected.data as any).request.status, "rejected");
+
+    const adminId = await insertLegacyUntargetedRequest(receptionistId, "total_capacity_override");
+    const adminRejected = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${adminId}/reject`, {
+      method: "POST",
+      body: { approverReason: "Super Admin rejection" },
+    });
+    assert.equal(adminRejected.status, 200, JSON.stringify(adminRejected.data));
+    assert.equal((adminRejected.data as any).request.status, "rejected");
   });
 
   it("prevents receptionist approval and prevents duplicate approval from creating another booking", async () => {
@@ -2020,6 +2086,10 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       method: "POST", body: { approverReason: "Wrong doctor" },
     });
     assert.equal(otherReject.status, 404);
+    const supervisorReject = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${selectedRejectionId}/reject`, {
+      method: "POST", body: { approverReason: "Supervisor cannot reject a directed request" },
+    });
+    assert.equal(supervisorReject.status, 404);
 
     const selectedApproval = await fetchAs(selectedDoctor.cookie, `/api/v2/scheduling-override-requests/${selectedApprovalId}/approve`, {
       method: "POST", body: { approverReason: "Selected doctor approved" },
