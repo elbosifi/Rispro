@@ -172,8 +172,5 @@ export function isSupportedOverrideType(value: string | null | undefined): value
 
 export function overrideFailureMessage(message?: string | null): string {
   const text = String(message ?? "").trim();
-  if (text.toLowerCase().includes("different or stronger override") || text.toLowerCase().includes("state has changed")) {
-    return "The scheduling state has changed. This request can no longer be approved with the original override type.";
-  }
   return text || "The request could not be completed.";
 }

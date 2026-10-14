@@ -28,6 +28,7 @@ import {
   canRoleApproveSchedulingOverride,
   formatOverrideType,
   formatRequestType,
+  isDirectedDoctorOverbookingTypes,
   overrideFailureMessage,
 } from "../utils/scheduling-override-requests";
 
@@ -39,14 +40,31 @@ function effectiveOverrideTypes(request: SchedulingOverrideRequestDto): Scheduli
   return request.overrideTypes?.length ? request.overrideTypes : [request.overrideType];
 }
 
+function currentApprovalOverrideTypes(request: SchedulingOverrideRequestDto): SchedulingOverrideType[] {
+  if (request.status === "pending" && request.decisionContext?.currentRequiredOverrideTypes != null) {
+    return request.decisionContext.currentRequiredOverrideTypes;
+  }
+  return effectiveOverrideTypes(request);
+}
+
 function canRoleApproveOverrideTypes(role: User["role"] | undefined, overrideTypes: readonly SchedulingOverrideType[]): boolean {
+  if (role === "super_admin") return true;
+  if (overrideTypes.length === 0) return role === "supervisor";
   return overrideTypes.every((overrideType) => canRoleApproveSchedulingOverride(role, overrideType));
 }
 
-function canDoctorApproveDirectedRequest(user: User | null, doctorMe: DoctorMe | null | undefined, request: SchedulingOverrideRequestDto): boolean {
+function isDirectedDoctorTarget(user: User | null, doctorMe: DoctorMe | null | undefined, request: SchedulingOverrideRequestDto): boolean {
   return Number(request.requestedApproverUserId) === Number(user?.id) &&
     Boolean(doctorMe?.hasActiveDoctorProfile && doctorMe.canSupervise) &&
     Boolean(doctorMe?.allowedModalities.some((permission) => permission.active && permission.canSupervise && Number(permission.modalityId) === Number(request.modalityId)));
+}
+
+function canDoctorApproveDirectedRequest(user: User | null, doctorMe: DoctorMe | null | undefined, request: SchedulingOverrideRequestDto): boolean {
+  const originalTypes = effectiveOverrideTypes(request);
+  const currentTypes = currentApprovalOverrideTypes(request);
+  return isDirectedDoctorOverbookingTypes(originalTypes) &&
+    (currentTypes.length === 0 || isDirectedDoctorOverbookingTypes(currentTypes)) &&
+    isDirectedDoctorTarget(user, doctorMe, request);
 }
 
 function pushSupported(): boolean {
@@ -78,8 +96,9 @@ export function SchedulingOverrideApprovalCenter({
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
 
   const actionableCount = badgeQuery.data?.requests.filter((request) => {
-    const overrideTypes = effectiveOverrideTypes(request);
+    const overrideTypes = currentApprovalOverrideTypes(request);
     if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
+    if (request.decisionContext?.currentDecisionAllowed === false && overrideTypes.length === 0) return false;
     if (canDoctorApproveDirectedRequest(user, doctorMe, request)) return true;
     if (user?.role === "supervisor") return canRoleApproveOverrideTypes(user.role, overrideTypes);
     return user?.role === "super_admin";
@@ -319,6 +338,10 @@ export function SchedulingOverrideRequestsWorkspace({
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingReauthAction, setPendingReauthAction] = useState<null | { action: () => void; allowPasskey: boolean }>(null);
 
+  useEffect(() => {
+    if (variant === "drawer") void listQuery.refetch();
+  }, [variant, listQuery.refetch]);
+
   const requests = useMemo(() => listQuery.data?.requests ?? [], [listQuery.data?.requests]);
 
   if (!user) return null;
@@ -388,7 +411,7 @@ export function SchedulingOverrideRequestsWorkspace({
       setActionError(t(language, "overrideRequests.rejectionReasonRequired"));
       return;
     }
-    if (canDoctorApproveDirectedRequest(user, doctorMe, request)) {
+    if (isDirectedDoctorTarget(user, doctorMe, request)) {
       void rejectAfterReauth(request);
       return;
     }
@@ -420,6 +443,11 @@ export function SchedulingOverrideRequestsWorkspace({
           {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : t(language, "overrideRequests.allOverrideTypes")}</option>)}
         </select>
         <Input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+        <div className="col-span-2 flex justify-end sm:col-span-4">
+          <Button type="button" size="sm" variant="secondary" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}>
+            {t(language, listQuery.isFetching ? "common.refreshing" : "common.refreshNow")}
+          </Button>
+        </div>
       </div>
 
       {actionError ? (
@@ -526,12 +554,14 @@ function RequestCard({
 }) {
   const { language } = useLanguage();
   const overrideTypes = effectiveOverrideTypes(request);
+  const currentOverrideTypes = currentApprovalOverrideTypes(request);
   const isPending = request.status === "pending";
-  const canApprove = isPending && (canDoctorApproveDirectedRequest(user, doctorMe, request) || canRoleApproveOverrideTypes(user.role, overrideTypes));
+  const context = request.decisionContext ?? null;
+  const unsupportedCurrentBlocker = context?.currentDecisionAllowed === false && currentOverrideTypes.length === 0;
+  const canApprove = isPending && !unsupportedCurrentBlocker && (canDoctorApproveDirectedRequest(user, doctorMe, request) || canRoleApproveOverrideTypes(user.role, currentOverrideTypes));
   const isOwn = Number(request.requesterUserId) === Number(user.id);
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
-  const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && overrideTypes.includes("total_capacity_override");
-  const context = request.decisionContext ?? null;
+  const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && currentOverrideTypes.includes("total_capacity_override");
   const changedDateMode = approvalDraft.approvalMode === "changed_date";
   const approvalNoteRequired = user.role !== "super_admin" && ((context?.approvalNoteRequired ?? overrideTypes.some(approvalNoteRequiredForOverride)) || changedDateMode);
   const approveDisabled = busy || (changedDateMode && !approvalDraft.changedBookingDate) || (approvalNoteRequired && !approveReason.trim());
@@ -541,6 +571,21 @@ function RequestCard({
     request.requesterUsername || context?.requester.username || null,
     t(language, "overrideRequests.idMeta", { id: request.requesterUserId }),
   ].filter(Boolean).join(" · ");
+  const currentTypesKnown = context?.currentRequiredOverrideTypes != null;
+  const currentApprovalStatus = context?.currentDecisionAllowed === true && currentTypesKnown && currentOverrideTypes.length === 0
+    ? "No override is currently required."
+    : currentTypesKnown && currentOverrideTypes.length > 0
+      ? `Current approval requires: ${currentOverrideTypes.map(formatOverrideType).join(", ")}`
+      : context?.currentDecisionAllowed === false && currentTypesKnown && currentOverrideTypes.length === 0
+        ? "The current scheduling state contains a blocker that cannot be approved through this request."
+        : null;
+  const currentCapacityAvailableForTotalRequest = overrideTypes.includes("total_capacity_override") &&
+    context?.currentDecisionAllowed === true &&
+    currentTypesKnown &&
+    currentOverrideTypes.length === 0 &&
+    context?.afterApprovalCapacity != null &&
+    context.totalCapacity != null &&
+    context.afterApprovalCapacity <= context.totalCapacity;
 
   return (
     <article className="rounded-2xl border border-border bg-card p-3 shadow-sm">
@@ -598,7 +643,7 @@ function RequestCard({
         ) : null}
       </div>
 
-      <SectionTitle>Why approval is required</SectionTitle>
+      <SectionTitle>Why approval was requested</SectionTitle>
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
         <p><span className="font-semibold">Rule:</span> {context?.violatedRuleLabel || overrideTypes.map(formatOverrideType).join(", ")}</p>
         {context?.violatedRuleType ? <p className="mt-1 text-amber-800"><span className="font-semibold">Rule type:</span> {context.violatedRuleType}</p> : null}
@@ -622,6 +667,18 @@ function RequestCard({
           <p className="mt-2 text-amber-800">{`Special quota: ${context.specialQuotaBreakdown.consumed} / ${context.specialQuotaBreakdown.configured}`}</p>
         ) : null}
       </div>
+
+      {currentApprovalStatus ? (
+        <div className="mt-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">
+          <p>{currentApprovalStatus}</p>
+          {currentCapacityAvailableForTotalRequest ? (
+            <p className="mt-1">Capacity is currently available. Approval will book this appointment without a capacity override.</p>
+          ) : null}
+          {context?.availabilityRefreshedAt ? (
+            <p className="mt-1 text-muted-foreground">Availability refreshed {new Date(context.availabilityRefreshedAt).toLocaleString()}.</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <SectionTitle>Decision support</SectionTitle>
       <div className="grid gap-2 text-xs">

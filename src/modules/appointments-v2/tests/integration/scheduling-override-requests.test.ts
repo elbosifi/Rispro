@@ -506,6 +506,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const { pool } = await import("../../../../db/pool.js");
     const result = await pool.query(
       `select status,
+              override_types,
               approver_reason,
               failure_code,
               failure_message,
@@ -520,6 +521,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     );
     return result.rows[0] as {
       status: string;
+      override_types: string[];
       approver_reason: string | null;
       failure_code: string | null;
       failure_message: string | null;
@@ -1429,62 +1431,140 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(supervisorRequestApproval.status, 403);
   });
 
-  it("marks approval failed when current scheduling state needs a stronger override than requested", async () => {
+  it("approves with standard capacity when a requested override is no longer needed", async () => {
     if (!testData) return;
-    await setCapacityLimits();
-    const date = "2042-04-07";
-    await fillNonOncologyCategory(date);
-    const requested = await requestCategoryOverride(date);
-    assert.equal(requested.status, 201);
-    assert.equal((requested.data as any).request.overrideType, "category_override");
-
+    const { pool } = await import("../../../../db/pool.js");
     await setCapacityLimits(5, 5);
+    const date = "2042-04-07";
+    await fillTotalCapacityWithOncology(date, 5);
+    const selectedDoctor = await createDoctorActor("opened_capacity");
+    const requested = await requestTotalCapacityOverride(date, selectedDoctor.userId);
+    assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
     const targetPatientId = Number((requested.data as any).request.patientId);
-    const beforeCount = await countBookings(date, targetPatientId);
-    const approval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
+    assert.deepEqual((requested.data as any).request.overrideTypes, ["total_capacity_override"]);
+
+    await setCapacityLimits(10, 10);
+    const approval = await fetchAs(selectedDoctor.cookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
       method: "POST",
-      body: { approverReason: "Now requires total capacity" },
+      body: { approverReason: null },
     });
 
-    assert.equal(approval.status, 409, JSON.stringify(approval.data));
-    assert.match((approval.data as any).error, /different or stronger override is now required/i);
-    assert.equal((approval.data as any).details.request.status, "failed");
-    assert.equal((approval.data as any).details.request.failureCode, "override_type_changed");
-    assert.equal(await countBookings(date, targetPatientId), beforeCount);
-    const stored = await getRequestFromDb(Number((requested.data as any).request.id));
-    assert.equal(stored.status, "failed");
-    assert.equal(stored.failure_code, "override_type_changed");
-    assert.match(stored.failure_message ?? "", /different or stronger override is now required/i);
-    assert.ok(stored.approval_decision_snapshot_json);
+    assert.equal(approval.status, 200, JSON.stringify(approval.data));
+    assert.equal((approval.data as any).request.status, "approved");
+    assert.equal((approval.data as any).booking.capacityResolutionMode, "standard");
+    assert.equal(await countBookings(date, targetPatientId), 1);
+    const bookingId = Number((approval.data as any).booking.id);
+    const booking = await pool.query<{ capacity_resolution_mode: string }>(
+      `select capacity_resolution_mode from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    assert.equal(booking.rows[0]?.capacity_resolution_mode, "standard");
+    const overrideAudit = await pool.query<{ count: number }>(
+      `select count(*)::int as count from appointments_v2.override_audit_events where booking_id = $1`,
+      [bookingId]
+    );
+    assert.equal(overrideAudit.rows[0]?.count, 0);
 
-    const repeatedApproval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
-      method: "POST",
-      body: { approverReason: "Attempt to reuse stale request" },
-    });
-    assert.equal(repeatedApproval.status, 409, JSON.stringify(repeatedApproval.data));
-    assert.match((repeatedApproval.data as any).error, /no longer pending/i);
-    assert.equal(await countBookings(date, targetPatientId), beforeCount);
-    assert.equal((await getRequestFromDb(Number((requested.data as any).request.id))).status, "failed");
+    const stored = await getRequestFromDb(requestId);
+    assert.equal(stored.status, "approved");
+    assert.deepEqual(stored.override_types, ["total_capacity_override"]);
+    const snapshot = stored.approval_decision_snapshot_json as any;
+    assert.deepEqual(snapshot.changedDateApproval.originalOverrideTypes, ["total_capacity_override"]);
+    assert.deepEqual(snapshot.changedDateApproval.finalRequiredOverrideTypes, []);
   });
 
-  it("fails closed when the override is no longer needed", async () => {
+  it("approves with a stronger current override for a super admin and snapshots both types", async () => {
     if (!testData) return;
-    await setCapacityLimits();
+    const { pool } = await import("../../../../db/pool.js");
+    await setCapacityLimits(10, 5);
     const date = "2042-02-08";
     await fillNonOncologyCategory(date);
     const requested = await requestCategoryOverride(date);
     assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
+    const targetPatientId = Number((requested.data as any).request.patientId);
+    assert.deepEqual((requested.data as any).request.overrideTypes, ["category_override"]);
 
-    await setCapacityLimits(10, 10);
-    const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
+    await setCapacityLimits(5, 5);
+    const approved = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
       method: "POST",
-      body: { approverReason: "Capacity opened" },
+      body: { approverReason: "Current total capacity approved" },
     });
 
-    assert.equal(approved.status, 409);
-    const stored = await getRequestFromDb(Number((requested.data as any).request.id));
+    assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    assert.equal((approved.data as any).request.status, "approved");
+    assert.equal((approved.data as any).booking.capacityResolutionMode, "total_capacity_override");
+    assert.equal(await countBookings(date, targetPatientId), 1);
+    const bookingId = Number((approved.data as any).booking.id);
+    const overrideAudit = await pool.query<{ override_type: string }>(
+      `select override_type from appointments_v2.override_audit_events where booking_id = $1 order by override_type`,
+      [bookingId]
+    );
+    assert.deepEqual(overrideAudit.rows.map((row) => row.override_type), ["total_capacity_override"]);
+
+    const stored = await getRequestFromDb(requestId);
+    assert.equal(stored.status, "approved");
+    assert.deepEqual(stored.override_types, ["category_override"]);
+    const snapshot = stored.approval_decision_snapshot_json as any;
+    assert.deepEqual(snapshot.changedDateApproval.originalOverrideTypes, ["category_override"]);
+    assert.deepEqual(snapshot.changedDateApproval.finalRequiredOverrideTypes, ["total_capacity_override"]);
+  });
+
+  it("keeps a request pending when current requirements exceed supervisor authority", async () => {
+    if (!testData) return;
+    await setCapacityLimits(10, 5);
+    const date = "2042-04-10";
+    await fillNonOncologyCategory(date);
+    const requested = await requestCategoryOverride(date);
+    assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
+    const targetPatientId = Number((requested.data as any).request.patientId);
+
+    await setCapacityLimits(5, 5);
+    const approval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Supervisor cannot approve total capacity" },
+    });
+
+    assert.equal(approval.status, 403, JSON.stringify(approval.data));
+    assert.equal(await countBookings(date, targetPatientId), 0);
+    const stored = await getRequestFromDb(requestId);
+    assert.equal(stored.status, "pending");
+    assert.deepEqual(stored.override_types, ["category_override"]);
+    assert.equal(stored.failure_code, null);
+  });
+
+  it("fails closed when approval finds a current blocker without a supported override", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    await setCapacityLimits();
+    const date = "2042-04-11";
+    await fillNonOncologyCategory(date);
+    const requested = await requestCategoryOverride(date);
+    assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
+    const targetPatientId = Number((requested.data as any).request.patientId);
+    await pool.query(
+      `update appointments_v2.scheduling_override_requests
+       set request_payload_json = jsonb_set(request_payload_json, '{createPayload,examTypeId}', '999999999'::jsonb)
+       where id = $1`,
+      [requestId]
+    );
+
+    const approval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Current exam type is missing" },
+    });
+
+    assert.equal(approval.status, 409, JSON.stringify(approval.data));
+    assert.equal(await countBookings(date, targetPatientId), 0);
+    const stored = await getRequestFromDb(requestId);
     assert.equal(stored.status, "failed");
-    assert.equal(stored.failure_code, "override_type_changed");
+    assert.equal(stored.failure_code, "unsupported_current_blocker");
+    const snapshot = stored.approval_decision_snapshot_json as any;
+    assert.equal(snapshot.isAllowed, false);
+    assert.deepEqual(snapshot.reasons.map((reason: { code: string }) => reason.code), ["exam_type_not_found"]);
   });
 
   it("handles the exact 18/18 total plus 7/7 exam-mix combined override", async () => {

@@ -218,23 +218,29 @@ function approvalNoteRequiredForApprover(
 
 function buildApprovalConsequenceText(
   request: SchedulingOverrideRequestRow,
-  context: Pick<SchedulingOverrideDecisionContext, "totalCapacity" | "afterApprovalCapacity" | "overbookAmount">
+  context: Pick<SchedulingOverrideDecisionContext, "totalCapacity" | "afterApprovalCapacity" | "overbookAmount">,
+  currentRequiredOverrideTypes: readonly SchedulingOverrideType[] | null
 ): string | null {
+  if (request.status === "pending" && (currentRequiredOverrideTypes == null || currentRequiredOverrideTypes.length === 0)) return null;
+  const overrideType = currentRequiredOverrideTypes?.[0] ?? request.overrideType;
   const modality = request.modalityName || request.modalityCode || "this modality";
-  if (request.overrideType === "total_capacity_override") {
+  if (overrideType === "total_capacity_override") {
     const overbook = context.overbookAmount == null ? null : Math.max(0, context.overbookAmount);
+    if (overbook === 0) {
+      return null;
+    }
     if (overbook != null && overbook > 0) {
       return `Approving this request will create this appointment even though ${modality} daily capacity is already full. This will overbook ${modality} by ${overbook} case${overbook === 1 ? "" : "s"}.`;
     }
     return `Approving this request will create this appointment using a total capacity override for ${modality}.`;
   }
-  if (request.overrideType === "category_override") {
+  if (overrideType === "category_override") {
     return `Approving this request will create this appointment even though the requested category capacity is already full.`;
   }
-  if (request.overrideType === "closed_weekday_override") {
+  if (overrideType === "closed_weekday_override") {
     return `Approving this request will create this appointment on a disabled or closed scheduling day.`;
   }
-  if (request.overrideType === "exam_mix_override") {
+  if (overrideType === "exam_mix_override") {
     return `Approving this request will create this appointment even though an exam mix quota is already full.`;
   }
   return null;
@@ -360,6 +366,20 @@ async function buildDecisionContext(
     afterApprovalCapacity,
     overbookAmount,
   };
+  let currentDecision: BookingDecision | null = null;
+  if (request.status === "pending") {
+    const payload = request.requestPayloadJson;
+    try {
+      if (request.requestType === "create_booking" && payload.createPayload) {
+        currentDecision = await evaluateCreatePayload(client, payload.createPayload);
+      } else if (request.requestType === "reschedule_booking" && payload.reschedulePayload && payload.bookingId) {
+        currentDecision = (await evaluateReschedulePayload(client, payload.bookingId, payload.reschedulePayload)).decision;
+      }
+    } catch (error) {
+      if (!(error instanceof SchedulingError)) throw error;
+    }
+  }
+  const currentRequiredOverrideTypes = currentDecision ? inferRequiredOverrideTypes(currentDecision) : null;
 
   return {
     violatedRuleLabel: violated.label,
@@ -403,8 +423,17 @@ async function buildDecisionContext(
     requestAgeMinutes: Number.isFinite(new Date(request.createdAt).getTime())
       ? Math.max(0, Math.floor((Date.now() - new Date(request.createdAt).getTime()) / 60000))
       : null,
-    approvalNoteRequired: approvalNoteRequiredFor(request.overrideTypes),
-    approvalConsequenceText: buildApprovalConsequenceText(request, contextBase),
+    approvalNoteRequired: request.status === "pending"
+      ? (currentRequiredOverrideTypes == null ? false : approvalNoteRequiredFor(currentRequiredOverrideTypes))
+      : approvalNoteRequiredFor(request.overrideTypes),
+    approvalConsequenceText: buildApprovalConsequenceText(
+      request,
+      contextBase,
+      request.status === "pending" ? currentRequiredOverrideTypes : null
+    ),
+    currentDecisionAllowed: currentDecision?.isAllowed ?? null,
+    currentRequiredOverrideTypes,
+    availabilityRefreshedAt: currentDecision ? new Date().toISOString() : null,
   };
 }
 
@@ -483,10 +512,20 @@ async function hasDirectedDoctorApprovalAuthority(request: SchedulingOverrideReq
     await canDoctorSuperviseModality(userId, Number(request.modalityId));
 }
 
+function canApproveCurrentOverrideTypes(
+  role: Role,
+  overrideTypes: readonly SchedulingOverrideType[],
+  directedDoctorApprovalAuthorized: boolean
+): boolean {
+  return role === "super_admin" ||
+    canRoleApproveSchedulingOverrideTypes(role, overrideTypes) ||
+    (directedDoctorApprovalAuthorized && (overrideTypes.length === 0 || isDirectedDoctorOverbookingTypes(overrideTypes)));
+}
+
 async function canApproveRequest(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): Promise<boolean> {
   if (role === "super_admin") return true;
   if (request.requestedApproverUserId != null) return hasDirectedDoctorApprovalAuthority(request, userId);
-  return canRoleApproveSchedulingOverrideTypes(role, request.overrideTypes);
+  return role === "supervisor";
 }
 
 function getString(value: unknown): string {
@@ -924,9 +963,6 @@ export async function approveSchedulingOverrideRequest(
     if (!(await canApproveRequest(request, approverUserId, role))) {
       throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
     }
-    if (approvalNoteRequiredForApprover(role, approvalMode, request.overrideTypes) && !approverReason?.trim()) {
-      throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
-    }
 
     const payload = request.requestPayloadJson;
     if (payload.version !== 1 || payload.requestType !== request.requestType) {
@@ -952,20 +988,11 @@ export async function approveSchedulingOverrideRequest(
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideTypes = inferred.requiredOverrideTypes;
-      if (!isDirectedDoctorOverbookingTypes(requiredOverrideTypes) && !canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes) && role !== "super_admin") {
+      if (!canApproveCurrentOverrideTypes(role, requiredOverrideTypes, directedDoctorApprovalAuthorized)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
       if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
-      }
-      if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {
-        const failed = await markSchedulingOverrideRequestFailed(client, id, {
-          approverUserId,
-          failureCode: "override_type_changed",
-          failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
-          approvalDecisionSnapshot: decision,
-        });
-        return { request: await hydrateRequestDisplayName(client, failed) };
       }
       const capacityResolutionMode = capacityModeForOverrideTypes(requiredOverrideTypes);
       const createPayload: CreateAppointmentDto = {
@@ -1004,20 +1031,11 @@ export async function approveSchedulingOverrideRequest(
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
       if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideTypes = inferred.requiredOverrideTypes;
-      if (!isDirectedDoctorOverbookingTypes(requiredOverrideTypes) && !canRoleApproveSchedulingOverrideTypes(role, requiredOverrideTypes) && role !== "super_admin") {
+      if (!canApproveCurrentOverrideTypes(role, requiredOverrideTypes, directedDoctorApprovalAuthorized)) {
         throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
       }
       if (approvalNoteRequiredForApprover(role, approvalMode, requiredOverrideTypes) && !approverReason?.trim()) {
         throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
-      }
-      if (approvalMode === "as_requested" && JSON.stringify(requiredOverrideTypes) !== JSON.stringify(request.overrideTypes)) {
-        const failed = await markSchedulingOverrideRequestFailed(client, id, {
-          approverUserId,
-          failureCode: "override_type_changed",
-          failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
-          approvalDecisionSnapshot: decision,
-        });
-        return { request: await hydrateRequestDisplayName(client, failed) };
       }
       const capacityResolutionMode = requiredOverrideTypes.length ? capacityModeForOverrideTypes(requiredOverrideTypes) : undefined;
       const reschedule = effectiveReschedulePayload;

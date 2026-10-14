@@ -426,6 +426,9 @@ export interface SchedulingOverrideRequestDto {
     requestAgeMinutes: number | null;
     approvalNoteRequired: boolean;
     approvalConsequenceText: string | null;
+    currentDecisionAllowed?: boolean | null;
+    currentRequiredOverrideTypes?: SchedulingOverrideType[] | null;
+    availabilityRefreshedAt?: string | null;
   } | null;
 }
 

@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulingOverrideApprovalCenter, SchedulingOverrideRequestsWorkspace } from "../components/SchedulingOverrideApprovalCenter";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import type { SchedulingOverrideRequestDto } from "../types";
 import type { DoctorMe, User } from "@/types/api";
+import { overrideFailureMessage } from "../utils/scheduling-override-requests";
 
 const mockApprove = vi.fn();
 const mockReject = vi.fn();
@@ -13,11 +15,18 @@ const mockCancel = vi.fn();
 const mockSubscribePush = vi.fn();
 const mockUnsubscribePush = vi.fn();
 const mockTestPush = vi.fn();
+const mockListRefetch = vi.fn();
+const mockApi = vi.fn();
 let mockRequests: SchedulingOverrideRequestDto[] = [];
 let mockPushConfig = { enabled: true, publicKey: "test-public-key", subscribed: false };
+let mockListIsFetching = false;
 
 vi.mock("@/lib/toast", () => ({
   pushToast: vi.fn(),
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  api: (...args: unknown[]) => mockApi(...args),
 }));
 
 vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
@@ -34,6 +43,8 @@ vi.mock("../api", () => ({
     data: { requests: mockRequests },
     isLoading: false,
     isError: false,
+    isFetching: mockListIsFetching,
+    refetch: mockListRefetch,
   }),
   useApproveSchedulingOverrideRequest: () => ({
     mutateAsync: mockApprove,
@@ -138,6 +149,9 @@ describe("SchedulingOverrideApprovalCenter", () => {
     mockSubscribePush.mockReset();
     mockUnsubscribePush.mockReset();
     mockTestPush.mockReset();
+    mockListRefetch.mockReset().mockResolvedValue(undefined);
+    mockApi.mockReset().mockResolvedValue({ request: {} });
+    mockListIsFetching = false;
     mockApprove.mockResolvedValue({ request: request({ status: "approved" }) });
     mockReject.mockResolvedValue({ request: request({ status: "rejected" }) });
     mockCancel.mockResolvedValue({ request: request({ status: "cancelled" }) });
@@ -193,6 +207,85 @@ describe("SchedulingOverrideApprovalCenter", () => {
       changedBookingDate: null,
       changedBookingTime: null,
     });
+  });
+
+  it("refetches the cached request list when the drawer opens", async () => {
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+
+    expect(mockListRefetch).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+    await waitFor(() => expect(mockListRefetch).toHaveBeenCalledTimes(1));
+  });
+
+  it("refreshes the request list manually and disables the button while fetching", async () => {
+    const { rerender } = renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
+    const refresh = screen.getByRole("button", { name: "Refresh now" });
+    await userEvent.click(refresh);
+    expect(mockListRefetch).toHaveBeenCalledTimes(1);
+
+    mockListIsFetching = true;
+    rerender(<LanguageProvider><SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" /></LanguageProvider>);
+    const refreshing = screen.getByRole("button", { name: "Refreshing..." }) as HTMLButtonElement;
+    expect(refreshing.disabled).toBe(true);
+  });
+
+  it("shows the original reason separately from refreshed current scheduling state", async () => {
+    mockRequests = [request({
+      overrideType: "total_capacity_override",
+      overrideTypes: ["total_capacity_override"],
+      decisionContext: {
+        violatedRuleLabel: "Total MRI capacity exceeded when requested",
+        violatedRuleType: "total_capacity_override",
+        currentCapacity: 9,
+        totalCapacity: 10,
+        remainingCapacity: 1,
+        afterApprovalCapacity: 10,
+        overbookAmount: 0,
+        modalityCapacityBreakdown: null,
+        categoryBreakdown: null,
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: 9,
+        sameDayAppointmentSummary: [],
+        patientPreviousNoShowCount: 0,
+        patientPreviousCancelledCount: 0,
+        patientFutureAppointmentCount: 0,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: 4,
+        approvalNoteRequired: false,
+        approvalConsequenceText: null,
+        currentDecisionAllowed: true,
+        currentRequiredOverrideTypes: [],
+        availabilityRefreshedAt: "2042-02-01T08:05:00Z",
+      },
+    })];
+    renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
+
+    expect(screen.getByText("Why approval was requested")).toBeTruthy();
+    expect(screen.getByText("Total MRI capacity exceeded when requested")).toBeTruthy();
+    expect(screen.getByText("No override is currently required.")).toBeTruthy();
+    expect(screen.getByText("Capacity is currently available. Approval will book this appointment without a capacity override.")).toBeTruthy();
+    expect(screen.getByText(/Availability refreshed/)).toBeTruthy();
+  });
+
+  it("keeps approval success invalidation for request, availability, and booking queries", async () => {
+    const actualApi = await vi.importActual<typeof import("../api")>("../api");
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+
+    function ApprovalHookHarness() {
+      const approval = actualApi.useApproveSchedulingOverrideRequest();
+      return <button type="button" onClick={() => void approval.mutateAsync({ id: 11 })}>Run real approval hook</button>;
+    }
+
+    render(<QueryClientProvider client={queryClient}><ApprovalHookHarness /></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Run real approval hook" }));
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(3));
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, { queryKey: ["v2-scheduling-override-requests"] });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, { queryKey: ["v2-availability"] });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(3, { queryKey: ["v2-bookings"] });
   });
 
   it("supports changed-date approval after supervisor re-auth", async () => {
@@ -459,7 +552,9 @@ describe("SchedulingOverrideApprovalCenter", () => {
     renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("receptionist", 7)} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
-    expect(screen.getByText("The scheduling state has changed. This request can no longer be approved with the original override type.")).toBeTruthy();
+    const oldFailureMessage = "The current scheduling state has changed. A different or stronger override is now required.";
+    expect(screen.getByText(oldFailureMessage)).toBeTruthy();
+    expect(overrideFailureMessage(oldFailureMessage)).toBe(oldFailureMessage);
     await userEvent.click(screen.getByRole("button", { name: "Cancel request" }));
 
     await waitFor(() => {
