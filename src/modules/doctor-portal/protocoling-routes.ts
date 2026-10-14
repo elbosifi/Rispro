@@ -6,9 +6,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { getDoctorMe } from "./profile-service.js";
-import { canDoctorProtocolModality } from "./profile-repository.js";
 import { rescheduleBooking } from "../appointments-v2/booking/services/reschedule-booking.service.js";
-import { logAuditEntry } from "../../services/audit-service.js";
 import {
   cancelProtocolAssignment,
   getProtocolingAppointmentDetail,
@@ -31,6 +29,7 @@ import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, Protocol
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
 import { createComplementaryRecall, listComplementaryRecalls, updateComplementaryRecallInstructions, withdrawComplementaryRecall } from "../appointments-v2/recall/complementary-recall.service.js";
 import { queueManualComplementaryRecallCompletedEmail } from "../appointments-v2/recall/complementary-recall-email.js";
+import { changeDoctorProtocolingExamType, type ProtocolingExamTypeDisposition } from "./doctor-protocoling-exam-type-service.js";
 
 const router = Router();
 
@@ -72,6 +71,12 @@ function optionalPositiveInteger(value: unknown, field: string): number | null {
 function optionalText(value: unknown): string | null {
   const text = asOptionalString(value)?.trim();
   return text ? text : null;
+}
+
+function protocolingExamTypeDisposition(value: unknown): ProtocolingExamTypeDisposition | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "keep" || value === "clear") return value;
+  throw new HttpError(400, "protocolDisposition must be keep or clear.");
 }
 
 function modality(value: unknown): ProtocolingModality | null {
@@ -307,59 +312,13 @@ router.patch(
     const appointmentId = positiveInteger(req.params.appointmentId, "appointmentId");
     const body = asUnknownRecord(req.body);
     const examTypeId = positiveInteger(body.examTypeId ?? body.exam_type_id, "examTypeId");
-    const result = await rescheduleBooking(
+    const result = await changeDoctorProtocolingExamType({
       appointmentId,
-      null,
-      undefined,
       examTypeId,
-      null,
-      null,
       userId,
-      req.user.role,
-      undefined,
-      undefined,
-      null,
-      null,
-      null,
-      null,
-      undefined,
-      undefined,
-      "default",
-      undefined,
-      false,
-      true,
-      false,
-      async (client, rescheduled) => {
-        if (!(await canDoctorProtocolModality(userId, Number(rescheduled.booking.modalityId), client))) {
-          throw new HttpError(403, "Doctor is not permitted to protocol this appointment modality.");
-        }
-        const examTypeIds = [rescheduled.previousExamTypeId, rescheduled.booking.examTypeId]
-          .filter((id): id is number => id != null);
-        const examTypes = await client.query<{ id: number; name: string | null }>(
-          `select id, coalesce(nullif(name_en, ''), nullif(name_ar, '')) as name
-           from exam_types
-           where id = any($1::bigint[])`,
-          [examTypeIds]
-        );
-        const examTypeNames = new Map(examTypes.rows.map((row) => [Number(row.id), row.name]));
-        await logAuditEntry({
-          entityType: "appointment",
-          entityId: appointmentId,
-          actionType: "doctor_protocoling_exam_type_changed",
-          oldValues: {
-            examTypeId: rescheduled.previousExamTypeId,
-            examTypeName: rescheduled.previousExamTypeId == null ? null : examTypeNames.get(rescheduled.previousExamTypeId) ?? null,
-          },
-          newValues: {
-            examTypeId,
-            examTypeName: examTypeNames.get(examTypeId) ?? null,
-            source: "Doctor Protocoling Board",
-          },
-          changedByUserId: userId,
-        }, client);
-      }
-    );
-    res.json({ booking: result.booking });
+      protocolDisposition: protocolingExamTypeDisposition(body.protocolDisposition ?? body.protocol_disposition),
+    });
+    res.json({ booking: result.booking, detail: result.detail, protocolDisposition: result.protocolDisposition });
   })
 );
 

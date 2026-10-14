@@ -1,4 +1,5 @@
 import { pool } from "../../db/pool.js";
+import type { Pool, PoolClient } from "pg";
 import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
@@ -610,7 +611,19 @@ export async function saveProtocolAssignment(
 }
 
 export async function cancelProtocolAssignment(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
-  await pool.query(
+  await cancelActiveProtocolAssignments(pool, appointmentId);
+  const detail = await getProtocolingAppointmentDetail(appointmentId);
+  if (!detail) throw new HttpError(404, "Appointment not found.");
+  scheduleBookingWorklistSync(appointmentId);
+  return detail;
+}
+
+/**
+ * Canonical protocol-assignment cancellation mutation. Callers that compose it
+ * with another booking mutation must use the same transaction.
+ */
+export async function cancelActiveProtocolAssignments(client: Pool | PoolClient, appointmentId: number): Promise<void> {
+  await client.query(
     `
       update appointment_protocol_assignments
       set status = 'CANCELLED',
@@ -620,10 +633,6 @@ export async function cancelProtocolAssignment(appointmentId: number): Promise<D
     `,
     [appointmentId]
   );
-  const detail = await getProtocolingAppointmentDetail(appointmentId);
-  if (!detail) throw new HttpError(404, "Appointment not found.");
-  scheduleBookingWorklistSync(appointmentId);
-  return detail;
 }
 
 async function getPatientHistoryForContext(current: PreviousStudiesAppointmentContext) {

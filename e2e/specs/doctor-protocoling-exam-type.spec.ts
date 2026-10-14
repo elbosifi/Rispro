@@ -17,6 +17,10 @@ test("a protocol-authorized doctor changes a same-modality examination without r
   await expect(workspace).toBeVisible();
   await workspace.getByRole("radio", { name: "Free-text protocol" }).click();
   await workspace.getByLabel("Free-text protocol").fill("Preserve this entered clinical protocol content during examination change.");
+  const saveAssignment = page.waitForResponse((response) => response.request().method() === "POST" && /\/api\/doctor\/protocoling\/appointments\/\d+\/assignment$/.test(new URL(response.url()).pathname));
+  await workspace.getByRole("button", { name: "Save", exact: true }).click();
+  await saveAssignment;
+  await expect(workspace.getByText("Current assignment", { exact: true })).toBeVisible();
   await expect(workspace.getByRole("button", { name: "Edit examination type" })).toBeVisible();
   await screenshot("doctor-protocoling-exam-before.png");
 
@@ -24,9 +28,13 @@ test("a protocol-authorized doctor changes a same-modality examination without r
   const editor = page.getByRole("dialog", { name: "Edit examination type" });
   const examinationSelect = editor.getByLabel("Examination type", { exact: true });
   await expect(examinationSelect.locator("option")).toContainText(["E2E CT Chest", "E2E CT Head"]);
-  const update = page.waitForRequest((request) => request.method() === "PATCH" && /\/api\/doctor\/protocoling\/appointments\/\d+\/exam-type$/.test(new URL(request.url()).pathname));
   await examinationSelect.selectOption({ label: "E2E CT Chest" });
   await editor.getByRole("button", { name: "Update exam" }).click();
+  const decision = page.getByRole("dialog", { name: "Change examination type" });
+  await expect(decision).toBeVisible();
+  await expect(decision.getByText(/already has an assigned protocol/i)).toBeVisible();
+  const update = page.waitForRequest((request) => request.method() === "PATCH" && /\/api\/doctor\/protocoling\/appointments\/\d+\/exam-type$/.test(new URL(request.url()).pathname));
+  await decision.getByRole("button", { name: "Change exam & keep protocol" }).click();
   await update;
   await expect(workspace.getByText("E2E CT Chest", { exact: true })).toBeVisible();
   await expect(workspace.getByLabel("Free-text protocol")).toHaveValue("Preserve this entered clinical protocol content during examination change.");

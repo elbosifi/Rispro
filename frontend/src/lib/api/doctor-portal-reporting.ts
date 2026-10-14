@@ -1281,11 +1281,20 @@ export async function updateDoctorProtocolReportRequirement(
 
 export async function updateDoctorProtocolExamType(
   appointmentId: number,
-  examTypeId: number
-): Promise<{ booking: { examTypeId: number | null } }> {
-  return api<{ booking: { examTypeId: number | null } }>(`/doctor/protocoling/appointments/${appointmentId}/exam-type`, {
+  examTypeId: number,
+  protocolDisposition?: "keep" | "clear",
+): Promise<{
+  booking: { examTypeId: number | null };
+  detail: DoctorProtocolingAppointmentDetail;
+  protocolDisposition: "kept" | "cleared" | "none";
+}> {
+  return api<{
+    booking: { examTypeId: number | null };
+    detail: DoctorProtocolingAppointmentDetail;
+    protocolDisposition: "kept" | "cleared" | "none";
+  }>(`/doctor/protocoling/appointments/${appointmentId}/exam-type`, {
     method: "PATCH",
-    body: JSON.stringify({ examTypeId }),
+    body: JSON.stringify({ examTypeId, ...(protocolDisposition == null ? {} : { protocolDisposition }) }),
   });
 }
 

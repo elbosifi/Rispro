@@ -1993,9 +1993,9 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           embedded={embedded}
           onNavigate={(direction) => navigateWorklist(direction)}
           onUpdated={onEmbeddedUpdated}
-          onExamTypeUpdated={(examTypeId, examTypeName) => {
-            queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, examTypeId, examTypeName } : item));
-            queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], (current) => current ? { ...current, appointment: { ...current.appointment, examTypeId, examTypeName } } : current);
+          onExamTypeUpdated={(examTypeId, examTypeName, updatedDetail) => {
+            queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, ...updatedDetail.appointment, examTypeId, examTypeName } : item));
+            queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], updatedDetail);
           }}
            onRequiresReportUpdated={(requiresReport) => {
              queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, requiresReport } : item));
@@ -2077,7 +2077,7 @@ function ProtocolAssignmentModal({
   embedded: boolean;
   onNavigate: (direction: -1 | 1) => void;
   onUpdated?: () => void | Promise<void>;
-  onExamTypeUpdated: (examTypeId: number, examTypeName: string) => void;
+  onExamTypeUpdated: (examTypeId: number, examTypeName: string, detail: DoctorProtocolingAppointmentDetail) => void;
   onRequiresReportUpdated: (requiresReport: boolean) => void;
   onSave: (payload: ProtocolAssignmentPayload, assignNext: boolean) => void;
   onClear: () => void;
@@ -2110,6 +2110,8 @@ function ProtocolAssignmentModal({
   const [examTypeDraftId, setExamTypeDraftId] = useState(String(appointment.examTypeId ?? ""));
   const [examTypeSearch, setExamTypeSearch] = useState("");
   const [examTypeOverride, setExamTypeOverride] = useState<{ appointmentId: number; id: number; name: string } | null>(null);
+  const [examTypeProtocolDecisionOpen, setExamTypeProtocolDecisionOpen] = useState(false);
+  const [protocolAssignmentCleared, setProtocolAssignmentCleared] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [recallDialogOpen, setRecallDialogOpen] = useState(false);
   const [withdrawRecallDialogOpen, setWithdrawRecallDialogOpen] = useState(false);
@@ -2121,7 +2123,8 @@ function ProtocolAssignmentModal({
   const pendingLeaveDirectionRef = useRef<-1 | 1 | "close" | null>(null);
   const actionMenuAnchorRef = useRef<HTMLDivElement>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
-  const title = existing ? "Change assigned protocol" : "Assign protocol";
+  const activeAssignment = protocolAssignmentCleared ? null : existing;
+  const title = activeAssignment ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols are available. Enter a free-text protocol.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
   const recallMutation = useMutation({ mutationFn: (payload: Parameters<typeof createComplementaryRecallRequest>[1]) => createComplementaryRecallRequest(appointment.appointmentId, payload), onSuccess: async () => { setRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); await onUpdated?.(); pushToast({ type: "success", title: "Additional imaging requested" }); } });
@@ -2130,10 +2133,8 @@ function ProtocolAssignmentModal({
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
   const selectedVersionId = selectedProtocol?.activeVersionId ?? null;
-  const canEditExamType = ["scheduled", "arrived", "waiting"].includes(appointment.appointmentStatus);
-  const examTypeEditingUnavailableMessage = "Examination type can be changed only while the appointment is scheduled, arrived, or waiting.";
   const examTypesQueryResult = useV2ExamTypes(appointment.modalityId);
-  const examTypesQuery = { ...examTypesQueryResult, isLoading: examTypesQueryResult.isLoading || !canEditExamType };
+  const examTypesQuery = examTypesQueryResult;
   const examTypeOptions = useMemo(() => {
     const search = examTypeSearch.trim().toLowerCase();
     return (examTypesQuery.data ?? []).filter((examType) => examType.isActive && Number(examType.modalityId) === Number(appointment.modalityId) && (!search || [examType.name, examType.nameEn, examType.nameAr, examType.code].filter(Boolean).some((value) => String(value).toLowerCase().includes(search))));
@@ -2142,13 +2143,25 @@ function ProtocolAssignmentModal({
   const displayedExamTypeId = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.id : appointment.examTypeId;
   const displayedExamTypeName = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.name : appointment.examTypeName;
   const examTypeUpdateMutation = useMutation({
-    mutationFn: () => updateDoctorProtocolExamType(appointment.appointmentId, Number(examTypeDraftId)),
-    onSuccess: async () => {
+    mutationFn: (protocolDisposition?: "keep" | "clear") => updateDoctorProtocolExamType(appointment.appointmentId, Number(examTypeDraftId), protocolDisposition),
+    onSuccess: async (result) => {
       const updatedExamType = selectedExamType;
       if (!updatedExamType) return;
       const updatedExamTypeName = updatedExamType.nameEn || updatedExamType.name;
       setExamTypeOverride({ appointmentId: appointment.appointmentId, id: updatedExamType.id, name: updatedExamTypeName });
-      onExamTypeUpdated(updatedExamType.id, updatedExamTypeName);
+      onExamTypeUpdated(updatedExamType.id, updatedExamTypeName, result.detail);
+      if (result.protocolDisposition === "cleared") {
+        setProtocolAssignmentCleared(true);
+        setProtocolId("");
+        setScannerId("");
+        setProtocolNotes("");
+        setContrastNotes("");
+        setFreeTextProtocol("");
+        setProtocolModeOverride(null);
+        setModeTouched(false);
+        setAdditionalInstructionsOpen(false);
+      }
+      setExamTypeProtocolDecisionOpen(false);
       setExamEditorOpen(false);
       setExamTypeSearch("");
       await Promise.all([
@@ -2366,7 +2379,7 @@ function ProtocolAssignmentModal({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [actionMenuOpen]);
-  const hasMoreProtocolActions = Boolean(printableSheet || existing);
+  const hasMoreProtocolActions = Boolean(printableSheet || activeAssignment);
   const displayedRequiresReport = reportOverride?.appointmentId === appointment.appointmentId ? reportOverride.value : appointment.requiresReport;
   const toggleActionMenu = () => {
     if (actionMenuOpen) {
@@ -2403,7 +2416,6 @@ function ProtocolAssignmentModal({
               <div className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)}{appointment.appointmentTime?.trim() ? ` · ${appointment.appointmentTime.trim().slice(0, 5)}` : ""}</span></span>
                 <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
-                {!canEditExamType ? <span className="text-muted-foreground">{examTypeEditingUnavailableMessage}</span> : null}
                 <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
               <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
               {appointment.latestComplementaryRecall ? <Badge variant={appointment.latestComplementaryRecall.status === "completed" ? "success" : appointment.latestComplementaryRecall.status === "cancelled" ? "neutral" : appointment.latestComplementaryRecall.status === "pending_scheduling" ? "warning" : "info"} size="sm" className={appointment.latestComplementaryRecall.status === "pending_scheduling" ? "border-amber-300 bg-amber-50 text-amber-800" : ""}>{appointment.latestComplementaryRecall.status === "pending_scheduling" ? "Additional imaging pending · Needs booking" : appointment.latestComplementaryRecall.status === "scheduled" ? "Additional imaging pending · Scheduled" : appointment.latestComplementaryRecall.status === "completed" ? "Additional imaging completed" : "Additional imaging withdrawn"}</Badge> : null}
@@ -2424,7 +2436,7 @@ function ProtocolAssignmentModal({
                 </select></label>
                 {examTypesQuery.isError ? <p className="mt-2 text-xs text-red-700" role="alert">Unable to load examination types.</p> : null}
                 {examTypeUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{examTypeUpdateMutation.error instanceof Error ? examTypeUpdateMutation.error.message : "Unable to update examination type."}</p> : null}
-                <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => examTypeUpdateMutation.mutate()} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</button></div>
+                <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => activeAssignment ? setExamTypeProtocolDecisionOpen(true) : examTypeUpdateMutation.mutate(undefined)} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</button></div>
               </div> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs md:col-span-2 lg:col-span-1 lg:justify-end">
@@ -2514,16 +2526,16 @@ function ProtocolAssignmentModal({
                         <span className="font-medium">{appointment.clinicalNotes}</span>
                       </div>
                     ) : null}
-                    {existing && (
+                    {activeAssignment && (
                       <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}>
                         <p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p>
                         <p className="mt-1 text-sm font-semibold">
-                          {existing.freeTextProtocol
-                            ? existing.protocolName
-                              ? `Free-text protocol (derived from ${existing.protocolName} v${existing.versionNumber ?? "-"})`
+                          {activeAssignment.freeTextProtocol
+                            ? activeAssignment.protocolName
+                              ? `Free-text protocol (derived from ${activeAssignment.protocolName} v${activeAssignment.versionNumber ?? "-"})`
                               : "Free-text protocol"
-                            : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}
-                          {existing.scannerName ? ` · ${existing.scannerName}` : ""}
+                            : `${activeAssignment.protocolName ?? "Saved protocol"} v${activeAssignment.versionNumber ?? "-"}`}
+                          {activeAssignment.scannerName ? ` · ${activeAssignment.scannerName}` : ""}
                         </p>
                       </div>
                     )}
@@ -2630,7 +2642,7 @@ function ProtocolAssignmentModal({
                       <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
                       {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
                         {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
-                        {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
+                        {activeAssignment ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}
                     <button
@@ -2666,6 +2678,21 @@ function ProtocolAssignmentModal({
         {detailsOpen ? <ProtocolingAppointmentDetailsDrawer key={appointment.appointmentId} appointment={appointment} onClose={() => setDetailsOpen(false)} /> : null}
         <ComplementaryRecallRequestDialog open={recallDialogOpen} onClose={() => setRecallDialogOpen(false)} examLabel={appointment.examTypeName ?? "Unspecified"} submitting={recallMutation.isPending} error={recallMutation.error instanceof Error ? recallMutation.error.message : null} onSubmit={(payload) => recallMutation.mutate(payload)} />
         <ComplementaryRecallWithdrawDialog open={withdrawRecallDialogOpen} status={appointment.activeComplementaryRecall?.status ?? "pending_scheduling"} submitting={withdrawRecallMutation.isPending} error={withdrawRecallMutation.error instanceof Error ? withdrawRecallMutation.error.message : null} onClose={() => setWithdrawRecallDialogOpen(false)} onConfirm={() => withdrawRecallMutation.mutate()} />
+        <Dialog open={examTypeProtocolDecisionOpen} onClose={() => { if (!examTypeUpdateMutation.isPending) setExamTypeProtocolDecisionOpen(false); }}>
+          <DialogContent maxWidth="500px" aria-label="Change examination type">
+            <DialogHeader>
+              <DialogTitle>Change examination type?</DialogTitle>
+              <DialogDescription>
+                This appointment already has an assigned protocol. Do you want to keep the existing protocol when changing the examination from {displayedExamTypeName || "the current examination"} to {selectedExamType?.nameEn || selectedExamType?.name || "the selected examination"}?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setExamTypeProtocolDecisionOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</Button>
+              <Button variant="destructive" onClick={() => examTypeUpdateMutation.mutate("clear")} disabled={examTypeUpdateMutation.isPending}>Change exam &amp; clear protocol</Button>
+              <Button onClick={() => examTypeUpdateMutation.mutate("keep")} disabled={examTypeUpdateMutation.isPending}>Change exam &amp; keep protocol</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog open={Boolean(reconciliationStudy)} onClose={()=>{if(!reconciliationMutation.isPending){setReconciliationStudy(null);setReconciliationConfirmed(false);}}}><DialogContent maxWidth="680px"><DialogHeader><DialogTitle>Patient Identity Reconciliation</DialogTitle><DialogDescription>Only the DICOM Patient ID will change. Historical demographics and all imaging identifiers will remain unchanged.</DialogDescription></DialogHeader>{reconciliationStudy?<div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-lg border p-3"><h4 className="font-semibold">Historical DICOM identity</h4><p>Patient ID: {reconciliationStudy.historicalPatientId||"Unavailable"}</p><p>Patient name: {reconciliationStudy.historicalPatientName||"Unavailable"}</p><p>DOB: {reconciliationStudy.historicalPatientBirthDate||"Unavailable"}</p></div><div className="rounded-lg border p-3"><h4 className="font-semibold">Current RISpro identity</h4><p>Patient ID: {historyQuery.data?.currentPatient?.patientId||"Unavailable"}</p><p>Patient name: {historyQuery.data?.currentPatient?.name||"Unavailable"}</p><p>DOB: {historyQuery.data?.currentPatient?.birthDate||"Unavailable"}</p></div><div className="md:col-span-2 rounded-lg border p-3"><p>Study date: {reconciliationStudy.date||"Unknown"}</p><p>Study: {reconciliationStudy.description||"Study"}</p><p>Accession: {reconciliationStudy.accessionNumber||"Unavailable"}</p><p className="break-all text-xs text-muted-foreground">StudyInstanceUID: {reconciliationStudy.studyInstanceUid}</p></div><label className="md:col-span-2 flex items-start gap-2"><Checkbox checked={reconciliationConfirmed} onCheckedChange={(value)=>setReconciliationConfirmed(Boolean(value))}/><span>I confirm that this historical study belongs to the selected RISpro patient.</span></label>{reconciliationMutation.isError?<p role="alert" className="md:col-span-2 text-red-700">{(reconciliationMutation.error as Error).message}</p>:null}</div>:null}<DialogFooter><Button variant="secondary" onClick={()=>setReconciliationStudy(null)} disabled={reconciliationMutation.isPending}>Cancel</Button><Button onClick={()=>reconciliationMutation.mutate()} disabled={!reconciliationConfirmed||reconciliationMutation.isPending}>{reconciliationMutation.isPending?"Submitting...":"Reconcile patient identity"}</Button></DialogFooter></DialogContent></Dialog>
         <Dialog open={confirmLeaveOpen} onClose={() => { setConfirmLeaveOpen(false); pendingLeaveDirectionRef.current = null; }}>
           <DialogContent maxWidth="460px">
