@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs/promises";
+import { shouldReplaceSanteHl7ForBooking } from "./sante-hl7-replacement-policy.js";
 
 const source = await fs.readFile(new URL("./sante-hl7-outbox-service.ts", import.meta.url), "utf8");
+const replacementPolicySource = await fs.readFile(new URL("./sante-hl7-replacement-policy.ts", import.meta.url), "utf8");
 
 test("Sante outbox does not persist full HL7 payload text", () => {
   assert.doesNotMatch(source, /hl7_payload|message_payload|payload_text|full_payload/i);
@@ -32,7 +34,7 @@ test("MLLP delivery records acknowledged, nack, and retryable send failure paths
 
 test("queue-only setting skips first Sante send until booking enters queue", () => {
   assert.match(source, /sendOnlyWhenPatientEntersQueue/);
-  assert.match(source, /QUEUE_STATUSES = new Set\(\["arrived", "waiting"\]\)/);
+  assert.match(replacementPolicySource, /QUEUE_STATUSES = new Set\(\["arrived", "waiting"\]\)/);
   assert.match(source, /waiting_for_patient_queue/);
 });
 
@@ -52,4 +54,16 @@ test("detail replacement queues cancel before fresh create for queued synced boo
   assert.match(source, /projection: previousProjection \?\? projection/);
   assert.match(source, /projection_json/);
   assert.match(source, /last_projection_json/);
+});
+
+test("detail replacement follows normal versus queue-only Sante publication policy", () => {
+  assert.equal(shouldReplaceSanteHl7ForBooking("scheduled", false), true);
+  assert.equal(shouldReplaceSanteHl7ForBooking("scheduled", true), false);
+  assert.equal(shouldReplaceSanteHl7ForBooking("scheduled", true, true), true);
+  assert.equal(shouldReplaceSanteHl7ForBooking("arrived", false), true);
+  assert.equal(shouldReplaceSanteHl7ForBooking("arrived", true), true);
+  assert.equal(shouldReplaceSanteHl7ForBooking("waiting", true), true);
+  assert.equal(shouldReplaceSanteHl7ForBooking("in-progress", false), false);
+  assert.equal(shouldReplaceSanteHl7ForBooking("in-progress", false, true), false);
+  assert.equal(shouldReplaceSanteHl7ForBooking("completed", false), false);
 });

@@ -1,7 +1,7 @@
 import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { scheduleBookingWorklistDetailReplacement } from "../../services/dicom-service.js";
-import { findBookingByIdForUpdate, updateBookingExamTypeOnly } from "../appointments-v2/booking/repositories/booking.repo.js";
+import { findBookingById, findBookingByIdForUpdate, updateBookingExamTypeOnly } from "../appointments-v2/booking/repositories/booking.repo.js";
 import { findExamTypeById } from "../appointments-v2/catalog/repositories/exam-type-catalog.repo.js";
 import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
 import { canDoctorProtocolModality } from "./profile-repository.js";
@@ -49,14 +49,20 @@ export async function changeDoctorProtocolingExamType(input: ChangeDoctorProtoco
   const changed = await withTransaction(async (client) => {
     const booking = await findBookingByIdForUpdate(client, input.appointmentId);
     if (!booking) throw new HttpError(404, "Appointment not found.");
+    // Deliberately do not restrict booking status: this is a clinical correction,
+    // including retrospective corrections for completed or terminal cases.
+
+    if (!(await canDoctorProtocolModality(input.userId, Number(booking.modalityId), client))) {
+      throw new HttpError(403, "Doctor is not permitted to protocol this appointment modality.");
+    }
 
     const examType = await findExamTypeById(client, input.examTypeId);
     if (!examType || !examType.isActive) throw new HttpError(400, "Exam type is inactive or not found.");
     if (Number(examType.modalityId) !== Number(booking.modalityId)) {
       throw new HttpError(400, "Exam type must belong to the appointment modality.");
     }
-    if (!(await canDoctorProtocolModality(input.userId, Number(booking.modalityId), client))) {
-      throw new HttpError(403, "Doctor is not permitted to protocol this appointment modality.");
+    if (Number(booking.examTypeId) === input.examTypeId) {
+      throw new HttpError(400, "Examination type is already assigned.");
     }
 
     const activeAssignmentResult = await client.query<ActiveProtocolAssignmentRow>(
@@ -64,10 +70,11 @@ export async function changeDoctorProtocolingExamType(input: ChangeDoctorProtoco
        from appointment_protocol_assignments
        where appointment_id = $1 and status <> 'CANCELLED'
        order by updated_at desc, id desc
-       limit 1
        for update`,
       [input.appointmentId],
     );
+    // Match the detail view's latest-active assignment as the audit reference.
+    // KEEP leaves every active row untouched; CLEAR uses the canonical all-active cancellation.
     const activeAssignment = activeAssignmentResult.rows[0] ?? null;
     if (activeAssignment && input.protocolDisposition == null) {
       throw new HttpError(409, "Choose whether to keep or clear the active protocol before changing the examination type.");
@@ -109,8 +116,11 @@ export async function changeDoctorProtocolingExamType(input: ChangeDoctorProtoco
       changedByUserId: input.userId,
     }, client);
 
+    const updatedBooking = await findBookingById(client, input.appointmentId);
+    if (!updatedBooking) throw new HttpError(404, "Appointment not found.");
+
     return {
-      booking: { ...booking, examTypeId: input.examTypeId },
+      booking: updatedBooking,
       protocolDisposition,
       protocolAssignmentId,
     };

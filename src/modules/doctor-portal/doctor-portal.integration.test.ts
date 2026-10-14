@@ -504,10 +504,20 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
 
     try {
       await withExamTypeChangePolicy("supervisor_required", async () => {
+        const bookingBeforeCorrection = await pool.query<{ updated_at: Date }>(`select updated_at from appointments_v2.bookings where id = $1`, [appointmentId]);
         const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamA.id } });
         assert.equal(response.status, 200, JSON.stringify(response.data));
         assert.equal(Number((response.data as any).booking.examTypeId), sameModalityExamA.id);
+        const returnedBooking = (response.data as { booking: { updatedAt: string; updatedByUserId: number } }).booking;
+        const bookingAfterCorrection = await pool.query<{ updated_at: Date; updated_by_user_id: number }>(
+          `select updated_at, updated_by_user_id from appointments_v2.bookings where id = $1`,
+          [appointmentId],
+        );
+        assert.equal(new Date(returnedBooking.updatedAt).getTime(), bookingAfterCorrection.rows[0]!.updated_at.getTime());
+        assert.equal(Number(returnedBooking.updatedByUserId), normal.id);
+        assert.ok(bookingAfterCorrection.rows[0]!.updated_at >= bookingBeforeCorrection.rows[0]!.updated_at);
       });
+      await attemptExamChange(sameModalityExamA.id, 400, sameModalityExamA.id);
       await withExamTypeChangePolicy("disabled", async () => {
         const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id } });
         assert.equal(response.status, 200, JSON.stringify(response.data));
@@ -633,6 +643,8 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       await attemptExamChange(999999999, 400, sameModalityExamA.id);
       await attemptExamChange(inactiveExam.id, 400, sameModalityExamA.id);
       await attemptExamChange(otherModalityExam.id, 400, sameModalityExamA.id);
+      const malformedDisposition = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id, protocolDisposition: "reassign" } });
+      assert.equal(malformedDisposition.status, 400, JSON.stringify(malformedDisposition.data));
 
       const auditTrigger = `${TEST_PREFIX.toLowerCase()}_fail_protocoling_audit_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
       const auditFunction = `${auditTrigger}_fn`;
@@ -651,7 +663,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
          for each row execute function public.${auditFunction}()`
       );
       try {
-        const failedAudit = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamA.id } });
+        const failedAudit = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id } });
         assert.equal(failedAudit.status, 500, JSON.stringify(failedAudit.data));
         assert.equal(await appointmentExamTypeId(appointmentId), sameModalityExamA.id);
         const auditCount = await pool.query<{ count: number }>(
@@ -679,6 +691,60 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       assert.equal(activeProtocol.rowCount, 1);
       assert.equal(activeProtocol.rows[0]?.free_text_protocol, "Keep existing clinical assignment");
 
+      const clearTrigger = `${TEST_PREFIX.toLowerCase()}_fail_protocol_clear_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+      const clearFunction = `${clearTrigger}_fn`;
+      await pool.query(
+        `create function public.${clearFunction}() returns trigger language plpgsql as $body$
+         begin
+           if old.appointment_id = ${appointmentId} and new.status = 'CANCELLED' then
+             raise exception 'forced protocol clear failure';
+           end if;
+           return new;
+         end;
+         $body$`
+      );
+      await pool.query(
+        `create trigger ${clearTrigger} before update on appointment_protocol_assignments
+         for each row execute function public.${clearFunction}()`
+      );
+      try {
+        const failedClear = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id, protocolDisposition: "clear" } });
+        assert.equal(failedClear.status, 500, JSON.stringify(failedClear.data));
+        assert.equal(await appointmentExamTypeId(appointmentId), sameModalityExamA.id);
+        const stillActive = await pool.query<{ status: string }>(`select status from appointment_protocol_assignments where id = $1`, [activeProtocol.rows[0]!.id]);
+        assert.equal(stillActive.rows[0]?.status, "ASSIGNED");
+      } finally {
+        await pool.query(`drop trigger if exists ${clearTrigger} on appointment_protocol_assignments`);
+        await pool.query(`drop function if exists public.${clearFunction}()`);
+      }
+
+      const bookingTrigger = `${TEST_PREFIX.toLowerCase()}_fail_protocol_booking_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+      const bookingFunction = `${bookingTrigger}_fn`;
+      await pool.query(
+        `create function public.${bookingFunction}() returns trigger language plpgsql as $body$
+         begin
+           if old.id = ${appointmentId} and new.exam_type_id is distinct from old.exam_type_id then
+             raise exception 'forced clinical booking update failure';
+           end if;
+           return new;
+         end;
+         $body$`
+      );
+      await pool.query(
+        `create trigger ${bookingTrigger} before update on appointments_v2.bookings
+         for each row execute function public.${bookingFunction}()`
+      );
+      try {
+        const failedBookingUpdate = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id, protocolDisposition: "clear" } });
+        assert.equal(failedBookingUpdate.status, 500, JSON.stringify(failedBookingUpdate.data));
+        assert.equal(await appointmentExamTypeId(appointmentId), sameModalityExamA.id);
+        const stillActive = await pool.query<{ status: string }>(`select status from appointment_protocol_assignments where id = $1`, [activeProtocol.rows[0]!.id]);
+        assert.equal(stillActive.rows[0]?.status, "ASSIGNED");
+      } finally {
+        await pool.query(`drop trigger if exists ${bookingTrigger} on appointments_v2.bookings`);
+        await pool.query(`drop function if exists public.${bookingFunction}()`);
+      }
+
       const kept = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id, protocolDisposition: "keep" } });
       assert.equal(kept.status, 200, JSON.stringify(kept.data));
       assert.equal((kept.data as { protocolDisposition: string }).protocolDisposition, "kept");
@@ -704,6 +770,47 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       );
       assert.deepEqual(protocolAudits.rows.map((row) => row.new_values.protocolDisposition).sort(), ["cleared", "kept"]);
       assert.ok(protocolAudits.rows.every((row) => Number(row.new_values.protocolAssignmentId) === Number(activeProtocol.rows[0]!.id)));
+
+      const savedProtocol = await pool.query<{ id: number }>(
+        `insert into protocols (name, modality, is_active) values ($1, 'CT', true) returning id`,
+        [`${TEST_PREFIX}Saved correction protocol ${randomUUID()}`],
+      );
+      const savedVersion = await pool.query<{ id: number }>(
+        `insert into protocol_versions (protocol_id, version_number, status, created_by)
+         values ($1, '1', 'ACTIVE', $2) returning id`,
+        [savedProtocol.rows[0]!.id, normal.id],
+      );
+      await pool.query(`update protocols set active_version_id = $2 where id = $1`, [savedProtocol.rows[0]!.id, savedVersion.rows[0]!.id]);
+      try {
+        const savedAssignmentResponse = await api(normal.cookie, `/api/doctor/protocoling/appointments/${appointmentId}/assignment`, {
+          method: "POST",
+          body: { protocolId: savedProtocol.rows[0]!.id, status: "ASSIGNED", protocolNotes: "Saved protocol assignment is preserved." },
+        });
+        assert.equal(savedAssignmentResponse.status, 201, JSON.stringify(savedAssignmentResponse.data));
+        const savedAssignmentBefore = await pool.query<{ id: number; protocol_id: number; protocol_version_id: number; protocol_notes: string | null; status: string }>(
+          `select id, protocol_id, protocol_version_id, protocol_notes, status from appointment_protocol_assignments
+           where appointment_id = $1 and status <> 'CANCELLED'`,
+          [appointmentId],
+        );
+        assert.equal(savedAssignmentBefore.rowCount, 1);
+        const savedCorrection = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: sameModalityExamB.id, protocolDisposition: "keep" } });
+        assert.equal(savedCorrection.status, 200, JSON.stringify(savedCorrection.data));
+        const savedAssignmentAfter = await pool.query<typeof savedAssignmentBefore.rows[0]>(
+          `select id, protocol_id, protocol_version_id, protocol_notes, status from appointment_protocol_assignments where id = $1`,
+          [savedAssignmentBefore.rows[0]!.id],
+        );
+        assert.deepEqual(savedAssignmentAfter.rows[0], savedAssignmentBefore.rows[0]);
+        const savedAudit = await pool.query<{ new_values: Record<string, unknown> }>(
+          `select new_values from audit_log where entity_type = 'appointment' and entity_id = $1
+           and action_type = 'doctor_protocoling_exam_type_changed' order by id desc limit 1`,
+          [appointmentId],
+        );
+        assert.equal(Number(savedAudit.rows[0]?.new_values.protocolAssignmentId), Number(savedAssignmentBefore.rows[0]!.id));
+        assert.equal(savedAudit.rows[0]?.new_values.protocolDisposition, "kept");
+      } finally {
+        await pool.query(`delete from appointment_protocol_assignments where appointment_id = $1 and protocol_id = $2`, [appointmentId, savedProtocol.rows[0]!.id]);
+        await pool.query(`delete from protocols where id = $1`, [savedProtocol.rows[0]!.id]);
+      }
     } finally {
       await pool.query(
         `update appointments_v2.bookings
@@ -821,6 +928,14 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
          from appointments_v2.special_quota_consumptions where booking_id = $1 and released_at is null`,
         [correctionAppointmentId],
       );
+      const beforeQuotaAvailabilityCount = await pool.query<{ count: number }>(
+        `select count(*)::int as count from appointments_v2.special_quota_consumptions where quota_rule_id = $1 and released_at is null`,
+        [quotaRuleId],
+      );
+      const beforeTotalConsumptionCount = await pool.query<{ count: number }>(
+        `select count(*)::int as count from appointments_v2.special_quota_consumptions where booking_id = $1`,
+        [correctionAppointmentId],
+      );
 
       const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: correctedExam.id } });
       assert.equal(response.status, 200, JSON.stringify(response.data));
@@ -843,6 +958,16 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         [correctionAppointmentId],
       );
       assert.equal(afterConsumption.rowCount, 1);
+      const afterQuotaAvailabilityCount = await pool.query<{ count: number }>(
+        `select count(*)::int as count from appointments_v2.special_quota_consumptions where quota_rule_id = $1 and released_at is null`,
+        [quotaRuleId],
+      );
+      const afterTotalConsumptionCount = await pool.query<{ count: number }>(
+        `select count(*)::int as count from appointments_v2.special_quota_consumptions where booking_id = $1`,
+        [correctionAppointmentId],
+      );
+      assert.equal(afterQuotaAvailabilityCount.rows[0]?.count, beforeQuotaAvailabilityCount.rows[0]?.count);
+      assert.equal(afterTotalConsumptionCount.rows[0]?.count, beforeTotalConsumptionCount.rows[0]?.count);
       const { exam_type_id: afterConsumptionExamTypeId, ...afterConsumptionAllocation } = afterConsumption.rows[0]!;
       const { exam_type_id: _beforeConsumptionExamTypeId, ...beforeConsumptionAllocation } = beforeConsumption.rows[0]!;
       assert.deepEqual(afterConsumptionAllocation, beforeConsumptionAllocation);
@@ -866,6 +991,64 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         await pool.query(`delete from system_settings where category = 'scheduling_and_capacity' and setting_key = 'allow_friday_appointments'`);
       }
     }
+  });
+
+  it("allows clinical examination correction across every persisted appointment lifecycle status", async () => {
+    guard();
+    const patientId = await createPatient("Clinical correction statuses");
+    const statusAppointmentId = await createBooking(testData, addDays(today, 1), patientId);
+    const examA = await insertExamType(testData.modalityId, "Status correction A");
+    const examB = await insertExamType(testData.modalityId, "Status correction B");
+    const statuses = ["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled", "discontinued", "voided"] as const;
+    const path = `/api/doctor/protocoling/appointments/${statusAppointmentId}/exam-type`;
+    let nextExamTypeId = examA.id;
+
+    for (const status of statuses) {
+      await pool.query(`update appointments_v2.bookings set status = $2 where id = $1`, [statusAppointmentId, status]);
+      const response = await api(normal.cookie, path, { method: "PATCH", body: { examTypeId: nextExamTypeId } });
+      assert.equal(response.status, 200, `${status}: ${JSON.stringify(response.data)}`);
+      assert.equal(await appointmentExamTypeId(statusAppointmentId), nextExamTypeId);
+      nextExamTypeId = nextExamTypeId === examA.id ? examB.id : examA.id;
+    }
+  });
+
+  it("serializes simultaneous protocol saves and exam corrections without duplicate active assignments", async () => {
+    guard();
+    const patientId = await createPatient("Concurrent clinical correction");
+    const correctionAppointmentId = await createBooking(testData, addDays(today, 1), patientId);
+    const examA = await insertExamType(testData.modalityId, "Concurrent correction A");
+    const examB = await insertExamType(testData.modalityId, "Concurrent correction B");
+    const assignmentPath = `/api/doctor/protocoling/appointments/${correctionAppointmentId}/assignment`;
+    const examPath = `/api/doctor/protocoling/appointments/${correctionAppointmentId}/exam-type`;
+
+    const assignmentResults = await Promise.all([
+      api(normal.cookie, assignmentPath, { method: "POST", body: { freeTextProtocol: "Concurrent protocol A", status: "ASSIGNED" } }),
+      api(normal.cookie, assignmentPath, { method: "POST", body: { freeTextProtocol: "Concurrent protocol B", status: "ASSIGNED" } }),
+    ]);
+    assert.deepEqual(assignmentResults.map((result) => result.status), [201, 201]);
+    const activeBeforeCorrection = await pool.query<{ id: number }>(
+      `select id from appointment_protocol_assignments where appointment_id = $1 and status <> 'CANCELLED'`,
+      [correctionAppointmentId],
+    );
+    assert.equal(activeBeforeCorrection.rowCount, 1);
+
+    const correctionResults = await Promise.all([
+      api(normal.cookie, examPath, { method: "PATCH", body: { examTypeId: examA.id, protocolDisposition: "keep" } }),
+      api(normal.cookie, examPath, { method: "PATCH", body: { examTypeId: examB.id, protocolDisposition: "clear" } }),
+    ]);
+    assert.deepEqual(correctionResults.map((result) => result.status), [200, 200], JSON.stringify(correctionResults.map((result) => result.data)));
+    assert.ok([examA.id, examB.id].includes((await appointmentExamTypeId(correctionAppointmentId))!));
+    const activeAfterCorrection = await pool.query<{ count: number }>(
+      `select count(*)::int as count from appointment_protocol_assignments where appointment_id = $1 and status <> 'CANCELLED'`,
+      [correctionAppointmentId],
+    );
+    assert.equal(activeAfterCorrection.rows[0]?.count, 0);
+    const correctionAudits = await pool.query<{ new_values: Record<string, unknown> }>(
+      `select new_values from audit_log where entity_type = 'appointment' and entity_id = $1 and action_type = 'doctor_protocoling_exam_type_changed'`,
+      [correctionAppointmentId],
+    );
+    assert.equal(correctionAudits.rowCount, 2);
+    assert.ok(correctionAudits.rows.every((row) => ["kept", "cleared", "none"].includes(String(row.new_values.protocolDisposition))));
   });
 
   it("keeps generic appointment rescheduling subject to exam type change policy", async () => {

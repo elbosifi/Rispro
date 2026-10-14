@@ -1,5 +1,7 @@
 import { pool } from "../../db/pool.js";
 import type { Pool, PoolClient } from "pg";
+import { withTransaction } from "../appointments-v2/shared/utils/transactions.js";
+import { findBookingByIdForUpdate } from "../appointments-v2/booking/repositories/booking.repo.js";
 import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
@@ -533,76 +535,58 @@ export async function saveProtocolAssignment(
   assignedBy: number | null
 ): Promise<DoctorProtocolingAppointmentDetail> {
   const { protocolVersionId } = await validateAssignment(appointmentId, input);
-  const existing = await pool.query<{ id: number }>(
-    `
-      select id
-      from appointment_protocol_assignments
-      where appointment_id = $1
-        and status <> 'CANCELLED'
-      order by updated_at desc, id desc
-      limit 1
-    `,
-    [appointmentId]
-  );
+  await withTransaction(async (client) => {
+    if (!(await findBookingByIdForUpdate(client, appointmentId))) throw new HttpError(404, "Appointment not found.");
 
-  if (existing.rows[0]) {
-    await pool.query(
-      `
-        update appointment_protocol_assignments
-        set protocol_id = $2,
-            protocol_version_id = $3,
-            scanner_id = $4,
-            assigned_by = $5,
-            assigned_at = now(),
-            protocol_notes = $6,
-            contrast_notes = $7,
-            free_text_protocol = $8,
-            status = $9,
-            updated_at = now()
-        where id = $1
-      `,
-      [
-        existing.rows[0].id,
-        input.protocolId,
-        protocolVersionId,
-        input.scannerId,
-        assignedBy,
-        input.protocolNotes,
-        input.contrastNotes,
-        input.freeTextProtocol,
-        input.status,
-      ]
+    const activeAssignments = await client.query<{ id: number }>(
+      `select id
+       from appointment_protocol_assignments
+       where appointment_id = $1 and status <> 'CANCELLED'
+       order by updated_at desc, id desc
+       for update`,
+      [appointmentId],
     );
-  } else {
-    await pool.query(
-      `
-        insert into appointment_protocol_assignments (
-          appointment_id,
-          protocol_id,
-          protocol_version_id,
-          scanner_id,
-          assigned_by,
-          assigned_at,
-          protocol_notes,
-          contrast_notes,
-          free_text_protocol,
-          status
-        )
-        values ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)
-      `,
-      [
-        appointmentId,
-        input.protocolId,
-        protocolVersionId,
-        input.scannerId,
-        assignedBy,
-        input.protocolNotes,
-        input.contrastNotes,
-        input.freeTextProtocol,
-        input.status,
-      ]
-    );
-  }
+    if (activeAssignments.rows.length > 1) {
+      throw new HttpError(409, "Multiple active protocol assignments require manual resolution.");
+    }
+
+    const values = [
+      input.protocolId,
+      protocolVersionId,
+      input.scannerId,
+      assignedBy,
+      input.protocolNotes,
+      input.contrastNotes,
+      input.freeTextProtocol,
+      input.status,
+    ];
+    const existingId = activeAssignments.rows[0]?.id;
+    if (existingId != null) {
+      await client.query(
+        `update appointment_protocol_assignments
+         set protocol_id = $2,
+             protocol_version_id = $3,
+             scanner_id = $4,
+             assigned_by = $5,
+             assigned_at = now(),
+             protocol_notes = $6,
+             contrast_notes = $7,
+             free_text_protocol = $8,
+             status = $9,
+             updated_at = now()
+         where id = $1`,
+        [existingId, ...values],
+      );
+    } else {
+      await client.query(
+        `insert into appointment_protocol_assignments (
+           appointment_id, protocol_id, protocol_version_id, scanner_id, assigned_by,
+           assigned_at, protocol_notes, contrast_notes, free_text_protocol, status
+         ) values ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)`,
+        [appointmentId, ...values],
+      );
+    }
+  }, { isolationLevel: "serializable", operationName: "doctor_protocol_assignment_save" });
 
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");

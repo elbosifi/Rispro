@@ -53,7 +53,7 @@ const historicalCandidate = {
   phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: null, patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
 } as const;
 
-const { mockCreateAssignment, mockCancelAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateProtocolExamType, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCancelAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateProtocolExamType: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockCancelAssignment, mockCreateComplementaryRecall, mockWithdrawComplementaryRecall, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockFetchHistoricalPacsCandidates, mockSearchHistoricalPacsPatientId, mockRequestReconciliation, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateProtocolExamType, mockUpdateReportRequirement, mockExamTypes } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockCancelAssignment: vi.fn(), mockCreateComplementaryRecall: vi.fn(), mockWithdrawComplementaryRecall: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockFetchHistoricalPacsCandidates: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockRequestReconciliation:vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateProtocolExamType: vi.fn(), mockUpdateReportRequirement: vi.fn(), mockExamTypes: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }, { id: 13, name: "Inactive CT", nameEn: "Inactive CT", nameAr: "فحص غير نشط", code: "CTI", modalityId: 4, isActive: false }] }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: mockCancelAssignment, createDoctorProtocolAssignment: mockCreateAssignment,
@@ -88,11 +88,11 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
-vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false, t: (key: TranslationKey) => translate("en", key) }) }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false, t: (key: TranslationKey, params?: Record<string, string | number>) => translate("en", key, params) }) }));
 vi.mock("@/v2/appointments/api", () => ({
   rescheduleV2Booking: mockRescheduleBooking,
   fetchV2Modalities: vi.fn(async () => []),
-  useV2ExamTypes: () => ({ data: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }], isLoading: false, isError: false }),
+  useV2ExamTypes: () => ({ data: mockExamTypes, isLoading: false, isError: false }),
 }));
 vi.mock("@/components/appointments/appointment-information-view", () => ({
   AppointmentDetailsReadOnly: ({ readOnly }: { readOnly?: boolean }) => <div data-testid="read-only-appointment-details">{readOnly ? "Read-only appointment details" : "Editable appointment details"}</div>,
@@ -177,6 +177,12 @@ function protocolImportConfirmCalls(): unknown[][] {
 
 describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
+    mockExamTypes.splice(0, mockExamTypes.length,
+      { id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true },
+      { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true },
+      { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true },
+      { id: 13, name: "Inactive CT", nameEn: "Inactive CT", nameAr: "فحص غير نشط", code: "CTI", modalityId: 4, isActive: false },
+    );
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
     mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
@@ -1065,16 +1071,20 @@ describe("Doctor protocoling request documents", () => {
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" });
+    await userEvent.type(protocol, "Unsaved protocol draft remains in the editor.");
     await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
     expect(screen.getByRole("option", { name: /CT Chest Abdomen/ })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /MRI Brain/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Inactive CT/ })).toBeNull();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
     await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
 
     await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledWith(42, 11, undefined));
     expect(mockRescheduleBooking).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: "Change examination type" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Change examination type?" })).toBeNull();
     expect(await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByText("CT Chest Abdomen")).toBeTruthy();
+    expect((protocol as HTMLTextAreaElement).value).toBe("Unsaved protocol draft remains in the editor.");
     expect(screen.queryByRole("dialog", { name: /supervisor/i })).toBeNull();
   });
 
@@ -1097,32 +1107,41 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Change" }));
     const protocol = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
     expect(protocol.value).toBe(activeFreeTextAssignment.freeTextProtocol);
+    await userEvent.clear(protocol);
+    await userEvent.type(protocol, "Unsaved protocol edits stay visible when keeping the assignment.");
     await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
     await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Change examination type" });
+    const dialog = await screen.findByRole("dialog", { name: "Change examination type?" });
     expect(within(dialog).getByText(/already has an assigned protocol/i)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Change exam & keep protocol" }));
 
     await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledWith(42, 11, "keep"));
-    expect(protocol.value).toBe(activeFreeTextAssignment.freeTextProtocol);
+    expect(protocol.value).toBe("Unsaved protocol edits stay visible when keeping the assignment.");
   });
 
   it("clears the active protocol only after the explicit clear decision succeeds", async () => {
     const activeAppointment = setActiveProtocolFixture();
-    mockUpdateProtocolExamType.mockResolvedValue(examUpdateResult("cleared", activeAppointment));
+    let resolveUpdate: ((result: ReturnType<typeof examUpdateResult>) => void) | undefined;
+    mockUpdateProtocolExamType.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 
     await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
+    await userEvent.clear(protocol);
+    await userEvent.type(protocol, "Unsubmitted protocol edit is protected until the server confirms clear.");
     await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
     await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
     await userEvent.click(await screen.findByRole("button", { name: "Change exam & clear protocol" }));
 
     await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledWith(42, 11, "clear"));
-    expect((screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement).value).toBe("");
+    expect(protocol.value).toBe("Unsubmitted protocol edit is protected until the server confirms clear.");
+    expect(screen.getByText("Current assignment")).toBeTruthy();
+    await act(async () => { resolveUpdate?.(examUpdateResult("cleared", activeAppointment)); });
+    await waitFor(() => expect(protocol.value).toBe(""));
     expect(screen.queryByText("Current assignment")).toBeNull();
   });
 
@@ -1135,11 +1154,84 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
     await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
-    const dialog = await screen.findByRole("dialog", { name: "Change examination type" });
+    const dialog = await screen.findByRole("dialog", { name: "Change examination type?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(mockUpdateProtocolExamType).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: "Change examination type" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Change examination type?" })).toBeNull();
+    expect(screen.getByText("CT Chest", { exact: true, selector: "span" })).toBeTruthy();
+  });
+
+  it.each(["keep", "clear"] as const)("preserves active protocol editor state when %s correction fails", async (disposition) => {
+    setActiveProtocolFixture();
+    mockUpdateProtocolExamType.mockRejectedValue(new Error("Exam update denied"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
+    await userEvent.clear(protocol);
+    await userEvent.type(protocol, "Keep this unsaved protocol text after failure.");
+    await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
+    await userEvent.click(await screen.findByRole("button", { name: `Change exam & ${disposition} protocol` }));
+
+    expect(await screen.findByText("Exam update denied")).toBeTruthy();
+    expect(protocol.value).toBe("Keep this unsaved protocol text after failure.");
+    expect(screen.getByText("Current assignment")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /supervisor/i })).toBeNull();
+  });
+
+  it("disables all protocol disposition actions while correction is pending and ignores duplicate attempts", async () => {
+    setActiveProtocolFixture();
+    mockUpdateProtocolExamType.mockReturnValue(new Promise(() => undefined));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change examination type?" });
+    const keep = within(dialog).getByRole("button", { name: "Change exam & keep protocol" }) as HTMLButtonElement;
+    await userEvent.click(keep);
+
+    await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledTimes(1));
+    expect(keep.disabled).toBe(true);
+    expect((within(dialog).getByRole("button", { name: "Change exam & clear protocol" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Updating...", hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Change examination type?" })).toBeTruthy();
+    expect(mockUpdateProtocolExamType).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the server detail and synchronizes caches when the selected exam option disappears", async () => {
+    let resolveUpdate: ((result: ReturnType<typeof examUpdateResult>) => void) | undefined;
+    mockUpdateProtocolExamType.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const view = render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
+    await waitFor(() => expect(mockUpdateProtocolExamType).toHaveBeenCalledWith(42, 11, undefined));
+
+    mockExamTypes.splice(1, 1);
+    view.rerender(<MemoryRouter><QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
+    const serverAppointment = { ...appointment, examTypeId: 11, examTypeName: "Server-authoritative CT exam" };
+    await act(async () => { resolveUpdate?.({ ...examUpdateResult("none"), detail: { appointment: serverAppointment, assignmentDetail: null } }); });
+
+    expect(await screen.findByText("Server-authoritative CT exam", { exact: true, selector: "span" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Edit examination type" })).toBeNull();
+    const cachedDetail = queryClient.getQueryData<{ appointment: DoctorProtocolingAppointment }>(["doctor", "protocoling", "appointments", 42]);
+    expect(cachedDetail?.appointment.examTypeName).toBe("Server-authoritative CT exam");
+    const cachedList = queryClient.getQueriesData<DoctorProtocolingAppointment[]>({ queryKey: ["doctor", "protocoling", "appointments"] })
+      .map(([, data]) => data)
+      .find((items) => items?.some((item) => item.appointmentId === 42));
+    expect(cachedList?.find((item) => item.appointmentId === 42)?.examTypeName).toBe("Server-authoritative CT exam");
   });
 
   it("preserves entered protocol text when an examination update fails", async () => {

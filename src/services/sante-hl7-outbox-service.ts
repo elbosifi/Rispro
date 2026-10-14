@@ -22,6 +22,7 @@ import {
   type SanteMllpSendResult,
 } from "./sante-mllp-client.js";
 import type { UserId } from "../types/http.js";
+import { shouldReplaceSanteHl7ForBooking } from "./sante-hl7-replacement-policy.js";
 import {
   MWL_POLICY_CATEGORY,
   REQUIRE_PROTOCOL_BEFORE_MWL_KEY,
@@ -437,9 +438,24 @@ export async function enqueueSanteHl7ReplacementForBooking(
       await client.query("commit");
       return { enqueued: true, jobIds: [cancel.id], reason: "waiting_for_protocol" };
     }
-    if (!QUEUE_STATUSES.has(projection.status)) {
-      await client.query("rollback");
-      return { enqueued: false, jobIds: [], reason: "booking_not_in_queue" };
+    if (!shouldReplaceSanteHl7ForBooking(projection.status, settings.sendOnlyWhenPatientEntersQueue, currentProjectionExists)) {
+      if (!currentProjectionExists) {
+        await client.query("rollback");
+        return { enqueued: false, jobIds: [], reason: "booking_not_in_queue" };
+      }
+      await supersedePendingSantePublicationJobs(client, bookingId);
+      const previousProjection = await loadPreviousSanteProjection(client, bookingId);
+      const cancel = await insertOutboxRow({
+        client,
+        bookingId,
+        projection: previousProjection ?? projection,
+        eventType: "cancel",
+        orderControl: "CA",
+        status: "pending",
+        settings,
+      });
+      await client.query("commit");
+      return { enqueued: true, jobIds: [cancel.id], reason: "booking_not_in_queue" };
     }
 
     const jobIds: number[] = [];

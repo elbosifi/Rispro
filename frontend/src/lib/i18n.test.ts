@@ -17,13 +17,13 @@ describe("i18n catalog parity", () => {
     const englishKeys = Object.keys(__i18nTestables.en).sort();
     const arabicKeys = Object.keys(__i18nTestables.ar).sort();
 
-    expect(englishKeys).toHaveLength(2943);
+    expect(englishKeys).toHaveLength(2975);
     expect(arabicKeys).toEqual(englishKeys);
   });
 
   it("keeps every translation key and value byte-for-byte stable", () => {
-    expect(catalogHash(__i18nTestables.en)).toBe("f48f53977a5e20a2d45dd295ec0b54128dc6d570333c6c687e8e2246da970a48");
-    expect(catalogHash(__i18nTestables.ar)).toBe("4784a432708bc98f6b1f1887e7b15a4684c35ed01ba97d82408cd09e1f416511");
+    expect(catalogHash(__i18nTestables.en)).toBe("4e8a7b6ac17f96d158b8d93782a3297d269b4ee0d859b2e6a315b7e8fcf57ade");
+    expect(catalogHash(__i18nTestables.ar)).toBe("475bdc950165ed43ea84debf17d2aa02ce093193b8e1a0ee0a904d22b8461bc2");
   });
 
   it("keeps interpolation placeholders aligned between English and Arabic", () => {
@@ -58,6 +58,23 @@ describe("i18n catalog parity", () => {
       expect(t("ar", key)).not.toBe(key);
       expect(t("ar", key)).not.toBe(t("en", key));
     }
+  });
+
+  it("provides localized copy for the active-protocol examination decision", () => {
+    const keys = [
+      "doctor.protocols.examTypeChangeTitle",
+      "doctor.protocols.examTypeChangeDescription",
+      "doctor.protocols.examTypeChangeKeep",
+      "doctor.protocols.examTypeChangeClear",
+      "doctor.protocols.examTypeChangeCancel",
+    ] as const;
+    for (const key of keys) {
+      expect(t("en", key)).not.toBe(key);
+      expect(t("ar", key)).not.toBe(key);
+      expect(t("ar", key)).not.toBe(t("en", key));
+    }
+    expect(t("en", "doctor.protocols.examTypeChangeDescription", { oldExam: "MRI Elbow", newExam: "MRI Shoulder" })).toContain("MRI Elbow");
+    expect(t("ar", "doctor.protocols.examTypeChangeDescription", { oldExam: "MRI Elbow", newExam: "MRI Shoulder" })).toContain("MRI Shoulder");
   });
 
   it("provides English and Arabic copy for the MWL protocol policy", () => {

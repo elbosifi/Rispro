@@ -1993,9 +1993,10 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           embedded={embedded}
           onNavigate={(direction) => navigateWorklist(direction)}
           onUpdated={onEmbeddedUpdated}
-          onExamTypeUpdated={(examTypeId, examTypeName, updatedDetail) => {
-            queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, ...updatedDetail.appointment, examTypeId, examTypeName } : item));
+          onExamTypeUpdated={(updatedDetail) => {
+            queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, ...updatedDetail.appointment } : item));
             queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], updatedDetail);
+            queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointment-details", selectedAppointment.appointmentId], updatedDetail);
           }}
            onRequiresReportUpdated={(requiresReport) => {
              queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, requiresReport } : item));
@@ -2077,13 +2078,14 @@ function ProtocolAssignmentModal({
   embedded: boolean;
   onNavigate: (direction: -1 | 1) => void;
   onUpdated?: () => void | Promise<void>;
-  onExamTypeUpdated: (examTypeId: number, examTypeName: string, detail: DoctorProtocolingAppointmentDetail) => void;
+  onExamTypeUpdated: (detail: DoctorProtocolingAppointmentDetail) => void;
   onRequiresReportUpdated: (requiresReport: boolean) => void;
   onSave: (payload: ProtocolAssignmentPayload, assignNext: boolean) => void;
   onClear: () => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { t, isArabic } = useLanguage();
   const existing = appointment.assignment;
   const activeProtocols = protocols.filter((protocol) => protocol.isActive && protocol.modality === appointment.modalityCode && protocol.activeVersionId && protocol.activeVersionStatus === "ACTIVE");
   const matchingScanners = scanners.filter((scanner) => scanner.isActive && scanner.modality === appointment.modalityCode);
@@ -2142,15 +2144,23 @@ function ProtocolAssignmentModal({
   const selectedExamType = (examTypesQuery.data ?? []).find((examType) => String(examType.id) === examTypeDraftId) ?? null;
   const displayedExamTypeId = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.id : appointment.examTypeId;
   const displayedExamTypeName = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.name : appointment.examTypeName;
+  const currentExamType = (examTypesQuery.data ?? []).find((examType) => String(examType.id) === String(displayedExamTypeId ?? "")) ?? null;
+  const localizedExamTypeName = (examType: NonNullable<typeof selectedExamType> | null) => examType
+    ? (isArabic ? examType.nameAr || examType.nameEn || examType.name : examType.nameEn || examType.name)
+    : null;
+  const oldExamName = localizedExamTypeName(currentExamType) || displayedExamTypeName || "the current examination";
+  const newExamName = localizedExamTypeName(selectedExamType) || "the selected examination";
   const examTypeUpdateMutation = useMutation({
     mutationFn: (protocolDisposition?: "keep" | "clear") => updateDoctorProtocolExamType(appointment.appointmentId, Number(examTypeDraftId), protocolDisposition),
     onSuccess: async (result) => {
-      const updatedExamType = selectedExamType;
-      if (!updatedExamType) return;
-      const updatedExamTypeName = updatedExamType.nameEn || updatedExamType.name;
-      setExamTypeOverride({ appointmentId: appointment.appointmentId, id: updatedExamType.id, name: updatedExamTypeName });
-      onExamTypeUpdated(updatedExamType.id, updatedExamTypeName, result.detail);
-      if (result.protocolDisposition === "cleared") {
+      const updatedAppointment = result.detail.appointment;
+      const updatedExamTypeId = updatedAppointment.examTypeId;
+      const updatedExamTypeName = updatedAppointment.examTypeName ?? "";
+      if (updatedExamTypeId != null) {
+        setExamTypeOverride({ appointmentId: appointment.appointmentId, id: updatedExamTypeId, name: updatedExamTypeName });
+        setExamTypeDraftId(String(updatedExamTypeId));
+      }
+      if (result.protocolDisposition === "cleared" && updatedAppointment.assignment == null) {
         setProtocolAssignmentCleared(true);
         setProtocolId("");
         setScannerId("");
@@ -2175,6 +2185,9 @@ function ProtocolAssignmentModal({
         queryClient.invalidateQueries({ queryKey: ["calendar"] }),
       ]);
       await onUpdated?.();
+      // Refetches may still return stale data from a lagging query path, so
+      // finish by writing the successful mutation's authoritative detail.
+      onExamTypeUpdated(result.detail);
       pushToast({ type: "success", title: "Examination type updated.", message: "The appointment date and time were kept unchanged." });
     },
   });
@@ -2346,6 +2359,9 @@ function ProtocolAssignmentModal({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && actionMenuOpen) { event.preventDefault(); setActionMenuOpen(false); return; }
+      // The decision dialog owns Escape while open; during the request, keep
+      // both it and the surrounding workspace stable until the server replies.
+      if (event.key === "Escape" && (examTypeProtocolDecisionOpen || examTypeUpdateMutation.isPending)) return;
       if (event.key === "Escape" && !saving) requestClose();
 
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -2368,7 +2384,7 @@ function ProtocolAssignmentModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actionMenuOpen, embedded, executeSave, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+  }, [actionMenuOpen, embedded, examTypeProtocolDecisionOpen, examTypeUpdateMutation.isPending, executeSave, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
 
   useEffect(() => {
     if (!actionMenuOpen) return;
@@ -2679,17 +2695,17 @@ function ProtocolAssignmentModal({
         <ComplementaryRecallRequestDialog open={recallDialogOpen} onClose={() => setRecallDialogOpen(false)} examLabel={appointment.examTypeName ?? "Unspecified"} submitting={recallMutation.isPending} error={recallMutation.error instanceof Error ? recallMutation.error.message : null} onSubmit={(payload) => recallMutation.mutate(payload)} />
         <ComplementaryRecallWithdrawDialog open={withdrawRecallDialogOpen} status={appointment.activeComplementaryRecall?.status ?? "pending_scheduling"} submitting={withdrawRecallMutation.isPending} error={withdrawRecallMutation.error instanceof Error ? withdrawRecallMutation.error.message : null} onClose={() => setWithdrawRecallDialogOpen(false)} onConfirm={() => withdrawRecallMutation.mutate()} />
         <Dialog open={examTypeProtocolDecisionOpen} onClose={() => { if (!examTypeUpdateMutation.isPending) setExamTypeProtocolDecisionOpen(false); }}>
-          <DialogContent maxWidth="500px" aria-label="Change examination type">
+          <DialogContent maxWidth="500px" aria-label={t("doctor.protocols.examTypeChangeTitle")}>
             <DialogHeader>
-              <DialogTitle>Change examination type?</DialogTitle>
+              <DialogTitle>{t("doctor.protocols.examTypeChangeTitle")}</DialogTitle>
               <DialogDescription>
-                This appointment already has an assigned protocol. Do you want to keep the existing protocol when changing the examination from {displayedExamTypeName || "the current examination"} to {selectedExamType?.nameEn || selectedExamType?.name || "the selected examination"}?
+                {t("doctor.protocols.examTypeChangeDescription", { oldExam: oldExamName, newExam: newExamName })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="secondary" onClick={() => setExamTypeProtocolDecisionOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</Button>
-              <Button variant="destructive" onClick={() => examTypeUpdateMutation.mutate("clear")} disabled={examTypeUpdateMutation.isPending}>Change exam &amp; clear protocol</Button>
-              <Button onClick={() => examTypeUpdateMutation.mutate("keep")} disabled={examTypeUpdateMutation.isPending}>Change exam &amp; keep protocol</Button>
+              <Button variant="secondary" onClick={() => setExamTypeProtocolDecisionOpen(false)} disabled={examTypeUpdateMutation.isPending}>{t("doctor.protocols.examTypeChangeCancel")}</Button>
+              <Button variant="destructive" onClick={() => examTypeUpdateMutation.mutate("clear")} disabled={examTypeUpdateMutation.isPending}>{t("doctor.protocols.examTypeChangeClear")}</Button>
+              <Button onClick={() => examTypeUpdateMutation.mutate("keep")} disabled={examTypeUpdateMutation.isPending}>{t("doctor.protocols.examTypeChangeKeep")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
