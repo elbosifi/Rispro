@@ -2555,7 +2555,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 onKeyDown={(event) => {
                   if (event.key === "Enter") applySearch();
                 }}
-                placeholder="Search MRN / accession / patient / exam"
+                placeholder="Search MRN / National ID / accession / patient / exam"
                 className={`${inputClass()} pl-9 pr-9`}
               />
               {filters.q && (

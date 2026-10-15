@@ -995,6 +995,9 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
       lower(coalesce(p.english_full_name, '')) like $${values.length}
       or lower(coalesce(p.arabic_full_name, '')) like $${values.length}
       or lower(coalesce(p.mrn, '')) like $${values.length}
+      or lower(coalesce(p.national_id, '')) like $${values.length}
+      or lower(coalesce(p.identifier_value, '')) like $${values.length}
+      or lower(coalesce(primary_identifier.value, '')) like $${values.length}
       or lower('V2-' || lpad(b.id::text, 6, '0')) like $${values.length}
       or lower(coalesce(et.name_en, '')) like $${values.length}
     )`);
@@ -1399,6 +1402,14 @@ export async function listReportingBoardStatsRows(
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join lateral (
+        select pi.value
+        from patient_identifiers pi
+        where pi.patient_id = p.id
+          and pi.is_primary = true
+        order by pi.id asc
+        limit 1
+      ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id

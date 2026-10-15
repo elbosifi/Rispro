@@ -1846,6 +1846,67 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
+  it("searches National ID and patient identifiers across appointment and comparison cases without weakening filters", async () => {
+    guard();
+    const date = addDays(230);
+    const nationalId = `9${randomUUID().replace(/\D/g, "").padEnd(11, "7").slice(0, 11)}`;
+    const mrn = `MRN${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+    const legacyIdentifier = `L${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const primaryIdentifier = `PRIMARY${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+    const patientName = uniq("identifier_search_patient");
+    const examTypeId = await createExamType(ctModalityId, uniq("identifier_search_exam"));
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId, date, patientName });
+    await setPatientIdentifierFields(appointmentId, { mrn, identifierValue: legacyIdentifier, nationalId });
+    await insertPrimaryPatientIdentifier(appointmentId, primaryIdentifier);
+    const comparisonRequestId = await createComparisonRequestForBooking(appointmentId, `${date}T10:00:00.000Z`, uniq("identifier_search_comparison"));
+
+    const otherModalityAppointmentId = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: uniq("identifier_search_other_modality") });
+    await linkBookingToPatient(otherModalityAppointmentId, appointmentId);
+    const outsideDate = addDays(1);
+    const outsideDateAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId, date: outsideDate, patientName: uniq("identifier_search_outside_date") });
+    await linkBookingToPatient(outsideDateAppointmentId, appointmentId);
+    const unrelatedAppointmentId = await createBooking({ modalityId: ctModalityId, examTypeId, date, patientName: uniq("identifier_search_unrelated") });
+
+    const search = async (q: string, filters: { caseSource?: string; dateFrom?: string; dateTo?: string; modalityCode?: string; reportStatus?: string } = {}) => {
+      const params = new URLSearchParams({
+        q,
+        caseSource: filters.caseSource ?? "all",
+        dateFrom: filters.dateFrom ?? date,
+        dateTo: filters.dateTo ?? date,
+        modalityCode: filters.modalityCode ?? "CT",
+        reportStatus: filters.reportStatus ?? "all",
+        limit: "20",
+      });
+      const response = await api<{ cases: Array<{ caseKey: string }> }>(supervisor.cookie, `/api/doctor/reporting-board/cases?${params}`);
+      assert.equal(response.status, 200, JSON.stringify(response.data));
+      return response.data.cases.map((row) => row.caseKey).sort();
+    };
+    const appointmentCaseKey = `appointment:${appointmentId}`;
+    const comparisonCaseKey = `comparison:${comparisonRequestId}`;
+    const bothExpected = [appointmentCaseKey, comparisonCaseKey].sort();
+
+    assert.deepEqual(await search(nationalId), bothExpected, "full National ID returns only the correct patient's appointment and comparison");
+    assert.deepEqual(await search(nationalId.slice(3, 9)), bothExpected, "partial National ID matches case-insensitively");
+    assert.deepEqual(await search(primaryIdentifier.toLowerCase()), bothExpected, "primary patient identifier is searchable for both case types");
+    assert.deepEqual(await search(legacyIdentifier), bothExpected, "legacy identifier_value is searchable for both case types");
+    assert.deepEqual(await search(mrn), bothExpected, "MRN search remains supported for both case types");
+    assert.deepEqual(await search(patientName), bothExpected, "patient name search remains supported for both case types");
+
+    const accession = `V2-${String(appointmentId).padStart(6, "0")}`;
+    assert.deepEqual(await search(accession), bothExpected, "accession search remains supported for both case types");
+    const examName = (await pool.query<{ name_en: string }>(`select name_en from exam_types where id = $1`, [examTypeId])).rows[0]!.name_en;
+    assert.deepEqual(await search(examName), [...bothExpected, `appointment:${unrelatedAppointmentId}`].sort(), "examination search remains supported for both case types");
+    assert.deepEqual(await search(nationalId, { caseSource: "appointments" }), [appointmentCaseKey]);
+    assert.deepEqual(await search(nationalId, { caseSource: "comparisons" }), [comparisonCaseKey]);
+
+    assert.deepEqual(await search(nationalId, { modalityCode: "MR" }), [`appointment:${otherModalityAppointmentId}`]);
+    assert.deepEqual(await search(nationalId, { dateFrom: outsideDate, dateTo: outsideDate }), [`appointment:${outsideDateAppointmentId}`]);
+    statusByAppointmentId.set(appointmentId, "final");
+    await statusByAppointmentId.flush();
+    assert.deepEqual(await search(nationalId, { reportStatus: "final" }), [appointmentCaseKey]);
+    assert.deepEqual(await search(nationalId, { reportStatus: "required_not_final" }), [comparisonCaseKey]);
+  });
+
   it("keeps primary and comparison Sonic observations independent, including reassignment history", async () => {
     guard();
     const date = addDays(84);

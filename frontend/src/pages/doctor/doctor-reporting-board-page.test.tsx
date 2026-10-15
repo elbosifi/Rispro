@@ -1399,12 +1399,12 @@ describe("DoctorReportingBoardPage", () => {
 
   it("keeps applied search private while passing it to the board API", async () => {
     renderPage();
-    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    const search = await screen.findByPlaceholderText("Search MRN / National ID / accession / patient / exam");
     fireEvent.change(search, { target: { value: "PRIVATE-PATIENT-SEARCH" } });
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" });
 
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "PRIVATE-PATIENT-SEARCH" })));
-    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("PRIVATE-PATIENT-SEARCH");
+    expect((screen.getByPlaceholderText("Search MRN / National ID / accession / patient / exam") as HTMLInputElement).value).toBe("PRIVATE-PATIENT-SEARCH");
     expect(screen.getByTestId("location-probe").textContent).not.toContain("PRIVATE-PATIENT-SEARCH");
     expect(screen.getByTestId("location-probe").textContent).not.toMatch(/[?&](q|query|search)=/);
   });
@@ -1413,7 +1413,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage("/doctor/reporting-board?q=SENSITIVE_VALUE&query=ALSO_PRIVATE&search=NOPE&category=oncology");
 
     await waitFor(() => expect(screen.getByTestId("location-probe").textContent).toBe("/doctor/reporting-board?category=oncology"));
-    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("Search MRN / National ID / accession / patient / exam") as HTMLInputElement).value).toBe("");
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.not.objectContaining({ q: "SENSITIVE_VALUE" })));
   });
 
@@ -1580,7 +1580,7 @@ describe("DoctorReportingBoardPage", () => {
   it("applies search to reporting board filters on Enter and clears it", async () => {
     renderPage();
 
-    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    const search = await screen.findByPlaceholderText("Search MRN / National ID / accession / patient / exam");
     fireEvent.change(search, { target: { value: "MRN-7" } });
     fireEvent.keyDown(search, { key: "Enter" });
 
@@ -1594,7 +1594,7 @@ describe("DoctorReportingBoardPage", () => {
   it("live-refreshes SonicDICOM before refetching the board without changing filters", async () => {
     renderPage();
 
-    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    const search = await screen.findByPlaceholderText("Search MRN / National ID / accession / patient / exam");
     fireEvent.change(search, { target: { value: "MRN-7" } });
     fireEvent.keyDown(search, { key: "Enter" });
 
@@ -1609,7 +1609,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(refreshReportingBoardSonicDicomMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledTimes(caseCallCount + 1));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledTimes(statsCallCount + 1));
-    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("MRN-7");
+    expect((screen.getByPlaceholderText("Search MRN / National ID / accession / patient / exam") as HTMLInputElement).value).toBe("MRN-7");
     expect(screen.getByText(/Board refreshed:/)).toBeTruthy();
     expect(screen.queryByText(/Last refreshed:/)).toBeNull();
   });

@@ -1210,6 +1210,9 @@ function comparisonReportingWhere(filters: ReportingBoardFilters, values: unknow
       lower(coalesce(p.english_full_name, '')) like $${values.length}
       or lower(coalesce(p.arabic_full_name, '')) like $${values.length}
       or lower(coalesce(p.mrn, '')) like $${values.length}
+      or lower(coalesce(p.national_id, '')) like $${values.length}
+      or lower(coalesce(p.identifier_value, '')) like $${values.length}
+      or lower(coalesce(primary_identifier.value, '')) like $${values.length}
       or lower(coalesce(cr.linked_previous_accession_number, '')) like $${values.length}
       or lower(coalesce(cr.linked_exam_name, '')) like $${values.length}
       or lower(coalesce(cr.reason, '')) like $${values.length}
