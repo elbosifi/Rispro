@@ -13,10 +13,6 @@ export function isWindowsWorkstation(): boolean {
   return /\bWin/i.test(platform);
 }
 
-export function buildRadiantPacsTagUrl(tag: string, value: string): string {
-  return `radiant:///?n=pstv&v=${encodeURIComponent(tag)}&v=${encodeURIComponent(`"${value}"`)}`;
-}
-
 export function buildReportingBoardPrintUrl(input: {
   filters: ReportingBoardFilters;
   savedViewToken?: string | null;

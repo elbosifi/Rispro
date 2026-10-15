@@ -155,7 +155,7 @@ const caseRow: ReportingBoardCaseRow = {
   patientEnglishName: "Alpha Patient",
   patientArabicName: null,
   accessionNumber: "V2-000042",
-  studyInstanceUid: null,
+  studyInstanceUid: "1.2.840.42",
   bookingDate: "2026-05-25",
   bookingTime: "08:30",
   modalityId: 1,
@@ -421,7 +421,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     const row = (await screen.findByText("V2-000042")).closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Open Images" }));
 
     await waitFor(() => expect(launchReportingBoardCaseInOhifMock).toHaveBeenCalledWith(42, true));
@@ -1037,10 +1037,42 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
     const openStudy = screen.getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
-    expect(openStudy.getAttribute("href")).toBe("radiant:///?n=pstv&v=00080050&v=%22V2-000042%22");
+    expect(openStudy.getAttribute("href")).toBe("radiant://?n=pstv&v=0020000D&v=%221.2.840.42%22");
     const openPatient = screen.getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
-    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22DICOM-PRIMARY-7%22");
+    expect(openPatient.getAttribute("href")).toBe("radiant://?n=pstv&v=00100020&v=%22DICOM-PRIMARY-7%22");
     expect(openPatient.getAttribute("href")).not.toMatch(/MRN-7|%227%22/);
+  });
+
+  it("renders a UID-only exact-study RadiAnt link", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, accessionNumber: "", studyInstanceUid: "1.2.uid-only" }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    setNavigatorPlatform("Win32");
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("Alpha Patient").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
+
+    const openStudy = screen.getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
+    expect(openStudy.getAttribute("href")).toBe("radiant://?n=pstv&v=0020000D&v=%221.2.uid-only%22");
+  });
+
+  it("falls back to accession for an exact-study RadiAnt link", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, studyInstanceUid: null }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    setNavigatorPlatform("Win32");
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("Alpha Patient").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
+
+    const openStudy = screen.getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
+    expect(openStudy.getAttribute("href")).toBe("radiant://?n=pstv&v=00080050&v=%22V2-000042%22");
   });
 
   it("does not fall back to MRN or internal patient ID for patient viewer links", async () => {
@@ -1061,7 +1093,7 @@ describe("DoctorReportingBoardPage", () => {
 
   it("disables viewer actions when accession and patient identifiers are missing", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [{ ...caseRow, appointmentId: 43, accessionNumber: "", patientMrn: null, patientDicomId: null }],
+      cases: [{ ...caseRow, appointmentId: 43, accessionNumber: "", studyInstanceUid: null, patientMrn: null, patientDicomId: null }],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
     });
     setNavigatorPlatform("Win32");

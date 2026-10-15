@@ -373,6 +373,7 @@ function makeCase(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingB
     mrn: "MRN-42",
     patientDicomId: "PRIMARY-42",
     accessionNumber: "ACC-42",
+    studyInstanceUid: "1.2.840.42",
     date: "2026-09-02",
     time: "09:30",
     modality: "MR",

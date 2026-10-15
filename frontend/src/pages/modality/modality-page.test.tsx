@@ -9,7 +9,7 @@ import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import type { HistoricalPacsCandidate, ModalityProtocolAssignment } from "@/types/api";
-import { buildRadiantPacsTagUrl } from "../doctor/doctor-reporting-board-page.helpers";
+import { buildRadiantPatientUrl, buildRadiantStudyUrl } from "@/lib/radiant";
 
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
@@ -2265,17 +2265,17 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("button", { name: "History" }));
 
     expect(screen.getByRole("link", { name: "Patient studies" }).getAttribute("href")).toBe("/api/v2/read/modality/appointments/62/previous-studies/open-sonicdicom?scope=patient");
-    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "CANONICAL-10"));
+    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPatientUrl("CANONICAL-10"));
 
     const currentSonic = screen.getAllByRole("link", { name: "SonicDICOM" }).find((link) => link.getAttribute("href")?.includes("accession=CURRENT-ACC"));
     expect(currentSonic).toBeTruthy();
-    const currentRadiant = screen.getAllByRole("link", { name: "RadiAnt" }).find((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "CURRENT-ACC"));
+    const currentRadiant = screen.getAllByRole("link", { name: "RadiAnt" }).find((link) => link.getAttribute("href") === buildRadiantStudyUrl({ studyInstanceUid: "1.2.current", accessionNumber: "CURRENT-ACC" }));
     expect(currentRadiant).toBeTruthy();
     expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("RIS-ONLY-ACC"))).toBe(false);
-    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "RIS-ONLY-ACC"))).toBe(false);
-    expect(screen.getByRole("link", { name: "Open old patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
+    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantStudyUrl({ accessionNumber: "RIS-ONLY-ACC" }))).toBe(false);
+    expect(screen.getByRole("link", { name: "Open old patient studies in RadiAnt" }).getAttribute("href")).toBe(buildRadiantPatientUrl("OLD-77"));
     expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("accession=OLD-ACC"))).toBe(true);
-    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantPacsTagUrl("00080050", "OLD-ACC"))).toBe(true);
+    expect(screen.getAllByRole("link", { name: "RadiAnt" }).some((link) => link.getAttribute("href") === buildRadiantStudyUrl({ studyInstanceUid: "1.2.old", accessionNumber: "OLD-ACC" }))).toBe(true);
     expect(screen.queryByText(/Reconcile patient identity/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /Reconcile/i })).toBeNull();
   });

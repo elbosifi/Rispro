@@ -7,7 +7,7 @@ import { fetchDoctorMe } from "@/lib/api/doctor-portal-reporting";
 import { confirmIrReferralMaterials, createIrReferralScheduleRequest, deleteIrReferralDocument, fetchIrReferral, listIrReferralDocuments, recordIrReferralDecision, uploadIrReferralDocument } from "@/lib/api/ir-referrals";
 import { irDecisionLabel, irReferralStatusLabel, irReferralStatusVariant } from "@/lib/ir-referral-display";
 import { formatDateTimeLy } from "@/lib/date-format";
-import { buildRadiantPacsTagUrl } from "@/pages/doctor/doctor-reporting-board-page.helpers";
+import { buildRadiantPatientUrl } from "@/lib/radiant";
 import { getDoctorDisplayName } from "@/lib/user-display-name";
 import { pushToast } from "@/lib/toast";
 import { t } from "@/lib/i18n";
@@ -168,7 +168,7 @@ export default function IrReferralDetailPage({ surface = "core" }: IrReferralDet
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div><Link to={surface === "doctor" ? "/doctor/ir-consultations" : "/comparisons"} className="text-sm font-semibold text-accent">{t(language, surface === "doctor" ? "irReferral.backToDoctorConsultations" : "irReferral.backToReviewRequests")}</Link><div className="mt-2 flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">{t(language, "irReferral.detailTitle")}</h1><Badge variant={irReferralStatusVariant(row.status)}>{irReferralStatusLabel(language, row.status)}</Badge></div></div>
       <div className="flex flex-wrap gap-2">
-        {row.patientDicomId ? <a href={buildRadiantPacsTagUrl("00100020", row.patientDicomId)} className="inline-flex h-10 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted">{t(language, "irReferral.openPatientStudies")} <ExternalLink size={15} /></a> : <span className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm text-muted-foreground">{t(language, "irReferral.pacsIdentifierUnavailable")}</span>}
+        {buildRadiantPatientUrl(row.patientDicomId) ? <a href={buildRadiantPatientUrl(row.patientDicomId) ?? undefined} className="inline-flex h-10 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted">{t(language, "irReferral.openPatientStudies")} <ExternalLink size={15} /></a> : <span className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm text-muted-foreground">{t(language, "irReferral.pacsIdentifierUnavailable")}</span>}
         {canPrepareMaterials ? <Link to={`/pacs/remap?irReferralId=${row.id}&returnPath=${encodeURIComponent(`/comparisons/ir/${row.id}`)}`} className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm font-semibold hover:bg-muted">{t(language, "irReferral.pacsRemap")}</Link> : null}
       </div>
     </div>

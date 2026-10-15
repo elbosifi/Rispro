@@ -910,6 +910,7 @@ export interface ReportingBoardMobileCase {
   mrn: string | null;
   patientDicomId: string | null;
   accessionNumber: string;
+  studyInstanceUid: string | null;
   date: string;
   time: string | null;
   modality: string;

@@ -107,10 +107,10 @@ function reportStatusFeedbackLabel(status: string): string {
   return status === "no_report" ? "No report" : status === "study_not_found" ? "Study not found" : status === "unavailable" ? "Unavailable" : status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 import {
-  buildRadiantPacsTagUrl,
   buildReportingBoardPrintUrl,
   isWindowsWorkstation,
 } from "./doctor-reporting-board-page.helpers";
+import { buildRadiantPatientUrl, buildRadiantStudyUrl } from "@/lib/radiant";
 
 const REPORT_STATUS_OPTIONS: Array<{ value: ReportingBoardReportStatus; label: string }> = [
   { value: "required_not_final", label: "Required not final" },
@@ -838,6 +838,8 @@ function RowActionMenu({
   const actionUnavailable = row.exclusionReason === "manual_final" ? "Manual final override" : row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientDicomId = String(row.patientDicomId || "").trim();
+  const radiantStudyUrl = buildRadiantStudyUrl({ studyInstanceUid: row.studyInstanceUid, accessionNumber });
+  const radiantPatientUrl = buildRadiantPatientUrl(patientDicomId);
   const showRadiantActions = isWindowsWorkstation();
   const canReconcileFinalizerAssignment = canManage && row.caseType === "appointment" && row.reportStatus === "final" && row.reportStatusSource === "sonicdicom" && !row.manualFinalOverrideId && row.assignedDoctorId !== null && row.finalizedByDoctorId !== null && row.assignedDoctorId !== row.finalizedByDoctorId && Boolean(row.sonicDicomLatestDocumentId);
   const copyAccession = async () => {
@@ -962,22 +964,22 @@ function RowActionMenu({
           {refreshingReportStatus ? "Refreshing report status…" : "Refresh report status"}
         </button>
       )}
-      {showRadiantActions && accessionNumber && (
-        <a role="menuitem" href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+      {showRadiantActions && radiantStudyUrl && (
+        <a role="menuitem" href={radiantStudyUrl} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
           Open this study in RadiAnt
         </a>
       )}
-      {showRadiantActions && !accessionNumber && (
-        <button type="button" role="menuitem" disabled title="Accession number missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+      {showRadiantActions && !radiantStudyUrl && (
+        <button type="button" role="menuitem" disabled title="Study UID and accession number missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
           Open this study in RadiAnt
         </button>
       )}
-      {showRadiantActions && patientDicomId && (
-        <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientDicomId)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+      {showRadiantActions && radiantPatientUrl && (
+        <a role="menuitem" href={radiantPatientUrl} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
           Open patient studies in RadiAnt
         </a>
       )}
-      {showRadiantActions && !patientDicomId && (
+      {showRadiantActions && !radiantPatientUrl && (
         <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
           Open patient studies in RadiAnt
         </button>

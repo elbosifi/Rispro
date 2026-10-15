@@ -21,7 +21,6 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("./doctor-reporting-board-page.helpers", () => ({
-  buildRadiantPacsTagUrl: (tag: string, value: string) => `radiant:///?tag=${tag}&value=${value}`,
   isWindowsWorkstation: testState.isWindows,
 }));
 
@@ -63,7 +62,7 @@ function makeItem(overrides: Partial<ProtocolingPatientHistoryItem> = {}): Proto
   return {
     appointmentId: 1,
     orthancStudyId: null,
-    studyInstanceUid: null,
+    studyInstanceUid: "1.2.current",
     accessionNumber: "ACC-1",
     date: "2026-09-01",
     time: null,
@@ -276,7 +275,7 @@ describe("PersonalReportingPatientHistory", () => {
     testState.isWindows.mockReturnValue(true);
     const firstRender = renderHistory();
     expect(await screen.findByRole("link", { name: "Open in SonicDICOM" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open in RadiAnt" }).getAttribute("href")).toContain("00080050");
+    expect(screen.getByRole("link", { name: "Open in RadiAnt" }).getAttribute("href")).toContain("0020000D");
 
     firstRender.unmount();
     testState.isWindows.mockReturnValue(false);

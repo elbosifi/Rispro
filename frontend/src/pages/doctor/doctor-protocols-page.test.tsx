@@ -8,7 +8,7 @@ import type { DoctorMe, DoctorProtocolingAppointment, ProtocolAssignment } from 
 import type { ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow, ProtocolLibraryVersion, ProtocolLibraryVersionDetail } from "@/types/api";
 import * as apiHooks from "@/lib/api-hooks";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
-import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
+import { buildRadiantPatientUrl } from "@/lib/radiant";
 import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
 
 function render(ui: ReactElement) {
@@ -620,7 +620,7 @@ describe("Doctor protocoling request documents", () => {
 
   it("keeps matched PACS study viewers on the appointment study-scope route", async () => {
     mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [
-      { appointmentId: 11, orthancStudyId: "study-11", accessionNumber: "V2-001111", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "Matched PACS CT", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs" },
+      { appointmentId: 11, orthancStudyId: "study-11", studyInstanceUid: "1.2.matched", accessionNumber: "V2-001111", date: "2026-08-16", time: "10:00", modalities: ["CT"], description: "Matched PACS CT", appointmentStatus: "completed", reportAvailable: false, source: "rispro_pacs" },
     ] });
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
@@ -629,7 +629,7 @@ describe("Doctor protocoling request documents", () => {
 
     expect(within(row).getByText("PACS")).toBeTruthy();
     expect(within(row).getByRole("link", { name: "SonicDICOM" }).getAttribute("href")).toContain("/api/doctor/protocoling/appointments/11/open-sonicdicom?scope=study");
-    expect(within(row).getByRole("link", { name: "RadiAnt" })).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "RadiAnt" }).getAttribute("href")).toContain("0020000D");
   });
 
   it("keeps PACS-only accession viewers and omits the appointment-bound report action", async () => {
@@ -745,7 +745,7 @@ describe("Doctor protocoling request documents", () => {
     expect(history.queryByText("20240102")).toBeNull();
     expect(history.getByText("2 series · 20 images")).toBeTruthy();
     const openOldStudies = history.getByRole("link", { name: "Open old studies in RadiAnt" });
-    expect(openOldStudies.getAttribute("href")).toBe(buildRadiantPacsTagUrl("00100020", "OLD-77"));
+    expect(openOldStudies.getAttribute("href")).toBe(buildRadiantPatientUrl("OLD-77"));
     expect(history.queryByRole("button", { name: /Attach|Migrate|Merge|Remap/i })).toBeNull();
     await userEvent.click(history.getByText("Why this matched"));
     expect(history.getByText("fuzzy english name")).toBeTruthy();

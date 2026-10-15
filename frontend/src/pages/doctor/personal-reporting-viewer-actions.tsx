@@ -4,7 +4,8 @@ import { ExternalLink, Monitor } from "lucide-react";
 import { fetchOhifRetrievalJob, launchReportingBoardCaseInOhif } from "@/lib/api-hooks";
 import type { OhifViewerAvailability, ReportingBoardMobileCase } from "@/types/api";
 import { Button } from "@/components/shared";
-import { buildRadiantPacsTagUrl, isWindowsWorkstation } from "./doctor-reporting-board-page.helpers";
+import { buildRadiantStudyUrl } from "@/lib/radiant";
+import { isWindowsWorkstation } from "./doctor-reporting-board-page.helpers";
 
 type ViewerState = "idle" | "resolving" | "retrieving" | "failed";
 
@@ -54,12 +55,13 @@ export function PersonalReportingViewerActions({
   const [viewerState, setViewerState] = useState<ViewerState>("idle");
   const [viewerMessage, setViewerMessage] = useState("");
   const accessionNumber = row.accessionNumber.trim();
+  const radiantStudyUrl = buildRadiantStudyUrl({ studyInstanceUid: row.studyInstanceUid, accessionNumber });
   const showOhif = authorized
     && row.caseType === "appointment"
     && Boolean(accessionNumber)
     && Boolean(ohifAvailability?.enabled && ohifAvailability.configured);
   const showSonicDicom = authorized && row.caseType === "appointment" && Boolean(accessionNumber);
-  const showRadiant = authorized && !isMobile && isWindowsWorkstation() && Boolean(accessionNumber);
+  const showRadiant = authorized && !isMobile && isWindowsWorkstation() && Boolean(radiantStudyUrl);
   const isResolving = viewerState === "resolving" || viewerState === "retrieving";
 
   const openOhif = async () => {
@@ -139,7 +141,7 @@ export function PersonalReportingViewerActions({
       ) : null}
       {showRadiant ? (
         <a
-          href={buildRadiantPacsTagUrl("00080050", accessionNumber)}
+          href={radiantStudyUrl!}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Open in RadiAnt"

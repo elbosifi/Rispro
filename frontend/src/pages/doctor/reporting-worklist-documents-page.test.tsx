@@ -22,7 +22,7 @@ vi.mock("@/components/documents/request-documents-panel", () => ({
 function caseRow(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBoardMobileCase {
   return {
     caseType: "appointment", caseKey: "appointment:42", appointmentId: 42, comparisonRequestId: null,
-    patientName: "Patient One", mrn: "MRN-42", patientDicomId: "PID-42", accessionNumber: "V2-000042",
+    patientName: "Patient One", mrn: "MRN-42", patientDicomId: "PID-42", accessionNumber: "V2-000042", studyInstanceUid: "1.2.840.42",
     date: "2026-09-27", time: "09:00", modality: "CT", exam: "CT Chest", category: "oncology",
     assignedDoctor: "Dr Reader", assignedDoctorId: 4, assignmentOrigin: "rispro", finalizedByDoctorId: null,
     finalizedByDoctorName: null, sonicDicomFinalizedByAccount: null, assignmentMatch: "not_applicable",

@@ -10,7 +10,8 @@ import {
 } from "@/lib/api-hooks";
 import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import type { HistoricalPacsCandidate, HistoricalPacsIndexStatus, ProtocolingPatientHistoryItem, ProtocolingPatientHistoryResponse, ReportingBoardMobileCase } from "@/types/api";
-import { buildRadiantPacsTagUrl, isWindowsWorkstation } from "./doctor-reporting-board-page.helpers";
+import { buildRadiantStudyUrl } from "@/lib/radiant";
+import { isWindowsWorkstation } from "./doctor-reporting-board-page.helpers";
 
 export type PersonalReportingHistoryCase = Pick<
   ReportingBoardMobileCase,
@@ -86,16 +87,17 @@ function historyStudyPath(caseIdentity: PersonalReportingHistoryCase, accession:
   return `${base}?accession=${encodeURIComponent(accession)}`;
 }
 
-function HistoryStudyActions({ caseIdentity, accession }: { caseIdentity: PersonalReportingHistoryCase; accession: string | null }) {
+function HistoryStudyActions({ caseIdentity, studyInstanceUid, accessionNumber }: { caseIdentity: PersonalReportingHistoryCase; studyInstanceUid: string | null; accessionNumber: string | null }) {
   const isMobile = useIsMobileViewport();
-  const normalizedAccession = accession?.trim() ?? "";
-  if (!normalizedAccession) return null;
+  const normalizedAccession = accessionNumber?.trim() ?? "";
+  const radiantStudyUrl = buildRadiantStudyUrl({ studyInstanceUid, accessionNumber });
+  if (!normalizedAccession && !radiantStudyUrl) return null;
   const actionClasses = isMobile
     ? "btn-secondary inline-flex h-[var(--control-height-sm)] items-center gap-1.5 px-2.5 text-sm"
     : "btn-secondary inline-flex h-9 items-center gap-1.5 px-2.5 text-sm";
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <a
+      {normalizedAccession ? <a
         href={historyStudyPath(caseIdentity, normalizedAccession)}
         target="_blank"
         rel="noopener noreferrer"
@@ -105,10 +107,10 @@ function HistoryStudyActions({ caseIdentity, accession }: { caseIdentity: Person
       >
         <ExternalLink size={15} aria-hidden="true" />
         <span>SonicDICOM</span>
-      </a>
-      {!isMobile && isWindowsWorkstation() ? (
+      </a> : null}
+      {!isMobile && isWindowsWorkstation() && radiantStudyUrl ? (
         <a
-          href={buildRadiantPacsTagUrl("00080050", normalizedAccession)}
+          href={radiantStudyUrl}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Open in RadiAnt"
@@ -163,7 +165,7 @@ function CurrentStudyRow({ caseIdentity, item, requestedAccession }: { caseIdent
         </p>
       ) : null}
       <div className="mt-2">
-        <HistoryStudyActions caseIdentity={caseIdentity} accession={item.accessionNumber} />
+        <HistoryStudyActions caseIdentity={caseIdentity} studyInstanceUid={item.studyInstanceUid} accessionNumber={item.accessionNumber} />
       </div>
     </article>
   );
@@ -199,7 +201,7 @@ function HistoricalCandidateCard({ caseIdentity, candidate }: { caseIdentity: Pe
             <p className="mt-1 min-w-0 break-words">Modality: {study.modalitiesInStudy.length ? study.modalitiesInStudy.join("/") : "Unknown"}</p>
             <p className="min-w-0 break-all">Accession: {study.accessionNumber ?? "Unavailable"}</p>
             <div className="mt-2">
-              <HistoryStudyActions caseIdentity={caseIdentity} accession={study.accessionNumber} />
+              <HistoryStudyActions caseIdentity={caseIdentity} studyInstanceUid={study.studyInstanceUid} accessionNumber={study.accessionNumber} />
             </div>
           </div>
         ))}

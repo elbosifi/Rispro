@@ -1309,6 +1309,7 @@ function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean, person
     mrn: row.patientMrn,
     patientDicomId: row.patientDicomId ?? null,
     accessionNumber: row.accessionNumber,
+    studyInstanceUid: row.studyInstanceUid ?? null,
     date: row.bookingDate,
     time: row.bookingTime,
     modality: row.modalityCode,

@@ -16,7 +16,6 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("./doctor-reporting-board-page.helpers", () => ({
-  buildRadiantPacsTagUrl: (tag: string, value: string) => `radiant:///?tag=${tag}&value=${value}`,
   isWindowsWorkstation: testState.isWindows,
 }));
 
@@ -56,6 +55,7 @@ function makeRow(overrides: Partial<ReportingBoardMobileCase> = {}): ReportingBo
     mrn: "MRN-42",
     patientDicomId: "PRIMARY-42",
     accessionNumber: "ACC-42",
+    studyInstanceUid: "1.2.840.42",
     date: "2026-09-02",
     time: "09:30",
     modality: "MR",
@@ -150,7 +150,7 @@ describe("PersonalReportingViewerActions", () => {
     expect(screen.getByRole("link", { name: "Open in SonicDICOM" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open in OHIF" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open in RadiAnt" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open in RadiAnt" }).getAttribute("href")).toContain("00080050");
+    expect(screen.getByRole("link", { name: "Open in RadiAnt" }).getAttribute("href")).toContain("0020000D");
 
     unmount();
     setWindowsWorkstation(false);
