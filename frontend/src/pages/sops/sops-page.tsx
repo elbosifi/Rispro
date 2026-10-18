@@ -62,13 +62,14 @@ import {
   type SopXlsxConfirmResult,
   type SopJsonConfirmResult,
 } from "@/lib/api/sops";
-import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
+import { localizeSopSectionTitle, SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { createEmptySopDocument } from "./sop-document";
 import { SopXlsxImportDialog } from "./sop-xlsx-import-dialog";
 import { SopJsonImportDialog } from "./sop-json-import-dialog";
 import SopJsonExamplePage from "./sop-json-example-page";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { t as translate, type Language, type TranslationKey } from "@/lib/i18n";
 import {
   proceedWithUnsavedNavigation,
   registerUnsavedNavigationGuard,
@@ -98,6 +99,17 @@ const FALLBACK_CATEGORIES = [
   "Reception / Registration",
   "Administrative",
 ];
+const FALLBACK_CATEGORY_KEYS: Partial<Record<string, TranslationKey>> = {
+  General: "sops.category.general",
+  Ultrasound: "sops.category.ultrasound",
+  Mammography: "sops.category.mammography",
+  "X-Ray": "sops.category.xray",
+  "Interventional Radiology": "sops.category.interventionalRadiology",
+  "Patient Safety": "sops.category.patientSafety",
+  "PACS / IT": "sops.category.pacsIt",
+  "Reception / Registration": "sops.category.receptionRegistration",
+  Administrative: "sops.category.administrative",
+};
 const isManagement = (role?: string) =>
   role === "supervisor" || role === "super_admin";
 function parseIsoDateOnly(value: string): [number, number, number] | null {
@@ -138,20 +150,21 @@ function suggestNextMinorVersion(currentVersion: string | null | undefined): str
   return `${major}.${minor + 1}`;
 }
 
-const dateLabel = (value: string | null | undefined) => {
+const dateLabel = (value: string | null | undefined, language: Language = "en") => {
   if (!value) return "—";
   const parts = parseIsoDateOnly(value);
   if (parts) {
     const utcDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
-    return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(utcDate);
+    return new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-LY", { dateStyle: "medium", timeZone: "UTC", calendar: "gregory" }).format(utcDate);
   }
   return value;
 };
-const dateTimeLabel = (value: string | null | undefined) =>
+const dateTimeLabel = (value: string | null | undefined, language: Language = "en") =>
   value
-    ? new Intl.DateTimeFormat("en-GB", {
+    ? new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-LY", {
         dateStyle: "medium",
         timeStyle: "short",
+        calendar: "gregory",
       }).format(new Date(value))
     : "—";
 const statusVariant = (status: string) =>
@@ -162,12 +175,16 @@ const statusVariant = (status: string) =>
       : status === "archived"
         ? ("legacy" as const)
         : ("neutral" as const);
-const versionStatusLabel = (version: SopVersion, current: string | null) =>
+const versionStatusLabel = (
+  version: SopVersion,
+  current: string | null,
+  t: (key: TranslationKey) => string,
+) =>
   version.version === current
-    ? "Current"
+    ? t("sops.versionStatus.current")
     : version.status === "superseded"
-      ? "Superseded"
-      : "Draft";
+      ? t("sops.versionStatus.superseded")
+      : t("sops.status.draft");
 
 function editorNodeText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -214,18 +231,20 @@ function publishValidationError(input: {
   effectiveDate: string;
   ownerUserId: number | null;
   document: SopDocument;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }): string | null {
-  if (!input.title.trim()) return "Title is required before publishing.";
-  if (!input.category) return "Category is required before publishing.";
-  if (!input.version.trim()) return "Version is required before publishing.";
-  if (!input.ownerUserId) return "SOP Owner is required before publishing.";
-  if (!input.effectiveDate) return "Effective date is required before publishing.";
+  if (!input.title.trim()) return input.t("sops.editor.validation.titleRequired");
+  if (!input.category) return input.t("sops.editor.validation.categoryRequired");
+  if (!input.version.trim()) return input.t("sops.editor.validation.versionRequired");
+  if (!input.ownerUserId) return input.t("sops.editor.validation.ownerRequired");
+  if (!input.effectiveDate) return input.t("sops.editor.validation.effectiveDateRequired");
   const missing = input.document.sections.find(
     (section) => section.required && !editorNodeText(section.content).trim(),
   );
-  return missing
-    ? `${missing.title} must contain meaningful content before publishing.`
-    : null;
+  if (!missing) return null;
+  return input.t("sops.editor.validation.sectionRequired", {
+    section: localizeSopSectionTitle(missing.key, missing.title, input.t),
+  });
 }
 
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -244,6 +263,7 @@ function LibraryPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { language } = useLanguage();
+  const t = (key: TranslationKey) => translate(language, key);
   const management = isManagement(user?.role);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -281,7 +301,7 @@ function LibraryPage() {
     setJsonExampleBusy(true);
     setJsonExampleError(null);
     try { await downloadSopJsonExample(); }
-    catch (value) { setJsonExampleError(value instanceof Error ? value.message : "Unable to download the SOP JSON example."); }
+    catch (value) { setJsonExampleError(value instanceof Error ? value.message : t("sops.library.downloadExampleError")); }
     finally { setJsonExampleBusy(false); }
   };
   return (
@@ -290,14 +310,13 @@ function LibraryPage() {
         <div>
           <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-accent" aria-hidden="true" />
-            <h1 className="text-xl font-semibold sm:text-2xl">SOP Library</h1>
+            <h1 className="text-xl font-semibold sm:text-2xl">{t("sops.library.title")}</h1>
           </div>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Controlled radiology procedures, safety instructions, and
-            operational standards.
+            {t("sops.library.description")}
           </p>
         </div>
-        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />Import SOP</Button><Button type="button" variant="secondary" onClick={() => void downloadJsonExample()} disabled={jsonExampleBusy}><Download className="h-4 w-4" />{jsonExampleBusy ? "Downloading…" : "Download JSON Example"}</Button><Button type="button" variant="secondary" onClick={() => navigate("/sops/json-example")}><Pencil className="h-4 w-4" />Edit JSON Example</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />New SOP</Button></div> : null}
+        {management ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={() => setJsonImportOpen(true)}><Download className="h-4 w-4" />{t("sops.library.import")}</Button><Button type="button" variant="secondary" onClick={() => void downloadJsonExample()} disabled={jsonExampleBusy}><Download className="h-4 w-4" />{jsonExampleBusy ? t("sops.library.downloading") : t("sops.library.downloadExample")}</Button><Button type="button" variant="secondary" onClick={() => navigate("/sops/json-example")}><Pencil className="h-4 w-4" />{t("sops.library.editExample")}</Button><Button type="button" onClick={() => navigate("/sops/new")}><CirclePlus className="h-4 w-4" />{t("sops.library.new")}</Button></div> : null}
       </header>
       {jsonExampleError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{jsonExampleError}</div> : null}
       <section
@@ -305,59 +324,59 @@ function LibraryPage() {
         aria-labelledby="sop-filter-heading"
       >
         <h2 id="sop-filter-heading" className="text-sm font-semibold">
-          Find an SOP
+          {t("sops.library.find")}
         </h2>
         <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <label className="grid gap-1 text-sm font-medium">
-            Search
+            {t("common.search")}
             <Input
-              aria-label="Search SOPs"
+              aria-label={t("sops.library.searchLabel")}
               className="h-10"
-              placeholder="Code or title"
+              placeholder={t("sops.library.searchPlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
           <label className="grid gap-1 text-sm font-medium">
-            Category
+            {t("sops.library.category")}
             <select
-              aria-label="Category"
+              aria-label={t("sops.library.category")}
               className="input-premium h-10"
               value={category}
               onChange={(event) => setCategory(event.target.value)}
             >
-              <option value="">All categories</option>
+              <option value="">{t("sops.library.allCategories")}</option>
               {categories.map((item) => (
                 <option key={item} value={item}>
-                  {item}
+                  {FALLBACK_CATEGORY_KEYS[item] ? t(FALLBACK_CATEGORY_KEYS[item]!) : item}
                 </option>
               ))}
             </select>
           </label>
           <label className="grid gap-1 text-sm font-medium">
-            Status
+            {t("sops.library.status")}
             <select
-              aria-label="Status"
+              aria-label={t("sops.library.status")}
               className="input-premium h-10"
               value={management ? status : "published"}
               disabled={!management}
               onChange={(event) => setStatus(event.target.value)}
             >
-              <option value="published">Published</option>
+              <option value="published">{t("sops.status.published")}</option>
               {management ? (
                 <>
-                  <option value="">All statuses</option>
-                  <option value="draft">Draft</option>
-                  <option value="archived">Archived</option>
+                  <option value="">{t("sops.library.allStatuses")}</option>
+                  <option value="draft">{t("sops.status.draft")}</option>
+                  <option value="archived">{t("sops.status.archived")}</option>
                 </>
               ) : null}
             </select>
           </label>
           {management ? (
             <label className="grid gap-1 text-sm font-medium">
-              Review status
+              {t("sops.library.reviewStatus")}
               <select
-                aria-label="Review status"
+                aria-label={t("sops.library.reviewStatus")}
                 className="input-premium h-10"
                 value={reviewStatusFilter}
                 onChange={(event) =>
@@ -366,9 +385,9 @@ function LibraryPage() {
                   )
                 }
               >
-                <option value="all">All review statuses</option>
-                <option value="due_soon">Due soon</option>
-                <option value="overdue">Overdue</option>
+                <option value="all">{t("sops.library.allReviewStatuses")}</option>
+                <option value="due_soon">{t("sops.library.dueSoon")}</option>
+                <option value="overdue">{t("sops.library.overdue")}</option>
               </select>
             </label>
           ) : null}
@@ -380,7 +399,7 @@ function LibraryPage() {
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">
           <h2 id="sop-register-heading" className="font-semibold">
-            Available SOPs
+            {t("sops.library.available")}
           </h2>
           {list.data ? (
             <Badge variant="neutral" size="sm">
@@ -389,25 +408,25 @@ function LibraryPage() {
           ) : null}
         </div>
         {list.isLoading ? (
-          <LoadingState message="Loading SOP Library…" />
+          <LoadingState message={t("sops.library.loading")} />
         ) : list.isError ? (
           <div className="grid justify-items-center gap-2 p-6">
-            <ErrorState message="Unable to load the SOP Library." />
+            <ErrorState message={t("sops.library.loadError")} />
             <Button
               type="button"
               variant="secondary"
               size="sm"
               onClick={() => void list.refetch()}
             >
-              Retry
+              {t("common.tryAgain")}
             </Button>
           </div>
         ) : !displayedSops.length ? (
           <EmptyState
             message={
               management
-                ? "No SOPs match the selected filters."
-                : "No published SOPs are available."
+                ? t("sops.library.noMatches")
+                : t("sops.library.nonePublished")
             }
           />
         ) : (
@@ -415,19 +434,19 @@ function LibraryPage() {
             <table className="w-full min-w-[840px] text-start text-sm">
               <thead className="bg-muted/20 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="p-3 text-start">Code</th>
-                  <th className="p-3 text-start">Title</th>
-                  <th className="p-3 text-start">Category</th>
-                  {management ? <th className="p-3 text-start">Owner</th> : null}
-                  <th className="p-3 text-start">Version</th>
-                  <th className="p-3 text-start">Status</th>
-                  <th className="p-3 text-start">Effective date</th>
+                  <th className="p-3 text-start">{t("sops.library.code")}</th>
+                  <th className="p-3 text-start">{t("sops.library.documentTitle")}</th>
+                  <th className="p-3 text-start">{t("sops.library.category")}</th>
+                  {management ? <th className="p-3 text-start">{t("sops.library.owner")}</th> : null}
+                  <th className="p-3 text-start">{t("sops.library.version")}</th>
+                  <th className="p-3 text-start">{t("sops.library.status")}</th>
+                  <th className="p-3 text-start">{t("sops.library.effectiveDate")}</th>
                   {management ? (
-                    <th className="p-3 text-start">Review Due</th>
+                    <th className="p-3 text-start">{t("sops.library.reviewDue")}</th>
                   ) : (
-                    <th className="p-3 text-start">Last updated</th>
+                    <th className="p-3 text-start">{t("sops.library.lastUpdated")}</th>
                   )}
-                  <th className="p-3 text-end">Actions</th>
+                  <th className="p-3 text-end">{t("common.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -463,8 +482,9 @@ function LibraryRow({
   sop: SopSummary;
   management: boolean;
   onOpen: () => void;
-  language: string;
+  language: Language;
 }) {
+  const t = (key: TranslationKey) => translate(language, key);
   const version = management ? sop.draftVersion ?? sop.currentVersion : sop.currentVersion;
   return (
     <tr className="border-t border-border align-middle hover:bg-muted/20">
@@ -486,11 +506,11 @@ function LibraryRow({
       </td>
       <td className="p-3">
         <Badge variant={statusVariant(sop.status)} size="sm">
-          {sop.status}
+          {t(`sops.status.${sop.status}` as TranslationKey)}
         </Badge>
       </td>
       <td className="p-3 text-muted-foreground">
-        {dateLabel(sop.currentEffectiveDate)}
+        {dateLabel(sop.currentEffectiveDate, language)}
       </td>
       {management ? (
         <td className="p-3">
@@ -501,10 +521,10 @@ function LibraryRow({
                 return (
                   <div className="flex flex-col gap-1 items-start">
                     <span className="text-sm font-medium text-red-600 dark:text-red-400">
-                      {dateLabel(sop.currentNextReviewDate)}
+                      {dateLabel(sop.currentNextReviewDate, language)}
                     </span>
                     <Badge variant="error" size="sm">
-                      Review overdue
+                      {t("sops.library.overdue")}
                     </Badge>
                   </div>
                 );
@@ -513,17 +533,17 @@ function LibraryRow({
                 return (
                   <div className="flex flex-col gap-1 items-start">
                     <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                      {dateLabel(sop.currentNextReviewDate)}
+                      {dateLabel(sop.currentNextReviewDate, language)}
                     </span>
                     <Badge variant="warning" size="sm">
-                      Review due soon
+                      {t("sops.library.dueSoon")}
                     </Badge>
                   </div>
                 );
               }
               return (
                 <span className="text-muted-foreground">
-                  {dateLabel(sop.currentNextReviewDate)}
+                  {dateLabel(sop.currentNextReviewDate, language)}
                 </span>
               );
             })()
@@ -533,18 +553,18 @@ function LibraryRow({
         </td>
       ) : (
         <td className="p-3 text-muted-foreground">
-          {dateTimeLabel(sop.updatedAt)}
+          {dateTimeLabel(sop.updatedAt, language)}
         </td>
       )}
       <td className="p-3 text-end">
         <Button type="button" size="sm" variant="secondary" onClick={onOpen}>
           <Eye className="h-4 w-4" />
-          {language === "ar" ? "فتح" : "Open"}
+          {t("sops.library.open")}
         </Button>
         {management && sop.status === "draft" ? (
           <span className="ms-2 inline-flex items-center text-xs text-amber-700">
             <Pencil className="me-1 h-3.5 w-3.5" />
-            Edit
+            {t("sops.library.edit")}
           </span>
         ) : null}
       </td>
@@ -597,21 +617,23 @@ function MetadataFields({
   titleReadOnly?: boolean;
   categoryReadOnly?: boolean;
 }) {
+  const { language } = useLanguage();
+  const t = (key: TranslationKey) => translate(language, key);
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <label className="grid gap-1 text-sm font-medium md:col-span-2">
-        Title
+        {t("sops.editor.titleField")}
         <Input
-          aria-label="Title"
+          aria-label={t("sops.editor.titleField")}
           value={title}
           readOnly={titleReadOnly}
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        SOP Code
+        {t("sops.editor.codeField")}
         <Input
-          aria-label="SOP Code"
+          aria-label={t("sops.editor.codeField")}
           dir="ltr"
           value={code}
           readOnly={codeReadOnly}
@@ -620,9 +642,9 @@ function MetadataFields({
         />
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        Category
+        {t("sops.library.category")}
         <select
-          aria-label="Category"
+          aria-label={t("sops.library.category")}
           className="input-premium h-10"
           value={category}
           disabled={categoryReadOnly}
@@ -630,22 +652,22 @@ function MetadataFields({
         >
           {categories.map((item) => (
             <option key={item} value={item}>
-              {item}
+              {FALLBACK_CATEGORY_KEYS[item] ? t(FALLBACK_CATEGORY_KEYS[item]!) : item}
             </option>
           ))}
         </select>
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        SOP Owner
+        {t("sops.editor.ownerField")}
         <select
-          aria-label="SOP Owner"
+          aria-label={t("sops.editor.ownerField")}
           className="input-premium h-10"
           value={ownerUserId ?? ""}
           onChange={(event) =>
             setOwnerUserId(event.target.value ? Number(event.target.value) : null)
           }
         >
-          <option value="">Select owner…</option>
+          <option value="">{t("sops.editor.selectOwner")}</option>
           {users?.map((item) => (
             <option key={item.id} value={item.id}>
               {item.displayName}
@@ -654,9 +676,9 @@ function MetadataFields({
         </select>
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        Version
+        {t("sops.editor.versionField")}
         <Input
-          aria-label="Version"
+          aria-label={t("sops.editor.versionField")}
           dir="ltr"
           value={version}
           readOnly={codeReadOnly}
@@ -664,31 +686,31 @@ function MetadataFields({
         />
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        Effective date
+        {t("sops.editor.effectiveDate")}
         <Input
-          aria-label="Effective date"
+          aria-label={t("sops.editor.effectiveDate")}
           type="date"
           value={effectiveDate}
           onChange={(event) => setEffectiveDate(event.target.value)}
         />
       </label>
       <label className="grid gap-1 text-sm font-medium">
-        Next review date
+        {t("sops.editor.nextReviewDate")}
         <Input
-          aria-label="Next review date"
+          aria-label={t("sops.editor.nextReviewDate")}
           type="date"
           value={nextReviewDate}
           onChange={(event) => setNextReviewDate(event.target.value)}
         />
       </label>
       <label className="grid gap-1 text-sm font-medium md:col-span-2">
-        Change summary
+        {t("sops.editor.changeSummary")}
         <Textarea
-          aria-label="Change summary"
+          aria-label={t("sops.editor.changeSummary")}
           className="min-h-20"
           value={changeSummary}
           onChange={(event) => setChangeSummary(event.target.value)}
-          placeholder="Summarize this version"
+          placeholder={t("sops.editor.changeSummaryPlaceholder")}
         />
       </label>
     </div>
@@ -713,6 +735,7 @@ function EditorForm({
   publishing?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useLanguage();
   const [title, setTitle] = useState(existingSop?.title ?? "");
   const [code, setCode] = useState(existingSop?.code ?? "");
   const [category, setCategory] = useState(
@@ -727,7 +750,7 @@ function EditorForm({
     existingVersion?.nextReviewDate ?? "",
   );
   const [changeSummary, setChangeSummary] = useState(
-    existingVersion?.changeSummary ?? "Initial SOP version",
+    existingVersion?.changeSummary ?? t("sops.editor.initialSummary"),
   );
   const [document, setDocument] = useState<SopDocument>(
     () => existingVersion?.contentJson ?? createEmptySopDocument(meta.sections),
@@ -740,7 +763,7 @@ function EditorForm({
       effectiveDate: existingVersion?.effectiveDate ?? "",
       nextReviewDate: existingVersion?.nextReviewDate ?? "",
       ownerUserId: existingSop?.ownerUserId ?? null,
-      changeSummary: existingVersion?.changeSummary ?? "Initial SOP version",
+      changeSummary: existingVersion?.changeSummary ?? t("sops.editor.initialSummary"),
       document: existingVersion?.contentJson ?? createEmptySopDocument(meta.sections),
     }),
   );
@@ -757,7 +780,6 @@ function EditorForm({
   const [importOpen, setImportOpen] = useState(false);
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
-  const { t } = useLanguage();
   const publishInFlight = useRef(false);
   const currentSignature = draftSignature({
     title,
@@ -825,12 +847,12 @@ function EditorForm({
       await queryClient.invalidateQueries({ queryKey: ["sops"] });
       onSaved(result.sop.id, result.version.version);
     },
-    onError: (value) =>
-      setError(
-        value instanceof Error
-          ? value.message
-          : "Unable to save the SOP draft.",
-      ),
+        onError: (value) =>
+          setError(
+            value instanceof Error
+              ? value.message
+              : t("sops.editor.saveError"),
+          ),
   });
   const publishCurrentDraft = async () => {
     if (publishInFlight.current || !isExisting) return;
@@ -841,6 +863,7 @@ function EditorForm({
       effectiveDate,
       ownerUserId,
       document,
+      t,
     });
     if (validationError) {
       setError(validationError);
@@ -857,7 +880,7 @@ function EditorForm({
       setError(
         value instanceof Error
           ? value.message
-          : "Unable to save and publish the SOP.",
+          : t("sops.editor.publishError"),
       );
     } finally {
       publishInFlight.current = false;
@@ -873,7 +896,7 @@ function EditorForm({
       const saved = dirty ? await save.mutateAsync() : null;
       await downloadSopXlsx(saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version);
     } catch (value) {
-      setError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
+      setError(value instanceof Error ? value.message : t("sops.editor.exportExcelError"));
     } finally {
       setExportBusy(false);
     }
@@ -882,7 +905,7 @@ function EditorForm({
     if (!isExisting || exportBusy || save.isPending || publishBusy || publishing) return;
     setExportBusy(true); setError(null); setSuccess(null);
     try { const saved = dirty ? await save.mutateAsync() : null; await downloadSopJson(saved?.sop.id ?? existingSop!.id, saved?.version.version ?? version); }
-    catch (value) { setError(value instanceof Error ? value.message : "Unable to export the SOP JSON."); }
+    catch (value) { setError(value instanceof Error ? value.message : t("sops.editor.exportJsonError")); }
     finally { setExportBusy(false); }
   };
   const printCurrentDraft = async () => {
@@ -943,8 +966,8 @@ function EditorForm({
     setImportOpen(false);
     setJsonImportOpen(false);
     setError(null);
-    const importLabel = "importType" in result.summary ? "JSON changes" : "Excel changes";
-    setSuccess(`${importLabel} imported into draft v${result.version.version}. ${result.summary.changedSectionKeys.length} section${result.summary.changedSectionKeys.length === 1 ? "" : "s"} changed.`);
+    const importLabel = "importType" in result.summary ? t("sops.editor.jsonChanges") : t("sops.editor.excelChanges");
+    setSuccess(t("sops.editor.importSuccess", { source: importLabel, version: result.version.version, count: result.summary.changedSectionKeys.length }));
     await queryClient.invalidateQueries({ queryKey: ["sops", "detail", result.sop.id] });
     await queryClient.invalidateQueries({ queryKey: ["sops"] });
   };
@@ -964,16 +987,15 @@ function EditorForm({
             <Pencil className="h-5 w-5 text-accent" aria-hidden="true" />
             <h1 className="text-xl font-semibold sm:text-2xl">
               {isExisting
-                ? `Edit draft · ${existingSop!.code}`
-                : "Create new SOP"}
+                ? t("sops.editor.editDraft", { code: existingSop!.code })
+                : t("sops.editor.createNew")}
             </h1>
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
-            Use the fixed eight-section template. Required sections cannot be
-            removed.
+            {t("sops.editor.templateHint")}
           </p>
         </div>
-        <Badge variant="draft">Draft</Badge>
+        <Badge variant="draft">{t("sops.status.draft")}</Badge>
       </header>
       <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <MetadataFields
@@ -1003,14 +1025,13 @@ function EditorForm({
       <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="font-semibold">Structured SOP editor</h2>
+            <h2 className="font-semibold">{t("sops.editor.structuredTitle")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Arabic and English paragraphs can use independent direction
-              controls.
+              {t("sops.editor.directionHint")}
             </p>
           </div>
           <span className="text-xs text-muted-foreground">
-            Stored as structured JSON
+            {t("sops.editor.structuredJson")}
           </span>
         </div>
         <SopStructuredEditor value={document} editable onChange={setDocument} />
@@ -1030,7 +1051,7 @@ function EditorForm({
           onClick={() => requestLeave(onCancel)}
           disabled={save.isPending || publishing || publishBusy}
         >
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           type="button"
@@ -1040,7 +1061,7 @@ function EditorForm({
           }}
           disabled={!canSave}
         >
-          {save.isPending ? "Saving…" : "Save Draft"}
+          {save.isPending ? t("sops.editor.saving") : t("sops.editor.saveDraft")}
         </Button>
         {isExisting ? (
           <>
@@ -1051,9 +1072,9 @@ function EditorForm({
             disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}
           >
               <Download className="h-4 w-4" />
-              {exportBusy ? "Exporting…" : "Export Excel"}
+              {exportBusy ? t("sops.editor.exporting") : t("sops.editor.exportExcel")}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => void exportCurrentJson()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}><Download className="h-4 w-4" />{exportBusy ? "Exporting…" : "Export JSON"}</Button>
+            <Button type="button" variant="secondary" onClick={() => void exportCurrentJson()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}><Download className="h-4 w-4" />{exportBusy ? t("sops.editor.exporting") : t("sops.editor.exportJson")}</Button>
             <Button type="button" variant="secondary" onClick={() => void printCurrentDraft()} disabled={save.isPending || exportBusy || printBusy || pdfBusy || publishBusy || publishing}>
               <Printer className="h-4 w-4" />
               {printBusy ? t("sops.preparingPrint") : t("sops.print")}
@@ -1067,12 +1088,12 @@ function EditorForm({
               variant="secondary"
               onClick={() => { setError(null); setSuccess(null); setImportOpen(true); }}
               disabled={dirty || save.isPending || exportBusy || publishBusy || publishing}
-              title={dirty ? "Save the current RISpro draft before importing Excel." : undefined}
+              title={dirty ? t("sops.editor.saveBeforeImportExcel") : undefined}
             >
               <FileSpreadsheet className="h-4 w-4" />
-              Import Excel
+              {t("sops.editor.importExcel")}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => { setError(null); setSuccess(null); setJsonImportOpen(true); }} disabled={dirty || save.isPending || exportBusy || publishBusy || publishing} title={dirty ? "Save the current RISpro draft before importing JSON." : undefined}><Download className="h-4 w-4" />Import JSON</Button>
+            <Button type="button" variant="secondary" onClick={() => { setError(null); setSuccess(null); setJsonImportOpen(true); }} disabled={dirty || save.isPending || exportBusy || publishBusy || publishing} title={dirty ? t("sops.editor.saveBeforeImportJson") : undefined}><Download className="h-4 w-4" />{t("sops.editor.importJson")}</Button>
           </>
         ) : null}
         {isExisting ? (
@@ -1084,11 +1105,11 @@ function EditorForm({
             }}
             disabled={save.isPending || publishing || publishBusy}
           >
-            {publishing ? "Publishing…" : "Publish SOP"}
+            {publishing ? t("sops.editor.publishing") : t("sops.editor.publish")}
           </Button>
         ) : null}
       </div>
-      {isExisting && dirty ? <p className="text-end text-xs text-amber-700">Save the current RISpro draft before importing Excel.</p> : null}
+      {isExisting && dirty ? <p className="text-end text-xs text-amber-700">{t("sops.editor.saveBeforeImportExcel")}</p> : null}
       {success ? <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p> : null}
       {isExisting ? <SopXlsxImportDialog open={importOpen} sopId={existingSop!.id} version={version} sopCode={existingSop!.code} onClose={() => setImportOpen(false)} onConfirmed={(result) => void handleImported(result)} /> : null}
       {isExisting ? <SopJsonImportDialog open={jsonImportOpen} mode="draft_update" sopId={existingSop!.id} version={version} onClose={() => setJsonImportOpen(false)} onConfirmed={(result) => void handleImported(result)} /> : null}
@@ -1101,11 +1122,10 @@ function EditorForm({
         <DialogContent maxWidth="520px">
           <DialogHeader>
             <DialogTitle>
-              Publish {title || "this SOP"} v{version}?
+              {t("sops.editor.publishConfirm", { title: title || t("sops.editor.thisSop"), version })}
             </DialogTitle>
             <DialogDescription>
-              This version will become the active SOP. Published versions cannot
-              be edited directly.
+              {t("sops.editor.publishDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1115,14 +1135,14 @@ function EditorForm({
               onClick={() => setPublishOpen(false)}
               disabled={publishing || publishBusy || save.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
               onClick={() => void publishCurrentDraft()}
               disabled={publishing || publishBusy || save.isPending}
             >
-              {publishing ? "Publishing…" : "Publish SOP"}
+              {publishing ? t("sops.editor.publishing") : t("sops.editor.publish")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1135,11 +1155,11 @@ function EditorForm({
       >
         <DialogContent maxWidth="460px">
           <DialogHeader>
-            <DialogTitle>Discard unsaved changes?</DialogTitle>
-            <DialogDescription>SOP edits have not been saved.</DialogDescription>
+            <DialogTitle>{t("sops.editor.discardTitle")}</DialogTitle>
+            <DialogDescription>{t("sops.editor.discardDescription")}</DialogDescription>
           </DialogHeader>
           <p className="text-sm">
-            Keep editing or discard the changes made in this SOP editor.
+            {t("sops.editor.discardPrompt")}
           </p>
           <DialogFooter>
             <Button
@@ -1147,7 +1167,7 @@ function EditorForm({
               variant="secondary"
               onClick={() => setDiscardOpen(false)}
             >
-              Keep editing
+              {t("sops.editor.keepEditing")}
             </Button>
             <Button
               type="button"
@@ -1159,7 +1179,7 @@ function EditorForm({
                 if (proceed) proceedWithUnsavedNavigation(proceed);
               }}
             >
-              Discard changes
+              {t("sops.editor.discardChanges")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1177,6 +1197,7 @@ function VersionHistory({
   currentVersion: string | null;
   onOpen: (version: string) => void;
 }) {
+  const { language, t } = useLanguage();
   return (
     <section
       className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
@@ -1185,19 +1206,19 @@ function VersionHistory({
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <FileClock className="h-4 w-4 text-accent" />
         <h2 id="sop-history-heading" className="font-semibold">
-          Version history
+          {t("sops.detail.versionHistory")}
         </h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] text-sm">
           <thead className="bg-muted/20 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="p-3 text-start">Version</th>
-              <th className="p-3 text-start">Published / effective</th>
-              <th className="p-3 text-start">Change summary</th>
-              <th className="p-3 text-start">Author / publisher</th>
-              <th className="p-3 text-start">Status</th>
-              <th className="p-3 text-end">View</th>
+              <th className="p-3 text-start">{t("sops.editor.versionField")}</th>
+              <th className="p-3 text-start">{t("sops.detail.publishedEffective")}</th>
+              <th className="p-3 text-start">{t("sops.editor.changeSummary")}</th>
+              <th className="p-3 text-start">{t("sops.detail.authorPublisher")}</th>
+              <th className="p-3 text-start">{t("sops.library.status")}</th>
+              <th className="p-3 text-end">{t("sops.detail.view")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1207,7 +1228,7 @@ function VersionHistory({
                   {version.version}
                 </td>
                 <td className="p-3 text-muted-foreground">
-                  {dateLabel(version.effectiveDate ?? version.publishedAt)}
+                  {dateLabel(version.effectiveDate ?? version.publishedAt, language)}
                 </td>
                 <td className="max-w-[22rem] p-3">
                   {version.changeSummary || "—"}
@@ -1218,13 +1239,13 @@ function VersionHistory({
                     version.createdByUsername ??
                     "—"}
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {dateTimeLabel(version.publishedAt ?? version.createdAt)}
+                    {dateTimeLabel(version.publishedAt ?? version.createdAt, language)}
                   </span>
                 </td>
                 <td className="p-3">
                   <Badge
                     variant={
-                      versionStatusLabel(version, currentVersion) === "Current"
+                      version.version === currentVersion
                         ? "success"
                         : version.status === "draft"
                           ? "draft"
@@ -1232,7 +1253,7 @@ function VersionHistory({
                     }
                     size="sm"
                   >
-                    {versionStatusLabel(version, currentVersion)}
+                    {versionStatusLabel(version, currentVersion, t)}
                   </Badge>
                 </td>
                 <td className="p-3 text-end">
@@ -1243,7 +1264,7 @@ function VersionHistory({
                     onClick={() => onOpen(version.version)}
                   >
                     <Eye className="h-4 w-4" />
-                    Open
+                    {t("sops.detail.open")}
                   </Button>
                 </td>
               </tr>
@@ -1293,7 +1314,7 @@ function DetailPage({ id }: { id: number }) {
   const [exportBusy, setExportBusy] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
 
   const metaQuery = useQuery({
     queryKey: ["sops", "meta"],
@@ -1328,7 +1349,7 @@ function DetailPage({ id }: { id: number }) {
       setActionError(
         value instanceof Error
           ? value.message
-          : "Unable to create the revision.",
+          : t("sops.detail.revisionError"),
       ),
   });
   const publish = useMutation({
@@ -1340,7 +1361,7 @@ function DetailPage({ id }: { id: number }) {
     },
     onError: (value) =>
       setActionError(
-        value instanceof Error ? value.message : "Unable to publish the SOP.",
+        value instanceof Error ? value.message : t("sops.detail.publishError"),
       ),
   });
   const archive = useMutation({
@@ -1353,7 +1374,7 @@ function DetailPage({ id }: { id: number }) {
     },
     onError: (value) =>
       setActionError(
-        value instanceof Error ? value.message : "Unable to archive the SOP.",
+        value instanceof Error ? value.message : t("sops.detail.archiveError"),
       ),
   });
   const changeOwner = useMutation({
@@ -1367,7 +1388,7 @@ function DetailPage({ id }: { id: number }) {
     },
     onError: (value) =>
       setActionError(
-        value instanceof Error ? value.message : "Unable to update the SOP owner.",
+        value instanceof Error ? value.message : t("sops.detail.ownerError"),
       ),
   });
   const reviewNoChanges = useMutation({
@@ -1380,7 +1401,7 @@ function DetailPage({ id }: { id: number }) {
     },
     onError: (value) =>
       setActionError(
-        value instanceof Error ? value.message : "Unable to record review.",
+        value instanceof Error ? value.message : t("sops.detail.reviewError"),
       ),
   });
   const exportSelectedVersion = async () => {
@@ -1390,7 +1411,7 @@ function DetailPage({ id }: { id: number }) {
     try {
       await downloadSopXlsx(id, selectedVersion.version);
     } catch (value) {
-      setActionError(value instanceof Error ? value.message : "Unable to export the SOP workbook.");
+      setActionError(value instanceof Error ? value.message : t("sops.detail.exportExcelError"));
     } finally {
       setExportBusy(false);
     }
@@ -1402,7 +1423,7 @@ function DetailPage({ id }: { id: number }) {
     try {
       await downloadSopJson(id, selectedVersion.version);
     } catch (value) {
-      setActionError(value instanceof Error ? value.message : "Unable to export the SOP JSON.");
+      setActionError(value instanceof Error ? value.message : t("sops.detail.exportJsonError"));
     } finally {
       setExportBusy(false);
     }
@@ -1443,19 +1464,19 @@ function DetailPage({ id }: { id: number }) {
   if (detail.isLoading)
     return (
       <PageShell>
-        <LoadingState message="Loading SOP…" />
+        <LoadingState message={t("sops.detail.loading")} />
       </PageShell>
     );
   if (detail.isError || !data || !selectedVersion)
     return (
       <PageShell>
-        <ErrorState message="Unable to load this SOP." />
+        <ErrorState message={t("sops.detail.loadError")} />
         <Button
           type="button"
           variant="secondary"
           onClick={() => void detail.refetch()}
         >
-          Retry
+          {t("common.tryAgain")}
         </Button>
       </PageShell>
     );
@@ -1494,7 +1515,7 @@ function DetailPage({ id }: { id: number }) {
               {data.sop.title}
             </h1>
             <Badge variant={statusVariant(data.sop.status)}>
-              {data.sop.status}
+              {t(`sops.status.${data.sop.status}` as TranslationKey)}
             </Badge>
           </div>
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -1502,14 +1523,11 @@ function DetailPage({ id }: { id: number }) {
               {data.sop.code}
             </span>
             <span>{data.sop.category}</span>
-            <span dir="ltr">Version {selectedVersion.version}</span>
-            <span>Effective {dateLabel(selectedVersion.effectiveDate)}</span>
-            <span>Owner: {data.sop.ownerName ?? "—"}</span>
+            <span dir="ltr">{t("sops.detail.version", { version: selectedVersion.version })}</span>
+            <span>{t("sops.detail.effective", { date: dateLabel(selectedVersion.effectiveDate, language) })}</span>
+            <span>{t("sops.detail.owner", { owner: data.sop.ownerName ?? "—" })}</span>
             <span>
-              Next review:{" "}
-              {selectedVersion.nextReviewDate
-                ? dateLabel(selectedVersion.nextReviewDate)
-                : "—"}
+              {t("sops.detail.nextReview", { date: selectedVersion.nextReviewDate ? dateLabel(selectedVersion.nextReviewDate, language) : "—" })}
             </span>
           </div>
         </div>
@@ -1524,11 +1542,11 @@ function DetailPage({ id }: { id: number }) {
           </Button>
           <Button type="button" variant="secondary" onClick={() => void exportSelectedVersion()} disabled={exportBusy}>
             <Download className="h-4 w-4" />
-            {exportBusy ? "Exporting…" : "Export Excel"}
+            {exportBusy ? t("sops.editor.exporting") : t("sops.editor.exportExcel")}
           </Button>
           <Button type="button" variant="secondary" onClick={() => void exportSelectedVersionJson()} disabled={exportBusy}>
             <Download className="h-4 w-4" />
-            {exportBusy ? "Exporting…" : "Export JSON"}
+            {exportBusy ? t("sops.editor.exporting") : t("sops.editor.exportJson")}
           </Button>
           {management && data.sop.status === "published" ? (
             <>
@@ -1543,7 +1561,7 @@ function DetailPage({ id }: { id: number }) {
                     }}
                   >
                     <UserCheck className="h-4 w-4" />
-                    Change Owner
+                    {t("sops.detail.changeOwner")}
                   </Button>
                   <Button
                     type="button"
@@ -1551,7 +1569,7 @@ function DetailPage({ id }: { id: number }) {
                     onClick={() => setReviewNoChangesOpen(true)}
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    Reviewed – No Changes
+                    {t("sops.detail.reviewedNoChanges")}
                   </Button>
                 </>
               ) : null}
@@ -1562,7 +1580,7 @@ function DetailPage({ id }: { id: number }) {
                   onClick={() => navigate(`/sops/${id}?version=${encodeURIComponent(data.sop.draftVersion!)}`)}
                 >
                   <Pencil className="h-4 w-4" />
-                  Open Draft Revision
+                  {t("sops.detail.openDraftRevision")}
                 </Button>
               ) : (
                 <Button
@@ -1571,7 +1589,7 @@ function DetailPage({ id }: { id: number }) {
                   onClick={() => setRevisionOpen(true)}
                 >
                   <Pencil className="h-4 w-4" />
-                  Create New Revision
+                  {t("sops.detail.createNewRevision")}
                 </Button>
               )}
               <Button
@@ -1580,7 +1598,7 @@ function DetailPage({ id }: { id: number }) {
                 onClick={() => setArchiveOpen(true)}
               >
                 <Archive className="h-4 w-4" />
-                Archive SOP
+                {t("sops.detail.archiveSop")}
               </Button>
             </>
           ) : null}
@@ -1589,22 +1607,21 @@ function DetailPage({ id }: { id: number }) {
             variant="ghost"
             onClick={() => navigate("/sops")}
           >
-            Back to Library
+            {t("sops.detail.backToLibrary")}
           </Button>
         </div>
       </header>
-      {management && data.sop.status === "published" && !data.sop.draftVersion ? <p className="text-sm text-muted-foreground">Create a new revision before importing Excel changes.</p> : null}
+      {management && data.sop.status === "published" && !data.sop.draftVersion ? <p className="text-sm text-muted-foreground">{t("sops.detail.createRevisionBeforeImport")}</p> : null}
       <Card className="p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="font-semibold">
               {selectedVersion.status === "superseded"
-                ? "Read-only historical version"
-                : "Published SOP"}
+                ? t("sops.detail.historicalVersion")
+                : t("sops.detail.publishedSop")}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Published {dateTimeLabel(selectedVersion.publishedAt)} by{" "}
-              {selectedVersion.publishedByName ?? "—"}
+              {t("sops.detail.publishedBy", { date: dateTimeLabel(selectedVersion.publishedAt, language), publisher: selectedVersion.publishedByName ?? "—" })}
             </p>
           </div>
           <Badge
@@ -1612,7 +1629,7 @@ function DetailPage({ id }: { id: number }) {
               selectedVersion.status === "published" ? "success" : "neutral"
             }
           >
-            {versionStatusLabel(selectedVersion, data.sop.currentVersion)}
+            {versionStatusLabel(selectedVersion, data.sop.currentVersion, t)}
           </Badge>
         </div>
         <SopReadOnlyDocument value={selectedVersion.contentJson} />
@@ -1638,35 +1655,34 @@ function DetailPage({ id }: { id: number }) {
       >
         <DialogContent maxWidth="520px">
           <DialogHeader>
-            <DialogTitle>Create a new SOP revision</DialogTitle>
+            <DialogTitle>{t("sops.detail.revisionDialogTitle")}</DialogTitle>
             <DialogDescription>
-              The current published version stays unchanged until the new draft
-              is published.
+              {t("sops.detail.revisionDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <label className="grid gap-1 text-sm font-medium">
-              New version
+              {t("sops.detail.newVersion")}
               <Input
-                aria-label="New version"
+                aria-label={t("sops.detail.newVersion")}
                 dir="ltr"
                 value={revisionVersion}
                 onChange={(event) => setRevisionVersion(event.target.value)}
               />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Effective date
+              {t("sops.editor.effectiveDate")}
               <Input
-                aria-label="Effective date"
+                aria-label={t("sops.editor.effectiveDate")}
                 type="date"
                 value={revisionDate}
                 onChange={(event) => setRevisionDate(event.target.value)}
               />
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Change summary
+              {t("sops.editor.changeSummary")}
               <Textarea
-                aria-label="Change summary"
+                aria-label={t("sops.editor.changeSummary")}
                 className="min-h-24"
                 value={revisionSummary}
                 onChange={(event) => setRevisionSummary(event.target.value)}
@@ -1676,7 +1692,7 @@ function DetailPage({ id }: { id: number }) {
               <p role="alert" className="text-sm text-red-700">
                 {revision.error instanceof Error
                   ? revision.error.message
-                  : "Unable to create the revision."}
+                  : t("sops.detail.revisionError")}
               </p>
             ) : null}
           </div>
@@ -1687,7 +1703,7 @@ function DetailPage({ id }: { id: number }) {
               onClick={() => setRevisionOpen(false)}
               disabled={revision.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -1698,7 +1714,7 @@ function DetailPage({ id }: { id: number }) {
                 revision.isPending
               }
             >
-              {revision.isPending ? "Creating…" : "Create draft revision"}
+              {revision.isPending ? t("sops.detail.creatingRevision") : t("sops.detail.createDraftRevision")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1711,10 +1727,9 @@ function DetailPage({ id }: { id: number }) {
       >
         <DialogContent maxWidth="520px">
           <DialogHeader>
-            <DialogTitle>Archive this SOP? </DialogTitle>
+            <DialogTitle>{t("sops.detail.archiveConfirmTitle")}</DialogTitle>
             <DialogDescription>
-              All published versions will be preserved. The SOP will leave the
-              active library.
+              {t("sops.detail.archiveConfirmDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1724,7 +1739,7 @@ function DetailPage({ id }: { id: number }) {
               onClick={() => setArchiveOpen(false)}
               disabled={archive.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -1732,7 +1747,7 @@ function DetailPage({ id }: { id: number }) {
               onClick={() => archive.mutate()}
               disabled={archive.isPending}
             >
-              {archive.isPending ? "Archiving…" : "Archive SOP"}
+              {archive.isPending ? t("sops.detail.archiving") : t("sops.detail.archiveSop")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1745,16 +1760,16 @@ function DetailPage({ id }: { id: number }) {
       >
         <DialogContent maxWidth="480px">
           <DialogHeader>
-            <DialogTitle>Change SOP Owner</DialogTitle>
+            <DialogTitle>{t("sops.detail.changeOwner")}</DialogTitle>
             <DialogDescription>
-              Assign the RISpro user responsible for maintaining this SOP.
+              {t("sops.detail.changeOwnerDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <label className="grid gap-1 text-sm font-medium">
-              SOP Owner
+              {t("sops.editor.ownerField")}
               <select
-                aria-label="Change SOP Owner"
+                aria-label={t("sops.detail.changeOwner")}
                 className="input-premium h-10"
                 value={selectedOwnerUserId ?? ""}
                 onChange={(event) =>
@@ -1763,7 +1778,7 @@ function DetailPage({ id }: { id: number }) {
                   )
                 }
               >
-                <option value="">Select owner…</option>
+                <option value="">{t("sops.editor.selectOwner")}</option>
                 {users?.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.displayName}
@@ -1775,7 +1790,7 @@ function DetailPage({ id }: { id: number }) {
               <p role="alert" className="text-sm text-red-700">
                 {changeOwner.error instanceof Error
                   ? changeOwner.error.message
-                  : "Unable to update the SOP owner."}
+                  : t("sops.detail.ownerError")}
               </p>
             ) : null}
           </div>
@@ -1786,14 +1801,14 @@ function DetailPage({ id }: { id: number }) {
               onClick={() => setOwnerOpen(false)}
               disabled={changeOwner.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
               onClick={() => changeOwner.mutate(selectedOwnerUserId)}
               disabled={changeOwner.isPending}
             >
-              {changeOwner.isPending ? "Saving…" : "Save Owner"}
+              {changeOwner.isPending ? t("sops.editor.saving") : t("sops.detail.saveOwner")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1806,20 +1821,20 @@ function DetailPage({ id }: { id: number }) {
       >
         <DialogContent maxWidth="520px">
           <DialogHeader>
-            <DialogTitle>Reviewed – No Changes</DialogTitle>
+            <DialogTitle>{t("sops.detail.reviewedNoChanges")}</DialogTitle>
             <DialogDescription>
-              Confirm that this SOP has been reviewed and no revision is required.
+              {t("sops.detail.reviewConfirmDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>The SOP version and effective date will remain unchanged.</p>
-            <p>The next review date will be moved forward by two years.</p>
+            <p>{t("sops.detail.reviewVersionUnchanged")}</p>
+            <p>{t("sops.detail.reviewDateMoved")}</p>
           </div>
           {reviewNoChanges.isError ? (
             <p role="alert" className="text-sm text-red-700">
               {reviewNoChanges.error instanceof Error
                 ? reviewNoChanges.error.message
-                : "Unable to record review."}
+                : t("sops.detail.reviewError")}
             </p>
           ) : null}
           <DialogFooter>
@@ -1829,14 +1844,14 @@ function DetailPage({ id }: { id: number }) {
               onClick={() => setReviewNoChangesOpen(false)}
               disabled={reviewNoChanges.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
               onClick={() => reviewNoChanges.mutate()}
               disabled={reviewNoChanges.isPending}
             >
-              {reviewNoChanges.isPending ? "Confirming…" : "Confirm Review"}
+              {reviewNoChanges.isPending ? t("sops.detail.confirmingReview") : t("sops.detail.confirmReview")}
             </Button>
           </DialogFooter>
         </DialogContent>

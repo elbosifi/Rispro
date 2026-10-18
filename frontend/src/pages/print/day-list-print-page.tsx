@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, recordReportOutput } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
-import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 
 const DEFAULT_COLUMNS = ["sequence", "patient", "accession", "time", "modality", "exam", "category", "priority", "status"];
@@ -33,12 +33,13 @@ export default function DayListPrintPage() {
     staleTime: 0,
   });
 
+  const caseCategory = searchParams.get("caseCategory");
   const filterSummary = [
-    `Date: ${date || "-"}`,
-    searchParams.get("modalityId") ? `Modality ID: ${searchParams.get("modalityId")}` : "All modalities",
-    searchParams.get("status") ? `Status: ${searchParams.get("status")}` : "Active statuses",
-    searchParams.get("caseCategory") ? `Category: ${searchParams.get("caseCategory")}` : "All categories",
-    searchParams.get("q") ? `Search: ${searchParams.get("q")}` : "",
+    `${t(language, "print.dayList.filter.date")}: ${date ? formatDateLy(date) : "-"}`,
+    searchParams.get("modalityId") ? `${t(language, "print.dayList.filter.modalityId")}: ${searchParams.get("modalityId")}` : t(language, "print.dayList.filter.allModalities"),
+    searchParams.get("status") ? `${t(language, "print.dayList.filter.status")}: ${statusLabel(language, searchParams.get("status")!)}` : t(language, "print.dayList.filter.activeStatuses"),
+    caseCategory ? `${t(language, "print.dayList.filter.category")}: ${caseCategory === "oncology" ? t(language, "appointments.create.oncology") : caseCategory === "non_oncology" ? t(language, "appointments.create.nonOncology") : caseCategory}` : t(language, "print.dayList.filter.allCategories"),
+    searchParams.get("q") ? `${t(language, "print.dayList.filter.search")}: ${searchParams.get("q")}` : "",
   ].filter(Boolean);
 
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function DayListPrintPage() {
   }, [appointments.length, autoprint, date, error, isLoading, printed, queryParams]);
 
   return (
-    <div className="print-route-page">
+    <div className="print-route-page" dir={language === "ar" ? "rtl" : "ltr"}>
       <style>{`
         @page { size: A4 landscape; margin: 10mm; }
         * { box-sizing: border-box; }
@@ -84,11 +85,11 @@ export default function DayListPrintPage() {
         .print-header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d1d5db; padding-bottom: 10px; margin-bottom: 10px; }
         .brand { font-size: 18px; font-weight: 800; color: #0f766e; margin: 0; }
         .title { font-size: 22px; font-weight: 800; margin: 6px 0 0; }
-        .meta { text-align: right; font-size: 11px; color: #4b5563; line-height: 1.45; }
+        .meta { text-align: end; font-size: 11px; color: #4b5563; line-height: 1.45; }
         .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; font-size: 11px; }
         .filters span { border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 8px; }
         table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-        th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
+        th, td { border: 1px solid #d1d5db; padding: 6px; text-align: start; vertical-align: top; }
         th { background: #e6f4f1; color: #064e3b; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
         tbody tr:nth-child(even) { background: #f8fafc; }
         .arabic { direction: rtl; text-align: right; }
@@ -103,37 +104,37 @@ export default function DayListPrintPage() {
       `}</style>
       <div className="screen-actions">
         <button type="button" onClick={() => window.print()} disabled={isLoading || Boolean(error)}>
-          Print
+          {t(language, "print.dayList.print")}
         </button>
       </div>
       <section className="print-sheet" data-testid="day-list-print-page">
         <header className="print-header">
           <div>
             <p className="brand">RISpro</p>
-            <h1 className="title">Daily Appointment List</h1>
-            <p>{date ? formatDateLy(date) : "No date selected"}</p>
+            <h1 className="title">{t(language, "print.dayList.title")}</h1>
+            <p>{date ? formatDateLy(date) : t(language, "print.dayList.noDate")}</p>
           </div>
           <div className="meta">
-            <div>Printed at: {new Date().toLocaleString()}</div>
-            <div>Total rows: {appointments.length}</div>
-            <div>Paper: A4 landscape</div>
+            <div>{t(language, "print.dayList.printedAt")}: {new Date().toLocaleString(language === "ar" ? "ar-LY" : "en-GB")}</div>
+            <div>{t(language, "print.dayList.totalRows")}: {appointments.length}</div>
+            <div>{t(language, "print.dayList.paper")}: {t(language, "print.dayList.paperFormat")}</div>
           </div>
         </header>
         <div className="filters">
           {filterSummary.map((item) => <span key={item}>{item}</span>)}
         </div>
         {isLoading ? (
-          <p>Loading print data...</p>
+          <p>{t(language, "print.dayList.loading")}</p>
         ) : error ? (
-          <p>Could not load print data.</p>
+          <p>{t(language, "print.dayList.loadError")}</p>
         ) : appointments.length === 0 ? (
-          <p>No appointments match these filters.</p>
+          <p>{t(language, "print.dayList.empty")}</p>
         ) : (
           <AppointmentPrintTable appointments={appointments} columns={columns} language={language} />
         )}
         <footer className="footer">
-          <span>Generated by RISpro</span>
-          <span className="page-number">Page numbers are provided by the browser print dialog.</span>
+          <span>{t(language, "print.generatedBy")}</span>
+          <span className="page-number">{t(language, "print.dayList.pageNumbersNote")}</span>
         </footer>
       </section>
     </div>
@@ -144,14 +145,14 @@ function AppointmentPrintTable({ appointments, columns, language }: { appointmen
   const visible = new Set(columns);
   const headers: Record<string, string> = {
     sequence: "#",
-    patient: "Patient",
-    accession: "Accession",
-    time: "Time",
-    modality: "Modality",
-    exam: "Exam",
-    category: "Category",
-    priority: "Priority",
-    status: "Status",
+    patient: t(language, "print.patientLabel"),
+    accession: t(language, "print.dayList.accessionColumn"),
+    time: t(language, "print.dayList.column.time"),
+    modality: t(language, "print.modalityLabel"),
+    exam: t(language, "print.examLabel"),
+    category: t(language, "appointments.create.caseCategory"),
+    priority: t(language, "print.priorityLabel"),
+    status: t(language, "print.statusLabel"),
   };
   return (
     <table>

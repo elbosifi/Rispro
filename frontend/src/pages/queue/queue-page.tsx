@@ -285,15 +285,11 @@ export default function QueuePage() {
         (entry) => normalizeText(entry.accessionNumber) === normalizeText(cleanScanValue)
       );
       if (existingEntry && ["arrived", "waiting"].includes(existingEntry.appointmentStatus)) {
-        const warning = chooseLocalized(
-          language,
-          "تم تسجيل حضور هذا الموعد بالفعل.",
-          "This accession is already checked in."
-        );
+        const warning = t("queue.checkInErrorAlreadyArrived");
         setScanWarning(warning);
         pushToast({
           type: "info",
-          title: chooseLocalized(language, "تم تسجيل الحضور بالفعل", "Already checked in"),
+          title: t("queue.alreadyCheckedInTitle"),
           message: warning
         });
         return;

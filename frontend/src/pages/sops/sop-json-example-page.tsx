@@ -30,15 +30,21 @@ import {
 } from "@/lib/unsaved-navigation-guard";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import type { TranslationKey } from "@/lib/i18n";
 import { SopStructuredEditor } from "./sop-editor";
 
 const isManagement = (role?: string) => role === "supervisor" || role === "super_admin";
 const configSignature = (config: SopJsonExampleConfig) => JSON.stringify(config);
+const categoryKeys: Record<string, TranslationKey> = {
+  General: "sops.category.general", CT: "sops.category.ct", MRI: "sops.category.mri", Ultrasound: "sops.category.ultrasound",
+  Mammography: "sops.category.mammography", "X-Ray": "sops.category.xray", "Interventional Radiology": "sops.category.interventionalRadiology",
+  "Patient Safety": "sops.category.patientSafety", "PACS / IT": "sops.category.pacsIt", "Reception / Registration": "sops.category.receptionRegistration", Administrative: "sops.category.administrative",
+};
 
 function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleConfigResult }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const metaQuery = useQuery({ queryKey: ["sops", "meta"], queryFn: fetchSopMeta, staleTime: Infinity });
   const [config, setConfig] = useState(initial.config);
   const [source, setSource] = useState(initial.source);
@@ -59,7 +65,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       setError(null);
       void queryClient.invalidateQueries({ queryKey: ["sops", "jsonExampleConfig"] });
     },
-    onError: (value) => setError(value instanceof Error ? value.message : "Unable to save the JSON example."),
+    onError: (value) => setError(value instanceof Error ? value.message : t("sops.jsonExample.saveError")),
   });
   const reset = useMutation({
     mutationFn: resetSopJsonExampleConfig,
@@ -71,7 +77,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       setError(null);
       void queryClient.setQueryData(["sops", "jsonExampleConfig"], result);
     },
-    onError: (value) => setError(value instanceof Error ? value.message : "Unable to reset the JSON example."),
+    onError: (value) => setError(value instanceof Error ? value.message : t("sops.jsonExample.resetError")),
   });
   const busy = save.isPending || reset.isPending;
 
@@ -102,7 +108,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
   const downloadSavedExample = async () => {
     setDownloadError(null);
     try { await downloadSopJsonExample(); }
-    catch (value) { setDownloadError(value instanceof Error ? value.message : "Unable to download the JSON example."); }
+    catch (value) { setDownloadError(value instanceof Error ? value.message : t("sops.jsonExample.downloadError")); }
   };
 
   return (
@@ -110,34 +116,34 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       <header className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
         <div>
           <Button type="button" variant="ghost" size="sm" onClick={() => requestLeave(() => navigate("/sops"))}>
-            <ArrowLeft className="h-4 w-4" />Back to SOP Library
+            <ArrowLeft className="h-4 w-4" />{t("sops.jsonExample.backToLibrary")}
           </Button>
-          <h1 className="mt-3 text-xl font-semibold sm:text-2xl">RISpro SOP JSON Example</h1>
-          <p className="mt-1 text-sm font-semibold">JSON Example Template — configuration only, not a real SOP.</p>
+          <h1 className="mt-3 text-xl font-semibold sm:text-2xl">{t("sops.jsonExample.pageTitle")}</h1>
+          <p className="mt-1 text-sm font-semibold">{t("sops.jsonExample.configurationNotice")}</p>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Edit the example used when generating the downloadable RISpro SOP JSON V1 template. This does not modify existing SOPs.
+            {t("sops.jsonExample.description")}
           </p>
-          <p className="mt-2 text-sm text-muted-foreground">Active example: {source === "custom" ? "Customized" : "Built-in default"}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{t("sops.jsonExample.activeExample", { source: source === "custom" ? t("sops.jsonExample.customized") : t("sops.jsonExample.builtInDefault") })}</p>
         </div>
       </header>
 
-      <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5" aria-label="JSON example metadata">
+      <section className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5" aria-label={t("sops.jsonExample.metadataAria")}>
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="grid gap-1 text-sm font-medium">Example SOP Code<Input aria-label="Example SOP Code" value={config.code} onChange={(event) => update("code", event.target.value)} disabled={busy} /></label>
-          <label className="grid gap-1 text-sm font-medium">Example Title<Input aria-label="Example Title" value={config.title} onChange={(event) => update("title", event.target.value)} disabled={busy} /></label>
-          <label className="grid gap-1 text-sm font-medium">Category
-            <select aria-label="Category" className="input-premium h-10" value={config.category} onChange={(event) => update("category", event.target.value)} disabled={busy}>
-              {(metaQuery.data?.categories ?? ["General", "CT", "MRI", "Ultrasound", "Mammography", "X-Ray", "Interventional Radiology", "Patient Safety", "PACS / IT", "Reception / Registration", "Administrative"]).map((category) => <option key={category} value={category}>{category}</option>)}
+          <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.codeLabel")}<Input aria-label={t("sops.jsonExample.codeLabel")} value={config.code} onChange={(event) => update("code", event.target.value)} disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.titleLabel")}<Input aria-label={t("sops.jsonExample.titleLabel")} value={config.title} onChange={(event) => update("title", event.target.value)} disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.categoryLabel")}
+            <select aria-label={t("sops.jsonExample.categoryLabel")} className="input-premium h-10" value={config.category} onChange={(event) => update("category", event.target.value)} disabled={busy}>
+              {(metaQuery.data?.categories ?? ["General", "CT", "MRI", "Ultrasound", "Mammography", "X-Ray", "Interventional Radiology", "Patient Safety", "PACS / IT", "Reception / Registration", "Administrative"]).map((category) => <option key={category} value={category}>{categoryKeys[category] ? t(categoryKeys[category]) : category}</option>)}
             </select>
           </label>
-          <label className="grid gap-1 text-sm font-medium">Version<Input aria-label="Version" value={config.version} onChange={(event) => update("version", event.target.value)} disabled={busy} /></label>
-          <label className="grid gap-1 text-sm font-medium">Effective Date<Input aria-label="Effective Date" type="date" value={config.effectiveDate} onChange={(event) => update("effectiveDate", event.target.value)} disabled={busy} /></label>
-          <label className="grid gap-1 text-sm font-medium md:col-span-2">Change Summary<Textarea aria-label="Change Summary" className="min-h-20" value={config.changeSummary} onChange={(event) => update("changeSummary", event.target.value)} disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-medium">{t("sops.jsonImport.versionLabel")}<Input aria-label={t("sops.jsonImport.versionLabel")} value={config.version} onChange={(event) => update("version", event.target.value)} disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-medium">{t("sops.jsonImport.effectiveDate")}<Input aria-label={t("sops.jsonImport.effectiveDate")} type="date" value={config.effectiveDate} onChange={(event) => update("effectiveDate", event.target.value)} disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-medium md:col-span-2">{t("sops.jsonExample.changeSummary")}<Textarea aria-label={t("sops.jsonExample.changeSummary")} className="min-h-20" value={config.changeSummary} onChange={(event) => update("changeSummary", event.target.value)} disabled={busy} /></label>
         </div>
       </section>
 
       <aside className="rounded-xl border border-border bg-muted/20 p-4 text-sm leading-6">
-        SOP content may be Arabic, English, or bilingual. For bilingual SOPs, the departmental convention is Arabic first, followed by English within the same SOP section and version. Use RTL blocks for Arabic and LTR blocks for English.
+        {t("sops.jsonExample.languageGuidance")}
       </aside>
 
       <SopStructuredEditor value={config.document} editable={!busy} onChange={(document) => update("document", document)} />
@@ -146,29 +152,29 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       {downloadError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{downloadError}</div> : null}
 
       <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={() => requestLeave(() => navigate("/sops"))} disabled={busy}>Cancel</Button>
+        <Button type="button" variant="secondary" onClick={() => requestLeave(() => navigate("/sops"))} disabled={busy}>{t("common.cancel")}</Button>
         <Button type="button" variant="secondary" onClick={() => setResetOpen(true)} disabled={save.isPending || reset.isPending}>
-          <RotateCcw className="h-4 w-4" />Reset to Default
+          <RotateCcw className="h-4 w-4" />{t("sops.jsonExample.resetToDefault")}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => void downloadSavedExample()} disabled={dirty || save.isPending || reset.isPending} title={dirty ? "Save changes before downloading the example." : undefined}>
-          <Download className="h-4 w-4" />Download Example
+        <Button type="button" variant="secondary" onClick={() => void downloadSavedExample()} disabled={dirty || save.isPending || reset.isPending} title={dirty ? t("sops.jsonExample.saveBeforeDownload") : undefined}>
+          <Download className="h-4 w-4" />{t("sops.jsonExample.downloadExample")}
         </Button>
         <Button type="button" onClick={() => save.mutate()} disabled={!dirty || save.isPending || reset.isPending}>
-          <Save className="h-4 w-4" />{save.isPending ? "Saving…" : "Save Example"}
+          <Save className="h-4 w-4" />{save.isPending ? t("sops.jsonExample.saving") : t("sops.jsonExample.saveExample")}
         </Button>
       </div>
 
       <Dialog open={resetOpen} onClose={() => { if (!reset.isPending) setResetOpen(false); }}>
         <DialogContent maxWidth="520px">
           <DialogHeader>
-            <DialogTitle>Reset JSON Example?</DialogTitle>
-            <DialogDescription>This will discard the customized JSON example and restore the built-in RISpro bilingual example.</DialogDescription>
+            <DialogTitle>{t("sops.jsonExample.resetTitle")}</DialogTitle>
+            <DialogDescription>{t("sops.jsonExample.resetDescription")}</DialogDescription>
           </DialogHeader>
-          <p className="text-sm">This does not affect any existing SOPs.</p>
+          <p className="text-sm">{t("sops.jsonExample.existingSopsUnaffected")}</p>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setResetOpen(false)} disabled={reset.isPending}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={() => setResetOpen(false)} disabled={reset.isPending}>{t("common.cancel")}</Button>
             <Button type="button" variant="destructive" onClick={() => reset.mutate()} disabled={reset.isPending}>
-              {reset.isPending ? "Resetting…" : "Reset to Default"}
+              {reset.isPending ? t("sops.jsonExample.resetting") : t("sops.jsonExample.resetToDefault")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -177,17 +183,17 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       <Dialog open={discardOpen} onClose={() => setDiscardOpen(false)}>
         <DialogContent maxWidth="460px">
           <DialogHeader>
-            <DialogTitle>Discard unsaved changes?</DialogTitle>
-            <DialogDescription>Changes to the JSON example have not been saved.</DialogDescription>
+            <DialogTitle>{t("sops.editor.discardTitle")}</DialogTitle>
+            <DialogDescription>{t("sops.jsonExample.discardDescription")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setDiscardOpen(false)}>Keep editing</Button>
+            <Button type="button" variant="secondary" onClick={() => setDiscardOpen(false)}>{t("sops.editor.keepEditing")}</Button>
             <Button type="button" variant="destructive" onClick={() => {
               const proceed = pendingNavigation;
               setPendingNavigation(null);
               setDiscardOpen(false);
               if (proceed) proceedWithUnsavedNavigation(proceed);
-            }}>Discard changes</Button>
+            }}>{t("sops.editor.discardChanges")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -202,9 +208,10 @@ export default function SopJsonExamplePage() {
 }
 
 function AuthorizedSopJsonExamplePage() {
+  const { t } = useLanguage();
   const configQuery = useQuery({ queryKey: ["sops", "jsonExampleConfig"], queryFn: fetchSopJsonExampleConfig, retry: false });
-  if (configQuery.isLoading) return <LoadingState message="Loading JSON example…" />;
-  if (configQuery.isError) return <ErrorState message={configQuery.error instanceof Error ? configQuery.error.message : "Unable to load the JSON example."} />;
-  if (!configQuery.data) return <ErrorState message="Unable to load the JSON example." />;
+  if (configQuery.isLoading) return <LoadingState message={t("sops.jsonExample.loading")} />;
+  if (configQuery.isError) return <ErrorState message={configQuery.error instanceof Error ? configQuery.error.message : t("sops.jsonExample.loadError")} />;
+  if (!configQuery.data) return <ErrorState message={t("sops.jsonExample.loadError")} />;
   return <ManagementSopJsonExampleEditor key={configSignature(configQuery.data.config)} initial={configQuery.data} />;
 }

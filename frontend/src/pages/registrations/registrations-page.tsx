@@ -226,7 +226,7 @@ export default function RegistrationsPage() {
   });
   const sendNotificationMutation = useMutation({
     mutationFn: async () => {
-      if (!notificationAppointment) throw new Error("No appointment selected.");
+      if (!notificationAppointment) throw new Error(t("registrations.appointmentNotSelected"));
       return sendPatientWebPushNotification(notificationAppointment.id, {
         templateEventType: notificationMode === "template" ? notificationTemplate : undefined,
         title: notificationMode === "custom" ? notificationTitle : undefined,
@@ -442,8 +442,8 @@ export default function RegistrationsPage() {
           : null,
     selectedFilterModalityLabel ? `${t("registrations.modality")}: ${selectedFilterModalityLabel}` : null,
     filters.identifierType
-      ? `${language === "ar" ? "نوع المعرّف" : "Identifier type"}: ${filters.identifierType === "__missing__"
-        ? (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")
+      ? `${t("registrations.identifierType")}: ${filters.identifierType === "__missing__"
+        ? t("registrations.noPrimaryIdentifier")
         : (patientIdentifierTypes.find((type) => type.code === filters.identifierType)?.[language === "ar" ? "labelAr" : "labelEn"] || filters.identifierType)}`
       : null,
     ...filters.statuses.map((status) => `${t("registrations.status")} ${statusLabel(language, status)}`),
@@ -650,7 +650,7 @@ export default function RegistrationsPage() {
   function protocolVersionText(appointment: AppointmentWithDetails): string | null {
     const summary = appointment.protocolAssignmentSummary;
     if (!summary) return null;
-    return [summary.protocolName || (summary.freeTextProtocol ? "Free-text protocol" : "Protocol assigned"), summary.versionNumber ? `v${summary.versionNumber}` : null]
+    return [summary.protocolName || (summary.freeTextProtocol ? t("modality.protocol") : t("modality.protocolAssigned")), summary.versionNumber ? `v${summary.versionNumber}` : null]
       .filter(Boolean)
       .join(" ");
   }
@@ -658,18 +658,18 @@ export default function RegistrationsPage() {
   function handleProtocolPrint(appointment: AppointmentWithDetails) {
     const printWindow = openProtocolPrintWindow();
     if (!printWindow) {
-      pushToast({ type: "error", title: "Unable to open the protocol print window." });
+      pushToast({ type: "error", title: t("registrations.protocolPrintWindowError") });
       return;
     }
     printWindow.document.open();
-    printWindow.document.write("<title>Protocol sheet</title><p style=\"font:14px Arial;padding:20px\">Loading assigned protocol…</p>");
+    printWindow.document.write(`<title>${t("modality.assignedProtocol")}</title><p style="font:14px Arial;padding:20px">${t("modality.loadingAssignedProtocol")}</p>`);
     printWindow.document.close();
     void fetchRegistrationProtocolAssignment(appointment.id).then((assignment) => {
       if (!assignment) throw new Error("assignment_unavailable");
       writeProtocolPrintSheet(printWindow, buildModalityProtocolPrintSheet(appointment, assignment));
     }).catch(() => {
       try { printWindow.close(); } catch { /* best effort */ }
-      pushToast({ type: "error", title: "Unable to load the assigned protocol for printing." });
+      pushToast({ type: "error", title: t("modality.assignedProtocolLoadFailed") });
     });
   }
 
@@ -707,7 +707,7 @@ export default function RegistrationsPage() {
       return (
         <div className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">
           <span className="inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 font-semibold text-slate-600">
-            Protocol: Not protocolled
+            {t("modality.noProtocolAssigned")}
           </span>
         </div>
       );
@@ -715,9 +715,9 @@ export default function RegistrationsPage() {
 
     return (
       <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-snug text-muted-foreground">
-        <div className="flex items-center gap-2"><span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">Protocol assigned</span><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" aria-label="Print protocol" title="Print protocol" onClick={(event) => { event.stopPropagation(); handleProtocolPrint(appointment); }}>Print protocol</Button></div>
-        <p className="truncate text-foreground">Protocol: {protocolVersionText(appointment)}</p>
-        {summary.scannerName ? <p className="truncate">Scanner: {summary.scannerName}</p> : null}
+        <div className="flex items-center gap-2"><span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">{t("modality.protocolAssigned")}</span><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" aria-label={t("modality.printProtocol")} title={t("modality.printProtocol")} onClick={(event) => { event.stopPropagation(); handleProtocolPrint(appointment); }}>{t("modality.printProtocol")}</Button></div>
+        <p className="truncate text-foreground">{t("modality.protocol")}: {protocolVersionText(appointment)}</p>
+        {summary.scannerName ? <p className="truncate">{t("modality.scanner")}: {summary.scannerName}</p> : null}
       </div>
     );
   }
@@ -793,7 +793,7 @@ export default function RegistrationsPage() {
               aria-pressed={isTodayShortcutActive}
               className={isTodayShortcutActive ? ACTIVE_FILTER_PILL_CLASS : undefined}
             >
-              {language === "ar" ? "اليوم" : "Today"}
+              {t("calendar.today")}
             </Button>
             <Button
               type="button"
@@ -803,7 +803,7 @@ export default function RegistrationsPage() {
               aria-pressed={isTomorrowShortcutActive}
               className={isTomorrowShortcutActive ? ACTIVE_FILTER_PILL_CLASS : undefined}
             >
-              {language === "ar" ? "غداً" : "Tomorrow"}
+              {t("registrations.tomorrow")}
             </Button>
             <Button type="button" variant="secondary" size="sm" className="h-9 px-3 text-xs" onClick={handlePrintVisibleList}>
               {t("registrations.print")}
@@ -926,7 +926,7 @@ export default function RegistrationsPage() {
               </div>
               <div>
                 <label htmlFor="registration-identifier-type" className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">
-                  {language === "ar" ? "نوع المعرّف" : "Identifier type"}
+                  {t("registrations.identifierType")}
                 </label>
                 <select
                   id="registration-identifier-type"
@@ -934,13 +934,13 @@ export default function RegistrationsPage() {
                   onChange={(e) => handleFilterChange("identifierType", e.target.value)}
                   className="input-premium input-ltr w-full min-h-10"
                 >
-                  <option value="">{language === "ar" ? "كل أنواع المعرّفات" : "All identifier types"}</option>
+                  <option value="">{t("registrations.allIdentifierTypes")}</option>
                   {patientIdentifierTypes.map((identifierType) => (
                     <option key={identifierType.code} value={identifierType.code}>
                       {language === "ar" ? identifierType.labelAr : identifierType.labelEn}
                     </option>
                   ))}
-                  <option value="__missing__">{language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier"}</option>
+                  <option value="__missing__">{t("registrations.noPrimaryIdentifier")}</option>
                 </select>
               </div>
             </div>
@@ -983,7 +983,7 @@ export default function RegistrationsPage() {
           <div>
             <h3 className="text-lg font-semibold">{t("registrations.title")}</h3>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              {appointments.length} {language === "ar" ? "موعد" : "appointments"} {listWindowLabel}
+              {t(appointments.length === 1 ? "calendar.appointmentCount" : "calendar.appointmentCountPlural", { count: appointments.length })} {listWindowLabel}
             </p>
             <div
               className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium text-muted-foreground"
@@ -1079,9 +1079,9 @@ export default function RegistrationsPage() {
                         <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                           {apt.patientIdentifierType
                             ? (chooseLocalized(language, apt.patientIdentifierTypeLabelAr, apt.patientIdentifierTypeLabelEn) || apt.patientIdentifierType)
-                            : (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")}
+                            : t("registrations.noPrimaryIdentifier")}
                         </span>
-                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
+                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{t("registrations.additionalImaging")}</p><p className="truncate text-violet-700/80">{t("registrations.original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
                       </div>
                       <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
                         {statusLabel(language, apt.status)}
@@ -1134,7 +1134,7 @@ export default function RegistrationsPage() {
               <div>{t("registrations.date")}</div>
               <div>{t("registrations.statusCol")}</div>
               <div>{t("registrations.walkIn")}</div>
-              <div className="text-right">{language === "ar" ? "الإجراءات" : "Actions"}</div>
+              <div className="text-right">{t("common.actions")}</div>
             </div>
 
             {isLoading ? (
@@ -1215,7 +1215,7 @@ export default function RegistrationsPage() {
                           <span className="inline-flex rounded-full border border-slate-200 bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
                             {apt.patientIdentifierType
                               ? (chooseLocalized(language, apt.patientIdentifierTypeLabelAr, apt.patientIdentifierTypeLabelEn) || apt.patientIdentifierType)
-                              : (language === "ar" ? "لا يوجد معرّف أساسي" : "No primary identifier")}
+                              : t("registrations.noPrimaryIdentifier")}
                           </span>
                         </div>
                         <p className="mt-1 truncate text-[10.5px] leading-snug text-muted-foreground">
@@ -1230,14 +1230,14 @@ export default function RegistrationsPage() {
                             .filter(Boolean)
                             .join(" • ")}
                         </p>
-                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{chooseLocalized(language, "فحص تكميلي", "Additional Imaging")}</p><p className="truncate text-violet-700/80">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
+                        {apt.isAdditionalImaging ? <div className="mt-0.5 min-w-0 text-[11px] leading-4 text-violet-700"><p className="font-medium">{t("registrations.additionalImaging")}</p><p className="truncate text-violet-700/80">{t("registrations.original")}: {chooseLocalized(language, apt.originalExamAr ?? apt.originalExam, apt.originalExamEn ?? apt.originalExam) || "—"} <span aria-hidden="true">·</span> <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{apt.originalAccession || "—"}</span></p></div> : null}
                       </div>
 
                       <div className="min-w-0">
                         <p className="truncate font-mono text-[12px] font-semibold leading-tight tracking-tight text-foreground">
                           {apt.accessionNumber}
                         </p>
-                        <p className="mt-1 text-[10px] leading-none text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
+                        <p className="mt-1 text-[10px] leading-none text-muted-foreground">{t("registrations.seq")} {apt.dailySequence || "—"}</p>
                       </div>
 
                       <div className="min-w-0">
@@ -1268,7 +1268,7 @@ export default function RegistrationsPage() {
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-7 justify-end gap-1" aria-label={language === "ar" ? "إجراءات الموعد" : "Appointment actions"}>
+                      <div className="grid grid-cols-7 justify-end gap-1" aria-label={`${t("common.actions")}: ${t("registrations.title")}`}>
                         <Button
                           type="button"
                           size="sm"
@@ -1695,7 +1695,7 @@ export default function RegistrationsPage() {
               ) : slipPreviewHtml ? (
                 <iframe
                   key={slipPreviewHtml}
-                  title="Appointment slip preview"
+                  title={t("registrations.appointmentSlipPreview")}
                   srcDoc={slipPreviewHtml}
                   className="h-[56vh] w-full bg-white sm:h-[62vh]"
                   loading="eager"
