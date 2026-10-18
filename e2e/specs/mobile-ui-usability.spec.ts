@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { signInWithSession } from "../helpers/auth";
+import { signInWithSession } from "../helpers/auth.js";
 
 type AuditRole = "anonymous" | "e2e_reception" | "e2e_supervisor" | "e2e_super_admin" | "e2e_doctor";
 
@@ -203,6 +203,7 @@ const responsiveViewports = [
   { width: 390, height: 844 },
   { width: 430, height: 932 },
   { width: 768, height: 1024 },
+  { width: 1024, height: 900 },
   { width: 1440, height: 960 },
 ];
 
@@ -271,5 +272,66 @@ test("captures the mobile navigation shell and representative operational states
   await testInfo.attach("representative-states.txt", {
     body: Buffer.from("Captured navigation-open, appointments-patient-dialog when available, and reporting-case-details when available."),
     contentType: "text/plain",
+  });
+});
+
+test("modality board keeps a compact bilingual mobile worklist and stable desktop table", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await signInWithSession(page, "e2e_supervisor");
+  const modalityResponse = await page.request.get("http://127.0.0.1:3100/api/v2/lookups/modalities");
+  expect(modalityResponse.ok()).toBeTruthy();
+  const modalityBody = await modalityResponse.json() as { items: Array<{ id: number; code?: string }> };
+  const modalityId = String(modalityBody.items.find((item) => item.code === "E2E_CT")?.id ?? modalityBody.items[0]?.id ?? "");
+  expect(modalityId).not.toBe("");
+
+  const widths = [360, 390, 430, 768, 1024, 1440];
+  const screenshotRoot = path.join(process.cwd(), "test-results", "modality-mobile-ux");
+  fs.mkdirSync(screenshotRoot, { recursive: true });
+  const results: Array<{ language: "en" | "ar"; width: number; firstCardY?: number }> = [];
+
+  for (const language of ["en", "ar"] as const) {
+    if (language === "ar") {
+      await page.addInitScript(() => localStorage.setItem("rispro-language", "ar"));
+    }
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: width <= 768 ? 844 : 900 });
+      await page.goto(`/modality?modalityId=${modalityId}&view=all`, { waitUntil: "domcontentloaded" });
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+
+      const root = page.getByTestId("modality-page-root");
+      await expect(root).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+      const metrics = await page.evaluate(() => ({
+        documentWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
+
+      if (width <= 768) {
+        const mobileBoard = page.getByTestId("modality-board-mobile");
+        await expect(mobileBoard).toBeVisible();
+        const firstCard = mobileBoard.getByTestId(/modality-mobile-card-/).first();
+        await expect(firstCard).toBeVisible();
+        const firstCardBox = await firstCard.boundingBox();
+        expect(firstCardBox).not.toBeNull();
+        results.push({ language, width, firstCardY: firstCardBox!.y });
+        await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Waiting Warning Patient" }).first()).toContainText(language === "ar" ? "أكثر من 60 دقيقة" : "Waiting more than 60 minutes");
+        await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Waiting Warning Patient" }).first()).toContainText(language === "ar" ? "لا يوجد معرف أساسي" : "No primary ID");
+        await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Acquisition Patient" }).first()).toContainText(language === "ar" ? "مستند واحد" : "1 doc");
+        expect(firstCardBox!.y).toBeLessThan(width <= 390 ? 844 : 900);
+        await expect(page.getByTestId("modality-board")).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId("modality-board")).toBeVisible();
+        await expect(page.getByTestId("modality-board-table-wrap")).toBeVisible();
+        await expect(page.getByTestId("modality-board-mobile")).toHaveCount(0);
+        results.push({ language, width });
+      }
+
+      await page.screenshot({ path: path.join(screenshotRoot, `${language}-${width}.png`), fullPage: true });
+    }
+  }
+
+  await testInfo.attach("modality-mobile-ux-results.json", {
+    body: Buffer.from(JSON.stringify({ widths, languages: ["en", "ar"], syntheticCase: "E2E Acquisition Patient", results }, null, 2)),
+    contentType: "application/json",
   });
 });

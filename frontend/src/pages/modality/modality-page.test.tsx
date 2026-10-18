@@ -902,6 +902,70 @@ describe("ModalityPage modality board", () => {
     expect(modalityPageSource).not.toContain("max-h-[calc(100vh-290px)] overflow-auto");
   });
 
+  it("renders the sorted mobile examination cards with safety indicators and shared actions", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 1023px"),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    try {
+      const user = userEvent.setup();
+      await openBoard([
+        appointment({
+          id: 1,
+          accessionNumber: "ACC-FIRST",
+          status: "waiting",
+          arrivedAt: "2026-06-18T08:00:00Z",
+          englishFullName: "First Mobile Patient",
+          mriPrimaryScreening: { result: "implant_reported_review_required", implantSite: "wrist", implantDescription: "Synthetic implant", previousReviewerNameReported: null, screenedByUserId: 1, screenedAt: "2026-06-18T08:00:00Z" },
+          modalitySafetyWorkflowType: "mri_primary_implant_screening",
+          modalityCode: "MRI",
+        }),
+        appointment({
+          id: 2,
+          accessionNumber: "ACC-SECOND",
+          status: "in-progress",
+          englishFullName: "Second Mobile Patient",
+          patientPrimaryIdentifierValue: null,
+          patientPrimaryIdentifierLabelEn: null,
+        }),
+        appointment({
+          id: 3,
+          accessionNumber: "ACC-DONE",
+          status: "completed",
+          completedAt: "2026-06-18T10:00:00Z",
+          englishFullName: "Completed Mobile Patient",
+        }),
+      ], [{ key: "robot-a", name: "Robot A" }]);
+      await user.click(screen.getByRole("button", { name: "All" }));
+
+      const mobileBoard = screen.getByTestId("modality-board-mobile");
+      const cards = within(mobileBoard).getAllByTestId(/modality-mobile-card-/);
+      expect(cards).toHaveLength(3);
+      expect(cards.map((card) => within(card).getByText(/ACC-/).textContent)).toEqual(["ACC-SECOND", "ACC-FIRST", "ACC-DONE"]);
+      expect(within(cards[1]!).getByText("First Mobile Patient")).toBeTruthy();
+      expect(within(cards[1]!).getByText("Waiting more than 60 minutes")).toBeTruthy();
+      expect(cards[1]!.getAttribute("data-waiting-warning")).toBe("strong");
+      expect(within(cards[1]!).getByTestId("modality-mobile-mri-screening")).toBeTruthy();
+      expect(within(cards[0]!).getByText("No primary ID")).toBeTruthy();
+      expect(within(cards[1]!).getByRole("button", { name: "Mark arrived" })).toBeTruthy();
+      expect(within(cards[0]!).getByRole("button", { name: "Complete" })).toBeTruthy();
+      expect(within(cards[2]!).getByRole("button", { name: "Send CD" })).toBeTruthy();
+      await user.click(within(cards[2]!).getByRole("button", { name: "Send CD" }));
+      await waitFor(() => expect(createCdRobotDeliveryMock).toHaveBeenCalledWith(3, { destinationKey: "robot-a", resendReasonCode: undefined, resendReasonText: undefined }));
+      expect(screen.queryByTestId("modality-board")).toBeNull();
+      expect(within(screen.getByTestId("modality-mobile-stats")).getByRole("button", { name: "Waiting 1" }).getAttribute("aria-pressed")).toBe("false");
+
+      await user.click(within(cards[1]!).getByRole("button", { name: "Open appointment for First Mobile Patient" }));
+      await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("appointmentId=1"));
+      expect(screen.getByTestId("selected-appointment-drawer")).toBeTruthy();
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("compact counter chips render in the board header and apply exact filters", async () => {
     const user = await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-ARRIVED", status: "arrived", arrivedAt: "2026-06-18T08:05:00Z", englishFullName: "Arrived Patient" }),

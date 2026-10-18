@@ -212,6 +212,48 @@ try {
      values ('E2E Planned CT', 'CT', 'CT', $1, 'GE', 'Revolution', true) returning id`,
     [modalityId],
   );
+  const seedModalityBooking = async ({
+    name,
+    nationalId,
+    status,
+    caseCategory,
+    arrivedMinutesAgo,
+    notes,
+  }: {
+    name: string;
+    nationalId: string | null;
+    status: "scheduled" | "arrived" | "waiting" | "in-progress";
+    caseCategory: "oncology" | "non_oncology";
+    arrivedMinutesAgo?: number;
+    notes?: string;
+  }) => {
+    const patient = await pool.query<{ id: number }>(
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+       values ($1, $1, $2::varchar, $1, 'F', 42, '0910000100', case when $2::varchar is null then null else 'national_id' end, $2::text) returning id`,
+      [name, nationalId],
+    );
+    if (nationalId === null) {
+      await pool.query("update patients set mrn = null where id = $1", [Number(patient.rows[0].id)]);
+    }
+    const booking = await pool.query<{ id: number }>(
+      `insert into appointments_v2.bookings (patient_id, modality_id, exam_type_id, booking_date, case_category, requires_report, status, notes, policy_version_id, created_by_user_id, updated_by_user_id)
+       values ($1, $2, $3, $4::date, $5, true, $6, $7, $8, $9, $9) returning id`,
+      [Number(patient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), e2eTodayInTripoli(), caseCategory, status, notes ?? null, Number(policyVersion.rows[0].id), supervisorId],
+    );
+    if (arrivedMinutesAgo != null) {
+      await pool.query(
+        `update appointments_v2.bookings
+         set arrived_at = now() - ($2::int * interval '1 minute'),
+             waiting_started_at = now() - ($2::int * interval '1 minute')
+         where id = $1`,
+        [Number(booking.rows[0].id), arrivedMinutesAgo],
+      );
+    }
+  };
+  await seedModalityBooking({ name: "E2E Scheduled Patient", nationalId: "100000000100", status: "scheduled", caseCategory: "non_oncology" });
+  await seedModalityBooking({ name: "E2E Waiting Warning Patient", nationalId: null, status: "waiting", caseCategory: "oncology", arrivedMinutesAgo: 75, notes: "Synthetic waiting-time warning" });
+  await seedModalityBooking({ name: "E2E Arrived Patient", nationalId: "100000000110", status: "arrived", caseCategory: "non_oncology", arrivedMinutesAgo: 15 });
+  await seedModalityBooking({ name: "E2E In Progress Patient", nationalId: "100000000111", status: "in-progress", caseCategory: "non_oncology", arrivedMinutesAgo: 20 });
   const acquisitionPatient = await pool.query<{ id: number }>(
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
      values ('E2E Acquisition Patient', 'E2E Acquisition Patient', '100000000097', 'E2E Acquisition Patient', 'F', 39, '0910000097', 'national_id', '100000000097') returning id`,
@@ -222,6 +264,11 @@ try {
     [Number(acquisitionPatient.rows[0].id), modalityId, Number((await pool.query<{ id: number }>("select id from exam_types where code = 'E2E_CT_HEAD'")).rows[0].id), e2eTodayInTripoli(), Number(policyVersion.rows[0].id), supervisorId],
   );
   const acquisitionBookingId = Number(acquisitionBooking.rows[0].id);
+  await pool.query(
+    `insert into documents (patient_id, v2_booking_id, document_type, original_filename, stored_path, mime_type, file_size, source)
+     values ($1, $2, 'appointment_request', 'e2e-request.pdf', 'e2e/e2e-request.pdf', 'application/pdf', 128, 'manual_upload')`,
+    [Number(acquisitionPatient.rows[0].id), acquisitionBookingId],
+  );
   const acquisitionDicomDate = e2eTodayInTripoli().replaceAll("-", "");
   await pool.query(
     `insert into appointment_protocol_assignments (appointment_id, protocol_id, protocol_version_id, scanner_id, assigned_by, assigned_at, status)

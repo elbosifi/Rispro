@@ -85,7 +85,7 @@ test("Modality appointment deep links remain usable on mobile", async ({ page })
 
   await page.goto(modalityUrl(date, modalityId));
   await expectRestoredState(page, date, modalityId);
-  await page.getByTestId(/modality-board-row-/).filter({ hasText: "E2E Acquisition Patient" }).click();
+  await page.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Acquisition Patient" }).click();
   await expect(page).toHaveURL(/appointmentId=\d+/);
   await expect(page.getByTestId("selected-appointment-drawer")).toBeVisible();
   await page.reload();
