@@ -53,6 +53,7 @@ export interface AppointmentPatientSelection {
   maskedPrimaryIdentifier: string | null;
   maskedPhone1: string | null;
   identityRisk: PatientIdentityRisk;
+  identityDocumentVerified?: boolean;
   identityVerificationRequired: boolean;
   similarPatientCount: number;
   availableVerificationMethods: PatientIdentityVerificationMethod[];

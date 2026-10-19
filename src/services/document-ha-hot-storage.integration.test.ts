@@ -175,6 +175,14 @@ test("HA eligibility accepts the eight intended type/source combinations and exc
   for (const [documentType, source] of expected) {
     assert.equal(isDocumentEligibleForHaHotStorage({ documentType, source, v2BookingId: 10 }), true, `${documentType}/${source}`);
   }
+  assert.equal(isDocumentEligibleForHaHotStorage({
+    documentType: "patient_identity_document",
+    source: "manual_upload",
+    patientId: 123,
+    legacyAppointmentId: null,
+    v2BookingId: null,
+    incidentId: null,
+  }), true);
   for (const input of [
     { documentType: "incident_attachment", source: "manual_upload", v2BookingId: 10, incidentId: 4 },
     { documentType: "comparison_request", source: "manual_upload", v2BookingId: null },
@@ -182,6 +190,9 @@ test("HA eligibility accepts the eight intended type/source combinations and exc
     { documentType: "appointment_request", source: "complementary_recall_system", v2BookingId: 10 },
     { documentType: "clinical_document", source: "modality_scan_automation", v2BookingId: null },
     { documentType: "clinical_document", source: "manual_upload", v2BookingId: 10, incidentId: 4 },
+    { documentType: "patient_identity_document", source: "manual_upload", patientId: null },
+    { documentType: "patient_identity_document", source: "manual_upload", patientId: 123, v2BookingId: 10 },
+    { documentType: "patient_identity_document", source: "scanner_app", patientId: 123 },
   ]) {
     assert.equal(isDocumentEligibleForHaHotStorage(input), false);
   }
@@ -245,6 +256,22 @@ test("eligible upload stores an atomic HA copy, is idempotent, falls back for re
   assert.equal(second.created, false);
   assert.equal(second.document.id, first.document.id);
   assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [first.document.id])).rowCount, 1);
+
+  const identity = await uploadDocument({
+    patientId: fixture.patientId,
+    documentType: "patient_identity_document",
+    originalFilename: "identity.pdf",
+    mimeType: "application/pdf",
+    source: "manual_upload",
+    fileContentBase64: Buffer.from(`identity-${crypto.randomUUID()}`).toString("base64"),
+  }, fixture.userId);
+  createdDocumentIds.push(identity.id);
+  const identityReferences = await pool.query<{ appointment_id: number | null; v2_booking_id: number | null; incident_id: number | null }>(
+    "select appointment_id,v2_booking_id,incident_id from documents where id=$1",
+    [identity.id],
+  );
+  assert.deepEqual(identityReferences.rows[0], { appointment_id: null, v2_booking_id: null, incident_id: null });
+  assert.equal((await pool.query("select 1 from document_ha_blobs where document_id=$1", [identity.id])).rowCount, 1);
 });
 
 test("reconciliation detects same-size canonical corruption and releases HA only after verified rebuild", async () => {

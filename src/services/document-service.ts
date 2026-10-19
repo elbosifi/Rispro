@@ -606,8 +606,39 @@ export async function uploadDocument(
   const documentType = String(payload.documentType || "appointment_request").trim();
   const originalFilename = sanitizeDocumentFileName(payload.originalFilename || "document.bin");
   const mimeType = String(payload.mimeType || "application/octet-stream").trim().toLowerCase();
+  const rawSource = String(payload.source || "").trim();
   const source = normalizeDocumentSource(payload.source);
+  const isPatientIdentityDocument = documentType === "patient_identity_document";
   const suppliedSources = [payload.fileContentBuffer != null, payload.fileContentBase64 != null, payload.fileSourcePath != null].filter(Boolean).length;
+
+  if (isPatientIdentityDocument) {
+    if (patientId == null || appointmentId != null || incidentId != null) {
+      throw new HttpError(
+        400,
+        "Patient identity documents require patientId and must not reference an appointment or incident."
+      );
+    }
+
+    if (
+      (rawSource && rawSource !== "manual_upload") ||
+      source !== "manual_upload" ||
+      payload.fileSourcePath != null ||
+      payload.fileContentBuffer != null
+    ) {
+      throw new HttpError(
+        400,
+        "Patient identity documents must be uploaded directly as PDF, JPEG, or PNG files."
+      );
+    }
+
+    if (payload.scanSessionId != null || payload.requestScanJobId != null) {
+      throw new HttpError(
+        400,
+        "Patient identity documents cannot be linked to scanner jobs."
+      );
+    }
+  }
+
   if (suppliedSources !== 1) throw new HttpError(400, "Exactly one document file source is required.");
   const fileSourcePath = payload.fileSourcePath ? path.resolve(payload.fileSourcePath) : null;
   const fileBuffer = fileSourcePath ? null : resolveFileBuffer(payload);
@@ -646,6 +677,7 @@ export async function uploadDocument(
   const haEligible = isDocumentEligibleForHaHotStorage({
     documentType,
     source,
+    patientId,
     legacyAppointmentId: appointmentReference.legacyAppointmentId,
     v2BookingId: appointmentReference.v2BookingId,
     incidentId,
@@ -705,6 +737,7 @@ export async function uploadDocument(
   }
 
   let savedDocument: DocumentRow | undefined;
+  let revokedIdentityDocumentIds: number[] = [];
   let databaseClient: PoolClient | null = null;
   try {
     if (executor === pool) {
@@ -712,6 +745,28 @@ export async function uploadDocument(
       await databaseClient.query("begin");
     }
     const databaseExecutor = databaseClient ?? executor;
+    if (isPatientIdentityDocument) {
+      await databaseExecutor.query(
+        "select id from patients where id = $1 for update",
+        [patientId]
+      );
+
+      const revoked = await databaseExecutor.query<{ id: number }>(
+        `
+          update documents
+          set
+            identity_verified_at = null,
+            identity_verified_by_user_id = null
+          where patient_id = $1
+            and document_type = 'patient_identity_document'
+            and identity_verified_at is not null
+          returning id
+        `,
+        [patientId]
+      );
+      revokedIdentityDocumentIds = revoked.rows.map((row) => Number(row.id));
+    }
+
     const insertResult = (await databaseExecutor.query(
     `
       insert into documents (
@@ -788,6 +843,21 @@ export async function uploadDocument(
     savedDocument = insertResult.rows[0];
     if (haContent && haSettings?.enabled && savedDocument) {
       await persistDocumentHaBlob(databaseExecutor, savedDocument.id, haContent, haSettings.retentionHours);
+    }
+    if (savedDocument && revokedIdentityDocumentIds.length > 0) {
+      for (const revokedDocumentId of revokedIdentityDocumentIds) {
+        await logAuditEntry(
+          {
+            entityType: "patient_identity_document",
+            entityId: revokedDocumentId,
+            actionType: "identity_verification_revoked_after_replacement",
+            oldValues: { patientId, documentId: revokedDocumentId },
+            newValues: { patientId, replacementDocumentId: savedDocument.id },
+            changedByUserId: currentUserId
+          },
+          databaseExecutor
+        );
+      }
     }
     if (databaseClient) await databaseClient.query("commit");
   } catch (error) {

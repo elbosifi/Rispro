@@ -6,6 +6,8 @@ import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
 import { Badge, Button, DisclosureSection } from "@/components/shared";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { PatientIdentityBadge } from "@/components/patients/patient-identity-badge";
+import { PatientIdentityDocumentSection } from "@/components/patients/patient-identity-document-section";
 import type { PatientDirectorySummary } from "@/types/api";
 import { formatPatientIdentifierRows, formatPatientSex } from "@/components/patients/patient-summary-formatters";
 function CopyValueButton({ value, label }: { value: string | null | undefined; label: string }) {
@@ -100,7 +102,10 @@ export function PatientSummaryContent({
       <section aria-labelledby={`${variant}-patient-identity-heading`}>
         <h3 id={`${variant}-patient-identity-heading`} className="sr-only">{t(language, "patients.directory.drawer.demographics")}</h3>
         <div className="border-b border-border/70 pb-3">
-          <p className="text-base font-semibold leading-7 text-foreground">{demographics.arabicFullName || "—"}</p>
+          <div className="inline-flex max-w-full items-center gap-1.5 text-base font-semibold leading-7 text-foreground">
+            <span className="min-w-0 break-words">{demographics.arabicFullName || "—"}</span>
+            <PatientIdentityBadge verified={summary.identityDocumentVerified} />
+          </div>
           <p className="text-sm font-medium leading-6 text-muted-foreground">{demographics.englishFullName || "—"}</p>
         </div>
         <div className="mt-3">
@@ -119,6 +124,8 @@ export function PatientSummaryContent({
           {identifiers.length ? identifiers.map((identifier) => <div key={identifier.id} className="flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">{identifier.typeLabel}{identifier.isPrimary ? ` · ${t(language, "patients.identifier.primary")}` : ""}</span><Value value={identifier.value} dir="ltr" copyLabel={identifier.typeLabel} /></div>) : <Value value={null} />}
         </div>
       </section>
+
+      {variant === "drawer" ? <PatientIdentityDocumentSection patientId={demographics.id} /> : null}
 
       <section aria-labelledby={`${variant}-patient-contact-heading`}>
         <h3 id={`${variant}-patient-contact-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.contact")}</h3>

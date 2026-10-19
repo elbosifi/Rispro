@@ -30,6 +30,7 @@ export interface PatientDirectoryRowOutput {
   demographicsEstimated: boolean;
   phone1: string | null;
   category: "oncology" | "non_oncology" | null;
+  identityDocumentVerified: boolean;
   lastAppointment: {
     id: number;
     date: string;
@@ -219,6 +220,13 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
       fp.demographics_estimated,
       fp.phone_1,
       fp.category,
+      exists (
+        select 1
+        from documents d
+        where d.patient_id = fp.id
+          and d.document_type = 'patient_identity_document'
+          and d.identity_verified_at is not null
+      ) as identity_document_verified,
       (
         select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en)
         from appointments_v2.bookings b
@@ -276,6 +284,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         demographicsEstimated: Boolean(row.demographics_estimated),
         phone1: (row.phone_1 as string | null) ?? null,
         category: row.category as "oncology" | "non_oncology" | null,
+        identityDocumentVerified: Boolean(row.identity_document_verified),
         lastAppointment: (row.last_appointment as PatientDirectoryRowOutput["lastAppointment"]) || null,
         nextAppointment: (row.next_appointment as PatientDirectoryRowOutput["nextAppointment"]) || null,
         warnings: {

@@ -142,7 +142,11 @@ router.get(
       String(req.params.token || ""),
       requiredPositiveInteger(req.params.caseId, "caseId")
     );
-    res.json({ documents: documents.map(toPublicDocumentResponse) });
+    res.json({
+      documents: documents
+        .filter((document) => document.document_type !== "patient_identity_document")
+        .map(toPublicDocumentResponse),
+    });
   })
 );
 
@@ -157,6 +161,9 @@ router.get(
       requiredPositiveInteger(req.params.caseId, "caseId"),
       requiredPositiveInteger(req.params.documentId, "documentId")
     );
+    if (document.document_type === "patient_identity_document") {
+      throw new HttpError(403, "Patient identity documents are not available through public reporting links.");
+    }
     const absolutePath = getDocumentAbsolutePath(document);
     res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
     res.setHeader(

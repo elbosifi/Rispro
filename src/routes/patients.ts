@@ -21,6 +21,11 @@ import {
   searchPatients,
   updatePatient
 } from "../services/patient-service.js";
+import {
+  getPatientIdentityDocumentState,
+  revokePatientIdentityDocumentVerification,
+  verifyPatientIdentityDocument,
+} from "../services/patient-identity-document-service.js";
 
 type PatientsRequest = Request & {
   query: UnknownRecord;
@@ -115,6 +120,34 @@ patientsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const mrn = await previewNextPatientMrn();
     res.json({ mrn });
+  })
+);
+
+patientsRouter.get(
+  "/:patientId/identity-document",
+  requireAnyRole(["receptionist", "supervisor", "super_admin"]),
+  asyncRoute(async (req: Request, res: Response) => {
+    const patientId = Number(req.params.patientId);
+    res.json(await getPatientIdentityDocumentState(patientId));
+  })
+);
+
+patientsRouter.post(
+  "/:patientId/identity-document/verify",
+  requireAnyRole(["receptionist", "supervisor", "super_admin"]),
+  asyncRoute(async (req: Request, res: Response) => {
+    const patientId = Number(req.params.patientId);
+    const documentId = Number(req.body?.documentId);
+    res.json(await verifyPatientIdentityDocument(patientId, documentId, Number(req.user!.sub)));
+  })
+);
+
+patientsRouter.post(
+  "/:patientId/identity-document/revoke",
+  requireAnyRole(["supervisor", "super_admin"]),
+  asyncRoute(async (req: Request, res: Response) => {
+    const patientId = Number(req.params.patientId);
+    res.json(await revokePatientIdentityDocumentVerification(patientId, Number(req.user!.sub)));
   })
 );
 

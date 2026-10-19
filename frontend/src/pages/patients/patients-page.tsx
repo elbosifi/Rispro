@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchPatientDirectory, type PatientDirectoryParams } from "@/lib/api-hooks";
 import PatientForm from "@/components/patients/patient-form";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
+import { PatientIdentityBadge } from "@/components/patients/patient-identity-badge";
 import {
   buildPatientDirectorySearch,
   parsePatientDirectoryNavigation,
@@ -372,7 +373,10 @@ export default function PatientsPage() {
                       >
                       <td className="p-3 font-mono text-xs">{patient.mrn || "—"}</td>
                       <td className="p-3 font-medium">
-                        <span className="truncate max-w-[150px]">{patient.arabicFullName}</span>
+                        <div className="inline-flex max-w-full items-center gap-1.5">
+                          <span className="min-w-0 max-w-[150px] truncate">{patient.arabicFullName}</span>
+                          <PatientIdentityBadge verified={patient.identityDocumentVerified} />
+                        </div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {(patient.warnings.missingPhone || patient.warnings.missingDob || patient.warnings.missingSex || patient.warnings.missingName || patient.warnings.noAppointment || patient.warnings.possibleDuplicate) && (
                             <>
@@ -481,7 +485,10 @@ export default function PatientsPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="break-words font-semibold leading-snug">{patient.arabicFullName}</p>
+                      <p className="inline-flex max-w-full items-center gap-1.5 break-words font-semibold leading-snug">
+                        <span className="min-w-0 break-words">{patient.arabicFullName}</span>
+                        <PatientIdentityBadge verified={patient.identityDocumentVerified} />
+                      </p>
                       <p className="mt-1 font-mono text-xs text-muted-foreground">{patient.mrn || "—"}</p>
                     </div>
                     <Badge variant={patient.nextAppointment ? "info" : "neutral"} size="sm">

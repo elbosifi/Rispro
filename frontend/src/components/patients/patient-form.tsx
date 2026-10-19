@@ -1333,6 +1333,18 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     type="button"
                     variant="secondary"
                     onClick={() => {
+                      const id = postCreatePatient.id;
+                      setPostCreatePatient(null);
+                      navigate(`/patients?patientId=${id}`);
+                    }}
+                    className="w-full"
+                  >
+                    {t("patients.identity.uploadAndVerify")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
                       setPostCreatePatient(null);
                       arabicFullNameRef.current?.focus();
                     }}

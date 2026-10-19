@@ -60,6 +60,25 @@ export interface PatientRegistrationRules {
 const PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
   "Primary identifier is required. Enter a National ID, passport number, or other identifier before saving this patient.";
 
+const criticalIdentityFields = [
+  "arabic_full_name",
+  "english_full_name",
+  "national_id",
+  "identifier_type",
+  "identifier_value",
+  "estimated_date_of_birth",
+  "sex"
+] as const;
+
+function normalizeCriticalIdentityValue(field: (typeof criticalIdentityFields)[number], value: unknown): string {
+  if (value == null) return "";
+  if (field === "estimated_date_of_birth") {
+    const rawDate = value instanceof Date ? value.toISOString() : String(value).trim();
+    return rawDate.slice(0, 10);
+  }
+  return String(value).trim();
+}
+
 type LegacyPatientIdentifierType = "national_id" | "passport" | "other";
 
 function toLegacyPatientIdentifierType(typeCode: string): LegacyPatientIdentifierType {
@@ -94,6 +113,7 @@ export interface PatientRow {
   created_by_user_id?: number | null;
   created_by_full_name?: string | null;
   created_by_username?: string | null;
+  identity_document_verified?: boolean;
 }
 
 export interface PatientPayload {
@@ -536,6 +556,13 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
         p.created_by_user_id,
         created_by_user.full_name as created_by_full_name,
         created_by_user.username as created_by_username,
+        exists (
+          select 1
+          from documents d
+          where d.patient_id = p.id
+            and d.document_type = 'patient_identity_document'
+            and d.identity_verified_at is not null
+        ) as identity_document_verified,
         (
           select coalesce(json_agg(json_build_object(
             'id', pi.id,
@@ -979,6 +1006,45 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
     const client = await pool.connect();
     try {
       await client.query("begin");
+      const lockedPatientResult = await client.query<{
+        arabic_full_name: string;
+        english_full_name: string | null;
+        national_id: string | null;
+        identifier_type: string | null;
+        identifier_value: string | null;
+        estimated_date_of_birth: string | null;
+        sex: string | null;
+      }>(
+        `
+          select
+            arabic_full_name,
+            english_full_name,
+            national_id,
+            identifier_type,
+            identifier_value,
+            estimated_date_of_birth::text as estimated_date_of_birth,
+            sex
+          from patients
+          where id = $1
+          for update
+        `,
+        [cleanPatientId]
+      );
+      const lockedPatient = lockedPatientResult.rows[0];
+      if (!lockedPatient) throw new HttpError(404, "Patient not found.");
+
+      const validatedIdentity = {
+        arabic_full_name: validated.arabicFullName,
+        english_full_name: validated.englishFullName || null,
+        national_id: validated.cleanNationalId || null,
+        identifier_type: toLegacyPatientIdentifierType(validated.identifierType),
+        identifier_value: validated.cleanIdentifierValue || null,
+        estimated_date_of_birth: validated.estimatedDob || null,
+        sex: validated.sex
+      };
+      const identityChanged = criticalIdentityFields.some((field) =>
+        normalizeCriticalIdentityValue(field, lockedPatient[field]) !== normalizeCriticalIdentityValue(field, validatedIdentity[field])
+      );
       const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [cleanPatientId], { queueOnly: true });
       const { rows } = await client.query<PersistedPatientRow>(
       `
@@ -1033,6 +1099,15 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
 
       await replacePatientIdentifiers(client, Number(updatedPatient.id), payload, validated, updatedByUserId);
       await syncPatientPrimaryIdentifierColumns(client, Number(updatedPatient.id), updatedByUserId);
+
+      if (identityChanged) {
+        await revokePatientIdentityVerification(
+          client,
+          [cleanPatientId],
+          "identity_verification_revoked_after_patient_update",
+          updatedByUserId
+        );
+      }
 
       await logAuditEntry(
         {
@@ -1209,6 +1284,44 @@ async function mergePatientIdentifiers(
   await client.query(`delete from patient_identifiers where patient_id = $1`, [sourcePatientId]);
 }
 
+async function revokePatientIdentityVerification(
+  client: PoolClient,
+  patientIds: number[],
+  actionType: string,
+  changedByUserId: OptionalUserId
+): Promise<void> {
+  const ids = Array.from(new Set(patientIds)).filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) return;
+
+  const result = await client.query<{ id: number }>(
+    `
+      update documents
+      set
+        identity_verified_at = null,
+        identity_verified_by_user_id = null
+      where patient_id = any($1::bigint[])
+        and document_type = 'patient_identity_document'
+        and identity_verified_at is not null
+      returning id
+    `,
+    [ids]
+  );
+
+  for (const row of result.rows) {
+    await logAuditEntry(
+      {
+        entityType: "patient_identity_document",
+        entityId: Number(row.id),
+        actionType,
+        oldValues: { patientIds, documentId: Number(row.id) },
+        newValues: null,
+        changedByUserId
+      },
+      client
+    );
+  }
+}
+
 export async function mergePatients(payload: MergePatientsPayload, updatedByUserId: OptionalUserId): Promise<PatientRow> {
   const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId") as number;
   const sourcePatientId = normalizePositiveInteger(payload.sourcePatientId, "sourcePatientId") as number;
@@ -1234,6 +1347,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
         from patients
         where id = any($1::bigint[])
         order by id asc
+        for update
       `,
       [[targetPatientId, sourcePatientId]]
     );
@@ -1241,6 +1355,13 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
     if (rows.length !== 2) {
       throw new HttpError(404, "Both patient records must exist before merging.");
     }
+
+    await revokePatientIdentityVerification(
+      client,
+      [targetPatientId, sourcePatientId],
+      "identity_verification_revoked_after_patient_merge",
+      updatedByUserId
+    );
 
     await client.query(`update appointments set patient_id = $1, updated_by_user_id = $3, updated_at = now() where patient_id = $2`, [
       targetPatientId,
@@ -1306,6 +1427,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
 }
 
 interface PatientDirectorySummaryOutput {
+  identityDocumentVerified: boolean;
   demographics: {
     id: number;
     mrn: string | null;
@@ -1487,6 +1609,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
   const missingName = !patient.arabic_full_name;
 
   return {
+    identityDocumentVerified: Boolean(patient.identity_document_verified),
     demographics: {
       id: patient.id,
       mrn: patient.mrn,

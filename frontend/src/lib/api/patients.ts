@@ -100,6 +100,9 @@ export async function fetchPatientDirectory(params: PatientDirectoryParams): Pro
       demographicsEstimated: Boolean(row.demographicsEstimated ?? row.demographics_estimated),
       phone1: row.phone1 as string | null ?? row.phone_1 as string | null,
       category: row.category as "oncology" | "non_oncology" | null,
+      identityDocumentVerified: Boolean(
+        row.identityDocumentVerified ?? row.identity_document_verified
+      ),
       lastAppointment: row.lastAppointment as PatientDirectoryResponse["patients"][0]["lastAppointment"],
       nextAppointment: row.nextAppointment as PatientDirectoryResponse["patients"][0]["nextAppointment"],
       warnings: row.warnings as PatientDirectoryResponse["patients"][0]["warnings"]
@@ -115,6 +118,7 @@ export async function fetchPatientDirectory(params: PatientDirectoryParams): Pro
 
 export async function fetchPatientDirectorySummary(patientId: number): Promise<PatientDirectorySummary> {
   const raw = await api<{
+    identityDocumentVerified?: boolean;
     demographics: RawRecord;
     identifiers: RawRecord;
     contact: RawRecord;
@@ -129,6 +133,7 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
   const duplicateCounts = raw.warnings?.duplicateCounts as RawRecord | undefined;
 
   return {
+    identityDocumentVerified: Boolean(raw.identityDocumentVerified),
     demographics: {
       id: Number(raw.demographics?.id ?? 0),
       mrn: raw.demographics?.mrn as string | null,

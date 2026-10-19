@@ -9,6 +9,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { X } from "lucide-react";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { PatientIdentityBadge } from "@/components/patients/patient-identity-badge";
 import { searchV2AppointmentPatients, verifyV2AppointmentPatientIdentity } from "../api";
 import type { AppointmentPatientSelection, PatientIdentityVerificationMethod } from "../types";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from "@/components/shared";
@@ -33,6 +34,7 @@ interface Patient extends Partial<AppointmentPatientSelection> {
   demographicsEstimated?: boolean;
   estimatedDateOfBirth?: string | null;
   identityRisk?: "none" | "ambiguous";
+  identityDocumentVerified?: boolean;
   identityVerificationRequired?: boolean;
   similarPatientCount?: number;
   availableVerificationMethods?: PatientIdentityVerificationMethod[];
@@ -276,7 +278,10 @@ export function PatientSearch({
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>
-            <span>{displayName}</span>
+            <span style={{ display: "inline-flex", maxWidth: "100%", alignItems: "center", gap: 6 }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</span>
+              <PatientIdentityBadge verified={selectedPatient.identityDocumentVerified} size={17} />
+            </span>
             <span style={{ marginInlineStart: 8 }}>
               <PatientCategoryBadge category={selectedPatient.category} showWhenUnset />
             </span>
@@ -386,7 +391,10 @@ export function PatientSearch({
                     (e.currentTarget.style.backgroundColor = "transparent")
                   }
                 >
-                  <div style={{ fontWeight: 500 }}>{displayName}</div>
+                  <div className="inline-flex max-w-full items-center gap-1.5">
+                    <span className="min-w-0 truncate">{displayName}</span>
+                    <PatientIdentityBadge verified={patient.identityDocumentVerified} size={16} />
+                  </div>
                   <div style={{ marginTop: 4 }}>
                     <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
                   </div>

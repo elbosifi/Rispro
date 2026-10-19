@@ -31,16 +31,28 @@ type AppointmentId = number | string | null | undefined;
 export interface DocumentHaEligibilityInput {
   documentType: unknown;
   source: unknown;
+  patientId?: AppointmentId;
   legacyAppointmentId?: AppointmentId;
   v2BookingId?: AppointmentId;
   incidentId?: AppointmentId;
 }
 
 export function isDocumentEligibleForHaHotStorage(input: DocumentHaEligibilityInput): boolean {
-  if (input.incidentId != null || (input.legacyAppointmentId == null && input.v2BookingId == null)) return false;
-
   const documentType = String(input.documentType || "").trim();
   const source = String(input.source || "").trim();
+
+  if (documentType === "patient_identity_document") {
+    return (
+      input.patientId != null &&
+      input.legacyAppointmentId == null &&
+      input.v2BookingId == null &&
+      input.incidentId == null &&
+      source === "manual_upload"
+    );
+  }
+
+  if (input.incidentId != null || (input.legacyAppointmentId == null && input.v2BookingId == null)) return false;
+
   if (documentType === "appointment_request") {
     return new Set(["manual_upload", "naps2_webscan", "scanner_app", "request_scan_automation"]).has(source);
   }

@@ -109,6 +109,18 @@ test("resolveBackupV3StorageRoots permits explicitly allowlisted external docume
   assert.equal(documentRoot?.archivePrefix, "documents/external");
 });
 
+test("Backup V3 includes local uploads and the configured patient-document root", () => {
+  const externalRoot = path.join(path.parse(process.cwd()).root, "rispro-patient-documents");
+  const roots = resolveBackupV3StorageRoots({
+    uploadsDir: "storage/uploads",
+    documentStorageRoot: externalRoot,
+    documentStorageAllowlist: [externalRoot],
+  });
+
+  assert.ok(roots.some((root) => root.id === "uploads" && root.kind === "uploads"));
+  assert.ok(roots.some((root) => root.id === "document-storage" && root.kind === "document_storage"));
+});
+
 test("validateBackupV3ArchiveEntries rejects hostile archive entries", () => {
   const errors = validateBackupV3ArchiveEntries(
     [

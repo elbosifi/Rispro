@@ -1617,6 +1617,7 @@ export interface PatientDirectoryRow {
   demographicsEstimated: boolean;
   phone1: string | null;
   category: "oncology" | "non_oncology" | null;
+  identityDocumentVerified?: boolean;
   lastAppointment: {
     id: number;
     date: string;
@@ -1651,6 +1652,7 @@ export interface PatientDirectoryResponse {
 }
 
 export interface PatientDirectorySummary {
+  identityDocumentVerified?: boolean;
   demographics: {
     id: number;
     mrn: string | null;

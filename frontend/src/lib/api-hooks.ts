@@ -2,6 +2,7 @@ export * from "./api/doctor-portal-reporting";
 export * from "./api/auth";
 export * from "./api/documents-printing";
 export * from "./api/patients";
+export * from "./api/patient-identity-documents";
 export * from "./api/appointments-queue";
 export * from "./api/appointments";
 export * from "./api/clinical-workflows";

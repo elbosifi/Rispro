@@ -1,6 +1,7 @@
 import express, { NextFunction, Request, Response } from "express";
 import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { HttpError } from "../utils/http-error.js";
 import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
@@ -15,6 +16,7 @@ import {
 import { getRequestDocumentProtocolPolicy } from "../services/request-document-protocol-policy.js";
 
 export const documentsRouter = express.Router();
+const IDENTITY_DOCUMENT_ROLES = ["receptionist", "supervisor", "super_admin"];
 
 documentsRouter.use(requireAuth);
 
@@ -40,7 +42,12 @@ documentsRouter.get(
       appointmentId: asOptionalUserId(query.appointmentId),
       appointmentRefType: asOptionalString(query.appointmentRefType),
     });
-    res.json({ documents: documents.map(toPublicDocumentResponse) });
+    const visibleDocuments = documents.filter(
+      (document) =>
+        document.document_type !== "patient_identity_document" ||
+        IDENTITY_DOCUMENT_ROLES.includes(req.user!.role)
+    );
+    res.json({ documents: visibleDocuments.map(toPublicDocumentResponse) });
   })
 );
 
@@ -48,6 +55,12 @@ documentsRouter.get(
   "/:documentId/view",
   asyncRoute(async (req: Request, res: Response, next: NextFunction) => {
     const document = await getDocumentById(String(req.params.documentId || ""));
+    if (
+      document.document_type === "patient_identity_document" &&
+      !IDENTITY_DOCUMENT_ROLES.includes(req.user!.role)
+    ) {
+      throw new HttpError(403, "Not authorized to view patient identity documents.");
+    }
     const absolutePath = getDocumentAbsolutePath(document);
     res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
     res.setHeader(
@@ -75,8 +88,17 @@ documentsRouter.post(
       res.status(400).json({ error: { message: "incidentId is only supported by the incident attachment endpoint." } });
       return;
     }
+    const isIdentityUpload =
+      String(body.documentType ?? "").trim() === "patient_identity_document";
+    if (isIdentityUpload && !IDENTITY_DOCUMENT_ROLES.includes(req.user!.role)) {
+      throw new HttpError(403, "Not authorized to upload patient identity documents.");
+    }
     const requestedSource = asOptionalString(body.source);
-    const source = requestedSource === "naps2_webscan" ? requestedSource : "manual_upload";
+    const source = isIdentityUpload
+      ? requestedSource || "manual_upload"
+      : requestedSource === "naps2_webscan"
+        ? requestedSource
+        : "manual_upload";
     const document = await uploadDocument(
       {
         documentType: asOptionalString(body.documentType),
@@ -107,6 +129,10 @@ documentsRouter.delete(
   "/:documentId",
   requireAnyRole(["supervisor", "super_admin"]),
   asyncRoute(async (req: Request, res: Response) => {
+    const document = await getDocumentById(String(req.params.documentId || ""));
+    if (document.document_type === "patient_identity_document") {
+      throw new HttpError(409, "Patient identity documents cannot be deleted; upload a replacement or revoke verification.");
+    }
     const result = await deleteDocumentById(String(req.params.documentId || ""), req.user!.sub);
     res.json(result);
   })
