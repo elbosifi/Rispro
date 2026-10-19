@@ -287,7 +287,7 @@ test("modality board keeps a compact bilingual mobile worklist and stable deskto
   const widths = [360, 390, 430, 768, 1024, 1440];
   const screenshotRoot = path.join(process.cwd(), "test-results", "modality-mobile-ux");
   fs.mkdirSync(screenshotRoot, { recursive: true });
-  const results: Array<{ language: "en" | "ar"; width: number; firstCardY?: number }> = [];
+  const results: Array<{ language: "en" | "ar"; width: number; firstCardY?: number; headerHeight?: number; completedCardHeight?: number; secondCardBottom?: number; maxActionRight?: number }> = [];
 
   for (const language of ["en", "ar"] as const) {
     if (language === "ar") {
@@ -313,7 +313,23 @@ test("modality board keeps a compact bilingual mobile worklist and stable deskto
         await expect(firstCard).toBeVisible();
         const firstCardBox = await firstCard.boundingBox();
         expect(firstCardBox).not.toBeNull();
-        results.push({ language, width, firstCardY: firstCardBox!.y });
+        const headerBox = await page.getByTestId("modality-board-header").boundingBox();
+        const secondCard = mobileBoard.getByTestId(/modality-mobile-card-/).nth(1);
+        const completedCard = mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Reporting Finalize" }).first();
+        await expect(secondCard).toBeVisible();
+        await expect(completedCard).toBeVisible();
+        const secondCardBottom = await secondCard.evaluate((element) => element.getBoundingClientRect().bottom);
+        const completedCardHeight = await completedCard.evaluate((element) => element.getBoundingClientRect().height);
+        const actionRights = await firstCard.locator("button").evaluateAll((buttons) => buttons.slice(1).map((button) => button.getBoundingClientRect().right));
+        results.push({ language, width, firstCardY: firstCardBox!.y, headerHeight: headerBox?.height, completedCardHeight, secondCardBottom, maxActionRight: Math.max(...actionRights) });
+        if (width === 390) {
+          expect(headerBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(150);
+          expect(firstCardBox!.y).toBeLessThanOrEqual(350);
+          expect(completedCardHeight).toBeGreaterThanOrEqual(150);
+          expect(completedCardHeight).toBeLessThanOrEqual(190);
+          expect(secondCardBottom).toBeLessThanOrEqual(844);
+          expect(Math.max(...actionRights)).toBeLessThanOrEqual(width + 1);
+        }
         await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Waiting Warning Patient" }).first()).toContainText(language === "ar" ? "أكثر من 60 دقيقة" : "Waiting more than 60 minutes");
         await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Waiting Warning Patient" }).first()).toContainText(language === "ar" ? "لا يوجد معرف أساسي" : "No primary ID");
         await expect(mobileBoard.getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Acquisition Patient" }).first()).toContainText(language === "ar" ? "مستند واحد" : "1 doc");
@@ -334,4 +350,107 @@ test("modality board keeps a compact bilingual mobile worklist and stable deskto
     body: Buffer.from(JSON.stringify({ widths, languages: ["en", "ar"], syntheticCase: "E2E Acquisition Patient", results }, null, 2)),
     contentType: "application/json",
   });
+});
+
+test("modality mobile filters and operational actions remain reachable", async ({ page }) => {
+  await signInWithSession(page, "e2e_supervisor");
+  await page.setViewportSize({ width: 390, height: 844 });
+  const modalityResponse = await page.request.get("http://127.0.0.1:3100/api/v2/lookups/modalities");
+  expect(modalityResponse.ok()).toBeTruthy();
+  const modalityBody = await modalityResponse.json() as { items: Array<{ id: number; code?: string }> };
+  const modalityId = String(modalityBody.items.find((item) => item.code === "E2E_CT")?.id ?? modalityBody.items[0]?.id ?? "");
+  expect(modalityId).not.toBe("");
+
+  const openBoard = async () => {
+    await page.goto(`/modality?modalityId=${modalityId}&view=all`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("modality-board-mobile").getByTestId(/modality-mobile-card-/).first()).toBeVisible();
+  };
+  const mobileBoard = () => page.getByTestId("modality-board-mobile");
+  const card = (name: string) => mobileBoard().getByTestId(/modality-mobile-card-/).filter({ hasText: name }).first();
+
+  await openBoard();
+  await page.getByTestId("modality-mobile-stats").getByRole("button", { name: /^Waiting \d+$/ }).click();
+  await expect(page).toHaveURL(/view=waiting/);
+
+  await openBoard();
+  const filterTrigger = page.getByTestId("modality-mobile-filters");
+  await filterTrigger.click();
+  let filterMenu = page.getByRole("menu");
+  await expect(filterMenu).toBeVisible();
+  await expect(filterMenu.getByRole("menuitem", { name: "Missing documents" })).toBeVisible();
+  const filterMenuBox = await filterMenu.boundingBox();
+  expect(filterMenuBox).not.toBeNull();
+  expect(filterMenuBox!.x).toBeGreaterThanOrEqual(0);
+  expect(filterMenuBox!.x + filterMenuBox!.width).toBeLessThanOrEqual(390);
+  expect(filterMenuBox!.y).toBeGreaterThanOrEqual(0);
+  expect(filterMenuBox!.y + filterMenuBox!.height).toBeLessThanOrEqual(844);
+  await filterMenu.getByRole("menuitem", { name: "Missing documents" }).click();
+  await expect(card("E2E Acquisition Patient")).toHaveCount(0);
+
+  await filterTrigger.click();
+  filterMenu = page.getByRole("menu");
+  await filterMenu.getByRole("menuitem", { name: "Uploaded documents" }).click();
+  await expect(card("E2E Acquisition Patient")).toBeVisible();
+
+  await filterTrigger.click();
+  await page.getByRole("menu").getByRole("menuitem", { name: "Reset view" }).click();
+  await expect(page).toHaveURL(new RegExp(`/modality\\?modalityId=${modalityId}$`));
+  await expect(card("E2E Waiting Warning Patient")).toBeVisible();
+
+  await openBoard();
+  const queueCard = card("E2E Scheduled Patient");
+  const markArrived = queueCard.getByRole("button", { name: "Mark arrived" });
+  await expect(markArrived).toBeVisible();
+  await expect(markArrived).toBeEnabled();
+  await markArrived.click();
+  await expect(queueCard).toContainText("Arrived", { timeout: 10_000 });
+
+  const arrivedCard = card("E2E Arrived Patient");
+  await arrivedCard.getByRole("button", { name: "Complete" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm completion" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  const activeCard = card("E2E In Progress Patient");
+  await activeCard.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menu").getByRole("menuitem", { name: "Stop" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm discontinuation" })).toBeVisible();
+  const stopReason = page.getByRole("dialog").getByRole("textbox");
+  await expect(stopReason).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm discontinuation" })).toBeDisabled();
+  await stopReason.fill("Synthetic validation reason");
+  await expect(page.getByRole("button", { name: "Confirm discontinuation" })).toBeEnabled();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+
+  const completedCard = card("E2E Reporting Finalize");
+  await expect(completedCard.getByRole("button", { name: "History" })).toBeVisible();
+  await expect(completedCard.getByRole("button", { name: /Open documents/ })).toBeVisible();
+  await expect(completedCard.getByRole("button", { name: /CD|disc/i })).toBeVisible();
+  await completedCard.getByRole("button", { name: "More actions" }).click();
+  const moreMenu = page.getByRole("menu");
+  await expect(moreMenu.getByRole("menuitem", { name: "Print" })).toBeVisible();
+  await expect(moreMenu.getByRole("menuitem", { name: "Reopen" })).toBeVisible();
+  const moreMenuBox = await moreMenu.boundingBox();
+  expect(moreMenuBox).not.toBeNull();
+  expect(moreMenuBox!.x + moreMenuBox!.width).toBeLessThanOrEqual(390);
+  expect(moreMenuBox!.y + moreMenuBox!.height).toBeLessThanOrEqual(844);
+  await moreMenu.getByRole("menuitem", { name: "Reopen" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm reopen" })).toBeVisible();
+  const reopenReason = page.getByRole("dialog").getByRole("textbox");
+  await expect(page.getByRole("button", { name: "Confirm reopen" })).toBeDisabled();
+  await reopenReason.fill("Synthetic reopen validation reason");
+  await expect(page.getByRole("button", { name: "Confirm reopen" })).toBeEnabled();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+
+  await completedCard.getByTestId("modality-mobile-document-status").click();
+  await expect(page.getByRole("heading", { name: "Documents", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await completedCard.getByRole("button", { name: "History" }).click();
+  const drawer = page.getByTestId("selected-appointment-drawer");
+  await expect(drawer).toBeVisible();
+  const drawerBox = await drawer.boundingBox();
+  expect(drawerBox).not.toBeNull();
+  expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+  expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
 });

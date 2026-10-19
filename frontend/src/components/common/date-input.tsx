@@ -13,6 +13,7 @@ interface DateInputProps {
   name?: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  compact?: boolean;
 }
 
 function autoFormatDisplayDateDraft(rawValue: string): string {
@@ -30,7 +31,8 @@ export function DateInput({
   required = false,
   name,
   inputRef,
-  onKeyDown
+  onKeyDown,
+  compact = false,
 }: DateInputProps) {
   const { language } = useLanguage();
   const hiddenInputRef = useRef<HTMLInputElement>(null);
@@ -63,7 +65,7 @@ export function DateInput({
 
   return (
     <div>
-      <label htmlFor={inputId} className="block text-sm font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>
+        <label htmlFor={inputId} className={compact ? "sr-only" : "block text-sm font-semibold mb-1.5"} style={{ color: "var(--foreground)" }}>
         {label}
       </label>
       <div className="relative">
@@ -80,13 +82,13 @@ export function DateInput({
           onChange={(event) => setDraft(autoFormatDisplayDateDraft(event.target.value))}
           onKeyDown={onKeyDown}
           onBlur={commitDraft}
-          className="input-premium input-ltr w-full pr-12 disabled:opacity-50"
+          className={`${compact ? "!min-h-10 h-10 pr-10 text-sm" : "pr-12"} input-premium input-ltr w-full disabled:opacity-50`}
         />
         <button
           type="button"
           onClick={openPicker}
           disabled={disabled}
-          className="absolute inset-y-0 right-0 px-3 transition-colors duration-150 disabled:opacity-50 flex items-center justify-center"
+          className={`${compact ? "px-2.5" : "px-3"} absolute inset-y-0 right-0 flex items-center justify-center transition-colors duration-150 disabled:opacity-50`}
           style={{ color: "var(--text-muted)" }}
           aria-label={t(language, "toast.pickDate", { label })}
         >

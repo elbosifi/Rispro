@@ -10,10 +10,13 @@ import {
   History,
   ChevronRight,
   Disc3,
+  FileText,
+  MoreHorizontal,
   Printer,
   RefreshCw,
   RotateCcw,
   ScanLine,
+  SlidersHorizontal,
   TimerReset,
 } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
@@ -33,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  AnchoredMenu,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -555,6 +559,7 @@ export default function ModalityPage() {
   const scope = navigationState.scope;
   const boardFilter = navigationState.view;
   const [documentFilter, setDocumentFilter] = useState<DocumentFilter>("all");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [documentAppointmentId, setDocumentAppointmentId] = useState<number | null>(null);
   const selectedAppointmentId = navigationState.appointmentId;
   const [selectedAppointmentTab, setSelectedAppointmentTab] = useState<"appointment" | "previousStudies">("appointment");
@@ -932,6 +937,9 @@ export default function ModalityPage() {
     { filter: "in-progress" as const, label: t(language, "status.in-progress"), value: inProgressStatisticsCount, className: "border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" },
     { filter: "completed" as const, label: t(language, "status.completed"), value: completedCount, className: "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" },
   ];
+  const mobileSecondaryStatusFilters = new Set<BoardFilter>(["ready", "not-arrived", "problem"]);
+  const mobileSecondaryFilterActive = mobileSecondaryStatusFilters.has(boardFilter) || documentFilter !== "all";
+  const mobileSecondaryFilterCount = (mobileSecondaryStatusFilters.has(boardFilter) ? 1 : 0) + (documentFilter !== "all" ? 1 : 0);
   const selectedName = selectedAppointment ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName) : "";
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
@@ -942,9 +950,10 @@ export default function ModalityPage() {
 
   return (
     <div data-testid="modality-page-root" className="min-h-screen bg-slate-50 lg:bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-2 p-2.5 sm:gap-3 sm:p-4 lg:p-5">
-        <header data-testid="modality-board-header" className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-none lg:rounded-2xl lg:border-slate-200/80 lg:bg-white/90 lg:px-4 lg:py-3 lg:shadow-[0_12px_30px_rgba(15,23,42,0.06)] lg:backdrop-blur-md">
-          <div className={`flex flex-col gap-2 lg:gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
+      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-1 p-2.5 sm:gap-3 sm:p-4 lg:p-5">
+        <header data-testid="modality-board-header" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-none lg:rounded-2xl lg:border-slate-200/80 lg:bg-white/90 lg:px-4 lg:py-3 lg:shadow-[0_12px_30px_rgba(15,23,42,0.06)] lg:backdrop-blur-md">
+          {!isNarrowViewport ? <>
+          <div className={`hidden flex-col gap-2 lg:flex lg:gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
             <div className={`flex items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className="hidden h-11 w-11 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-sm lg:flex">
                 <span className="text-xs font-bold tracking-[0.18em]">NCCB</span>
@@ -1003,7 +1012,7 @@ export default function ModalityPage() {
               </Button>
             </div>
           </div>
-          <div className={`mt-2 grid grid-cols-2 items-end gap-2 border-t border-slate-100 pt-2 lg:mt-3 lg:flex lg:flex-wrap lg:gap-3 lg:pt-3 ${isArabic ? "lg:flex-row-reverse" : ""}`}>
+          <div className={`mt-2 hidden grid-cols-2 items-end gap-2 border-t border-slate-100 pt-2 lg:mt-3 lg:flex lg:flex-wrap lg:gap-3 lg:pt-3 ${isArabic ? "lg:flex-row-reverse" : ""}`}>
             <div className="col-span-2 min-w-0 lg:min-w-[220px] lg:flex-1">
               <Select
                 label={t(language, "modality.selectModality")}
@@ -1030,6 +1039,68 @@ export default function ModalityPage() {
               </div>
             </div>
           </div>
+          </> : null}
+
+          {isNarrowViewport ? <div data-testid="modality-mobile-toolbar" className={`lg:hidden ${isArabic ? "text-end" : "text-start"}`}>
+            <div className={`flex items-center justify-between gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h1 className="min-w-0 truncate text-base font-semibold tracking-tight text-foreground">{headerTitle}</h1>
+                <span className="shrink-0 text-[9px] font-medium text-muted-foreground">{chooseLocalized(language, "تحديث", "Updated")} {lastRefreshedText}</span>
+              </div>
+              <div className={`flex shrink-0 items-center gap-1 ${isArabic ? "flex-row-reverse" : ""}`}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleRefresh}
+                  disabled={isFetching}
+                  aria-label={isFetching ? chooseLocalized(language, "جار التحديث", "Refreshing") : t(language, "modality.refresh")}
+                  title={isFetching ? chooseLocalized(language, "جار التحديث", "Refreshing") : t(language, "modality.refresh")}
+                  className="!h-10 !w-10 !min-h-10 rounded-lg text-muted-foreground"
+                >
+                  <RefreshCw size={17} className={isFetching ? "animate-spin" : ""} />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={!currentModality?.isActive}
+                  aria-label={scanDocumentsAriaLabel ?? scanDocumentsLabel}
+                  title={scanDocumentsAriaLabel ?? scanDocumentsLabel}
+                  onClick={() => currentModality && navigate(`/modality/document-ingestion?modalityId=${currentModality.id}${requestScanFailedCount > 0 ? "&tab=failed" : ""}`)}
+                  className="relative !h-10 !w-10 !min-h-10 rounded-lg text-muted-foreground"
+                >
+                  <ScanLine size={17} aria-hidden="true" />
+                  {requestScanFailedCount > 0 ? <span className="absolute me-[-1.15rem] mt-[-1.15rem] rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white" aria-hidden="true">{requestScanFailedCount}</span> : null}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-1">
+              <Select
+                compact
+                label={t(language, "modality.selectModality")}
+                value={modalityId}
+                onChange={handleModalityChange}
+                options={[
+                  { value: "", label: t(language, "modality.selectModality") },
+                  ...modalities.filter((modality) => modality.isActive).map((modality) => ({
+                    value: String(modality.id),
+                    label: chooseLocalized(language, modality.nameAr, modality.nameEn) || modality.code || `Modality ${modality.id}`,
+                  })),
+                ]}
+                required
+              />
+            </div>
+
+            <div className={`mt-1 grid grid-cols-[minmax(7rem,8.25rem)_minmax(0,1fr)] items-center gap-2 ${isArabic ? "grid-cols-[minmax(0,1fr)_minmax(7rem,8.25rem)]" : ""}`}>
+              <DateInput compact label={t(language, "modality.date")} value={date} onChange={handleDateChange} disabled={scope === "all"} />
+              <div className="flex min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t(language, "modality.scope")}>
+                <Button type="button" variant={scope === "day" ? "primary" : "ghost"} size="sm" onClick={() => handleScopeChange("day")} aria-pressed={scope === "day"} className="!h-10 !min-h-10 min-w-0 flex-1 justify-center px-2 text-xs">{t(language, "modality.scopeToday")}</Button>
+                <Button type="button" variant={scope === "all" ? "primary" : "ghost"} size="sm" onClick={() => handleScopeChange("all")} aria-pressed={scope === "all"} className="!h-10 !min-h-10 min-w-0 flex-1 justify-center px-2 text-xs">{t(language, "modality.scopeAll")}</Button>
+              </div>
+            </div>
+          </div> : null}
         </header>
 
         <main className="flex flex-1 flex-col gap-3">
@@ -1091,7 +1162,7 @@ export default function ModalityPage() {
               </div> : null}
 
               {isNarrowViewport ? <>
-              <div data-testid="modality-mobile-stats" className="grid grid-cols-4 gap-1.5 px-2 pt-2 lg:hidden">
+              <div data-testid="modality-mobile-stats" className="grid grid-cols-4 gap-1.5 px-2 pt-1 lg:hidden">
                 {headerCounterChips.map((chip) => (
                   <button
                     key={chip.filter}
@@ -1100,7 +1171,7 @@ export default function ModalityPage() {
                     aria-pressed={boardFilter === chip.filter}
                     data-active={boardFilter === chip.filter ? "true" : "false"}
                     onClick={() => handleBoardFilterChange(chip.filter)}
-                    className={`flex min-h-12 min-w-0 flex-col items-center justify-center rounded-md border px-1 py-1 text-center text-[10px] font-semibold leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${chip.className} ${boardFilter === chip.filter ? "border-2 border-accent ring-2 ring-accent/30 ring-offset-1" : "border"}`}
+                    className={`flex h-11 min-w-0 flex-col items-center justify-center rounded-md border bg-white px-1 py-1 text-center text-[10px] font-semibold leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${chip.filter === "waiting" ? "text-amber-800" : chip.filter === "arrived" ? "text-sky-800" : chip.filter === "in-progress" ? "text-indigo-800" : "text-emerald-800"} ${boardFilter === chip.filter ? "border-2 border-accent bg-blue-50 ring-2 ring-accent/25 ring-offset-1" : "border-slate-200"}`}
                   >
                     <span className="truncate max-w-full">{chip.label}</span>
                     <span className="mt-0.5 font-mono text-base tabular-nums">{chip.value}</span>
@@ -1108,15 +1179,12 @@ export default function ModalityPage() {
                 ))}
               </div>
 
-              <div className="px-2 pb-2 pt-2 lg:hidden">
-                <div className="min-w-0 overflow-x-auto overscroll-x-contain">
-                  <div className="flex w-max min-w-full items-center gap-1.5" role="group" aria-label={chooseLocalized(language, "مرشحات قائمة العمل", "Worklist filters")}>
+              <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 lg:hidden">
+                <div className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain">
+                  <div className="flex w-max min-w-full items-center gap-1.5" role="group" aria-label={chooseLocalized(language, "المرشح الأساسي", "Primary status filter")}>
                     {([
                       ["operational", chooseLocalized(language, "نشط", "Operational")],
-                      ["ready", chooseLocalized(language, "جاهز", "Arrived/Ready")],
-                      ["not-arrived", chooseLocalized(language, "لم يصل", "Not arrived")],
                       ["completed", chooseLocalized(language, "مكتمل", "Completed")],
-                      ["problem", chooseLocalized(language, "مشكلة", "Problem")],
                       ["all", chooseLocalized(language, "الكل", "All")],
                     ] as const).map(([filter, label]) => (
                       <Button
@@ -1126,39 +1194,82 @@ export default function ModalityPage() {
                         size="sm"
                         onClick={() => handleBoardFilterChange(filter)}
                         aria-pressed={boardFilter === filter}
-                        className="h-10 shrink-0 px-3 text-xs focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                        className="!h-10 !min-h-10 shrink-0 px-2.5 text-xs focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                       >
                         {label}
                       </Button>
                     ))}
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-1.5 border-t border-slate-100 pt-2">
-                  <div className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain" role="group" aria-label={t(language, "modality.documents.filterLabel")}>
-                    <div className="flex w-max min-w-full items-center gap-1.5">
-                      <span className="me-1 shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "modality.documents.filterLabel")}</span>
-                      {(["all", "missing", "uploaded"] as const).map((filter) => (
-                        <Button
-                          key={filter}
-                          type="button"
-                          variant={documentFilter === filter ? "primary" : "secondary"}
-                          size="sm"
-                          className="h-10 shrink-0 px-3 text-xs focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                          aria-pressed={documentFilter === filter}
-                          aria-label={`${t(language, filter === "all" ? "modality.documents.filterAll" : filter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")} ${t(language, "modality.documents.filterLabel")}`}
-                          onClick={() => setDocumentFilter(filter)}
-                        >
-                          {t(language, filter === "all" ? "modality.documents.filterAll" : filter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  {hasResettableView ? (
-                    <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-10 shrink-0 px-3 text-xs">
-                      {chooseLocalized(language, "إعادة العرض", "Reset view")}
+                <AnchoredMenu
+                  open={mobileFiltersOpen}
+                  onOpenChange={setMobileFiltersOpen}
+                  dir={isArabic ? "rtl" : "ltr"}
+                  width={236}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant={mobileSecondaryFilterActive ? "primary" : "secondary"}
+                      size="sm"
+                      data-testid="modality-mobile-filters"
+                      aria-label={chooseLocalized(language, "الفلاتر الإضافية", "Additional filters")}
+                      className="h-9 shrink-0 gap-1.5 px-2.5 text-xs"
+                    >
+                      <SlidersHorizontal size={15} aria-hidden="true" />
+                      <span>{chooseLocalized(language, "فلاتر", "Filters")}</span>
+                      {mobileSecondaryFilterCount > 0 ? <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-white/80 px-1 text-[10px] font-bold">{mobileSecondaryFilterCount}</span> : null}
                     </Button>
+                  }
+                >
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{chooseLocalized(language, "حالات إضافية", "More status filters")}</div>
+                  {([
+                    ["ready", chooseLocalized(language, "جاهز", "Arrived/Ready")],
+                    ["not-arrived", chooseLocalized(language, "لم يصل", "Not arrived")],
+                    ["problem", chooseLocalized(language, "مشكلة", "Problem")],
+                  ] as const).map(([filter, label]) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      role="menuitem"
+                      aria-pressed={boardFilter === filter}
+                      className={`flex min-h-10 w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${boardFilter === filter ? "bg-blue-50 font-semibold text-accent" : "text-foreground"}`}
+                      onClick={() => handleBoardFilterChange(filter)}
+                    >
+                      <span>{label}</span>
+                      {boardFilter === filter ? <span aria-hidden="true">✓</span> : null}
+                    </button>
+                  ))}
+                  <div className="my-1 border-t border-border" aria-hidden="true" />
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "modality.documents.filterLabel")}</div>
+                  {(["all", "missing", "uploaded"] as const).map((filter) => {
+                    const label = filter === "all"
+                      ? chooseLocalized(language, "كل المستندات", "All documents")
+                      : filter === "missing"
+                        ? chooseLocalized(language, "المستندات المفقودة", "Missing documents")
+                        : chooseLocalized(language, "المستندات المرفوعة", "Uploaded documents");
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        role="menuitem"
+                        aria-pressed={documentFilter === filter}
+                        className={`flex min-h-10 w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${documentFilter === filter ? "bg-blue-50 font-semibold text-accent" : "text-foreground"}`}
+                        onClick={() => setDocumentFilter(filter)}
+                      >
+                        <span>{label}</span>
+                        {documentFilter === filter ? <span aria-hidden="true">✓</span> : null}
+                      </button>
+                    );
+                  })}
+                  {hasResettableView ? (
+                    <>
+                      <div className="my-1 border-t border-border" aria-hidden="true" />
+                      <button type="button" role="menuitem" className="flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" onClick={handleResetView}>
+                        {chooseLocalized(language, "إعادة العرض", "Reset view")}
+                      </button>
+                    </>
                   ) : null}
-                </div>
+                </AnchoredMenu>
               </div>
               </> : null}
 
@@ -2182,8 +2293,11 @@ function MobileModalityCard({
     : documentCount === 1
       ? t(language, "modality.documents.one")
       : t(language, "modality.documents.many", { count: documentCount });
-  const englishName = appointment.englishFullName?.trim();
-  const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
+  const arabicName = appointment.arabicFullName?.trim() || appointment.englishFullName?.trim() || chooseLocalized(language, "غير مسجل", "Not recorded");
+  const englishName = appointment.englishFullName?.trim() || appointment.arabicFullName?.trim() || chooseLocalized(language, "غير مسجل", "Not recorded");
+  const primaryName = language === "ar" ? arabicName : englishName;
+  const secondaryName = language === "ar" ? englishName : arabicName;
+  const showSecondaryName = Boolean(secondaryName && secondaryName !== primaryName);
   const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
   const acquisition = appointment.acquisitionSummary;
   const acquisitionMinutes = acquisition?.durationSeconds != null
@@ -2199,25 +2313,25 @@ function MobileModalityCard({
     <article
       data-testid={`modality-mobile-card-${appointment.id}`}
       data-waiting-warning={waitingWarning?.level}
-      className={`rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${selected ? "ring-2 ring-accent/35" : ""} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
+      className={`rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)] [&_.state-chip]:!px-1.5 [&_.state-chip]:!py-0.5 [&_.state-chip]:!text-xs [&_.state-chip]:!leading-4 ${selected ? "ring-2 ring-accent/35" : ""} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
     >
       <button
         type="button"
         className="block w-full rounded-md text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-        aria-label={chooseLocalized(language, `فتح موعد ${appointment.arabicFullName}`, `Open appointment for ${englishName || appointment.arabicFullName}`)}
+        aria-label={chooseLocalized(language, `فتح موعد ${primaryName}`, `Open appointment for ${primaryName}`)}
         onClick={() => onOpen(appointment.id)}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p lang="ar" dir="rtl" className="break-words text-base font-bold leading-6 text-foreground">{appointment.arabicFullName}</p>
-            {showEnglishName ? <p lang="en" dir="ltr" className="break-words text-xs leading-5 text-slate-600">{englishName}</p> : null}
+            <p lang={language} dir={language === "ar" ? "rtl" : "ltr"} className="break-words text-[15px] font-bold leading-5 text-foreground">{primaryName}</p>
+            {showSecondaryName ? <p lang={language === "ar" ? "en" : "ar"} dir={language === "ar" ? "ltr" : "rtl"} className="break-words text-[11px] leading-4 text-slate-600">{secondaryName}</p> : null}
           </div>
           <Badge variant={statusVariant(appointment.status)} size="sm" className="shrink-0 whitespace-nowrap">
             {normalizeStatusLabel(language, appointment.status)}
           </Badge>
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1 flex flex-wrap items-center gap-1">
           <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
           {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
             <span data-testid="modality-mobile-mri-screening"><MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact /></span>
@@ -2238,49 +2352,44 @@ function MobileModalityCard({
           ) : null}
         </div>
 
-        <p lang={isArabic ? "ar" : "en"} dir={isArabic ? "rtl" : "ltr"} className="mt-3 break-words text-sm font-semibold leading-5 text-slate-900">
+        <p lang={isArabic ? "ar" : "en"} dir={isArabic ? "rtl" : "ltr"} className="mt-1 break-words text-sm font-semibold leading-5 text-slate-900">
           {chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || chooseLocalized(language, "غير مسجل", "Not recorded")}
         </p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span>{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)}</span>
-          <span aria-hidden="true">·</span>
-          <code dir="ltr" className="font-mono-data [unicode-bidi:isolate] text-slate-700">{appointment.accessionNumber}</code>
-          {appointment.isAdditionalImaging ? <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span> : null}
-        </div>
+        {appointment.isAdditionalImaging ? <p className="mt-0.5 truncate text-[10px] text-violet-700">{chooseLocalized(language, "الأصل", "Original")}: <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.originalAccession || "—"}</span></p> : null}
 
-        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{chooseLocalized(language, "الوصول", "Arrival")}</p>
-            <p dir="ltr" className="mt-0.5 truncate font-mono text-sm font-semibold tabular-nums text-slate-900">{formatArrivalColumn(language, appointment)}</p>
+        <div className="mt-1 flex items-center justify-between gap-2 border-t border-slate-100 pt-1 text-[11px]">
+          <div className="min-w-0 flex items-center gap-1.5 text-muted-foreground">
+            <span className="shrink-0 font-semibold">{chooseLocalized(language, "الوصول", "Arrival")}</span>
+            <span dir="ltr" className="truncate font-mono font-semibold tabular-nums text-slate-900">{formatArrivalColumn(language, appointment)}</span>
+            <span aria-hidden="true">·</span>
+            <code dir="ltr" className="truncate font-mono-data [unicode-bidi:isolate] text-slate-700">{appointment.accessionNumber}</code>
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{chooseLocalized(language, "الانتظار", "Waiting")}</p>
-            {waitingInfo ? <p className="mt-0.5 truncate text-sm font-semibold text-slate-900" title={waitingInfo.title}>{waitingInfo.displayValue}</p> : <p className="mt-0.5 truncate text-sm font-semibold text-slate-700">{missingWaitingInfo?.label}</p>}
-            <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{waitingInfo?.source ?? missingWaitingInfo?.reason}</p>
+          <div className="min-w-0 shrink-0 text-end">
+            <span className="sr-only">{appointment.status === "completed" ? chooseLocalized(language, "مدة الانتظار", "Waited") : chooseLocalized(language, "الانتظار", "Waiting")}</span>
+            {waitingInfo ? <span className="truncate text-xs font-semibold text-slate-900" title={waitingInfo.title}>{waitingInfo.displayValue}</span> : <span className="truncate text-xs font-semibold text-slate-700">{missingWaitingInfo?.label}</span>}
           </div>
         </div>
 
-        {waitingWarning ? <p role="status" className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-900">{waitingWarning.title}</p> : null}
+        {waitingWarning ? <p role="status" className="mt-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-900">{waitingWarning.title}</p> : null}
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
           {appointment.patientPrimaryIdentifierValue ? <span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{primaryIdentifierText(language, appointment)}</span> : null}
-          <span>{formatAgeSex(language, appointment).replace(t(language, "common.na"), chooseLocalized(language, "غير مسجل", "Not recorded"))}</span>
           <span>{priorityDisplay(language, appointment)}</span>
+          {acquisitionText ? <span data-testid="modality-mobile-acquisition" className="max-w-full truncate font-medium" title={acquisitionText}>{chooseLocalized(language, "التصوير", "Acquisition")}: {acquisitionText}</span> : null}
+          {appointment.isAdditionalImaging ? <span className="max-w-full truncate text-violet-700">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, appointment.originalExamAr ?? appointment.originalExam, appointment.originalExamEn ?? appointment.originalExam) || "—"}</span> : null}
+          {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <span className="text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related appointments`)}</span> : null}
+          {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? <span className="font-semibold text-sky-700">{notesIndicator(language, appointment)}</span> : null}
         </div>
-        {acquisitionText ? <p data-testid="modality-mobile-acquisition" className="mt-2 truncate text-xs font-medium text-muted-foreground" title={acquisitionText}>{chooseLocalized(language, "التصوير", "Acquisition")}: {acquisitionText}</p> : null}
-        {appointment.isAdditionalImaging ? <p className="mt-1 truncate text-xs text-violet-700">{chooseLocalized(language, "الأصل", "Original")}: {chooseLocalized(language, appointment.originalExamAr ?? appointment.originalExam, appointment.originalExamEn ?? appointment.originalExam) || "—"}</p> : null}
-        {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p className="mt-1 text-xs text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related appointments`)}</p> : null}
-        {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? <p className="mt-1 text-xs font-semibold text-sky-700">{notesIndicator(language, appointment)}</p> : null}
       </button>
 
-      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2">
+      <div className="mt-1 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-t border-slate-100 pt-1">
         {canMarkArrived ? (
           <Button
             type="button"
             variant="secondary"
             size="sm"
             style={{ background: "var(--state-warning-bg)", borderColor: "var(--state-warning-border)", color: "var(--state-warning-text)" }}
-            className="min-h-11 flex-1 px-2 text-xs font-semibold"
+            className="!h-10 !min-h-10 min-w-0 flex-1 px-2 text-xs font-semibold"
             aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
             disabled={statusPending}
             onClick={() => onRequestStatusChange(appointment, "arrived")}
@@ -2294,7 +2403,7 @@ function MobileModalityCard({
             type="button"
             variant="primary"
             size="sm"
-            className="min-h-11 flex-1 px-2 text-xs font-semibold"
+            className="!h-10 !min-h-10 min-w-0 flex-1 px-2 text-xs font-semibold"
             aria-label={chooseLocalized(language, "إكمال", "Complete")}
             disabled={completePending}
             onClick={() => onRequestCompletion(appointment)}
@@ -2303,37 +2412,38 @@ function MobileModalityCard({
             <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
           </Button>
         ) : null}
-        <Button type="button" variant="secondary" size="sm" className="min-h-11 flex-1 px-2 text-xs" aria-label={chooseLocalized(language, "الدراسات السابقة", "History")} onClick={() => onOpenPreviousStudies(appointment.id)}>
-          <History size={14} />
-          <span>{t(language, "modality.previousStudies.history")}</span>
+        <Button type="button" variant="secondary" size="icon" className="!h-10 !w-10 !min-h-10 shrink-0 !px-0 text-xs" aria-label={chooseLocalized(language, "الدراسات السابقة", "History")} title={chooseLocalized(language, "الدراسات السابقة", "History")} onClick={() => onOpenPreviousStudies(appointment.id)}>
+          <History size={14} className="shrink-0" />
         </Button>
         <button
           type="button"
           data-testid="modality-mobile-document-status"
-          className={`inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-md border px-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${documentCount > 0 ? "state-chip--success" : "state-chip--neutral"}`}
+          className={`inline-flex !h-10 !w-10 !min-h-10 shrink-0 items-center justify-center gap-1 rounded-md border px-0 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${documentCount > 0 ? "state-chip--success" : "state-chip--neutral"}`}
           aria-label={t(language, "modality.documents.openWithStatus", { status: documentStatusLabel, accession: appointment.accessionNumber })}
+          title={t(language, "modality.documents.openWithStatus", { status: documentStatusLabel, accession: appointment.accessionNumber })}
           onClick={() => onOpenDocuments(appointment.id)}
         >
-          {documentCount > 0 ? <CheckCircle2 size={14} aria-hidden="true" /> : <span aria-hidden="true">—</span>}
-          <span>{documentStatusLabel}</span>
+          {documentCount > 0 ? <FileText size={14} className="shrink-0" aria-hidden="true" /> : <span aria-hidden="true">—</span>}
+          <span className="sr-only">{documentStatusLabel}</span>
+          {documentCount > 0 ? <span aria-hidden="true" className="text-[10px] font-bold">{documentCount}</span> : null}
         </button>
         {appointment.status === "completed" ? (
           <Button
             type="button"
             variant="secondary"
-            size="sm"
             aria-label={cdDetails.label}
             title={cdDetails.tooltip}
-            className={`min-h-11 flex-1 px-2 text-xs transition-colors ${cdState === "sending" ? "border-sky-300 bg-sky-50 text-sky-800" : cdState === "sent" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : cdState === "failed" ? "border-red-300 bg-red-50 text-red-800" : "border-slate-300 bg-white text-slate-800"}`}
+            size="icon"
+            className={`!h-10 !w-10 !min-h-10 shrink-0 !px-0 text-xs transition-colors ${cdState === "sending" ? "border-sky-300 bg-sky-50 text-sky-800" : cdState === "sent" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : cdState === "failed" ? "border-red-300 bg-red-50 text-red-800" : "border-slate-300 bg-white text-slate-800"}`}
             disabled={cdDisabled}
             onClick={() => onOpenCd(appointment)}
           >
-            <Disc3 size={14} className={cdState === "sending" ? "animate-spin motion-reduce:animate-none" : undefined} />
-            <span>{cdState === "sending" ? t(language, "modality.cd.sending") : cdState === "sent" ? `${t(language, "modality.cd.sent")}${cdSuccessfulCount > 1 ? ` ×${cdSuccessfulCount}` : ""}` : cdState === "failed" ? t(language, "modality.cd.failed") : t(language, "modality.cd")}</span>
+            <Disc3 size={14} className={`shrink-0 ${cdState === "sending" ? "animate-spin motion-reduce:animate-none" : ""}`} />
+            <span className="sr-only">{cdState === "sending" ? t(language, "modality.cd.sending") : cdState === "sent" ? `${t(language, "modality.cd.sent")}${cdSuccessfulCount > 1 ? ` ×${cdSuccessfulCount}` : ""}` : cdState === "failed" ? t(language, "modality.cd.failed") : t(language, "modality.cd")}</span>
           </Button>
         ) : null}
-        <Button type="button" variant="secondary" size="sm" aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")} title={chooseLocalized(language, "إجراءات إضافية", "More actions")} className="min-h-11 w-11 shrink-0 px-2 text-slate-800" disabled={statusPending} onClick={(event) => onOpenMoreMenu(event, appointment)}>
-          <span aria-hidden="true" className="-translate-y-px text-xl font-semibold leading-none">…</span>
+        <Button type="button" variant="secondary" size="icon" aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")} title={chooseLocalized(language, "إجراءات إضافية", "More actions")} className="!h-10 !w-10 !min-h-10 shrink-0 !px-0 text-slate-800" disabled={statusPending} onClick={(event) => onOpenMoreMenu(event, appointment)}>
+          <MoreHorizontal size={17} className="shrink-0" aria-hidden="true" />
         </Button>
       </div>
     </article>
