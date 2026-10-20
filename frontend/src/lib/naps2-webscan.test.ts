@@ -8,6 +8,9 @@ function response(input: { ok?: boolean; status?: number; headers?: Record<strin
 
 const capabilities = '<scan:ScannerCapabilities xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"><scan:DocumentFormatExt>application/pdf</scan:DocumentFormatExt><scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt></scan:ScannerCapabilities>';
 const emptyFeederError = "<Error><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type></Error>";
+function scannerStatusXml(jobId: string, values: { uuid?: string; uri?: string; completed?: string; pending?: string; state?: string } = {}) {
+  return `<scan:ScannerStatus xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"><scan:Jobs><scan:JobInfo><pwg:JobUuid>${values.uuid ?? jobId}</pwg:JobUuid><pwg:JobUri>${values.uri ?? `/eSCL/ScanJobs/${jobId}`}</pwg:JobUri>${values.completed === undefined ? "<pwg:ImagesCompleted>0</pwg:ImagesCompleted>" : `<pwg:ImagesCompleted>${values.completed}</pwg:ImagesCompleted>`}${values.pending === undefined ? "<pwg:ImagesToTransfer>0</pwg:ImagesToTransfer>" : `<pwg:ImagesToTransfer>${values.pending}</pwg:ImagesToTransfer>`}<pwg:JobState>${values.state ?? "Aborted"}</pwg:JobState></scan:JobInfo></scan:Jobs></scan:ScannerStatus>`;
+}
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: () => ({ promise: Promise.resolve({ numPages: 2 }), destroy: vi.fn().mockResolvedValue(undefined) }) }));
 const jpeg = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03, 0x11, 0x00, 0xff, 0xd9])], { type: "image/jpeg" });
 
@@ -16,6 +19,7 @@ function mockScanner(options: {
   errorDetails?: (jobId: string) => string;
   errorDetailsStatus?: number;
   failErrorDetails?: boolean;
+  scannerStatus?: (jobId: string, init?: RequestInit) => Response | Promise<Response>;
   createJob?: (jobId: string, body: string) => Response | Promise<Response>;
   deleteJob?: (jobId: string) => void | Promise<void>;
 } = {}) {
@@ -25,6 +29,10 @@ function mockScanner(options: {
   const events: string[] = [];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("ScannerCapabilities")) return response();
+    if (url.endsWith("ScannerStatus")) {
+      events.push(`STATUS ${jobIndex}`);
+      return options.scannerStatus?.(String(jobIndex), init) ?? response({ status: 404 });
+    }
     if (url.endsWith("ScanJobs")) {
       jobIndex += 1;
       const jobId = String(jobIndex);
@@ -151,6 +159,7 @@ describe("naps2 direct eSCL adapter", () => {
           ? response({ blob: new Blob(["%PDF-1.4 flatbed"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
           : response({ status: 404 }),
       errorDetails: () => emptyFeederError,
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId, { uuid: "not-the-job-id" }) }),
     });
     const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto", fileName: "test-page.pdf" });
 
@@ -163,14 +172,79 @@ describe("naps2 direct eSCL adapter", () => {
     expect(result.pageCount).toBe(2);
     expect(result.paperSourceUsed).toBe("flatbed");
     expect(result.source).toBe("naps2_webscan");
+    expect(scanner.events).toContain("DELETE 1");
+    expect(scanner.events).toContain("DELETE 2");
   });
 
   it.each(["feeder", "flatbed", "duplex"] as const)("does not switch an explicit %s selection after a confirmed empty-feeder error", async (source) => {
-    const scanner = mockScanner({ nextDocument: () => response({ status: 500 }), errorDetails: () => emptyFeederError });
+    const scanner = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId) }),
+    });
     await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source })).rejects.toThrow(source === "feeder" ? "document feeder is empty" : "scanner error");
     expect(scanner.jobBodies).toHaveLength(1);
     expect(scanner.jobBodies[0]).toContain(source === "flatbed" ? "<pwg:InputSource>Platen</pwg:InputSource>" : "<pwg:InputSource>Feeder</pwg:InputSource>");
     expect(scanner.jobBodies[0]).toContain(source === "duplex" ? "<scan:Duplex>true</scan:Duplex>" : "<scan:ColorMode>");
+  });
+
+  it.each([
+    { description: "a completed physical image", xml: scannerStatusXml("1", { completed: "1" }) },
+    { description: "an image still awaiting transfer", xml: scannerStatusXml("1", { pending: "1" }) },
+    { description: "a missing matching job", xml: scannerStatusXml("another-job") },
+    {
+      description: "multiple matching jobs",
+      xml: scannerStatusXml("1").replace(
+        "</scan:Jobs></scan:ScannerStatus>",
+        `${scannerStatusXml("1").match(/<scan:JobInfo>[\s\S]*?<\/scan:JobInfo>/)?.[0]}</scan:Jobs></scan:ScannerStatus>`,
+      ),
+    },
+    { description: "a missing counter", xml: scannerStatusXml("1").replace("<pwg:ImagesCompleted>0</pwg:ImagesCompleted>", "") },
+    { description: "an invalid counter", xml: scannerStatusXml("1", { completed: "unknown" }) },
+    { description: "a still-processing job", xml: scannerStatusXml("1", { state: "Processing" }) },
+    { description: "malformed XML", xml: "<scan:ScannerStatus" },
+  ])("does not fall back when ScannerStatus reports $description", async ({ xml }) => {
+    const scanner = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      scannerStatus: () => response({ text: xml }),
+    });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when ScannerStatus fails or is unavailable", async () => {
+    const httpFailure = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      scannerStatus: () => response({ status: 503 }),
+    });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(httpFailure.jobBodies).toHaveLength(1);
+
+    const unavailable = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      scannerStatus: () => { throw new TypeError("blocked status request"); },
+    });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(unavailable.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when ScannerStatus times out", async () => {
+    vi.useFakeTimers();
+    const scanner = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      scannerStatus: (_jobId, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+    });
+    const pending = scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
+    const assertion = expect(pending).rejects.toThrow("scanner error");
+    await vi.advanceTimersByTimeAsync(3_000);
+    await assertion;
+    expect(scanner.jobBodies).toHaveLength(1);
   });
 
   it.each([
@@ -230,6 +304,7 @@ describe("naps2 direct eSCL adapter", () => {
         ? response({ blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
         : response({ status: 500 }),
       errorDetails: () => emptyFeederError,
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId) }),
     });
     await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
     expect(scanner.jobBodies).toHaveLength(1);
@@ -239,6 +314,7 @@ describe("naps2 direct eSCL adapter", () => {
     const scanner = mockScanner({
       nextDocument: () => response({ status: 500 }),
       errorDetails: (jobId) => jobId === "1" ? emptyFeederError : "<Error><Type>NAPS2.Scan.Exceptions.DeviceCommunicationException</Type></Error>",
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId) }),
     });
     await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
     expect(scanner.jobBodies).toHaveLength(2);
@@ -253,6 +329,7 @@ describe("naps2 direct eSCL adapter", () => {
           ? response({ blob: new Blob(["%PDF-1.4 fallback"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
           : response({ status: 404 }),
       errorDetails: () => emptyFeederError,
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId) }),
       deleteJob: async (jobId) => { if (jobId === "1") throw new TypeError("cleanup unavailable"); },
     });
     const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
@@ -260,6 +337,7 @@ describe("naps2 direct eSCL adapter", () => {
     expect(result.paperSourceUsed).toBe("flatbed");
     expect(scanner.jobBodies).toHaveLength(2);
     expect(scanner.events.indexOf("DELETE 1")).toBeLessThan(scanner.events.indexOf("POST 2"));
+    expect(scanner.events.indexOf("STATUS 1")).toBeLessThan(scanner.events.indexOf("DELETE 1"));
   });
 
   it("keeps the concurrency guard active while the Flatbed attempt is being created and releases it after failure", async () => {
@@ -267,6 +345,7 @@ describe("naps2 direct eSCL adapter", () => {
     const scanner = mockScanner({
       nextDocument: () => response({ status: 500 }),
       errorDetails: () => emptyFeederError,
+      scannerStatus: (jobId) => response({ text: scannerStatusXml(jobId) }),
       createJob: (jobId, body) => body.includes("<pwg:InputSource>Platen</pwg:InputSource>")
         ? new Promise<Response>((resolve) => { releaseFlatbed = resolve; })
         : response({ status: 201, headers: { Location: `/eSCL/ScanJobs/${jobId}` } }),

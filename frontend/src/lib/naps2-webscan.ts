@@ -219,6 +219,77 @@ async function readErrorDetails(jobUrl: URL): Promise<{ message: string; confirm
   }
 }
 
+function directElementText(parent: Element, localName: string): string | null {
+  const matches = Array.from(parent.children).filter((element) =>
+    element.localName === localName &&
+    (element.namespaceURI === "http://www.pwg.org/schemas/2010/12/sm" ||
+      element.namespaceURI === "http://schemas.hp.com/imaging/escl/2011/05/03")
+  );
+  return matches.length === 1 ? matches[0].textContent?.trim() ?? null : null;
+}
+
+function nonnegativeInteger(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+async function confirmNoPagesAcquired(jobUrl: URL): Promise<boolean> {
+  try {
+    const result = await request(
+      new URL("/eSCL/ScannerStatus", jobUrl.origin).toString(),
+      { method: "GET" },
+      async (response) => ({ ok: response.ok, text: await response.text() }),
+      3_000,
+    );
+    if (!result.ok) return false;
+
+    const xml = new DOMParser().parseFromString(result.text, "application/xml");
+    const root = xml.documentElement;
+    if (
+      xml.getElementsByTagName("parsererror").length ||
+      root.localName !== "ScannerStatus" ||
+      root.namespaceURI !== "http://schemas.hp.com/imaging/escl/2011/05/03"
+    ) {
+      return false;
+    }
+
+    const jobId = jobUrl.pathname.replace(/\/$/, "").split("/").pop();
+    if (!jobId) return false;
+    const matchingJobs = Array.from(xml.getElementsByTagNameNS("*", "JobInfo")).filter((job) => {
+      const jobUuid = directElementText(job, "JobUuid");
+      const jobUri = directElementText(job, "JobUri");
+      let uriMatches = false;
+      if (jobUri) {
+        try {
+          const parsedJobUri = new URL(jobUri, jobUrl.origin);
+          uriMatches = parsedJobUri.origin === jobUrl.origin &&
+            !parsedJobUri.username && !parsedJobUri.password &&
+            parsedJobUri.pathname.replace(/\/$/, "") === jobUrl.pathname.replace(/\/$/, "") &&
+            !parsedJobUri.search && !parsedJobUri.hash;
+        } catch {
+          uriMatches = false;
+        }
+      }
+      return jobUuid === jobId || uriMatches;
+    });
+
+    if (matchingJobs.length !== 1) return false;
+    const job = matchingJobs[0];
+    const imagesCompleted = nonnegativeInteger(directElementText(job, "ImagesCompleted"));
+    const imagesToTransfer = nonnegativeInteger(directElementText(job, "ImagesToTransfer"));
+    const jobState = directElementText(job, "JobState");
+    const terminalStates = new Set(["Aborted", "Canceled", "Cancelled", "Complete", "Completed"]);
+
+    return imagesCompleted === 0 &&
+      imagesToTransfer === 0 &&
+      jobState !== null && terminalStates.has(jobState);
+  } catch {
+    // A failed or blocked status request cannot establish that the device acquired no pages.
+    return false;
+  }
+}
+
 function responseMimeType(response: Response, blob: Blob): string {
   return (response.headers.get("Content-Type") || blob.type || "").split(";", 1)[0].trim().toLowerCase();
 }
@@ -241,7 +312,7 @@ async function readScannedDocuments(jobUrl: URL, source: Naps2PhysicalSource): P
     }
     if (response.status === 500) {
       const details = await readErrorDetails(jobUrl);
-      if (source === "feeder" && documents.length === 0 && details.confirmedEmptyFeeder) {
+      if (source === "feeder" && documents.length === 0 && details.confirmedEmptyFeeder && await confirmNoPagesAcquired(jobUrl)) {
         throw new ConfirmedFeederEmptyError();
       }
       throw new Error(`NAPS2 reported a scanner error.${details.message}`);

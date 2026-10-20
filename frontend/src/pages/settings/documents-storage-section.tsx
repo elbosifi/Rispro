@@ -39,6 +39,8 @@ type DocumentsStorageFormOverride = {
   value: DocumentsStorageForm;
 };
 
+const DPI_PRESETS = ["150", "200", "300", "400", "600"];
+
 function suggestedRisproHttpAddress(): string {
   // A visible proposal only. The protected Save action explicitly approves it.
   if (typeof window === "undefined") return "";
@@ -49,7 +51,13 @@ function suggestedRisproHttpAddress(): string {
 function normalizeDocumentsStorageForm(
   settings: Record<string, string> | undefined
 ): DocumentsStorageForm {
-  const savedScanDpi = String(settings?.scan_dpi ?? "");
+  const savedScanDpi = String(settings?.scan_dpi ?? "").trim();
+  const dpiNumber = Number(savedScanDpi);
+  const validDpi = /^\d+$/.test(savedScanDpi) &&
+    Number.isInteger(dpiNumber) &&
+    dpiNumber >= 50 &&
+    dpiNumber <= 1200;
+  const selectedDpi = validDpi ? String(dpiNumber) : "200";
 
   return {
     requireRequestDocumentForProtocolQueue: String(settings?.require_request_document_for_protocol_queue || "disabled").toLowerCase() === "enabled",
@@ -67,7 +75,7 @@ function normalizeDocumentsStorageForm(
     naps2SetupRisproOrigin: settings?.naps2_setup_rispro_origin ?? suggestedRisproHttpAddress(),
     naps2AllowedOrigins: settings?.naps2_webscan_allowed_origins || "",
     naps2FirewallSources: settings?.naps2_setup_firewall_sources || "",
-    scanDpi: ["150", "200", "300", "400", "600"].includes(savedScanDpi) ? savedScanDpi : "200",
+    scanDpi: selectedDpi,
     scanColorMode: settings?.scan_color_mode || "grayscale",
     scannerSource: normalizeNaps2Source(settings?.scanner_source),
   };
@@ -272,6 +280,7 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanDpi")}</label>
             <select value={form.scanDpi} onChange={(e) => updateForm("scanDpi", e.target.value)} className="input-premium w-full">
+              {!DPI_PRESETS.includes(form.scanDpi) && <option value={form.scanDpi}>{form.scanDpi} DPI (current setting)</option>}
               <option value="150">150 DPI</option>
               <option value="200">200 DPI</option>
               <option value="300">300 DPI</option>

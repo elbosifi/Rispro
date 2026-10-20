@@ -186,7 +186,7 @@ describe("Documents & Uploads protocol queue setting", () => {
   });
 
   it("defaults invalid saved DPI and source values while exposing Auto above Feeder", async () => {
-    fetchSettings.mockResolvedValue({ scan_dpi: "125", scanner_source: "unknown" });
+    fetchSettings.mockResolvedValue({ scan_dpi: "1201", scanner_source: "unknown" });
     renderSection();
 
     expect(await screen.findByDisplayValue("200 DPI")).toBeTruthy();
@@ -196,6 +196,60 @@ describe("Documents & Uploads protocol queue setting", () => {
       "auto", "feeder", "flatbed", "duplex",
     ]);
     expect(screen.getByText("Auto tries the feeder first and switches to the flatbed only when NAPS2 explicitly reports an empty feeder.")).toBeTruthy();
+  });
+
+  it.each(["1200", "75"])("preserves custom saved DPI %s when saving the form", async (dpi) => {
+    fetchSettings.mockResolvedValue({
+      scan_dpi: dpi,
+      scan_color_mode: "color",
+      scanner_source: "duplex",
+      storage_path: "/existing/document-storage",
+    });
+    renderSection();
+
+    await screen.findByText("Scan DPI");
+    const dpiSelect = selectForLabel("Scan DPI");
+    await waitFor(() => expect(dpiSelect.value).toBe(dpi));
+    expect(Array.from(dpiSelect.options).map((option) => option.textContent)).toEqual([
+      `${dpi} DPI (current setting)`,
+      "150 DPI", "200 DPI", "300 DPI", "400 DPI", "600 DPI",
+    ]);
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({
+      entries: expect.arrayContaining([
+        { key: "scan_dpi", value: { value: dpi } },
+        { key: "scan_color_mode", value: { value: "color" } },
+        { key: "scanner_source", value: { value: "duplex" } },
+        { key: "storage_path", value: { value: "/existing/document-storage" } },
+      ]),
+    })));
+  });
+
+  it("allows a standard DPI preset to replace a custom saved value", async () => {
+    fetchSettings.mockResolvedValue({ scan_dpi: "1200", scanner_source: "auto" });
+    renderSection();
+
+    await screen.findByText("Scan DPI");
+    const dpiSelect = selectForLabel("Scan DPI");
+    await waitFor(() => expect(dpiSelect.value).toBe("1200"));
+    await userEvent.selectOptions(dpiSelect, "300");
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({
+      entries: expect.arrayContaining([{ key: "scan_dpi", value: { value: "300" } }]),
+    })));
+  });
+
+  it.each([
+    { description: "missing", settings: {} },
+    { description: "malformed", settings: { scan_dpi: "not-a-number" } },
+    { description: "below the valid range", settings: { scan_dpi: "49" } },
+    { description: "above the valid range", settings: { scan_dpi: "1201" } },
+  ])("defaults $description saved DPI to 200", async ({ settings }) => {
+    fetchSettings.mockResolvedValue(settings);
+    renderSection();
+    expect(await screen.findByDisplayValue("200 DPI")).toBeTruthy();
   });
 
   it("persists an explicitly selected Auto scanner source", async () => {
