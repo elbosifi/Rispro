@@ -383,6 +383,38 @@ describe("PatientForm workflow hardening", () => {
     const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(updatePayload.demographicsEstimated).toBe(false);
     expect(updatePayload.category).toBe("oncology");
+    expect(updatePayload.englishFullName).toBeUndefined();
+    expect(updatePayload.regenerateEnglishName).toBeUndefined();
+  });
+
+  it("submits Arabic corrections for server-side English regeneration", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "edit", patientId: 9 });
+
+    const arabicInput = await screen.findByLabelText(/Arabic Full Name/i);
+    await user.clear(arabicInput);
+    await user.type(arabicInput, "محمد حسن علي");
+    await user.click(screen.getByRole("button", { name: /Update Patient/i }));
+
+    await waitFor(() => expect(updatePatient).toHaveBeenCalled());
+    const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(String(updatePayload.arabicFullName).trim()).toBe("محمد حسن علي");
+    expect(updatePayload.englishFullName).toBeUndefined();
+    expect(updatePayload.regenerateEnglishName).toBeUndefined();
+  });
+
+  it("marks an unchanged Arabic name for explicit server-side regeneration", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "edit", patientId: 9 });
+
+    await screen.findByLabelText(/Arabic Full Name/i);
+    await user.click(screen.getByRole("button", { name: /Regenerate/i }));
+    await user.click(screen.getByRole("button", { name: /Update Patient/i }));
+
+    await waitFor(() => expect(updatePatient).toHaveBeenCalled());
+    const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(updatePayload.englishFullName).toBeUndefined();
+    expect(updatePayload.regenerateEnglishName).toBe(true);
   });
 
   it("shows delete only to super_admin in edit mode", async () => {

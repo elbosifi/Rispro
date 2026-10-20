@@ -239,6 +239,37 @@ test("createPatient: allows joined spelling when blocked word is not separate", 
   }
 });
 
+test("updatePatient: unresolved regenerated English name rejects before changing the patient", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const previousRule = await readIdentifierRequiredRule();
+  const patientId = fx.patientAId;
+  const patientBefore = await getPatientById(patientId);
+  const unresolvedArabicName = `مجهول ${uniqueSuffix()}`;
+  try {
+    await setIdentifierRequiredRule("optional");
+    await assert.rejects(
+      () => updatePatient(
+        patientId,
+        minimalPatientPayload(uniqueSuffix(), {
+          arabicFullName: unresolvedArabicName,
+          englishFullName: undefined,
+          autoGenerateEnglish: true,
+        }),
+        fx.receptionistUserId
+      ),
+      /Cannot auto-generate English name\. Unresolved Arabic token\(s\):/
+    );
+
+    const patientAfter = await getPatientById(patientId);
+    assert.equal(patientAfter.arabic_full_name, patientBefore.arabic_full_name);
+    assert.equal(patientAfter.english_full_name, patientBefore.english_full_name);
+  } finally {
+    await setIdentifierRequiredRule(previousRule);
+    await fx.cleanup();
+  }
+});
+
 test("createPatient: required identifier setting accepts non-national primary identifier", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const fx = await createFixture();

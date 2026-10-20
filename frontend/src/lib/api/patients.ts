@@ -10,6 +10,7 @@ import type {
 } from "@/types/api";
 
 type RawRecord = Record<string, unknown>;
+export type PatientUpdatePayload = Partial<Patient> & { regenerateEnglishName?: boolean };
 
 // -- Patient Search --
 export async function searchPatients(query: string): Promise<Patient[]> {
@@ -38,7 +39,7 @@ export async function fetchPatientById(id: number): Promise<Patient> {
   return mapPatient(raw.patient);
 }
 
-export async function updatePatient(id: number, payload: Partial<Patient>) {
+export async function updatePatient(id: number, payload: PatientUpdatePayload) {
   const raw = await api<{ patient: RawRecord }>(`/patients/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)

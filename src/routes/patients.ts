@@ -19,7 +19,9 @@ import {
   mergePatients,
   previewNextPatientMrn,
   searchPatients,
-  updatePatient
+  updatePatient,
+  type PatientPayload,
+  type PatientRow
 } from "../services/patient-service.js";
 import {
   getPatientIdentityDocumentState,
@@ -44,6 +46,36 @@ function parseOptionalDirectoryEnum<T extends string>(value: unknown, fieldName:
   const stringValue = String(value);
   if ((allowed as readonly string[]).includes(stringValue)) return stringValue as T;
   throw new HttpError(400, `${fieldName} is invalid.`);
+}
+
+export function preparePatientUpdatePayload(
+  payload: UnknownRecord,
+  existingPatient: Pick<PatientRow, "arabic_full_name" | "english_full_name">
+): PatientPayload {
+  const { regenerateEnglishName, ...patientPayload } = payload;
+  const existingArabicName = existingPatient.arabic_full_name.trim();
+  const requestedArabicName = String(patientPayload.arabicFullName ?? "").trim();
+  const arabicNameChanged =
+    Object.prototype.hasOwnProperty.call(patientPayload, "arabicFullName") &&
+    requestedArabicName !== existingArabicName;
+  const explicitRegeneration = regenerateEnglishName === true;
+  const existingEnglishName = existingPatient.english_full_name?.trim() ?? "";
+  const requestedEnglishName = String(patientPayload.englishFullName ?? "").trim();
+
+  if (
+    Object.prototype.hasOwnProperty.call(patientPayload, "englishFullName") &&
+    requestedEnglishName !== existingEnglishName &&
+    !arabicNameChanged &&
+    !explicitRegeneration
+  ) {
+    throw new HttpError(403, "English patient name is generated from the name dictionary and cannot be edited manually.");
+  }
+
+  if (arabicNameChanged || explicitRegeneration) {
+    return { ...patientPayload, englishFullName: undefined, autoGenerateEnglish: true } as PatientPayload;
+  }
+
+  return { ...patientPayload, englishFullName: existingPatient.english_full_name ?? undefined, autoGenerateEnglish: false } as PatientPayload;
 }
 
 patientsRouter.get(
@@ -201,28 +233,7 @@ patientsRouter.put(
     const userId: UserId = request.user.sub;
     const payload = request.body ?? {};
     const existingPatient = await getPatientById(patientId);
-    const existingEnglishName = existingPatient.english_full_name;
-    if (existingEnglishName) {
-      if (
-        Object.prototype.hasOwnProperty.call(payload, "englishFullName") &&
-        String(payload.englishFullName ?? "").trim() !== existingEnglishName.trim()
-      ) {
-        throw new HttpError(403, "English patient name is generated from the name dictionary and cannot be edited manually.");
-      }
-      const patient = await updatePatient(
-        patientId,
-        { ...payload, englishFullName: existingEnglishName, autoGenerateEnglish: false },
-        userId
-      );
-      res.json({ patient });
-      return;
-    }
-
-    const patient = await updatePatient(
-      patientId,
-      { ...payload, englishFullName: undefined, autoGenerateEnglish: true },
-      userId
-    );
+    const patient = await updatePatient(patientId, preparePatientUpdatePayload(payload, existingPatient), userId);
     res.json({ patient });
   })
 );

@@ -13,7 +13,8 @@ import {
   upsertNameDictionaryEntry,
   fetchPatientById,
   updatePatient,
-  deletePatient
+  deletePatient,
+  type PatientUpdatePayload
 } from "@/lib/api-hooks";
 import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
 import { normalizeArabic } from "@/lib/arabic-normalize";
@@ -176,6 +177,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [addingToken, setAddingToken] = useState<string | null>(null);
   const [addTokenError, setAddTokenError] = useState<string | null>(null);
   const [localDictionary, setLocalDictionary] = useState<DictionaryEntry[]>([]);
+  const [regenerateEnglishName, setRegenerateEnglishName] = useState(false);
   const prevArabicTokenCountRef = useRef(0);
   const queryClient = useQueryClient();
   const arabicFullNameRef = useRef<HTMLInputElement>(null);
@@ -225,6 +227,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setForm(formState);
       setOriginalNationalId(formState.identifierType === "national_id" ? formState.identifierValue : "");
       setNationalIdConfirmedByPaste(null);
+      setRegenerateEnglishName(false);
       prevArabicTokenCountRef.current = existingPatient.arabicFullName
         ? existingPatient.arabicFullName.trim().split(/\s+/).filter(Boolean).length
         : 0;
@@ -313,8 +316,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
   });
   const updateMutation = useMutation({
-    mutationFn: (data: Partial<Patient>) => updatePatient(patientId!, data),
+    mutationFn: (data: PatientUpdatePayload) => updatePatient(patientId!, data),
     onSuccess: (patient) => {
+      setRegenerateEnglishName(false);
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
       showToast(language === "ar" ? `تم تحديث المريض: ${patient.arabicFullName}` : `Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
@@ -552,6 +556,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleRegenerateEnglishName = () => {
     const r = generateEnglishFromDictionary(form.arabicFullName, dictionary);
     setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
+    setRegenerateEnglishName(true);
     if (r.missingTokens.length > 0) {
       setMissingTokenInputs((p) => {
         const n = { ...p };
@@ -577,6 +582,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setMissingTokenInputs((p) => { const n = { ...p }; delete n[token]; return n; });
       const r = generateEnglishFromDictionary(form.arabicFullName, [...serverDictionary, ...localDictionary, ne]);
       setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
+      setRegenerateEnglishName(true);
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
     } catch (err: unknown) {
       setAddTokenError(getUnknownErrorMessage(err) || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
@@ -661,7 +667,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
     const payload = {
       arabicFullName: form.arabicFullName,
-      englishFullName: form.englishFullName || undefined,
+      englishFullName: isEdit ? undefined : form.englishFullName || undefined,
       identifierType: form.identifierType,
       identifierValue: form.identifierValue || undefined,
       category: form.category,
@@ -675,6 +681,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       phone2: form.phone2 ? normalizePhoneInput(form.phone2) : undefined,
       address: form.address || undefined,
       autoGenerateEnglish: true,
+      regenerateEnglishName: isEdit && regenerateEnglishName || undefined,
       identifiers: form.identifiers
         .map((entry) => ({
           typeCode: entry.typeCode,
