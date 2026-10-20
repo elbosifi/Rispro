@@ -5,9 +5,12 @@ import {
   adminMoveDocumentsToStorage,
   adminTestDocumentStorageConnectivity,
   fetchSettings,
+  fetchIntegrationStatus,
   saveSettings,
 } from "@/lib/api-hooks";
-import { scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
+import { normalizeNaps2Origin, resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
+import { Button } from "@/components/shared/Button";
 import { useLanguage } from "@/providers/language-provider";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
 
@@ -22,9 +25,6 @@ type DocumentsStorageForm = {
   haHotStorageRetentionHours: string;
   naps2WebScanEnabled: boolean;
   naps2WebScanEndpoint: string;
-  scannerAppEnabled: boolean;
-  scannerAppDownloadUrl: string;
-  scanSessionExpiryMinutes: string;
   scanDpi: string;
   scanColorMode: string;
   scannerSource: string;
@@ -50,10 +50,7 @@ function normalizeDocumentsStorageForm(
     ),
     haHotStorageRetentionHours: settings?.ha_hot_storage_retention_hours || "48",
     naps2WebScanEnabled: String(settings?.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled",
-    naps2WebScanEndpoint: settings?.naps2_webscan_endpoint || "http://127.0.0.1:9801",
-    scannerAppEnabled: String(settings?.scanner_app_enabled || "enabled").toLowerCase() === "enabled",
-    scannerAppDownloadUrl: settings?.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi",
-    scanSessionExpiryMinutes: settings?.scan_session_expiry_minutes || "15",
+    naps2WebScanEndpoint: settings?.naps2_webscan_endpoint || "",
     scanDpi: settings?.scan_dpi || "200",
     scanColorMode: settings?.scan_color_mode || "grayscale",
     scannerSource: settings?.scanner_source || "feeder",
@@ -112,11 +109,9 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           { key: "ha_hot_storage_enabled", value: { value: String(form.haHotStorageEnabled) } },
           { key: "ha_hot_storage_retention_hours", value: { value: form.haHotStorageRetentionHours } },
           { key: "naps2_webscan_enabled", value: { value: form.naps2WebScanEnabled ? "enabled" : "disabled" } },
-          { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint } },
+          { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint.trim() ? normalizeNaps2Origin(form.naps2WebScanEndpoint) : "" } },
           { key: "scanner_bridge_mode", value: { value: form.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
-          { key: "scanner_app_enabled", value: { value: form.scannerAppEnabled ? "enabled" : "disabled" } },
-          { key: "scanner_app_download_url", value: { value: form.scannerAppDownloadUrl } },
-          { key: "scan_session_expiry_minutes", value: { value: form.scanSessionExpiryMinutes } },
+          { key: "scanner_app_enabled", value: { value: "disabled" } },
           { key: "scan_dpi", value: { value: form.scanDpi } },
           { key: "scan_color_mode", value: { value: form.scanColorMode } },
           { key: "scanner_source", value: { value: form.scannerSource } },
@@ -144,15 +139,15 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
   });
 
   const testNaps2Mutation = useMutation({
-    mutationFn: () => scanAppointmentRequest({
-      endpoint: form.naps2WebScanEndpoint,
-      dpi: Number(form.scanDpi) || 200,
-      colorMode: form.scanColorMode === "color" ? "color" : "grayscale",
-      source: form.scannerSource === "flatbed" ? "flatbed" : form.scannerSource === "duplex" ? "duplex" : "feeder",
-      fileName: "naps2-test-scan.pdf",
-    }),
+    mutationFn: async () => {
+      const status = await fetchIntegrationStatus();
+      const endpoint = resolveEffectiveNaps2Endpoint(status.scanner.naps2WebScanEndpoint).endpoint;
+      const result = await getNaps2WebScanStatus(endpoint, status.scanner.naps2WebScanAllowedOrigins);
+      if (!result.available) throw new Error(result.message);
+      return result;
+    },
     onSuccess: (result) => {
-      setResultMessage(t("settings.documents.naps2TestOk", { pageCount: result.pageCount, fileName: result.file.name }));
+      setResultMessage(language === "ar" ? `تم الاتصال بالماسح: ${result.endpoint}. لم يتم مسح ورق أو رفع مستند.` : `Connected to ${result.endpoint}. No paper was scanned or uploaded.`);
     },
     onError: (err: unknown) => {
       setResultMessage(err instanceof Error ? err.message : t("settings.documents.naps2TestFailed", { message: "NAPS2.WebScan is not reachable." }));
@@ -244,33 +239,6 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
             <label className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={form.scannerAppEnabled}
-                onChange={(e) => updateForm("scannerAppEnabled", e.target.checked)}
-              />
-              {t("settings.documents.scannerAppEnabled")}
-            </label>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerAppDownloadUrl")}</label>
-            <input
-              value={form.scannerAppDownloadUrl}
-              onChange={(e) => updateForm("scannerAppDownloadUrl", e.target.value)}
-              placeholder="/assets/downloads/RISproScannerSetup.msi"
-              className="input-premium w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">{t("settings.documents.scanSessionExpiryMinutes")}</label>
-            <select value={form.scanSessionExpiryMinutes} onChange={(e) => updateForm("scanSessionExpiryMinutes", e.target.value)} className="input-premium w-full">
-              <option value="10">10</option>
-              <option value="15">15</option>
-              <option value="30">30</option>
-            </select>
-          </div>
-          <div className="flex items-end">
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
                 checked={form.naps2WebScanEnabled}
                 onChange={(e) => updateForm("naps2WebScanEnabled", e.target.checked)}
               />
@@ -282,7 +250,7 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
             <input
               value={form.naps2WebScanEndpoint}
               onChange={(e) => updateForm("naps2WebScanEndpoint", e.target.value)}
-              placeholder="http://127.0.0.1:9801"
+              placeholder="Automatic local discovery"
               className="input-premium w-full"
             />
           </div>
@@ -310,16 +278,16 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
+          <Button
             type="button"
-            className="btn-secondary text-sm"
+            variant="secondary"
             onClick={() => testNaps2Mutation.mutate()}
             disabled={testNaps2Mutation.isPending}
           >
-            {testNaps2Mutation.isPending ? t("settings.documents.naps2Testing") : t("settings.documents.naps2Test")}
-          </button>
+            {testNaps2Mutation.isPending ? t("settings.documents.naps2Testing") : language === "ar" ? "اختبار اتصال الماسح" : "Test scanner connection"}
+          </Button>
         </div>
-        <p className="text-xs description-center">{t("settings.documents.naps2Help")}</p>
+        <p className="text-xs text-muted-foreground">{language === "ar" ? "هذه إعدادات عامة وليست تأكيداً لجاهزية الجهاز. اترك عنوان الماسح فارغاً للاكتشاف المحلي. احفظ التغييرات قبل اختبار الاتصال." : "Global configuration does not confirm workstation readiness. Leave the system endpoint empty for automatic local discovery. Save changes before testing the effective workstation connection."} <a className="underline" href="/workstation/printing">{language === "ar" ? "إعداد محطة العمل واختبار المسح" : "Workstation setup and test scan"}</a></p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

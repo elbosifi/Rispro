@@ -31,6 +31,7 @@ import { createTeachingRouter } from "./modules/teaching/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { reportingBoardPublicRouter } from "./modules/doctor-portal/reporting-board-public-routes.js";
 import { publicPrintingBootstrapRouter } from "./routes/public-printing-bootstrap-routes.js";
+import { scannerBootstrapRouter } from "./routes/scanner-bootstrap-routes.js";
 import { validateConfiguredQzIdentityAtStartup } from "./services/qz-signing-service.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
@@ -170,6 +171,7 @@ export function createApp(): Application {
   app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/integrations", integrationsRouter);
+  app.use("/api/scanner-bootstrap", scannerBootstrapRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/backup-control", backupControlRouter);
   app.use("/api/request-scans", requestScansRouter);

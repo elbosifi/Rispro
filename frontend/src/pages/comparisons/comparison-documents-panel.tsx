@@ -41,6 +41,9 @@ export function ComparisonDocumentsPanel({
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [failedScanUpload, setFailedScanUpload] = useState<{ requestId: number; files: File[] } | null>(null);
+  const failedScans = failedScanUpload?.requestId === comparisonRequestId ? failedScanUpload.files : [];
+  const scanLock = useRef(false);
   const [file, setFile] = useState<File | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<RequestDocument | null>(null);
   const queryKey = useMemo(() => ["comparison-documents", comparisonRequestId], [comparisonRequestId]);
@@ -62,9 +65,9 @@ export function ComparisonDocumentsPanel({
   };
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ sourceFile, source }: { sourceFile: File; source: "manual_upload" | "naps2_webscan" }) =>
+    mutationFn: async ({ sourceFile, source, targetRequestId }: { sourceFile: File; source: "manual_upload" | "naps2_webscan"; targetRequestId?: number }) =>
       uploadComparisonDocument({
-        comparisonRequestId,
+        comparisonRequestId: targetRequestId ?? comparisonRequestId,
         originalFilename: sourceFile.name,
         mimeType: sourceFile.type || "application/octet-stream",
         fileContentBase64: await fileToBase64(sourceFile),
@@ -89,14 +92,24 @@ export function ComparisonDocumentsPanel({
       const enabled = Boolean(scanner?.naps2WebScanEnabled || scanner?.scannerBridgeMode === "naps2_webscan");
       if (!enabled) throw new Error(t(language, "comparisons.scanDisabled"));
       const endpoint = resolveEffectiveNaps2Endpoint(scanner?.naps2WebScanEndpoint);
-      const result = await scanAppointmentRequest({
-        endpoint: endpoint.endpoint,
-        dpi: Number(scanner?.scanDpi || 200),
-        colorMode: scanner?.scanColorMode === "color" ? "color" : "grayscale",
-        source: scanner?.scannerSource === "flatbed" ? "flatbed" : scanner?.scannerSource === "duplex" ? "duplex" : "feeder",
-        fileName: `comparison-${comparisonRequestId}-papers.pdf`,
-      });
-      return uploadMutation.mutateAsync({ sourceFile: result.file, source: result.source });
+      if (scanLock.current) throw new Error("A scan is already in progress.");
+      scanLock.current = true;
+      try {
+        const result = await scanAppointmentRequest({
+          endpoint: endpoint.endpoint,
+          allowedOrigins: scanner?.naps2WebScanAllowedOrigins,
+          dpi: Number(scanner?.scanDpi || 200),
+          colorMode: scanner?.scanColorMode === "color" ? "color" : "grayscale",
+          source: scanner?.scannerSource === "flatbed" ? "flatbed" : scanner?.scannerSource === "duplex" ? "duplex" : "feeder",
+          fileName: `comparison-${comparisonRequestId}-papers.pdf`,
+        });
+        const pending = result.files?.length ? [...result.files] : [result.file];
+        while (pending.length) {
+          try { await uploadMutation.mutateAsync({ sourceFile: pending[0], source: result.source, targetRequestId: comparisonRequestId }); pending.shift(); }
+          catch (error) { setFailedScanUpload({ requestId: comparisonRequestId, files: pending }); throw error; }
+        }
+        setFailedScanUpload(null);
+      } finally { scanLock.current = false; }
     },
     onError: (error) => pushToast({
       type: "error",
@@ -154,7 +167,7 @@ export function ComparisonDocumentsPanel({
               </Button>
             ) : null}
             {naps2Enabled ? (
-              <Button size="sm" variant="secondary" type="button" disabled={busy} onClick={() => scanMutation.mutate()}>
+              <Button size="sm" variant="secondary" type="button" disabled={busy || failedScans.length > 0} onClick={() => scanMutation.mutate()}>
                 {scanMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={14} />}
                 {t(language, "comparisons.scan")}
               </Button>
@@ -163,6 +176,14 @@ export function ComparisonDocumentsPanel({
         ) : null}
       </div>
 
+      {failedScans.length ? <div className="mt-2 text-sm" role="status">{failedScans.length} scanned document(s) still need uploading. Keep this page open.
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void (async () => {
+          const pending = [...failedScans];
+          try { while (pending.length) { await uploadMutation.mutateAsync({ sourceFile: pending[0], source: "naps2_webscan", targetRequestId: comparisonRequestId }); pending.shift(); } }
+          catch { /* Existing upload error toast explains the failure. */ }
+          finally { setFailedScanUpload({ requestId: comparisonRequestId, files: pending }); }
+        })()}>Retry scanned uploads</Button>
+      </div> : null}
       {documentsQuery.error ? <p className="mt-2 text-xs text-red-600">{t(language, "comparisons.papersLoadError")}</p> : null}
       {documents.length ? (
         <ul className="mt-3 grid gap-2">

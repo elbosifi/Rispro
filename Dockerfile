@@ -114,6 +114,7 @@ COPY frontend/src/assets/fonts/ ./frontend/src/assets/fonts/
 # Runtime bootstrap template used by the public QZ workstation endpoints.
 # Keep it in the shared runtime base so both production targets contain it.
 COPY scripts/qz/windows/ ./scripts/qz/windows/
+COPY scripts/naps2/windows/ ./scripts/naps2/windows/
 
 # Deployment-only Teaching Anatomy provisioner. It runs after the app is healthy
 # and writes the pinned atlas into the existing /app/storage volume.

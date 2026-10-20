@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
+import { Input } from "@/components/shared/Input";
+import type { IntegrationStatus } from "@/lib/api/documents-printing";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
 import { fetchIntegrationStatus } from "@/lib/api-hooks";
-import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
+import { getNaps2WebScanStatus, scanAppointmentRequest, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
 import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
 import {
   loadWorkstationNaps2Settings,
-  normalizeNaps2Origin,
   resetWorkstationNaps2Settings,
   resolveEffectiveNaps2Endpoint,
   saveWorkstationNaps2Settings,
@@ -35,80 +36,104 @@ export default function WorkstationPrintingPage() {
   return <div className="mx-auto w-full max-w-6xl space-y-4"><div><h1 className="text-2xl font-semibold">Workstation printing and scanning</h1><p className="text-sm text-muted-foreground">Configure QZ Tray, physical printer mappings, and the NAPS2 scanner endpoint for this browser only.</p></div><WorkstationSetupCard /><QzTrayPrintingSection /><WorkstationNaps2Section /></div>;
 }
 
-function WorkstationNaps2Section() {
+export function WorkstationNaps2Section() {
   const [endpointInput, setEndpointInput] = useState(() => loadWorkstationNaps2Settings()?.endpoint || "");
-  const [globalEndpoint, setGlobalEndpoint] = useState("");
+  const [scanner, setScanner] = useState<IntegrationStatus["scanner"] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [testing, setTesting] = useState(false);
+  const [connection, setConnection] = useState<Naps2WebScanStatus | null>(null);
+  const [scanMessage, setScanMessage] = useState("No test scan completed.");
   const [, setSettingsRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
     void fetchIntegrationStatus().then((status) => {
-      if (active) setGlobalEndpoint(status?.scanner?.naps2WebScanEndpoint || "");
-    }).catch(() => {
-      if (active) setGlobalEndpoint("");
+      if (active) setScanner(status.scanner);
+    }).catch((error: unknown) => {
+      if (active) setLoadError(error instanceof Error ? error.message : "Unable to load scanner configuration.");
     });
     return () => { active = false; };
   }, []);
 
-  const effective = resolveEffectiveNaps2Endpoint(globalEndpoint);
-  const sourceLabel = effective.source === "workstation"
-    ? "Workstation override"
-    : effective.source === "system"
-      ? "System default"
-      : "Automatic localhost probe";
-  const effectiveLabel = effective.endpoint || "http://127.0.0.1:9801, then http://localhost:9801";
+  let effective: ReturnType<typeof resolveEffectiveNaps2Endpoint> = { endpoint: undefined, source: "localhost" };
+  let endpointError = "";
+  try { effective = resolveEffectiveNaps2Endpoint(scanner?.naps2WebScanEndpoint); }
+  catch (error) { endpointError = error instanceof Error ? error.message : "Invalid system scanner endpoint."; }
+  const enabled = scanner?.naps2WebScanEnabled === true;
+  const sourceLabel = effective.source === "workstation" ? "Workstation override" : effective.source === "system" ? "System default" : "Automatic localhost discovery";
 
+  function clearResult() { setConnection(null); setScanMessage("No test scan completed."); }
   function saveEndpoint() {
     try {
       const saved = saveWorkstationNaps2Settings(endpointInput);
       setEndpointInput(saved.endpoint);
       setSettingsRevision((current) => current + 1);
-      pushToast({ type: "success", title: "NAPS2 endpoint saved", message: "This browser will use the workstation scanner origin." });
+      clearResult();
+      pushToast({ type: "success", title: "NAPS2 endpoint saved", message: "Test the connection to verify this browser can access the scanner." });
     } catch (error) {
-      pushToast({ type: "error", title: "Invalid NAPS2 endpoint", message: error instanceof Error ? error.message : "Enter a valid NAPS2 HTTP or HTTPS origin." });
+      pushToast({ type: "error", title: "Invalid NAPS2 endpoint", message: error instanceof Error ? error.message : "Enter a valid scanner origin." });
     }
   }
-
-  async function testConnection() {
+  async function test(scan: boolean) {
+    if (testing || !scanner || endpointError) return;
     setTesting(true);
     try {
-      const endpoint = normalizeNaps2Origin(endpointInput);
-      const status = await getNaps2WebScanStatus(endpoint);
-      if (!status.available) throw new Error(status.message || "NAPS2 Scanner Sharing is not available on this workstation.");
-      pushToast({ type: "success", title: "NAPS2 connection available", message: `Connected to ${status.endpoint || endpoint}.` });
+      // Resolve saved settings at click time, including immediately after a reset.
+      const endpoint = resolveEffectiveNaps2Endpoint(scanner.naps2WebScanEndpoint).endpoint;
+      const status = await getNaps2WebScanStatus(endpoint, scanner.naps2WebScanAllowedOrigins);
+      setConnection(status);
+      if (!status.available) throw new Error(status.message);
+      if (scan) {
+        setScanMessage("Scanning test paper…");
+        const result = await scanAppointmentRequest({ endpoint: status.endpoint, allowedOrigins: scanner.naps2WebScanAllowedOrigins, dpi: Number(scanner.scanDpi || 200), colorMode: scanner.scanColorMode === "color" ? "color" : "grayscale", source: scanner.scannerSource === "flatbed" ? "flatbed" : scanner.scannerSource === "duplex" ? "duplex" : "feeder", fileName: "naps2-test-scan.pdf" });
+        setScanMessage(`Test scan succeeded: ${result.pageCount} page(s). No patient document was uploaded or linked.`);
+      }
     } catch (error) {
-      pushToast({ type: "error", title: "NAPS2 connection failed", message: error instanceof Error ? error.message : "Unable to connect to NAPS2 Scanner Sharing." });
-    } finally {
-      setTesting(false);
-    }
+      const message = error instanceof Error ? error.message : "Unable to access NAPS2 Scanner Sharing.";
+      if (scan) setScanMessage(`Test scan failed: ${message}`);
+      else setConnection({ available: false, message });
+      pushToast({ type: "error", title: scan ? "NAPS2 test scan failed" : "NAPS2 connection failed", message });
+    } finally { setTesting(false); }
   }
-
   function resetEndpoint() {
     resetWorkstationNaps2Settings();
     setEndpointInput("");
     setSettingsRevision((current) => current + 1);
-    pushToast({ type: "success", title: "NAPS2 endpoint reset", message: "This browser will use the system scanner endpoint." });
+    clearResult();
   }
 
   return (
     <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="workstation-naps2-title">
-      <div>
-        <h2 id="workstation-naps2-title" className="font-semibold">Workstation NAPS2 scanner</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Override only the NAPS2 eSCL origin used by this browser. Scanning must remain enabled in Documents &amp; Uploads.</p>
-      </div>
-      <label className="mt-4 block text-sm font-medium" htmlFor="workstation-naps2-endpoint">NAPS2 eSCL endpoint</label>
-      <input id="workstation-naps2-endpoint" className="input-premium mt-1 h-10 w-full" type="url" value={endpointInput} placeholder="http://scanner-workstation:9801" onChange={(event) => setEndpointInput(event.target.value)} />
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <StatusItem label="Effective endpoint" value={effectiveLabel} mono />
+      <h2 id="workstation-naps2-title" className="font-semibold">Workstation NAPS2 scanner</h2>
+      <ol className="mt-2 list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+        <li>Install official NAPS2, select the scanner, enable Scanner Sharing and its background-sharing option.</li>
+        <li>Download the setup and run it as administrator on this Windows workstation. Follow any action reported in its log.</li>
+      </ol>
+      <div className="mt-3"><DownloadLink href={effective.source === "workstation" ? `/api/scanner-bootstrap/windows-setup?endpoint=${encodeURIComponent(effective.endpoint!)}` : "/api/scanner-bootstrap/windows-setup"} filename="RISpro-NAPS2-Setup.cmd" primary>Download NAPS2 setup</DownloadLink></div>
+      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+        <StatusItem label="Global scanning" value={scanner ? enabled ? "Enabled" : "Disabled in Documents & Uploads" : "Configuration unavailable"} />
+        <StatusItem label="Scanner connection status" value={connection ? connection.available ? "Connected — capabilities verified" : "Action required" : "Not tested on this workstation"} />
+        <StatusItem label="Effective scanner endpoint" value={effective.endpoint || connection?.endpoint || "Automatic HTTP loopback discovery, ports 9801–9850"} mono />
         <StatusItem label="Endpoint source" value={sourceLabel} />
       </dl>
-      <p className="mt-3 text-xs text-muted-foreground">Remote origins must be deployment-approved in CSP and may also require HTTPS certificate trust, CORS, Local Network Access permission, and firewall access.</p>
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={resetEndpoint}>Reset to system default</Button>
-        <Button type="button" variant="secondary" onClick={() => void testConnection()} disabled={testing}>{testing ? "Testing…" : "Test connection"}</Button>
-        <Button type="button" onClick={saveEndpoint}>Save workstation endpoint</Button>
+      {loadError || endpointError ? <p className="mt-3 text-sm text-destructive" role="alert">{loadError || endpointError}</p> : null}
+      {connection?.message ? <p className="mt-3 text-sm" role="status">{connection.message}</p> : null}
+      <p className="mt-3 text-sm" role="status">{scanMessage}</p>
+      <p className="mt-2 text-xs text-muted-foreground">Test connection reads scanner capabilities without moving paper. Test scan physically scans the selected feeder/flatbed; use test paper. It does not attach anything to a patient. Patient attachment is confirmed separately after upload. Manual PDF/image upload remains available.</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" variant="secondary" onClick={() => void test(false)} disabled={testing || !scanner || Boolean(endpointError)}>Test connection</Button>
+        <Button type="button" onClick={() => void test(true)} disabled={testing || !enabled || Boolean(endpointError)}>Test scan</Button>
       </div>
+      <details className="mt-4 border-t border-border pt-3">
+        <summary className="cursor-pointer text-sm font-semibold">Advanced endpoint override</summary>
+        <label className="mt-3 block text-sm font-medium" htmlFor="workstation-naps2-endpoint">NAPS2 eSCL endpoint</label>
+        <Input id="workstation-naps2-endpoint" className="mt-1 h-10 w-full" type="url" value={endpointInput} placeholder="http://scanner-host-IP:9801" onChange={(event) => setEndpointInput(event.target.value)} />
+        <p className="mt-2 text-xs text-muted-foreground">Save before testing. An explicit remote endpoint remains authoritative and must be approved in the server CSP. Reset restores the system endpoint or automatic local discovery.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={resetEndpoint} disabled={testing}>Reset to system default</Button>
+          <Button type="button" onClick={saveEndpoint} disabled={testing}>Save workstation endpoint</Button>
+        </div>
+      </details>
     </section>
   );
 }

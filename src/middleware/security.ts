@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import { allowInsecureQzWebsocket, env } from "../config/env.js";
+import { allowInsecureQzWebsocket } from "../config/env.js";
+import { naps2ConnectOrigins } from "../config/naps2.js";
 
 function buildConnectSources(): string[] {
   const qzHosts = ["localhost", "localhost.qz.io", "127.0.0.1"];
@@ -7,24 +8,13 @@ function buildConnectSources(): string[] {
   const qzInsecurePorts = [8182, 8283, 8384, 8485];
   const sources = [
     "'self'",
-    "http://127.0.0.1:9801",
-    "http://localhost:9801",
+    ...naps2ConnectOrigins(),
     ...qzHosts.flatMap((host) => qzSecurePorts.map((port) => `wss://${host}:${port}`)),
   ];
 
   if (allowInsecureQzWebsocket()) {
     sources.push(...qzHosts.flatMap((host) => qzInsecurePorts.map((port) => `ws://${host}:${port}`)));
   }
-
-  if (env.naps2WebscanEndpoint) {
-    try {
-      sources.push(new URL(env.naps2WebscanEndpoint).origin);
-    } catch {
-      // Invalid optional endpoint should not break app startup or headers.
-    }
-  }
-
-  sources.push(...env.naps2WebscanAllowedOrigins);
 
   return Array.from(new Set(sources));
 }

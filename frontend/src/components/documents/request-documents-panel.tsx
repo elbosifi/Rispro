@@ -329,12 +329,8 @@ export function RequestDocumentsPanel({
       integrationStatus?.scanner?.naps2WebScanEnabled ||
       integrationStatus?.scanner?.scannerBridgeMode === "naps2_webscan"
     );
-  const scannerAppEnabled =
-    enableLocalScan &&
-    canAttachDocuments &&
-    hasAppointmentContext &&
-    Boolean(integrationStatus?.scanner) &&
-    integrationStatus?.scanner?.scannerAppEnabled !== false;
+  // Retain rollback handlers, but expose only NAPS2 in the supported workflow.
+  const scannerAppEnabled = false;
   const scannerAppDownloadUrl =
     integrationStatus?.scanner?.scannerAppDownloadUrl || "/assets/downloads/RISproScannerSetup.msi";
   const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
@@ -456,7 +452,9 @@ export function RequestDocumentsPanel({
     }
   }
 
+  const scanRequestLock = useRef(false);
   async function handleScanAndAttach() {
+    if (scanRequestLock.current) return;
     if (scanUploading || retryingFailedUploads || uploadMutation.isPending) return;
     if (!naps2ScannerEnabled) {
       pushToast({
@@ -467,6 +465,7 @@ export function RequestDocumentsPanel({
       return;
     }
 
+    scanRequestLock.current = true;
     setScanUploading(true);
     setFailedScanUploads([]);
 
@@ -492,6 +491,7 @@ export function RequestDocumentsPanel({
       const effectiveScanEndpoint = resolveEffectiveNaps2Endpoint(integrationStatus?.scanner?.naps2WebScanEndpoint);
       const scanResult = await scanAppointmentRequest({
         endpoint: effectiveScanEndpoint.endpoint,
+        allowedOrigins: integrationStatus?.scanner?.naps2WebScanAllowedOrigins,
         dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
         colorMode: scanColorMode,
         source: scanSource,
@@ -543,6 +543,7 @@ export function RequestDocumentsPanel({
         message: err instanceof Error ? err.message : t("documents.scanFailedMessage"),
       });
     } finally {
+      scanRequestLock.current = false;
       setScanUploading(false);
     }
   }

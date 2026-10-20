@@ -5,16 +5,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentsStorageSection from "./documents-storage-section";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 
-const { fetchSettings, saveSettings } = vi.hoisted(() => ({ fetchSettings: vi.fn(), saveSettings: vi.fn() }));
+const { fetchSettings, saveSettings, fetchIntegrationStatus, connection, scan } = vi.hoisted(() => ({ fetchSettings: vi.fn(), saveSettings: vi.fn(), fetchIntegrationStatus: vi.fn(), connection: vi.fn(), scan: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   adminBulkDeleteDocuments: vi.fn(),
   adminMoveDocumentsToStorage: vi.fn(),
   adminTestDocumentStorageConnectivity: vi.fn(),
   fetchSettings,
+  fetchIntegrationStatus,
   saveSettings,
 }));
-vi.mock("@/lib/naps2-webscan", () => ({ scanAppointmentRequest: vi.fn() }));
+vi.mock("@/lib/naps2-webscan", () => ({ scanAppointmentRequest: scan, getNaps2WebScanStatus: connection }));
 vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: "en", t: (key: TranslationKey) => translate("en", key) }),
 }));
@@ -30,6 +31,10 @@ function renderSection() {
 
 describe("Documents & Uploads protocol queue setting", () => {
   beforeEach(() => {
+    localStorage.clear();
+    fetchIntegrationStatus.mockResolvedValue({ scanner: { naps2WebScanEndpoint: "http://saved:9803" } });
+    connection.mockResolvedValue({ available: true, endpoint: "http://saved:9803" });
+    scan.mockClear();
     fetchSettings.mockReset();
     saveSettings.mockReset();
     fetchSettings.mockResolvedValue({ require_request_document_for_protocol_queue: "disabled" });
@@ -118,4 +123,15 @@ describe("Documents & Uploads protocol queue setting", () => {
     expect(retention.disabled).toBe(false);
     expect(retention.value).toBe("168");
   });
+  it("tests saved effective workstation connectivity without scanning or exposing companion settings", async () => {
+    localStorage.setItem("rispro.naps2WebScanWorkstation.v1", JSON.stringify({ version: 1, endpoint: "http://override:9812", updatedAt: new Date().toISOString() }));
+    renderSection();
+    await userEvent.click(await screen.findByRole("button", { name: "Test scanner connection" }));
+    await waitFor(() => expect(connection).toHaveBeenCalledWith("http://override:9812", undefined));
+    expect(scan).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Scanner App download/i)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({ entries: expect.arrayContaining([{ key: "scanner_app_enabled", value: { value: "disabled" } }, { key: "naps2_webscan_endpoint", value: { value: "" } }]) })));
+  });
+
 });

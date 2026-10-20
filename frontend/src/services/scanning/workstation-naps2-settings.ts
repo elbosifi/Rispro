@@ -51,6 +51,6 @@ export function resolveEffectiveNaps2Endpoint(globalEndpoint?: string | null, st
   const local = loadWorkstationNaps2Settings(storage);
   if (local) return { endpoint: local.endpoint, source: "workstation" };
   const systemEndpoint = globalEndpoint?.trim();
-  if (systemEndpoint) return { endpoint: systemEndpoint, source: "system" };
+  if (systemEndpoint) return { endpoint: normalizeNaps2Origin(systemEndpoint), source: "system" };
   return { endpoint: undefined, source: "localhost" };
 }

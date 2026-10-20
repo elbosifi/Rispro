@@ -1,3 +1,5 @@
+import { normalizeNaps2Origin } from "@/services/scanning/workstation-naps2-settings";
+
 export interface Naps2WebScanStatus {
   available: boolean;
   endpoint?: string;
@@ -7,6 +9,7 @@ export interface Naps2WebScanStatus {
 
 export interface Naps2ScanOptions {
   endpoint?: string;
+  allowedOrigins?: string[];
   dpi?: number;
   colorMode?: "grayscale" | "color";
   source?: "feeder" | "flatbed" | "duplex";
@@ -22,51 +25,79 @@ export interface Naps2ScanResult {
 
 type EsclDocumentFormat = "application/pdf" | "image/jpeg";
 
-const DEFAULT_ENDPOINTS = ["http://127.0.0.1:9801", "http://localhost:9801"];
 const REQUEST_TIMEOUT_MS = 15_000;
 const SCAN_TIMEOUT_MS = 120_000;
 const MAX_DOCUMENTS = 100;
-const DEFAULT_RETRY_MS = 2_000;
-const NAPS2_UNAVAILABLE_MESSAGE = "NAPS2 Scanner Sharing is not available on this workstation. Upload PDF/image instead.";
+const DEFAULT_RETRY_MS = 1_000;
+const CONFIRMED_ENDPOINT_KEY = "rispro.naps2ConfirmedEndpoint.v1";
+const CONNECTION_HELP = "Check NAPS2 installation, Scanner Sharing and its HTTP endpoint. Run RISpro-NAPS2-Setup.cmd, then check Edge policy, NAPS2 CORS, server CSP and the scanner-host firewall. Browser JavaScript cannot distinguish a blocked request from a disconnected scanner. Manual PDF/image upload remains available.";
+let scanInProgress = false;
 
-function normalizeEndpoint(endpoint: string): string {
-  const value = endpoint.trim().replace(/\/+$/, "");
-  if (!value) throw new Error("NAPS2 eSCL endpoint is required.");
-  const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("NAPS2 eSCL endpoint must use HTTP or HTTPS.");
-  return value;
+export function assertNaps2EndpointApproved(endpoint: string, allowedOrigins?: string[]): string {
+  const origin = normalizeNaps2Origin(endpoint);
+  if (allowedOrigins && !allowedOrigins.includes(origin)) {
+    throw new Error(`Scanner origin ${origin} is not approved by server CSP. Ask an administrator to add this exact origin to NAPS2_WEBSCAN_ALLOWED_ORIGINS and restart RISpro.`);
+  }
+  return origin;
 }
 
-function candidateEndpoints(customEndpoint?: string): string[] {
-  return customEndpoint?.trim() ? [normalizeEndpoint(customEndpoint)] : DEFAULT_ENDPOINTS;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+async function request<T>(url: string, init: RequestInit, read: (response: Response) => Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal, credentials: "omit", redirect: "error", cache: "no-store" });
+    return await read(response);
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`NAPS2 request timed out. ${CONNECTION_HELP}`);
+    if (error instanceof TypeError) throw new Error(`Unable to reach NAPS2. ${CONNECTION_HELP}`);
+    throw error;
   } finally {
     window.clearTimeout(timer);
   }
 }
 
-function normalizeNaps2Error(error: unknown): Error {
-  if (error instanceof Error && error.name !== "AbortError") return new Error(error.message || NAPS2_UNAVAILABLE_MESSAGE);
-  return new Error(NAPS2_UNAVAILABLE_MESSAGE);
+function capabilitiesXml(text: string): Document {
+  const document = new DOMParser().parseFromString(text, "application/xml");
+  const root = document.documentElement;
+  const formats = [...document.getElementsByTagNameNS("*", "DocumentFormat"), ...document.getElementsByTagNameNS("*", "DocumentFormatExt")].map((node) => node.textContent);
+  if (document.getElementsByTagName("parsererror").length || root.localName !== "ScannerCapabilities" || root.namespaceURI !== "http://schemas.hp.com/imaging/escl/2011/05/03" || !formats.some((value) => value === "application/pdf" || value === "image/jpeg")) {
+    throw new Error("The endpoint did not return compatible eSCL ScannerCapabilities with PDF or JPEG support. Check the scanner endpoint.");
+  }
+  return document;
 }
 
-export async function getNaps2WebScanStatus(endpoint?: string): Promise<Naps2WebScanStatus> {
-  if (typeof window === "undefined" || typeof fetch === "undefined") return { available: false, message: NAPS2_UNAVAILABLE_MESSAGE };
-  for (const candidate of candidateEndpoints(endpoint)) {
-    try {
-      const response = await fetchWithTimeout(`${candidate}/eSCL/ScannerCapabilities`, { method: "GET" }, 3_000);
-      if (response.ok) return { available: true, endpoint: candidate, kind: "naps2_direct" };
-    } catch {
-      // Only the built-in loopback candidates are probes. A configured endpoint remains authoritative.
+async function probe(endpoint: string, timeoutMs: number): Promise<Naps2WebScanStatus> {
+  return request(`${endpoint}/eSCL/ScannerCapabilities`, { method: "GET" }, async (response) => {
+    if (!response.ok) throw new Error(response.status === 409 || response.status === 503 ? "The scanner is busy. Wait for the current scan to finish." : `NAPS2 connection test failed with HTTP ${response.status}. ${CONNECTION_HELP}`);
+    capabilitiesXml(await response.text());
+    return { available: true, endpoint, kind: "naps2_direct" };
+  }, timeoutMs);
+}
+
+export async function getNaps2WebScanStatus(endpoint?: string, allowedOrigins?: string[]): Promise<Naps2WebScanStatus> {
+  try {
+    if (endpoint?.trim()) return await probe(assertNaps2EndpointApproved(endpoint, allowedOrigins), 3_000);
+    // Prioritize a previously confirmed local device, then 9801, then bounded parallel probes.
+    let confirmed: string | null = null;
+    try { confirmed = localStorage.getItem(CONFIRMED_ENDPOINT_KEY); } catch { /* Storage is optional. */ }
+    const local = (value: string) => /^http:\/\/(127\.0\.0\.1|localhost):98(0[1-9]|[1-4][0-9]|50)$/.test(value);
+    const candidates = [...new Set([...(confirmed && local(confirmed) ? [confirmed] : []), "http://127.0.0.1:9801", ...Array.from({ length: 49 }, (_, index) => `http://127.0.0.1:${9802 + index}`), "http://localhost:9801"])];
+    const deadline = Date.now() + 6_500;
+    let found: Naps2WebScanStatus | undefined;
+    const attempt = async (candidate: string) => {
+      if (found || Date.now() >= deadline) return;
+      try { const status = await probe(assertNaps2EndpointApproved(candidate, allowedOrigins), Math.min(700, deadline - Date.now())); if (!found) found = status; } catch { /* Only automatic loopback discovery may try another endpoint. */ }
+    };
+    await attempt(candidates.shift()!);
+    await Promise.all(Array.from({ length: 8 }, async () => { while (!found && candidates.length && Date.now() < deadline) await attempt(candidates.shift()!); }));
+    if (found) {
+      try { localStorage.setItem(CONFIRMED_ENDPOINT_KEY, found.endpoint!); } catch { /* Storage is optional. */ }
+      return found;
     }
+    return { available: false, message: `No compatible local scanner found on HTTP ports 9801–9850. ${CONNECTION_HELP}` };
+  } catch (error) {
+    return { available: false, endpoint, message: error instanceof Error ? error.message : CONNECTION_HELP };
   }
-  return { available: false, message: NAPS2_UNAVAILABLE_MESSAGE };
 }
 
 export async function isNaps2WebScanAvailable(endpoint?: string): Promise<boolean> {
@@ -98,24 +129,23 @@ function buildScanSettings(options: Required<Pick<Naps2ScanOptions, "dpi" | "col
 
 class ScanJobCreationError extends Error {
   constructor(readonly status: number, readonly format: EsclDocumentFormat) {
-    super(status === 400 ? "NAPS2 rejected the scan settings." : status === 409 || status === 503 ? "The scanner is busy. Try again when the current scan finishes." : `NAPS2 scan job creation failed with HTTP ${status}.`);
+    super([400, 406, 415, 422].includes(status) ? `NAPS2 rejected unsupported scan settings (HTTP ${status}). Check feeder/flatbed, duplex, DPI, color and PDF/JPEG support.` : status === 409 || status === 503 ? "The scanner is busy. Try again when the current scan finishes." : `NAPS2 scan job creation failed with HTTP ${status}.`);
   }
 }
 
 async function createScanJob(endpoint: string, options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>, documentFormat: EsclDocumentFormat): Promise<URL> {
-  const response = await fetchWithTimeout(`${endpoint}/eSCL/ScanJobs`, {
+  return request(`${endpoint}/eSCL/ScanJobs`, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8" },
     body: buildScanSettings(options, documentFormat),
+  }, async (response) => {
+    if (response.status !== 201) throw new ScanJobCreationError(response.status, documentFormat);
+    const location = response.headers.get("Location");
+    if (!location) throw new Error("NAPS2 created a job but its Location header is missing or inaccessible. Check Access-Control-Expose-Headers: Location in NAPS2; wait for the orphan job to expire before retrying.");
+    const job = new URL(location, `${endpoint}/`);
+    if (job.origin !== endpoint || job.username || job.password || job.search || job.hash || !/^\/eSCL\/ScanJobs\/[^/]+\/?$/.test(job.pathname)) throw new Error("NAPS2 returned an unsafe scan job Location header.");
+    return job;
   });
-  if (response.status !== 201) throw new ScanJobCreationError(response.status, documentFormat);
-  const location = response.headers.get("Location") || response.headers.get("location");
-  if (!location) throw new Error("NAPS2 did not return a scan job Location header.");
-  try {
-    return new URL(location, `${endpoint}/`);
-  } catch {
-    throw new Error("NAPS2 returned an invalid scan job Location header.");
-  }
 }
 
 function retryAfterMs(value: string | null): number {
@@ -132,8 +162,8 @@ function wait(ms: number): Promise<void> {
 
 async function readErrorDetails(jobUrl: URL): Promise<string> {
   try {
-    const response = await fetchWithTimeout(new URL("ErrorDetails", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" }, 5_000);
-    const body = (await response.text()).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const details = await request(new URL("ErrorDetails", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" }, async (response) => response.text(), 5_000);
+    const body = details.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     return body ? ` NAPS2 details: ${body.slice(0, 300)}` : "";
   } catch {
     return "";
@@ -147,9 +177,9 @@ function responseMimeType(response: Response, blob: Blob): string {
 async function readScannedDocuments(jobUrl: URL): Promise<Blob[]> {
   const documents: Blob[] = [];
   const deadline = Date.now() + SCAN_TIMEOUT_MS;
-  while (documents.length < MAX_DOCUMENTS) {
+  while (true) {
     if (Date.now() >= deadline) throw new Error("NAPS2 scan timed out while waiting for pages.");
-    const response = await fetchWithTimeout(new URL("NextDocument", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" });
+    const { response, blob } = await request(new URL("NextDocument", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" }, async (response) => ({ response, blob: response.ok ? await response.blob() : new Blob() }), Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()));
     if (response.status === 503) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error("NAPS2 scan timed out while waiting for pages.");
@@ -161,18 +191,17 @@ async function readScannedDocuments(jobUrl: URL): Promise<Blob[]> {
       return documents;
     }
     if (response.status === 500) throw new Error(`NAPS2 reported a scanner error.${await readErrorDetails(jobUrl)}`);
-    if (!response.ok) throw new Error(`NAPS2 failed while reading scanned pages with HTTP ${response.status}.`);
-    const blob = await response.blob();
+    if (!response.ok) throw new Error(response.status === 409 ? "The scanner is busy. Wait for the current scan to finish." : `NAPS2 failed while reading scanned pages with HTTP ${response.status}.`);
     const mimeType = responseMimeType(response, blob);
     if (!blob.size) throw new Error("NAPS2 returned an empty scanned document.");
     if (mimeType !== "application/pdf" && mimeType !== "image/jpeg") throw new Error(`NAPS2 returned an unexpected document type (${mimeType || "unknown"}).`);
+    if (documents.length >= MAX_DOCUMENTS) throw new Error(`NAPS2 returned more than ${MAX_DOCUMENTS} documents; scan was stopped.`);
     documents.push(new Blob([blob], { type: mimeType }));
   }
-  throw new Error(`NAPS2 returned more than ${MAX_DOCUMENTS} documents; scan was stopped.`);
 }
 
 async function deleteScanJob(jobUrl: URL): Promise<void> {
-  try { await fetchWithTimeout(jobUrl.toString(), { method: "DELETE" }, 5_000); } catch { /* Best effort cleanup. */ }
+  try { await request(jobUrl.toString(), { method: "DELETE" }, async () => undefined, 3_000); } catch { /* Best effort cleanup. */ }
 }
 
 async function blobToBytes(blob: Blob): Promise<Uint8Array> { return new Uint8Array(await blob.arrayBuffer()); }
@@ -207,24 +236,51 @@ async function buildPdfFromJpegPages(pages: Blob[]): Promise<Blob> {
   return new Blob(chunks, { type: "application/pdf" });
 }
 
+async function scannedFiles(documents: Blob[], baseName: string): Promise<{ files: File[]; pageCount: number }> {
+  const files: File[] = [];
+  let pageCount = 0;
+  let jpegPages: Blob[] = [];
+  const flushJpegs = async () => {
+    if (!jpegPages.length) return;
+    files.push(new File([await buildPdfFromJpegPages(jpegPages)], `${baseName}-${files.length + 1}.pdf`, { type: "application/pdf" }));
+    pageCount += jpegPages.length;
+    jpegPages = [];
+  };
+  for (const document of documents) {
+    if (document.type === "image/jpeg") { jpegPages.push(document); continue; }
+    await flushJpegs();
+    // Preserve PDF responses as PDF, including multipage PDFs and multiple PDF documents.
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    const task = pdfjs.getDocument({ data: await blobToBytes(document), isEvalSupported: false });
+    try { const pdf = await task.promise; pageCount += pdf.numPages; }
+    finally { await task.destroy(); }
+    files.push(new File([document], `${baseName}-${files.length + 1}.pdf`, { type: "application/pdf" }));
+  }
+  await flushJpegs();
+  if (files.length === 1) files[0] = new File([files[0]], `${baseName}.pdf`, { type: "application/pdf" });
+  return { files, pageCount };
+}
+
 export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Promise<Naps2ScanResult> {
-  const status = await getNaps2WebScanStatus(options.endpoint);
-  if (!status.available || !status.endpoint) throw new Error(status.message || NAPS2_UNAVAILABLE_MESSAGE);
-  const scanOptions = { dpi: normalizeDpi(options.dpi), colorMode: options.colorMode || "grayscale", source: options.source || "feeder" } as const;
+  if (scanInProgress) throw new Error("A scan is already in progress in this browser. Wait for it to finish.");
+  scanInProgress = true;
   let jobUrl: URL | undefined;
   try {
+    const status = await getNaps2WebScanStatus(options.endpoint, options.allowedOrigins);
+    if (!status.available || !status.endpoint) throw new Error(status.message || CONNECTION_HELP);
+    const scanOptions = { dpi: normalizeDpi(options.dpi), colorMode: options.colorMode || "grayscale", source: options.source || "feeder" } as const;
     try { jobUrl = await createScanJob(status.endpoint, scanOptions, "application/pdf"); }
     catch (error) {
-      if (!(error instanceof ScanJobCreationError) || error.format !== "application/pdf" || ![400, 406, 415, 422].includes(error.status)) throw error;
+      if (!(error instanceof ScanJobCreationError) || ![400, 406, 415, 422].includes(error.status)) throw error;
       jobUrl = await createScanJob(status.endpoint, scanOptions, "image/jpeg");
     }
     const documents = await readScannedDocuments(jobUrl);
-    const pdf = documents.length === 1 && documents[0].type === "application/pdf" ? documents[0] : await buildPdfFromJpegPages(documents);
-    if (!pdf.size) throw new Error("NAPS2 returned an empty PDF.");
     const baseName = (options.fileName?.trim() || "appointment-request.pdf").replace(/\.[a-z0-9]+$/i, "");
-    return { file: new File([pdf], `${baseName}.pdf`, { type: "application/pdf" }), pageCount: documents.length, source: "naps2_webscan" };
-  } catch (error) {
+    const { files, pageCount } = await scannedFiles(documents, baseName);
+    return { file: files[0], files, pageCount, source: "naps2_webscan" };
+  } finally {
     if (jobUrl) await deleteScanJob(jobUrl);
-    throw normalizeNaps2Error(error);
+    scanInProgress = false;
   }
 }

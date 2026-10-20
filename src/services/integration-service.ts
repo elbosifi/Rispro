@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { env } from "../config/env.js";
+import { naps2ConnectOrigins } from "../config/naps2.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -57,6 +58,7 @@ interface IntegrationStatus {
     bridgeReady: boolean;
     naps2WebScanEnabled: boolean;
     naps2WebScanEndpoint: string;
+    naps2WebScanAllowedOrigins: string[];
     scannerAppEnabled: boolean;
     scannerAppDownloadUrl: string;
     scanSessionExpiryMinutes: string;
@@ -191,16 +193,11 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   const settings = await loadSettingsMap(["printing_and_labels", "documents_and_uploads"]);
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
-  const rawScannerMode = documentSettings.scanner_bridge_mode || "";
-  const naps2WebScanEndpoint = env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim() || "http://127.0.0.1:9801";
+  const naps2WebScanEndpoint = env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim();
   const naps2WebScanEnabled =
     env.naps2WebscanEnabled ||
     String(documentSettings.naps2_webscan_enabled || "").trim().toLowerCase() === "enabled";
-  const scannerBridgeMode = naps2WebScanEnabled
-    ? "naps2_webscan"
-    : rawScannerMode === "future_local_bridge"
-      ? "manual_browser_upload"
-      : rawScannerMode || "manual_browser_upload";
+  const scannerBridgeMode = naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload";
   const dicomGateway = await getDicomGatewayOverview();
 
   return {
@@ -229,7 +226,8 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       bridgeReady: false,
       naps2WebScanEnabled,
       naps2WebScanEndpoint,
-      scannerAppEnabled: String(documentSettings.scanner_app_enabled || "enabled").trim().toLowerCase() === "enabled",
+      naps2WebScanAllowedOrigins: naps2ConnectOrigins(),
+      scannerAppEnabled: false,
       scannerAppDownloadUrl: String(documentSettings.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi").trim(),
       scanSessionExpiryMinutes: String(documentSettings.scan_session_expiry_minutes || "15").trim(),
     },
@@ -319,7 +317,7 @@ export async function prepareScanSession(payload: ScanPreparePayload, currentUse
     suggestedFileName,
     guidance:
       mode === "naps2_webscan"
-        ? "NAPS2.WebScan is ready for this workstation session."
+        ? "NAPS2 is enabled. Workstation connectivity and scan completion must be verified in this browser; attachment is confirmed only after upload."
         : "Upload the scanned file in this session to attach it immediately."
   };
 

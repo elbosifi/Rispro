@@ -132,6 +132,8 @@ export interface EnvConfig {
   naps2WebscanEnabled: boolean;
   naps2WebscanEndpoint: string;
   naps2WebscanAllowedOrigins: string[];
+  naps2SetupRisproOrigin: string;
+  naps2SetupFirewallSources: string;
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
@@ -231,6 +233,8 @@ export const env: EnvConfig = {
   naps2WebscanEnabled: readBoolean("NAPS2_WEBSCAN_ENABLED", false),
   naps2WebscanEndpoint: String(process.env.NAPS2_WEBSCAN_ENDPOINT || "").trim(),
   naps2WebscanAllowedOrigins: parseNaps2WebscanAllowedOrigins(process.env.NAPS2_WEBSCAN_ALLOWED_ORIGINS),
+  naps2SetupRisproOrigin: String(process.env.NAPS2_SETUP_RISPRO_ORIGIN || "").trim(),
+  naps2SetupFirewallSources: String(process.env.NAPS2_SETUP_FIREWALL_SOURCES || "").trim(),
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
   seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",

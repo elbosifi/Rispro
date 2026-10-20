@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorkstationPrintingPage from "./workstation-printing-page";
 import { WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
 
-const { mockPushToast, mockGetNaps2WebScanStatus, mockFetchIntegrationStatus } = vi.hoisted(() => ({
+const { mockPushToast, mockGetNaps2WebScanStatus, mockFetchIntegrationStatus, mockScan } = vi.hoisted(() => ({
+  mockScan: vi.fn(),
   mockPushToast: vi.fn(),
   mockGetNaps2WebScanStatus: vi.fn(),
   mockFetchIntegrationStatus: vi.fn(),
@@ -30,7 +31,7 @@ vi.mock("@/pages/settings/qz-tray-printing-section", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
 vi.mock("@/lib/api-hooks", () => ({ fetchIntegrationStatus: () => mockFetchIntegrationStatus() }));
-vi.mock("@/lib/naps2-webscan", () => ({ getNaps2WebScanStatus: (endpoint: string) => mockGetNaps2WebScanStatus(endpoint) }));
+vi.mock("@/lib/naps2-webscan", () => ({ getNaps2WebScanStatus: (...args: unknown[]) => mockGetNaps2WebScanStatus(...args), scanAppointmentRequest: (...args: unknown[]) => mockScan(...args) }));
 
 function response(body: unknown) {
   return { ok: true, status: 200, json: async () => body } as Response;
@@ -39,11 +40,13 @@ function response(body: unknown) {
 describe("WorkstationPrintingPage", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockScan.mockReset();
+    mockScan.mockResolvedValue({ pageCount: 2 });
     mockPushToast.mockReset();
     mockGetNaps2WebScanStatus.mockReset();
     mockGetNaps2WebScanStatus.mockResolvedValue({ available: true, endpoint: "http://scanner:9801", kind: "naps2_direct" });
     mockFetchIntegrationStatus.mockReset();
-    mockFetchIntegrationStatus.mockResolvedValue({ scanner: { naps2WebScanEndpoint: "http://system-scanner:9801" } });
+    mockFetchIntegrationStatus.mockResolvedValue({ scanner: { naps2WebScanEnabled: true, naps2WebScanEndpoint: "http://system-scanner:9801" } });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(readyManifest)));
   });
 
@@ -85,6 +88,7 @@ describe("WorkstationPrintingPage", () => {
 
     expect(JSON.parse(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY) || "null").endpoint).toBe("http://workstation-scanner:9801");
     expect(await screen.findByText("Workstation override")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download NAPS2 setup" }).getAttribute("href")).toBe("/api/scanner-bootstrap/windows-setup?endpoint=http%3A%2F%2Fworkstation-scanner%3A9801");
     fireEvent.click(screen.getByRole("button", { name: "Reset to system default" }));
     expect(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY)).toBeNull();
     expect(await screen.findByText("System default")).toBeTruthy();
@@ -93,11 +97,11 @@ describe("WorkstationPrintingPage", () => {
   it("shows automatic localhost separately when no endpoint is configured", async () => {
     mockFetchIntegrationStatus.mockResolvedValueOnce({ scanner: { naps2WebScanEndpoint: "" } });
     render(<WorkstationPrintingPage />);
-    expect(await screen.findByText("Automatic localhost probe")).toBeTruthy();
-    expect(screen.getByText("http://127.0.0.1:9801, then http://localhost:9801")).toBeTruthy();
+    expect(await screen.findByText("Automatic localhost discovery")).toBeTruthy();
+    expect(screen.getByText("Automatic HTTP loopback discovery, ports 9801–9850")).toBeTruthy();
   });
 
-  it("rejects malformed origins and tests the normalized entered origin", async () => {
+  it("rejects malformed origins and tests the saved effective origin", async () => {
     render(<WorkstationPrintingPage />);
     const input = screen.getByLabelText("NAPS2 eSCL endpoint");
     fireEvent.change(input, { target: { value: "http://scanner:9801/eSCL" } });
@@ -105,9 +109,11 @@ describe("WorkstationPrintingPage", () => {
     expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "error", title: "Invalid NAPS2 endpoint" }));
 
     fireEvent.change(input, { target: { value: "http://scanner:9801/" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save workstation endpoint" }));
+    await screen.findByText("Workstation override");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
-    await waitFor(() => expect(mockGetNaps2WebScanStatus).toHaveBeenCalledWith("http://scanner:9801"));
-    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "success", title: "NAPS2 connection available" }));
+    await waitFor(() => expect(mockGetNaps2WebScanStatus).toHaveBeenCalledWith("http://scanner:9801", undefined));
+    expect(mockScan).not.toHaveBeenCalled();
   });
 
   it("shows diagnostics and reports copy success and failure through toasts", async () => {
@@ -144,4 +150,28 @@ describe("WorkstationPrintingPage", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("link", { name: "Download and install RISpro Printing" })).toBeTruthy();
   });
+  it("tests the system endpoint immediately after resetting an override", async () => {
+    localStorage.setItem(WORKSTATION_NAPS2_SETTINGS_KEY, JSON.stringify({ version: 1, endpoint: "http://old:9801", updatedAt: new Date().toISOString() }));
+    render(<WorkstationPrintingPage />);
+    await screen.findByText("Workstation override");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Test connection" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Reset to system default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(mockGetNaps2WebScanStatus).toHaveBeenCalledWith("http://system-scanner:9801", undefined));
+    expect(mockScan).not.toHaveBeenCalled();
+  });
+  it("keeps global enablement distinct from connection and physical test scan", async () => {
+    render(<WorkstationPrintingPage />);
+    expect(screen.getByText("Not tested on this workstation")).toBeTruthy();
+    await screen.findByText("Enabled");
+    expect(screen.getByText("No test scan completed.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download NAPS2 setup" }).getAttribute("href")).toBe("/api/scanner-bootstrap/windows-setup");
+    const advanced = screen.getByText("Advanced endpoint override").closest("details")!;
+    expect(advanced.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Test scan" }));
+    await waitFor(() => expect(mockScan).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Test scan succeeded: 2 page/)).toBeTruthy();
+    expect(screen.getByText(/No patient document was uploaded or linked/)).toBeTruthy();
+  });
+
 });

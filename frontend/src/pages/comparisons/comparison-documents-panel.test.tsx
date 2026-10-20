@@ -111,4 +111,39 @@ describe("ComparisonDocumentsPanel", () => {
     renderPanel({ canDelete: true });
     expect(await screen.findByRole("button", { name: "Remove comparison-paper.pdf" })).toBeTruthy();
   });
+  it("retains failed PDF segments and retries upload without rescanning", async () => {
+    apiMocks.list.mockResolvedValue([]);
+    const first = new File(["%PDF-first"], "first.pdf", { type: "application/pdf" });
+    const second = new File(["%PDF-second"], "second.pdf", { type: "application/pdf" });
+    apiMocks.scan.mockResolvedValue({ file: first, files: [first, second], pageCount: 3, source: "naps2_webscan" });
+    apiMocks.upload.mockResolvedValueOnce(attachedDocument).mockRejectedValueOnce(new Error("Upload disconnected"));
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: /Scan/i }));
+    const retry = await screen.findByRole("button", { name: "Retry scanned uploads" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(apiMocks.upload).toHaveBeenCalledTimes(3));
+    expect(apiMocks.scan).toHaveBeenCalledTimes(1);
+    expect(apiMocks.upload.mock.calls.map(([payload]) => payload.originalFilename)).toEqual(["first.pdf", "second.pdf", "second.pdf"]);
+    expect(apiMocks.upload.mock.calls[2][0]).toMatchObject({ comparisonRequestId: 77, source: "naps2_webscan" });
+  });
+
+  it("keeps pending scanned uploads bound to their original comparison request across navigation", async () => {
+    apiMocks.list.mockResolvedValue([]);
+    const file = new File(["%PDF-paper"], "original-request.pdf", { type: "application/pdf" });
+    apiMocks.scan.mockResolvedValue({ file, pageCount: 1, source: "naps2_webscan" });
+    apiMocks.upload.mockRejectedValueOnce(new Error("Upload disconnected"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const view = (id: number) => <QueryClientProvider client={client}><ComparisonDocumentsPanel comparisonRequestId={id} canAttach canDelete={false} /></QueryClientProvider>;
+    const rendered = render(view(77));
+    fireEvent.click(await screen.findByRole("button", { name: /Scan/i }));
+    await screen.findByRole("button", { name: "Retry scanned uploads" });
+    rendered.rerender(view(88));
+    expect(screen.queryByRole("button", { name: "Retry scanned uploads" })).toBeNull();
+    rendered.rerender(view(77));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry scanned uploads" }));
+    await waitFor(() => expect(apiMocks.upload).toHaveBeenCalledTimes(2));
+    expect(apiMocks.upload.mock.calls[1][0]).toMatchObject({ comparisonRequestId: 77, originalFilename: "original-request.pdf" });
+    expect(apiMocks.scan).toHaveBeenCalledTimes(1);
+  });
+
 });

@@ -404,7 +404,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledTimes(1));
     expect(mockCreateScanSession).not.toHaveBeenCalled();
-    expect(await screen.findByText("Download Scanner App")).toBeTruthy();
+    expect(screen.queryByText("Download Scanner App")).toBeNull();
     expect(screen.queryByText("Retry Launch")).toBeNull();
   });
 
@@ -480,25 +480,13 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenNthCalledWith(2, expect.objectContaining({ documentType: "clinical_document", source: "naps2_webscan" })));
   });
 
-  it("creates configured scanner-app sessions as clinical documents", async () => {
-    mockFetchIntegrationStatus.mockResolvedValue({
-      scanner: {
-        referralUploadEnabled: true, allowedFileTypes: ["pdf", "jpg", "png"], documentLinkScope: "patient_and_appointment",
-        scannerBridgeMode: "manual_browser_upload", scannerProfileName: "default", scannerSource: "feeder", scanDpi: "200",
-        scanColorMode: "grayscale", scanFileFormat: "pdf", bridgeReady: true, naps2WebScanEnabled: false,
-        naps2WebScanEndpoint: "", scannerAppEnabled: true, scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi", scanSessionExpiryMinutes: "15",
-      },
-    });
+  it("hides the legacy companion even when an old configuration enables it", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({ scanner: { ...(await mockFetchIntegrationStatus()).scanner, naps2WebScanEnabled: false, scannerAppEnabled: true, scannerBridgeMode: "manual_browser_upload" } });
     renderPanel({ newDocumentType: "clinical_document" });
-
-    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
-
-    await waitFor(() => expect(mockCreateScanSession).toHaveBeenCalledWith({
-      appointmentId: 42,
-      patientId: 9,
-      documentType: "clinical_document",
-      appointmentRefType: "v2_booking",
-    }));
+    await waitFor(() => expect(mockFetchIntegrationStatus).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Scan Paper" })).toBeNull();
+    expect(screen.queryByText("Download Scanner App")).toBeNull();
+    expect(mockCreateScanSession).not.toHaveBeenCalled();
   });
 
   it("localizes clinical-document upload labels in Arabic", async () => {

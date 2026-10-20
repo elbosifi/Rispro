@@ -44,6 +44,7 @@ export interface IntegrationStatus {
     bridgeReady: boolean;
     naps2WebScanEnabled?: boolean;
     naps2WebScanEndpoint?: string;
+    naps2WebScanAllowedOrigins?: string[];
     scannerAppEnabled?: boolean;
     scannerAppDownloadUrl?: string;
     scanSessionExpiryMinutes?: string;

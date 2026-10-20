@@ -31,8 +31,8 @@ describe("securityHeaders", () => {
 
       const csp = headers["Content-Security-Policy"];
       assert.equal(csp.includes("connect-src 'self'"), true);
-      assert.equal(csp.includes("http://127.0.0.1:9810"), false);
-      assert.equal(csp.includes("http://localhost:9810"), false);
+      assert.equal(csp.includes("http://127.0.0.1:9810"), true);
+      assert.equal(csp.includes("http://localhost:9810"), true);
       assert.equal(csp.includes("http://127.0.0.1:9801"), true);
       assert.equal(csp.includes("http://localhost:9801"), true);
     } finally {
@@ -84,7 +84,7 @@ describe("securityHeaders", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = true;
-    env.naps2WebscanEndpoint = "http://naps2.example.test:9803/eSCL/ScannerCapabilities";
+    env.naps2WebscanEndpoint = "http://naps2.example.test:9803";
     try {
       const headers: Record<string, string> = {};
       securityHeaders({} as any, {
@@ -113,7 +113,7 @@ describe("securityHeaders", () => {
   it("adds only the pre-validated NAPS2 workstation origins and deduplicates sources", () => {
     const previousEndpoint = env.naps2WebscanEndpoint;
     const previousAllowedOrigins = env.naps2WebscanAllowedOrigins;
-    env.naps2WebscanEndpoint = "http://scanner-one:9801/eSCL";
+    env.naps2WebscanEndpoint = "http://scanner-one:9801";
     env.naps2WebscanAllowedOrigins = ["http://scanner-one:9801", "https://scanner-two:9801"];
     try {
       const headers: Record<string, string> = {};
