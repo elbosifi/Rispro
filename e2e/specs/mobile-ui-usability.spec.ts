@@ -285,7 +285,8 @@ test("modality board keeps a compact bilingual mobile worklist and stable deskto
   expect(modalityId).not.toBe("");
 
   const widths = [360, 390, 430, 768, 1024, 1440];
-  const screenshotRoot = path.join(process.cwd(), "test-results", "modality-mobile-ux");
+  const browserArtifactRoot = process.env.RISPRO_BROWSER_ARTIFACT_DIR?.trim() || path.join(process.cwd(), "test-results");
+  const screenshotRoot = path.join(browserArtifactRoot, "modality-mobile-ux");
   fs.mkdirSync(screenshotRoot, { recursive: true });
   const results: Array<{ language: "en" | "ar"; width: number; firstCardY?: number; headerHeight?: number; completedCardHeight?: number; secondCardBottom?: number; maxActionRight?: number }> = [];
 
@@ -350,6 +351,10 @@ test("modality board keeps a compact bilingual mobile worklist and stable deskto
     body: Buffer.from(JSON.stringify({ widths, languages: ["en", "ar"], syntheticCase: "E2E Acquisition Patient", results }, null, 2)),
     contentType: "application/json",
   });
+  fs.writeFileSync(
+    path.join(screenshotRoot, "results.json"),
+    JSON.stringify({ widths, languages: ["en", "ar"], syntheticCase: "E2E Acquisition Patient", results }, null, 2),
+  );
 });
 
 test("modality mobile filters and operational actions remain reachable", async ({ page }) => {
@@ -453,4 +458,110 @@ test("modality mobile filters and operational actions remain reachable", async (
   expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(390);
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
+});
+
+test("modality appointment dialog keeps clinical content and actions reachable on mobile", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await signInWithSession(page, "e2e_supervisor");
+  const modalityResponse = await page.request.get("http://127.0.0.1:3100/api/v2/lookups/modalities");
+  expect(modalityResponse.ok()).toBeTruthy();
+  const modalityBody = await modalityResponse.json() as { items: Array<{ id: number; code?: string }> };
+  const modalityId = String(modalityBody.items.find((item) => item.code === "E2E_CT")?.id ?? modalityBody.items[0]?.id ?? "");
+  expect(modalityId).not.toBe("");
+
+  const browserArtifactRoot = process.env.RISPRO_BROWSER_ARTIFACT_DIR?.trim() || path.join(process.cwd(), "test-results");
+  const screenshotRoot = path.join(browserArtifactRoot, "modality-dialog-ux");
+  fs.mkdirSync(screenshotRoot, { recursive: true });
+  const results: Array<{ language: "en" | "ar"; scrollHeight: number; clientHeight: number; scrollTopAfterWheel: number }> = [];
+
+  for (const language of ["en", "ar"] as const) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    if (language === "ar") await page.addInitScript(() => localStorage.setItem("rispro-language", "ar"));
+    await page.goto(`/modality?modalityId=${modalityId}&view=all`, { waitUntil: "domcontentloaded" });
+    const card = page.getByTestId("modality-board-mobile").getByTestId(/modality-mobile-card-/).filter({ hasText: "E2E Acquisition Patient" }).first();
+    await expect(card).toBeVisible();
+    const openAppointmentButton = card.locator("button").first();
+    await openAppointmentButton.evaluate((element) => (element as HTMLButtonElement).click());
+
+    const drawer = page.getByTestId("selected-appointment-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("button", { name: language === "ar" ? "إكمال" : "Complete" })).toBeHidden();
+    const closeButton = drawer.getByRole("button", { name: language === "ar" ? "إغلاق الموعد" : "Close appointment" });
+    const closeBox = await closeButton.boundingBox();
+    expect(closeBox).not.toBeNull();
+    expect(closeBox!.y).toBeLessThan(120);
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-initial.png`) });
+
+    const detailsToggle = drawer.getByRole("button", { name: language === "ar" ? "تفاصيل المريض والتصوير" : "Patient and acquisition details" });
+    await detailsToggle.click();
+    await expect(drawer.getByTestId("clinical-mobile-details")).toBeVisible();
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-details.png`) });
+
+    const scrollRegion = page.getByTestId("clinical-dialog-scroll-region");
+    const initialScrollMetrics = await scrollRegion.evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, scrollTop: element.scrollTop }));
+    expect(initialScrollMetrics.scrollHeight).toBeGreaterThan(initialScrollMetrics.clientHeight);
+    await scrollRegion.evaluate((element) => element.scrollBy({ top: 360, behavior: "auto" }));
+    await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const scrollTopAfterWheel = await scrollRegion.evaluate((element) => element.scrollTop);
+    results.push({ language, scrollHeight: initialScrollMetrics.scrollHeight, clientHeight: initialScrollMetrics.clientHeight, scrollTopAfterWheel });
+
+    const protocol = drawer.getByTestId("clinical-protocol");
+    await protocol.scrollIntoViewIfNeeded();
+    await expect(protocol).toBeVisible();
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-protocol.png`) });
+
+    const requestDocuments = drawer.getByTestId("clinical-request-documents");
+    await requestDocuments.scrollIntoViewIfNeeded();
+    await expect(requestDocuments).toBeVisible();
+    await expect(requestDocuments).toContainText("e2e-request.pdf");
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-documents.png`) });
+
+    await drawer.getByRole("button", { name: language === "ar" ? "الدراسات السابقة" : "Previous studies" }).click();
+    const previousStudies = drawer.getByTestId("clinical-previous-studies-region");
+    await expect(previousStudies).toBeVisible();
+    await previousStudies.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-previous-studies.png`) });
+
+    await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-footer.png`) });
+    const moreButton = drawer.getByRole("button", { name: language === "ar" ? "إجراءات الموعد" : "Appointment actions" });
+    await moreButton.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(390);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(844);
+    await expect(menu.getByRole("menuitem", { name: language === "ar" ? "المستندات" : "Documents" })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await drawer.getByRole("button", { name: language === "ar" ? "إعادة فتح" : "Reopen as arrived" }).click();
+    await expect(page.getByRole("heading", { name: language === "ar" ? "تأكيد إعادة فتح الموعد" : "Confirm reopen" })).toBeVisible();
+    const reasonDialog = page.getByRole("dialog").last();
+    await expect(reasonDialog.getByRole("textbox")).toBeVisible();
+    await reasonDialog.getByRole("textbox").fill(language === "ar" ? "سبب تحقق اصطناعي" : "Synthetic validation reason");
+    await expect(reasonDialog.getByRole("button", { name: language === "ar" ? "تأكيد إعادة فتح الموعد" : "Confirm reopen" })).toBeEnabled();
+    await reasonDialog.getByRole("button", { name: language === "ar" ? "إغلاق" : "Close", exact: true }).click();
+    await expect(drawer).toBeVisible();
+
+    await closeButton.click();
+    await expect(drawer).toHaveCount(0);
+    await expect(page).toHaveURL(/modality\?modalityId=/);
+  }
+
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.addInitScript(() => localStorage.setItem("rispro-language", "en"));
+  await page.goto(`/modality?modalityId=${modalityId}&view=all`, { waitUntil: "domcontentloaded" });
+  const desktopCard = page.getByTestId("modality-board").getByTestId(/modality-board-row-/).filter({ hasText: "E2E Acquisition Patient" }).first();
+  await expect(desktopCard).toBeVisible();
+  await desktopCard.click();
+  await expect(page.getByTestId("selected-appointment-drawer")).toBeVisible();
+  await expect(page.getByTestId("clinical-workspace")).toBeVisible();
+  await page.screenshot({ path: path.join(screenshotRoot, "en-1440-dialog.png") });
+
+  await testInfo.attach("modality-dialog-scroll-results.json", {
+    body: Buffer.from(JSON.stringify(results, null, 2)),
+    contentType: "application/json",
+  });
 });

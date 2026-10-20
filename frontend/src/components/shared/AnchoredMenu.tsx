@@ -61,6 +61,7 @@ export function AnchoredMenu({ open, onOpenChange, trigger, children, dir = "ltr
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onOpenChange(false);
         return;
       }

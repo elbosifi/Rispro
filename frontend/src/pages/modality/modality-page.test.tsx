@@ -1710,11 +1710,13 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("MRN-DETAIL")).toBeTruthy();
     expect(within(drawer).getByText("NAT-DETAIL")).toBeTruthy();
     expect(within(drawer).getByText(/63 years.*Male/)).toBeTruthy();
-    expect(within(drawer).getByText("ACC-DETAIL")).toBeTruthy();
+    expect(within(drawer).getAllByText("ACC-DETAIL").length).toBeGreaterThanOrEqual(1);
     expect(within(drawer).getByTitle("MRI Abdomen")).toBeTruthy();
     expect(within(drawer).getByTitle("MRI")).toBeTruthy();
     expect(within(drawer).getByText("Urgent")).toBeTruthy();
     expect(within(drawer).getByTestId("clinical-appointment-notes").textContent).toContain("Needs interpreter");
+    await user.click(within(drawer).getByRole("button", { name: "Patient and acquisition details" }));
+    expect(within(drawer).getByTestId("clinical-mobile-details")).toBeTruthy();
   });
 
   it("lets modality staff ingest clinical documents from the selected appointment workspace", async () => {
@@ -1782,12 +1784,13 @@ describe("ModalityPage modality board", () => {
     expect(workspace.firstElementChild).toBe(screen.getByTestId("clinical-protocol"));
     expect(workspace.lastElementChild).toBe(screen.getByTestId("clinical-request-documents"));
     const workspaceRegion = screen.getByTestId("clinical-workspace-region");
-    expect(workspaceRegion.className).toContain("overflow-hidden");
-    expect(workspaceRegion.className).not.toContain("overflow-y-auto");
-    expect(workspace.className).toContain("h-full");
-    expect(workspace.className).toContain("min-h-0");
-    expect(screen.getByTestId("clinical-request-documents").className).toContain("h-full");
-    expect(screen.getByTestId("clinical-request-documents").className).toContain("min-h-0");
+    expect(workspaceRegion.className).toContain("overflow-visible");
+    expect(workspaceRegion.className).toContain("lg:overflow-hidden");
+    expect(screen.getByTestId("clinical-dialog-scroll-region").className).toContain("overflow-y-auto");
+    expect(workspace.className).toContain("lg:h-full");
+    expect(workspace.className).toContain("lg:min-h-0");
+    expect(screen.getByTestId("clinical-request-documents").className).toContain("lg:h-full");
+    expect(screen.getByTestId("clinical-request-documents").className).toContain("lg:min-h-0");
   });
 
   it("keeps the appointment header and operational actions outside the contained document workspace", async () => {
@@ -1800,10 +1803,11 @@ describe("ModalityPage modality board", () => {
     const header = within(drawer).getByTestId("clinical-patient-banner").parentElement?.parentElement;
     const workspaceRegion = screen.getByTestId("clinical-workspace-region");
     const footer = screen.getByTestId("clinical-operational-footer");
-    expect(header?.parentElement).toBe(workspaceRegion.parentElement);
-    expect(footer.parentElement).toBe(workspaceRegion.parentElement);
-    expect(dialogContent?.className).toContain("h-[94dvh]");
-    expect(dialogContent?.className).toContain("max-h-[94dvh]");
+    expect(header?.parentElement).toBe(drawer);
+    expect(workspaceRegion.parentElement).toBe(screen.getByTestId("clinical-dialog-scroll-region"));
+    expect(footer.parentElement).toBe(drawer);
+    expect(dialogContent?.className).toContain("h-[calc(100dvh-1rem)]");
+    expect(dialogContent?.className).toContain("sm:h-[94dvh]");
     expect(dialogContent?.className).not.toContain("h-screen");
     expect(within(footer).getByRole("button", { name: "Close" })).toBeTruthy();
     expect(within(footer).getByRole("button", { name: "Back to waiting" })).toBeTruthy();

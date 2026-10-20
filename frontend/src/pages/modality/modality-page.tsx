@@ -37,6 +37,7 @@ import {
   DialogTitle,
   Input,
   AnchoredMenu,
+  DisclosureSection,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -317,8 +318,8 @@ function isProtocolModality(appointment: AppointmentWithDetails | null): boolean
   return code === "CT" || code === "MR" || code === "MRI";
 }
 
-function protocolVersionLabel(name: string | null, version: string | null, freeText?: string | null): string {
-  const label = name?.trim() || (freeText?.trim() ? "Free-text protocol" : "Protocol assigned");
+function protocolVersionLabel(language: Language, name: string | null, version: string | null, freeText?: string | null): string {
+  const label = name?.trim() || (freeText?.trim() ? t(language, "modality.freeTextProtocol") : t(language, "modality.protocolAssigned"));
   return version?.trim() ? `${label} v${version}` : label;
 }
 
@@ -410,7 +411,7 @@ function waitingDurationInfo(language: Language, appointment: AppointmentWithDet
   return {
     value,
     displayValue: appointment.status === "completed"
-      ? chooseLocalized(language, `انتظر ${value}`, `Waited ${value}`)
+      ? t(language, "modality.historicalWait", { duration: value })
       : chooseLocalized(language, `انتظار ${value}`, `Waiting ${value}`),
     source,
     title: `${value} - ${source}`,
@@ -571,6 +572,7 @@ export default function ModalityPage() {
   const [reopenForScanningReason, setReopenForScanningReason] = useState("");
   const [reopenForScanningError, setReopenForScanningError] = useState<string | null>(null);
   const [openMoreMenu, setOpenMoreMenu] = useState<MoreMenuState | null>(null);
+  const [mobileAppointmentMenuOpen, setMobileAppointmentMenuOpen] = useState(false);
   const [cdDialog, setCdDialog] = useState<CdDialogState | null>(null);
   const [cdDestinationKey, setCdDestinationKey] = useState("");
   const [cdReasonCode, setCdReasonCode] = useState("");
@@ -802,11 +804,13 @@ export default function ModalityPage() {
   };
   const openSelectedAppointment = (appointmentId: number, tab: "appointment" | "previousStudies" = "appointment") => {
     setSelectedAppointmentTab(tab);
+    setMobileAppointmentMenuOpen(false);
     updateNavigation({ appointmentId });
   };
   const closeSelectedAppointment = () => {
     updateNavigation({ appointmentId: null });
     setSelectedAppointmentTab("appointment");
+    setMobileAppointmentMenuOpen(false);
   };
   const openSpecimenLabel = (appointment: AppointmentWithDetails) => {
     setSpecimenLabelText("");
@@ -941,6 +945,9 @@ export default function ModalityPage() {
   const mobileSecondaryFilterActive = mobileSecondaryStatusFilters.has(boardFilter) || documentFilter !== "all";
   const mobileSecondaryFilterCount = (mobileSecondaryStatusFilters.has(boardFilter) ? 1 : 0) + (documentFilter !== "all" ? 1 : 0);
   const selectedName = selectedAppointment ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName) : "";
+  const selectedSecondaryName = selectedAppointment
+    ? language === "ar" ? selectedAppointment.englishFullName?.trim() : selectedAppointment.arabicFullName?.trim()
+    : "";
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
   const selectedPriority = selectedAppointment ? priorityDisplay(language, selectedAppointment) : "";
@@ -1171,15 +1178,15 @@ export default function ModalityPage() {
                     aria-pressed={boardFilter === chip.filter}
                     data-active={boardFilter === chip.filter ? "true" : "false"}
                     onClick={() => handleBoardFilterChange(chip.filter)}
-                    className={`flex h-11 min-w-0 flex-col items-center justify-center rounded-md border bg-white px-1 py-1 text-center text-[10px] font-semibold leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${chip.filter === "waiting" ? "text-amber-800" : chip.filter === "arrived" ? "text-sky-800" : chip.filter === "in-progress" ? "text-indigo-800" : "text-emerald-800"} ${boardFilter === chip.filter ? "border-2 border-accent bg-blue-50 ring-2 ring-accent/25 ring-offset-1" : "border-slate-200"}`}
+                    className={`flex h-13 min-w-0 flex-col items-center justify-center rounded-md border bg-white px-1 py-1 text-center text-[10px] font-semibold leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${chip.filter === "waiting" ? "text-amber-800" : chip.filter === "arrived" ? "text-sky-800" : chip.filter === "in-progress" ? "text-indigo-800" : "text-emerald-800"} ${boardFilter === chip.filter ? "border-2 border-accent bg-blue-50 ring-2 ring-accent/25 ring-offset-1" : "border-slate-200"}`}
                   >
-                    <span className="truncate max-w-full">{chip.label}</span>
+                    <span className="max-w-full whitespace-normal leading-3">{chip.label}</span>
                     <span className="mt-0.5 font-mono text-base tabular-nums">{chip.value}</span>
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 lg:hidden">
+              <div className="flex items-center gap-1.5 px-2 py-0 lg:hidden">
                 <div className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain">
                   <div className="flex w-max min-w-full items-center gap-1.5" role="group" aria-label={chooseLocalized(language, "المرشح الأساسي", "Primary status filter")}>
                     {([
@@ -1456,9 +1463,9 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1.5 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
-                                  <span className="inline-flex max-w-full items-center gap-1 truncate font-semibold text-emerald-700" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
+                                  <span className="inline-flex max-w-full items-center gap-1 truncate font-semibold text-emerald-700" title={protocolVersionLabel(language, appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}>
                                     <BadgeCheck size={12} className="shrink-0" aria-hidden="true" />
-                                    <span className="truncate">{protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}</span>
+                                    <span className="truncate">{protocolVersionLabel(language, appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}</span>
                                   </span>
                                 ) : isProtocolModality(appointment) ? (
                                   <span className="text-[10px] text-muted-foreground">No protocol assigned</span>
@@ -1875,64 +1882,85 @@ export default function ModalityPage() {
         <DialogContent
           maxWidth="min(98vw, 1560px)"
           scrollable={false}
-          className="!p-0 h-[94dvh] !max-h-[94dvh] w-full overflow-hidden rounded-2xl"
+          className="!m-2 !w-[calc(100%-1rem)] !max-w-[calc(100%-1rem)] !p-0 h-[calc(100dvh-1rem)] !max-h-[calc(100dvh-1rem)] overflow-hidden rounded-xl sm:!m-4 sm:!w-[calc(100%-2rem)] sm:!max-w-[calc(100%-2rem)] sm:h-[94dvh] sm:!max-h-[94dvh] sm:rounded-2xl"
         >
           {selectedAppointment ? (
             <div data-testid="selected-appointment-drawer" className="flex h-full min-h-0 flex-col">
-              <DialogHeader className="!mb-0 shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
-                <div data-testid="clinical-patient-banner" className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
-                    <DialogTitle>{selectedName}</DialogTitle>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset size="sm" />
-                      <Badge variant="warning" size="sm">{selectedPriority}</Badge>
-                      {selectedEdited ? (
-                        <Badge variant="warning" size="sm">
-                          {t(language, "appointmentEditor.edited")}
-                        </Badge>
-                      ) : null}
-                      <Badge variant={statusVariant(selectedAppointment.status)} size="sm">
-                        {normalizeStatusLabel(language, selectedAppointment.status)}
-                      </Badge>
+              <DialogHeader
+                closeLabel={chooseLocalized(language, "إغلاق الموعد", "Close appointment")}
+                className="!mb-0 shrink-0 !items-start border-b border-slate-200 bg-white px-3 py-2.5 sm:px-6 sm:py-3 [&>button]:!h-11 [&>button]:!min-h-11 [&>button]:!w-11 [&>button]:shrink-0"
+              >
+                <div data-testid="clinical-patient-banner" className="min-w-0">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
+                      <DialogTitle className="break-words !text-base sm:!text-lg">{selectedName}</DialogTitle>
+                      {selectedSecondaryName && selectedSecondaryName !== selectedName ? <p lang={language === "ar" ? "en" : "ar"} dir={language === "ar" ? "ltr" : "rtl"} className="mt-0.5 break-words text-[11px] leading-4 text-muted-foreground">{selectedSecondaryName}</p> : null}
+                      <p lang={language} dir={language === "ar" ? "rtl" : "ltr"} className="mt-1 break-words text-sm font-semibold text-foreground">{selectedExam}</p>
                     </div>
-                    <div className="mt-3 flex w-full flex-wrap items-start gap-x-5 gap-y-2 border-t border-slate-100 pt-2">
-                      <ClinicalBannerField
-                        label={chooseLocalized(language, "معرف المريض", "MRN / primary ID")}
-                        value={selectedAppointment.mrn}
-                      />
-                      <ClinicalBannerField
-                        label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")}
-                        value={selectedAppointment.patientPrimaryIdentifierValue
-                          ? primaryIdentifierText(language, selectedAppointment)
-                          : selectedAppointment.nationalId
-                            ? selectedAppointment.nationalId
-                            : null}
-                      />
-                      <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
-                      <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
-                      <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
-                      <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
-                      {selectedAppointment.acquisitionSummary?.equipmentName ? <ClinicalBannerField label={chooseLocalized(language, "أُجري على", "Performed on")} value={selectedAppointment.acquisitionSummary.equipmentName} /> : null}
-                      {selectedAppointment.acquisitionSummary?.startedAt ? <ClinicalBannerField label={chooseLocalized(language, "بدأ التصوير", "Started")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.startedAt)} /> : null}
-                      {selectedAppointment.acquisitionSummary?.endedAt ? <ClinicalBannerField label={chooseLocalized(language, "انتهى التصوير", "Finished")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.endedAt)} /> : null}
-                      {selectedAppointment.acquisitionSummary?.durationSeconds != null ? <ClinicalBannerField label={chooseLocalized(language, "مدة الفحص", "Duration")} value={formatDurationMinutes(language, Math.floor(selectedAppointment.acquisitionSummary.durationSeconds / 60))} /> : null}
-                      {selectedAppointment.acquisitionSummary ? <ClinicalBannerField label={chooseLocalized(language, "المصدر", "Source")} value="MPPS" /> : null}
-                      {selectedAppointment.acquisitionSummary?.performedStatus === "DISCONTINUED" && selectedAppointment.acquisitionSummary.discontinuationReason ? <ClinicalBannerField label={chooseLocalized(language, "السبب", "Reason")} value={selectedAppointment.acquisitionSummary.discontinuationReason} /> : null}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button variant="secondary" size="icon" className="!h-11 !min-h-11 !w-11" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>
+                      {isIrModality ? <Button variant="secondary" size="icon" className="!h-11 !min-h-11 !w-11" aria-label={t(language, "modality.specimenLabel.print")} title={t(language, "modality.specimenLabel.print")} onClick={() => openSpecimenLabel(selectedAppointment)}><Printer size={16} /></Button> : null}
                     </div>
                   </div>
-                  <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>{t(language, "modality.specimenLabel.print")}</Button> : null}</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset size="sm" />
+                    <Badge variant="warning" size="sm">{selectedPriority}</Badge>
+                    {selectedEdited ? <Badge variant="warning" size="sm">{t(language, "appointmentEditor.edited")}</Badge> : null}
+                    <Badge variant={statusVariant(selectedAppointment.status)} size="sm">{normalizeStatusLabel(language, selectedAppointment.status)}</Badge>
+                    {selectedAppointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <span data-testid="clinical-mobile-mri-screening"><MriPrimaryScreeningBadges result={selectedAppointment.mriPrimaryScreening?.result ?? null} compact /></span> : null}
+                    {!hasPrimaryIdentifier(selectedAppointment) ? <Badge variant="warning" size="sm">{chooseLocalized(language, "لا يوجد معرف أساسي", "No primary ID")}</Badge> : null}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                    <span>{t(language, "modality.fieldAccession")}: <span dir="ltr" className="font-mono-data [unicode-bidi:isolate] font-semibold text-foreground">{selectedAppointment.accessionNumber}</span></span>
+                    <span>{selectedModality}</span>
+                  </div>
+                  <div className="hidden lg:flex lg:min-w-0 lg:flex-wrap lg:items-start lg:gap-x-5 lg:gap-y-2 lg:border-t lg:border-slate-100 lg:pt-2 lg:mt-3">
+                    <ClinicalBannerField label={chooseLocalized(language, "معرف المريض", "MRN / primary ID")} value={selectedAppointment.mrn} />
+                    <ClinicalBannerField label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")} value={selectedAppointment.patientPrimaryIdentifierValue ? primaryIdentifierText(language, selectedAppointment) : selectedAppointment.nationalId ? selectedAppointment.nationalId : null} />
+                    <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
+                    <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
+                    <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
+                    <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                    {selectedAppointment.acquisitionSummary?.equipmentName ? <ClinicalBannerField label={chooseLocalized(language, "أُجري على", "Performed on")} value={selectedAppointment.acquisitionSummary.equipmentName} /> : null}
+                    {selectedAppointment.acquisitionSummary?.startedAt ? <ClinicalBannerField label={chooseLocalized(language, "بدأ التصوير", "Started")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.startedAt)} /> : null}
+                    {selectedAppointment.acquisitionSummary?.endedAt ? <ClinicalBannerField label={chooseLocalized(language, "انتهى التصوير", "Finished")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.endedAt)} /> : null}
+                    {selectedAppointment.acquisitionSummary?.durationSeconds != null ? <ClinicalBannerField label={chooseLocalized(language, "مدة الفحص", "Duration")} value={formatDurationMinutes(language, Math.floor(selectedAppointment.acquisitionSummary.durationSeconds / 60))} /> : null}
+                    {selectedAppointment.acquisitionSummary ? <ClinicalBannerField label={chooseLocalized(language, "المصدر", "Source")} value="MPPS" /> : null}
+                    {selectedAppointment.acquisitionSummary?.performedStatus === "DISCONTINUED" && selectedAppointment.acquisitionSummary.discontinuationReason ? <ClinicalBannerField label={chooseLocalized(language, "السبب", "Reason")} value={selectedAppointment.acquisitionSummary.discontinuationReason} /> : null}
+                  </div>
                 </div>
               </DialogHeader>
+              <div data-testid="clinical-dialog-scroll-region" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 pb-[env(safe-area-inset-bottom)] lg:flex lg:flex-col lg:overflow-hidden">
               <Tabs value={selectedAppointmentTab} onValueChange={(value) => setSelectedAppointmentTab(value as "appointment" | "previousStudies")}>
-                <TabsList className="mx-4 mt-3 sm:mx-6">
+                <div className="shrink-0 px-3 pt-2 sm:px-6 sm:pt-3">
+                <DisclosureSection title={t(language, "modality.patientDetails")} className="lg:hidden" defaultOpen={false}>
+                  <div data-testid="clinical-mobile-details" className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                    <ClinicalMobileDetailField label={t(language, "settings.fieldMRN")} value={selectedAppointment.mrn} dir="ltr" />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")} value={selectedAppointment.patientPrimaryIdentifierValue || selectedAppointment.nationalId} dir="ltr" />
+                    <ClinicalMobileDetailField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
+                    <ClinicalMobileDetailField label={t(language, "modality.fieldExam")} value={selectedExam} />
+                    <ClinicalMobileDetailField label={t(language, "modality.fieldModality")} value={selectedModality} />
+                    <ClinicalMobileDetailField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} dir="ltr" />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "أُجري على", "Performed on")} value={selectedAppointment.acquisitionSummary?.equipmentName} />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "بدأ التصوير", "Started")} value={selectedAppointment.acquisitionSummary?.startedAt ? formatDateTimeLy(selectedAppointment.acquisitionSummary.startedAt) : null} dir="ltr" />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "انتهى التصوير", "Finished")} value={selectedAppointment.acquisitionSummary?.endedAt ? formatDateTimeLy(selectedAppointment.acquisitionSummary.endedAt) : null} dir="ltr" />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "مدة الفحص", "Duration")} value={selectedAppointment.acquisitionSummary?.durationSeconds != null ? formatDurationMinutes(language, Math.floor(selectedAppointment.acquisitionSummary.durationSeconds / 60)) : null} />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "المصدر", "Source")} value={selectedAppointment.acquisitionSummary ? "MPPS" : null} dir="ltr" />
+                    <ClinicalMobileDetailField label={chooseLocalized(language, "السبب", "Discontinuation reason")} value={selectedAppointment.acquisitionSummary?.performedStatus === "DISCONTINUED" ? selectedAppointment.acquisitionSummary.discontinuationReason : null} />
+                    <ClinicalMobileDetailField label={t(language, "modality.fieldPriority")} value={selectedPriority} />
+                    <ClinicalMobileDetailField label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes?.trim() || selectedAppointment.specialReasonNote?.trim()} />
+                  </div>
+                </DisclosureSection>
+                <TabsList className="mx-0 mt-2 sm:mx-0">
                   <TabsTrigger value="appointment">{chooseLocalized(language, "الموعد", "Appointment")}</TabsTrigger>
                   <TabsTrigger value="previousStudies">{t(language, "modality.previousStudies.previous")}</TabsTrigger>
                 </TabsList>
+                </div>
                 {selectedAppointmentTab === "appointment" ? <>
-              <main data-testid="clinical-workspace-region" className="min-h-0 flex-1 overflow-hidden bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
-                <div data-testid="clinical-workspace" className={`grid h-full min-h-0 gap-3 ${selectedAppointment.protocolAssignmentSummary || selectedProtocolQuery.data || selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching || selectedProtocolQuery.isError ? "grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)] lg:grid-rows-1" : "grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-1 lg:grid-rows-1"}`}>
-                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:order-2">
+              <main data-testid="clinical-workspace-region" className="min-h-0 flex-none overflow-visible bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4 lg:flex-1 lg:overflow-hidden">
+                <div data-testid="clinical-workspace" className={`grid min-w-0 gap-3 lg:h-full lg:min-h-0 ${selectedAppointment.protocolAssignmentSummary || selectedProtocolQuery.data || selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching || selectedProtocolQuery.isError ? "grid-cols-1 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)] lg:grid-rows-1" : "grid-cols-1 lg:grid-cols-1 lg:grid-rows-1"}`}>
+                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-w-0 lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
                     <ProtocolAssignmentPanel
                       key={selectedAppointment.id}
                       appointment={selectedAppointment}
@@ -1944,13 +1972,14 @@ export default function ModalityPage() {
                     />
                   </section>
 
-                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex h-full min-h-0 min-w-0 flex-col lg:order-1">
+                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex min-w-0 flex-col lg:order-1 lg:h-full lg:min-h-0">
                     <RequestDocumentsPanel
                       appointmentId={selectedAppointment.id}
                       patientId={selectedAppointment.patientId}
                       appointmentRefType="v2_booking"
                       previewMode="inline"
                       layout="workspace"
+                      compactMobileWorkspace
                       enableLocalScan
                       newDocumentType="clinical_document"
                       title={chooseLocalized(language, "وثائق طلب الفحص", "Examination request documents")}
@@ -1960,7 +1989,7 @@ export default function ModalityPage() {
                 </div>
               </main>
                 </> : null}
-                {selectedAppointmentTab === "previousStudies" ? <div className="min-h-0 flex-1 overflow-auto bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
+                {selectedAppointmentTab === "previousStudies" ? <div data-testid="clinical-previous-studies-region" className="min-h-0 flex-none overflow-visible bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4 lg:flex-1 lg:overflow-auto">
                   <SplitPreviousStudiesPanel
                     language={language}
                     appointmentId={selectedAppointment.id}
@@ -1983,20 +2012,25 @@ export default function ModalityPage() {
                   />
                 </div> : null}
               </Tabs>
+              </div>
 
-              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-wrap border-t border-slate-200 bg-white px-3 py-3 !justify-start sm:px-5 sm:!justify-end">
+              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-nowrap gap-2 border-t border-slate-200 bg-white px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] !justify-start sm:flex-wrap sm:px-5 sm:py-3 sm:pb-3 sm:!justify-end">
                 <Button
                   type="button"
                   variant="secondary"
+                  size="sm"
+                  className="!min-h-11 shrink-0"
                   onClick={closeSelectedAppointment}
                 >
                   <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
                 </Button>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-wrap">
                 {selectedAppointment.status === "scheduled" || selectedAppointment.status === "waiting" ? (
                   <Button
                     type="button"
                     variant="secondary"
+                    size="sm"
+                    className="!min-h-11 min-w-0 max-w-full"
                     disabled={statusMutation.isPending}
                     onClick={() => handleRequestStatusChange(selectedAppointment, "arrived")}
                   >
@@ -2008,6 +2042,8 @@ export default function ModalityPage() {
                   <Button
                     type="button"
                     variant="secondary"
+                    size="sm"
+                    className="!min-h-11 !hidden lg:!inline-flex"
                     disabled={statusMutation.isPending}
                     onClick={() => handleRequestStatusChange(selectedAppointment, "waiting")}
                   >
@@ -2019,6 +2055,8 @@ export default function ModalityPage() {
                   <Button
                     type="button"
                     variant="secondary"
+                    size="sm"
+                    className="!min-h-11"
                     disabled={statusMutation.isPending}
                     onClick={() => handleRequestStatusChange(selectedAppointment, "arrived", true)}
                   >
@@ -2030,6 +2068,8 @@ export default function ModalityPage() {
                   <Button
                     type="button"
                     variant="secondary"
+                    size="sm"
+                    className="!min-h-11"
                     disabled={reopenForScanningMutation.isPending}
                     onClick={() => {
                       setReopenForScanningAppointment(selectedAppointment);
@@ -2044,6 +2084,8 @@ export default function ModalityPage() {
                 <Button
                   type="button"
                   variant="primary"
+                  size="sm"
+                  className={`!min-h-11 ${!canComplete ? "!hidden lg:!inline-flex" : ""}`}
                   disabled={!canComplete || completeMutation.isPending}
                   onClick={() => handleRequestCompletion(selectedAppointment)}
                 >
@@ -2051,10 +2093,11 @@ export default function ModalityPage() {
                   <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                 </Button>
                 </div>
-                <div className="border-s border-slate-200 ps-2">
+                <div className="hidden border-s border-slate-200 ps-2 lg:block">
                 <Button
                   type="button"
                   variant="secondary"
+                  size="sm"
                   disabled={!canCloseAsProblem || statusMutation.isPending}
                   onClick={() => {
                     setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true });
@@ -2066,6 +2109,34 @@ export default function ModalityPage() {
                   <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                 </Button>
                 </div>
+                <AnchoredMenu
+                  open={mobileAppointmentMenuOpen}
+                  onOpenChange={setMobileAppointmentMenuOpen}
+                  dir={isArabic ? "rtl" : "ltr"}
+                  width={248}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="!h-11 !min-h-11 !w-11 !inline-flex shrink-0 lg:!hidden"
+                      aria-label={chooseLocalized(language, "إجراءات الموعد", "Appointment actions")}
+                      title={chooseLocalized(language, "إجراءات الموعد", "Appointment actions")}
+                    >
+                      <MoreHorizontal size={18} aria-hidden="true" />
+                    </Button>
+                  }
+                >
+                  <div className="space-y-0.5">
+                    <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" onClick={() => { setSelectedAppointmentTab("previousStudies"); setMobileAppointmentMenuOpen(false); }}><History size={16} aria-hidden="true" /><span>{chooseLocalized(language, "الدراسات السابقة", "History / previous studies")}</span></button>
+                    <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" onClick={() => { setDocumentAppointmentId(selectedAppointment.id); setMobileAppointmentMenuOpen(false); }}><FileText size={16} aria-hidden="true" /><span>{chooseLocalized(language, "المستندات", "Documents")}</span></button>
+                    {selectedAppointment.status === "completed" ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted disabled:opacity-50" disabled={cdButtonState(selectedAppointment) === "sending"} onClick={() => { openCd(selectedAppointment); setMobileAppointmentMenuOpen(false); }}><Disc3 size={16} aria-hidden="true" /><span>{cdButtonDetails(language, cdButtonState(selectedAppointment), selectedAppointment.cdSuccessfulCount ?? 0).label}</span></button> : null}
+                    <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" onClick={() => { handlePrint(selectedAppointment.id); setMobileAppointmentMenuOpen(false); }}><Printer size={16} aria-hidden="true" /><span>{t(language, "common.print")}</span></button>
+                    {isIrModality ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" onClick={() => { openSpecimenLabel(selectedAppointment); setMobileAppointmentMenuOpen(false); }}><Printer size={16} aria-hidden="true" /><span>{t(language, "modality.specimenLabel.print")}</span></button> : null}
+                    {selectedAppointment.status === "arrived" ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" disabled={statusMutation.isPending} onClick={() => { handleRequestStatusChange(selectedAppointment, "waiting"); setMobileAppointmentMenuOpen(false); }}><TimerReset size={16} aria-hidden="true" /><span>{chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}</span></button> : null}
+                    {ACTIVE_STATUSES.has(selectedAppointment.status) ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted disabled:opacity-50" disabled={statusMutation.isPending} onClick={() => { setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true }); setStatusReason(""); setMobileAppointmentMenuOpen(false); }}><Ban size={16} aria-hidden="true" /><span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span></button> : null}
+                  </div>
+                </AnchoredMenu>
               </DialogFooter>
             </div>
           ) : null}
@@ -2343,9 +2414,9 @@ function MobileModalityCard({
           ) : null}
           {appointment.isAdditionalImaging ? <Badge variant="info" size="sm">{chooseLocalized(language, "فحص تكميلي", "Additional imaging")}</Badge> : null}
           {appointment.protocolAssignmentSummary ? (
-            <span className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs font-semibold text-emerald-700" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
+            <span className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs font-semibold text-emerald-700" title={protocolVersionLabel(language, appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}>
               <BadgeCheck size={13} className="shrink-0" aria-hidden="true" />
-              <span className="truncate">{protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}</span>
+              <span className="truncate">{protocolVersionLabel(language, appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}</span>
             </span>
           ) : isProtocolModality(appointment) ? (
             <span className="text-xs text-muted-foreground">{chooseLocalized(language, "لا يوجد بروتوكول", "No protocol assigned")}</span>
@@ -2603,6 +2674,23 @@ function ClinicalBannerField({
   );
 }
 
+function ClinicalMobileDetailField({
+  label,
+  value,
+  dir = "auto",
+}: {
+  label: string;
+  value: string | number | null | undefined;
+  dir?: "auto" | "ltr" | "rtl";
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+      <p dir={dir} className="mt-1 break-words [overflow-wrap:anywhere] text-sm font-medium leading-5 text-foreground">{value ?? EMPTY_VALUE}</p>
+    </div>
+  );
+}
+
 function DetailField({
   label,
   value,
@@ -2700,7 +2788,7 @@ function ProtocolAssignmentPanel({
   }
 
   const printSheet = buildModalityProtocolPrintSheet(appointment, assignment);
-  const protocolTitle = protocolVersionLabel(assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol);
+  const protocolTitle = protocolVersionLabel(protocolLanguage, assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol);
   const hasFreeTextProtocol = hasMeaningfulValue(assignment.freeTextProtocol);
   const hasContrastNotes = hasMeaningfulValue(assignment.contrastNotes);
   const hasAppointmentNotes = hasMeaningfulValue(appointmentNotes);
