@@ -66,6 +66,14 @@ const users: User[] = [
     isActive: true,
     mustChangePassword: false,
   },
+  {
+    id: 12,
+    username: "second.profile",
+    fullName: "Second Profile",
+    role: "doctor",
+    isActive: true,
+    mustChangePassword: false,
+  },
 ];
 
 const profiles: DoctorProfile[] = [
@@ -90,11 +98,13 @@ const profiles: DoctorProfile[] = [
 function renderPage(me: DoctorMe = adminMe, options: { advanced?: boolean } = {}) {
   localStorage.setItem("rispro-language", "en");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  const makePage = () => (
     <QueryClientProvider client={queryClient}>
       <LanguageProvider><DoctorAdminDoctorsPage me={me} advanced={options.advanced} /></LanguageProvider>
     </QueryClientProvider>
   );
+  const rendered = render(makePage());
+  return { ...rendered, rerenderPage: () => rendered.rerender(makePage()) };
 }
 
 describe("DoctorAdminDoctorsPage", () => {
@@ -127,6 +137,29 @@ describe("DoctorAdminDoctorsPage", () => {
     expect((within(drawer).getByLabelText("Select user") as HTMLSelectElement).value).toBe("11");
     expect(within(drawer).getByLabelText("Display name")).toHaveProperty("value", "New Profile");
     expect(createDoctorProfileForAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen a dismissed deep-link drawer", async () => {
+    window.history.replaceState({}, "", "/doctor/doctors-directory?linkUserId=11");
+    renderPage();
+
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create doctor" })).toBeNull());
+  });
+
+  it("opens the newly requested user when the deep-link changes", async () => {
+    window.history.replaceState({}, "", "/doctor/doctors-directory?linkUserId=11");
+    const rendered = renderPage();
+    await screen.findByRole("dialog", { name: "Create doctor" });
+
+    window.history.replaceState({}, "", "/doctor/doctors-directory?linkUserId=12");
+    rendered.rerenderPage();
+
+    const drawer = await screen.findByRole("dialog", { name: "Create doctor" });
+    expect((within(drawer).getByLabelText("Select user") as HTMLSelectElement).value).toBe("12");
+    expect(within(drawer).getByLabelText("Display name")).toHaveProperty("value", "Second Profile");
   });
 
   it.each(["invalid", "10"])(

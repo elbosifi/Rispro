@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
@@ -157,7 +157,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const drawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const createDrawerCloseRef = useRef<HTMLButtonElement>(null);
   const createDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const handledLinkUserIdRef = useRef<number | null>(null);
+  const [dismissedLinkUserId, setDismissedLinkUserId] = useState<number | null>(null);
   const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
     userId: "",
@@ -168,8 +168,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     canAssignProtocols: true,
     canSupervise: false,
   });
-  const [linkUserSelectionChanged, setLinkUserSelectionChanged] =
-    useState(false);
+  const [linkUserSelectionChangedKey, setLinkUserSelectionChangedKey] = useState<string | null>(null);
 
   const profilesQuery = useQuery({ queryKey: ["doctor", "profiles"], queryFn: fetchDoctorProfilesForAdmin });
   const usersQuery = useQuery<{ users: User[] }>({ queryKey: ["users"], queryFn: fetchUsers });
@@ -230,14 +229,29 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     requestedLinkUser && !profilesByUserId.has(requestedLinkUser.id)
       ? requestedLinkUser
       : undefined;
+  const linkSelectionKey = preselectedLinkUser ? `url:${preselectedLinkUser.id}` : "manual";
   const linkDraft =
-    preselectedLinkUser && !linkUserSelectionChanged
+    preselectedLinkUser && linkUserSelectionChangedKey !== linkSelectionKey
       ? {
           ...draft,
           userId: String(preselectedLinkUser.id),
           displayName: preselectedLinkUser.fullName,
         }
       : draft;
+  const autoLinkDrawerOpen = Boolean(
+    requestedLinkUserId &&
+      profilesQuery.isSuccess &&
+      usersQuery.isSuccess &&
+      preselectedLinkUser &&
+      requestedLinkUserId !== dismissedLinkUserId,
+  );
+  const activeCreateDrawerMode = createDrawerMode ?? (autoLinkDrawerOpen ? "link" : null);
+  const visibleAdminMessage = autoLinkDrawerOpen ? null : adminMessage;
+  const dismissAutoLinkDrawer = useCallback(() => {
+    if (!autoLinkDrawerOpen || requestedLinkUserId === null) return;
+    setDismissedLinkUserId(requestedLinkUserId);
+    setAdminMessage(null);
+  }, [autoLinkDrawerOpen, requestedLinkUserId]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
 
@@ -257,11 +271,12 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       canSupervise: linkDraft.canSupervise,
     }),
     onSuccess: async (profile) => {
+      dismissAutoLinkDrawer();
       setSelectedProfileId(profile.id);
       setAdminMessage({ tone: "success", text: "Doctor profile created." });
       setCreateDrawerMode(null);
       setDraft({ userId: "", displayName: "", doctorRole: "consultant", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false });
-      setLinkUserSelectionChanged(false);
+      setLinkUserSelectionChangedKey(null);
       window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
       await invalidateProfiles();
     },
@@ -275,6 +290,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         .filter((permission) => permission.active || permission.canProtocol || permission.canReport || permission.canSupervise),
     }),
     onSuccess: async (result) => {
+      dismissAutoLinkDrawer();
       setSelectedProfileId(result.profile.id);
       setCreateDoctorDraft(DEFAULT_CREATE_DOCTOR_DRAFT);
       setCreateDoctorEmailEdited(false);
@@ -460,20 +476,10 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   };
 
   const closeCreateDrawer = () => {
+    dismissAutoLinkDrawer();
     setCreateDrawerMode(null);
     window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
   };
-
-  useEffect(() => {
-    if (!requestedLinkUserId || !profilesQuery.isSuccess || !usersQuery.isSuccess) return;
-    if (handledLinkUserIdRef.current === requestedLinkUserId) return;
-    handledLinkUserIdRef.current = requestedLinkUserId;
-    if (!preselectedLinkUser) return;
-
-    setAdminMessage(null);
-    setLinkUserSelectionChanged(false);
-    setCreateDrawerMode("link");
-  }, [preselectedLinkUser, profilesQuery.isSuccess, requestedLinkUserId, usersQuery.isSuccess]);
 
   useEffect(() => {
     if (!editingProfile) return;
@@ -500,11 +506,12 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   }, [editingProfile]);
 
   useEffect(() => {
-    if (!createDrawerMode) return;
+    if (!activeCreateDrawerMode) return;
     const unlockBodyScroll = lockBodyScroll();
     createDrawerCloseRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        dismissAutoLinkDrawer();
         setCreateDrawerMode(null);
         window.setTimeout(() => createDrawerTriggerRef.current?.focus(), 0);
         return;
@@ -520,7 +527,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     };
     document.addEventListener("keydown", onKeyDown);
     return () => { unlockBodyScroll(); document.removeEventListener("keydown", onKeyDown); };
-  }, [createDrawerMode]);
+  }, [activeCreateDrawerMode, dismissAutoLinkDrawer]);
 
   const createFormError = createDoctorMutation.error || createMutation.error;
   const formError = updateMutation.error || editMutation.error || accountMutation.error || modalityMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || lifecycleMutation.error;
@@ -547,9 +554,9 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           {formError instanceof Error ? formError.message : "Doctor admin action failed."}
         </div>
       )}
-      {adminMessage && (
-        <div className={adminMessage.tone === "success" ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700" : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"}>
-          {adminMessage.text}
+      {visibleAdminMessage && (
+        <div className={visibleAdminMessage.tone === "success" ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700" : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"}>
+          {visibleAdminMessage.text}
         </div>
       )}
 
@@ -636,7 +643,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         </section>
       )}
 
-      {createDrawerMode ? createPortal(
+      {activeCreateDrawerMode ? createPortal(
         <div className="fixed inset-0 z-[70] flex justify-end bg-black/35" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateDrawer(); }}>
           <aside data-testid="create-doctor-drawer" className="flex h-dvh w-full flex-col bg-background shadow-2xl sm:max-w-[620px] sm:border-s" role="dialog" aria-modal="true" aria-labelledby="create-doctor-title" aria-describedby="create-doctor-description">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
@@ -647,12 +654,12 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
               <Button ref={createDrawerCloseRef} type="button" variant="secondary" size="sm" onClick={closeCreateDrawer}>Close</Button>
             </header>
             <div className="flex shrink-0 overflow-x-auto border-b px-2 py-2" role="group" aria-label="Doctor creation workflow">
-              <button type="button" aria-pressed={createDrawerMode === "new"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("new"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${createDrawerMode === "new" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>New RISpro account</button>
-              <button type="button" aria-pressed={createDrawerMode === "link"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("link"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${createDrawerMode === "link" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>Link existing RISpro user</button>
+              <button type="button" aria-pressed={activeCreateDrawerMode === "new"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("new"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${activeCreateDrawerMode === "new" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>New RISpro account</button>
+              <button type="button" aria-pressed={activeCreateDrawerMode === "link"} onClick={() => { createDoctorMutation.reset(); createMutation.reset(); setCreateDrawerMode("link"); }} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${activeCreateDrawerMode === "link" ? "bg-teal-50 text-teal-800" : "text-muted-foreground"}`}>Link existing RISpro user</button>
             </div>
             <div data-testid="create-doctor-drawer-body" className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
               {createFormError ? <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{createFormError instanceof Error ? createFormError.message : "Doctor admin action failed."}</div> : null}
-              {createDrawerMode === "new" ? <>
+              {activeCreateDrawerMode === "new" ? <>
                 <section aria-labelledby="create-account-section-title" className="space-y-3">
                   <div>
                     <h3 id="create-account-section-title" className="font-semibold">Account</h3>
@@ -765,7 +772,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
                   <span className="font-medium">Select user</span>
                   <select aria-label="Select user" value={linkDraft.userId} onChange={(event) => {
                     const user = usersById.get(Number(event.target.value));
-                    setLinkUserSelectionChanged(true);
+                    setLinkUserSelectionChangedKey(linkSelectionKey);
                     setDraft((current) => ({ ...current, userId: event.target.value, displayName: user?.fullName ?? current.displayName }));
                   }} className="input-premium h-[var(--control-height-md)]">
                     <option value="">Select user</option>
@@ -777,14 +784,14 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
                 <label className="grid gap-1 text-sm">
                   <span className="font-medium">Display name</span>
                   <Input value={linkDraft.displayName} onChange={(event) => {
-                    setLinkUserSelectionChanged(true);
+                    setLinkUserSelectionChangedKey(linkSelectionKey);
                     setDraft((current) => ({ ...current, displayName: event.target.value }));
                   }} />
                 </label>
                 <label className="grid gap-1 text-sm">
                   <span className="font-medium">{t("doctorAdmin.profile.doctorRole")}</span>
                   <select aria-label={t("doctorAdmin.profile.doctorRole")} value={linkDraft.doctorRole} onChange={(event) => {
-                    setLinkUserSelectionChanged(true);
+                    setLinkUserSelectionChangedKey(linkSelectionKey);
                     setDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }));
                   }} className="input-premium h-[var(--control-height-md)]">
                     {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
@@ -794,7 +801,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
             </div>
             <footer className="flex shrink-0 justify-between gap-3 border-t bg-background px-4 py-3 sm:px-5">
               <Button type="button" variant="secondary" onClick={closeCreateDrawer}>Cancel</Button>
-              {createDrawerMode === "new" ? <Button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()}>{createDoctorMutation.isPending ? "Creating doctor…" : "Create doctor"}</Button> : <Button type="button" disabled={!linkDraft.userId || !linkDraft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Creating profile…" : "Create profile"}</Button>}
+              {activeCreateDrawerMode === "new" ? <Button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()}>{createDoctorMutation.isPending ? "Creating doctor…" : "Create doctor"}</Button> : <Button type="button" disabled={!linkDraft.userId || !linkDraft.displayName || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Creating profile…" : "Create profile"}</Button>}
             </footer>
           </aside>
         </div>, document.body) : null}
@@ -811,7 +818,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
             </nav>
             <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
               {formError ? <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formError instanceof Error ? formError.message : "Doctor admin action failed."}</div> : null}
-              {adminMessage ? <div role="status" className={`mb-4 rounded-lg border p-3 text-sm ${adminMessage.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{adminMessage.text}</div> : null}
+              {visibleAdminMessage ? <div role="status" className={`mb-4 rounded-lg border p-3 text-sm ${visibleAdminMessage.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{visibleAdminMessage.text}</div> : null}
               {drawerSection === "account" ? <section aria-labelledby="account-section-title" className="space-y-4">
                 <div><h3 id="account-section-title" className="font-semibold">Account</h3><p className="text-sm text-muted-foreground">Login account active is separate from Doctor profile active.</p></div>
                 <label className="grid gap-1 text-sm"><span className="font-medium">Username</span><input value={accountDraft.username} onChange={(event) => setAccountDraft((current) => ({ ...current, username: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>

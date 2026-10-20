@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { useLanguage } from "@/providers/language-provider";
-import type { TranslationKey } from "@/lib/i18n";
+import { localizeSopSectionTitle } from "./sop-section-utils";
 import { Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import TextAlign from "@tiptap/extension-text-align";
@@ -47,29 +47,9 @@ function ToolbarButton({ label, onClick, active = false, disabled = false, child
   return <button type="button" className={`sop-toolbar-button ${active ? "is-active" : ""}`} aria-label={label} title={label} aria-pressed={active} disabled={disabled} onClick={onClick}>{children}</button>;
 }
 
-const SECTION_TITLE_KEYS: Partial<Record<string, TranslationKey>> = {
-  purpose: "sops.section.purpose",
-  scope: "sops.section.scope",
-  responsibilities: "sops.section.responsibilities",
-  definitions: "sops.section.definitions",
-  safety: "sops.section.safety",
-  procedure: "sops.section.procedure",
-  documentation: "sops.section.documentation",
-  references: "sops.section.references",
-};
-
-export function localizeSopSectionTitle(
-  key: string,
-  title: string,
-  t: (key: TranslationKey) => string,
-) {
-  const translationKey = SECTION_TITLE_KEYS[key];
-  return translationKey ? t(translationKey) : title;
-}
-
 function SopToolbar({ editor, editable }: { editor: Editor; editable: boolean }) {
-  if (!editable) return null;
   const { t } = useLanguage();
+  if (!editable) return null;
   return <div className="flex flex-wrap items-center gap-1 border-b border-border bg-muted/20 p-2" role="toolbar" aria-label={t("sops.editor.toolbarLabel")}>
     <select aria-label={t("sops.editor.headingStyle")} className="input-premium h-8 w-28 px-2 text-xs" value={editor.isActive("heading", { level: 2 }) ? "2" : editor.isActive("heading", { level: 3 }) ? "3" : "p"} onChange={(event) => { const value = event.target.value; if (value === "p") editor.chain().focus().setParagraph().run(); else editor.chain().focus().toggleHeading({ level: Number(value) as 2 | 3 }).run(); }}>
       <option value="p">{t("sops.editor.body")}</option><option value="2">{t("sops.editor.headingTwo")}</option><option value="3">{t("sops.editor.headingThree")}</option>

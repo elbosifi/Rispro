@@ -62,7 +62,8 @@ import {
   type SopXlsxConfirmResult,
   type SopJsonConfirmResult,
 } from "@/lib/api/sops";
-import { localizeSopSectionTitle, SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
+import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
+import { localizeSopSectionTitle } from "./sop-section-utils";
 import { createEmptySopDocument } from "./sop-document";
 import { SopXlsxImportDialog } from "./sop-xlsx-import-dialog";
 import { SopJsonImportDialog } from "./sop-json-import-dialog";

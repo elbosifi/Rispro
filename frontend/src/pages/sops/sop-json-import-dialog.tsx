@@ -3,7 +3,7 @@ import { Alert, AlertDescription, AlertTitle, Badge, Button, Card, Dialog, Dialo
 import { confirmDraftSopJsonImport, confirmNewSopJsonImport, inspectDraftSopJsonImport, inspectNewSopJsonImport, previewDraftSopJsonImport, previewNewSopJsonImport, type SopJsonConfirmResult, type SopJsonInspect, type SopJsonPreview } from "@/lib/api/sops";
 import { useLanguage } from "@/providers/language-provider";
 import type { TranslationKey } from "@/lib/i18n";
-import { localizeSopSectionTitle } from "./sop-editor";
+import { localizeSopSectionTitle } from "./sop-section-utils";
 
 type Stage = "upload" | "inspecting" | "inspected" | "previewing" | "preview" | "confirming";
 type Props = { open: boolean; mode: "create" | "draft_update"; sopId?: number; version?: string; onClose: () => void; onConfirmed: (result: SopJsonConfirmResult) => void; };

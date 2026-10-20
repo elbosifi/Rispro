@@ -324,9 +324,9 @@ describe("SopsPage", () => {
     expect(screen.getAllByRole("button", { name: "LTR" })).toHaveLength(8);
     for (const title of sections.map((section) => section.title)) expect(screen.getByText(title)).toBeTruthy();
     await user.type(screen.getByLabelText("Title"), "MRI Safety");
-    await user.type(screen.getByLabelText("SOP Code"), "rad-mri-002");
+    await user.type(screen.getByLabelText("SOP code"), "rad-mri-002");
     await user.type(screen.getByLabelText("Change summary"), "Initial bilingual draft");
-    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(api.createSop).toHaveBeenCalled());
     expect(api.createSop.mock.calls[0][0]).toMatchObject({ title: "MRI Safety", code: "rad-mri-002", category: "General" });
     expect(api.createSop.mock.calls[0][0].contentJson.sections).toHaveLength(8);
@@ -345,7 +345,7 @@ describe("SopsPage", () => {
     api.fetchSop.mockResolvedValueOnce({ sop: publishedSop, versions: [publishedVersion, oldVersion] });
     renderPage("receptionist", "/sops/7?version=1.0");
     expect(await screen.findByText("Published SOP")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save Draft" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Version history" })).toBeTruthy();
     expect(screen.getByText("Superseded")).toBeTruthy();
   });
@@ -417,7 +417,7 @@ describe("SopsPage", () => {
     expect(await screen.findByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Unsaved MRI Safety");
-    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(api.updateSopDraft).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", false));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -487,7 +487,7 @@ describe("SopsPage", () => {
     const title = await screen.findByLabelText("Title");
     await user.clear(title);
     await user.type(title, "Saved native history edit");
-    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(api.updateSopDraft).toHaveBeenCalled());
 
     const historyGo = vi.spyOn(window.history, "go");
@@ -571,7 +571,7 @@ describe("SopsPage", () => {
     expect(screen.queryByRole("button", { name: "Create New Revision" })).toBeNull();
     await user.click(openDraft);
     expect(screen.getByTestId("router-location").textContent).toBe("/sops/7?version=1.1");
-    expect(await screen.findByRole("button", { name: "Save Draft" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Save draft" })).toBeTruthy();
   });
 
   it("exposes revision and archive actions only to management users", async () => {

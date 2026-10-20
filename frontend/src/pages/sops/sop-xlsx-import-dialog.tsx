@@ -10,7 +10,7 @@ import {
 } from "@/lib/api/sops";
 import { useLanguage } from "@/providers/language-provider";
 import type { TranslationKey } from "@/lib/i18n";
-import { localizeSopSectionTitle } from "./sop-editor";
+import { localizeSopSectionTitle } from "./sop-section-utils";
 
 type ImportStage = "upload" | "validating" | "validated" | "previewing" | "preview" | "confirming";
 
