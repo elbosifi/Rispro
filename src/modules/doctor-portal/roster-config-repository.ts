@@ -1,8 +1,10 @@
+import type { Db } from "./roster-repository.js";
 import { pool } from "../../db/pool.js";
 import type { UserId } from "../../types/http.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 
 export interface RosterDutyTypeConfigRow {
+  builtIn?: boolean;
   code: string;
   label: string;
   active: boolean;
@@ -23,17 +25,20 @@ export interface RosterShiftImportMappingRow {
   active: boolean;
 }
 
-export async function listRosterDutyTypes(includeInactive = false): Promise<RosterDutyTypeConfigRow[]> {
-  const result = await pool.query<RosterDutyTypeConfigRow>(
-    `
-      select code, label, active, requires_specialist as "requiresSpecialist", sort_order as "sortOrder"
-      from doctor_portal.roster_duty_types
-      where $1::boolean = true or active = true
-      order by sort_order asc, label asc, code asc
-    `,
-    [includeInactive]
-  );
-  return result.rows;
+// Existing built-in duties remain usable on an installation with no saved duty configuration.
+const DEFAULT_ROSTER_DUTIES: RosterDutyTypeConfigRow[] = [
+  ["ct_protocol_day", "CT protocol day"], ["ct_reporting_day", "CT reporting day"],
+  ["mri_supervision_reporting", "MRI supervision and reporting"],
+  ["ultrasound_term_1", "Ultrasound session 1"], ["ultrasound_term_2", "Ultrasound session 2"], ["ultrasound_term_3", "Ultrasound session 3"],
+  ["mammography_session", "Mammography session"], ["general_reporting", "General reporting"],
+  ["on_call", "On call"], ["leave", "Leave"], ["admin", "Admin"], ["teaching", "Teaching"],
+].map(([code, label], sortOrder) => ({ code, label, active: true, requiresSpecialist: false, sortOrder, builtIn: true }));
+
+export async function listRosterDutyTypes(includeInactive = false, db: Db = pool): Promise<RosterDutyTypeConfigRow[]> {
+  const result = await db.query<RosterDutyTypeConfigRow>(`
+    select code, label, active, requires_specialist as "requiresSpecialist", sort_order as "sortOrder"
+    from doctor_portal.roster_duty_types order by sort_order asc, label asc, code asc`);
+  return (result.rows.length ? result.rows : DEFAULT_ROSTER_DUTIES).filter(row => includeInactive || row.active);
 }
 
 export async function upsertRosterDutyType(

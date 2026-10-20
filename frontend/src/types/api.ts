@@ -300,6 +300,7 @@ export type CaseAssignmentStatus = "active" | "superseded" | "corrected" | "canc
 export type CaseAssignmentType = "imaging" | "protocol" | "reporting" | "ultrasound_operator" | "mammography_episode";
 
 export interface RosterDutyTypeConfig {
+  builtIn?: boolean;
   code: string;
   label: string;
   active: boolean;

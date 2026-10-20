@@ -1,3 +1,4 @@
+import { DoctorRosterBoard } from "./roster/doctor-roster-board";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -308,7 +309,7 @@ function AssignmentList({
   );
 }
 
-export function DoctorRosterPage({ me, management = false, advanced = false }: { me: DoctorMe; management?: boolean; advanced?: boolean }) {
+function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { me: DoctorMe; management?: boolean; advanced?: boolean }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const canManage = management && isManager(me);
@@ -1197,4 +1198,8 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
       ) : null}
     </div>
   );
+}
+
+export function DoctorRosterPage(props: { me: DoctorMe; management?: boolean; advanced?: boolean }) {
+  return props.management && !props.advanced ? <DoctorRosterBoard me={props.me} /> : <LegacyDoctorRosterPage {...props} />;
 }

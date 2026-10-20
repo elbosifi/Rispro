@@ -7,6 +7,8 @@ import type { AuthenticatedUserContext } from "../../types/http.js";
 import type { RosterDutyType, RosterTeamRole } from "./roster-types.js";
 import { doctorRosterTemplateRouter } from "./roster-template-routes.js";
 import {
+  getSavedRosterWeeks,
+  transferRosterMember,
   addRosterAssignment,
   addRosterMember,
   archiveRosterWeek,
@@ -125,6 +127,17 @@ router.get(
   })
 );
 
+router.get("/saved", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  res.json({ weeks: await getSavedRosterWeeks(actor(req)) });
+}));
+
+router.post("/assignments/:id/members/:memberId/transfer", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  const body = asUnknownRecord(req.body);
+  if (body.mode !== "move" && body.mode !== "copy") throw new HttpError(400, "Choose move or copy.");
+  await transferRosterMember(actor(req), asPositiveInteger(req.params.id, "assignmentId"), asPositiveInteger(req.params.memberId, "memberId"), asPositiveInteger(body.targetAssignmentId, "targetAssignmentId"), body.mode === "copy");
+  res.json({ ok: true });
+}));
+
 router.post(
   "/weeks",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
@@ -132,6 +145,8 @@ router.post(
     const week = await createDraftRosterWeek(actor(req), {
       weekStartDate: asString(body.weekStartDate),
       weekEndDate: asString(body.weekEndDate),
+      sourceRosterWeekId: body.sourceRosterWeekId == null ? undefined : asPositiveInteger(body.sourceRosterWeekId, "sourceRosterWeekId"),
+      structureOnly: body.structureOnly === true,
     });
     res.status(201).json({ week });
   })
@@ -152,7 +167,12 @@ router.patch(
 router.post(
   "/weeks/:id/copy-previous",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    const roster = await copyPreviousRosterWeek(actor(req), asPositiveInteger(req.params.id, "weekId"));
+    const body = asUnknownRecord(req.body);
+    const roster = await copyPreviousRosterWeek(actor(req), asPositiveInteger(req.params.id, "weekId"), {
+      sourceRosterWeekId: body.sourceRosterWeekId == null ? undefined : asPositiveInteger(body.sourceRosterWeekId, "sourceRosterWeekId"),
+      structureOnly: body.structureOnly === true,
+      replaceExisting: body.replaceExisting === true,
+    });
     res.json(roster);
   })
 );
@@ -372,7 +392,7 @@ router.post(
       actor(req),
       asPositiveInteger(req.params.id, "assignmentId"),
       asPositiveInteger(body.doctorId, "doctorId"),
-      parseTeamRole(body.teamRole)
+      body.teamRole === undefined ? undefined : parseTeamRole(body.teamRole)
     );
     res.status(201).json({ member });
   })

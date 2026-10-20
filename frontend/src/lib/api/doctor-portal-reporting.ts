@@ -248,15 +248,24 @@ export async function fetchRosterDoctors(): Promise<DoctorProfile[]> {
   return raw.profiles;
 }
 
-export async function createDoctorRosterWeek(payload: { weekStartDate: string; weekEndDate: string }) {
+export async function createDoctorRosterWeek(payload: { weekStartDate: string; weekEndDate: string; sourceRosterWeekId?: number; structureOnly?: boolean }) {
   return api<{ week: DoctorRosterResponse["week"] }>("/doctor/roster/weeks", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function copyPreviousDoctorRosterWeek(weekId: number): Promise<DoctorRosterResponse> {
-  return api<DoctorRosterResponse>(`/doctor/roster/weeks/${weekId}/copy-previous`, { method: "POST" });
+export async function fetchSavedDoctorRosters(): Promise<NonNullable<DoctorRosterResponse["week"]>[]> {
+  const raw = await api<{ weeks: NonNullable<DoctorRosterResponse["week"]>[] }>("/doctor/roster/saved");
+  return raw.weeks;
+}
+
+export async function copyPreviousDoctorRosterWeek(weekId: number, options: { sourceRosterWeekId?: number; structureOnly?: boolean; replaceExisting?: boolean } = {}): Promise<DoctorRosterResponse> {
+  return api<DoctorRosterResponse>(`/doctor/roster/weeks/${weekId}/copy-previous`, { method: "POST", body: JSON.stringify(options) });
+}
+
+export async function transferDoctorRosterMember(assignmentId: number, memberId: number, targetAssignmentId: number, mode: "move" | "copy"): Promise<void> {
+  await api(`/doctor/roster/assignments/${assignmentId}/members/${memberId}/transfer`, { method: "POST", body: JSON.stringify({ targetAssignmentId, mode }) });
 }
 
 export async function publishDoctorRosterWeek(weekId: number) {
@@ -284,7 +293,11 @@ export async function deleteDoctorRosterAssignment(assignmentId: number): Promis
   await api(`/doctor/roster/assignments/${assignmentId}`, { method: "DELETE" });
 }
 
-export async function addDoctorRosterMember(assignmentId: number, payload: { doctorId: number; teamRole: RosterTeamRole }): Promise<DoctorRosterMember> {
+export async function updateDoctorRosterSection(assignmentId: number, payload: Omit<Parameters<typeof createDoctorRosterAssignment>[0], "rosterWeekId">): Promise<void> {
+  await api(`/doctor/roster/assignments/${assignmentId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function addDoctorRosterMember(assignmentId: number, payload: { doctorId: number; teamRole?: RosterTeamRole }): Promise<DoctorRosterMember> {
   const raw = await api<{ member: DoctorRosterMember }>(`/doctor/roster/assignments/${assignmentId}/members`, {
     method: "POST",
     body: JSON.stringify(payload),

@@ -13,6 +13,7 @@ const fetchPageVisibilityMatrixMock = vi.fn();
 const fetchNoShowSummaryMock = vi.fn();
 const fetchMyDoctorRosterMock = vi.fn();
 const fetchDoctorRosterWeekMock = vi.fn();
+const fetchSavedDoctorRostersMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchRosterDutyTypesMock = vi.fn();
@@ -169,6 +170,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchNoShowSummary: () => fetchNoShowSummaryMock(),
   fetchMyDoctorRoster: (...args: unknown[]) => fetchMyDoctorRosterMock(...args),
   fetchDoctorRosterWeek: (...args: unknown[]) => fetchDoctorRosterWeekMock(...args),
+  fetchSavedDoctorRosters: (...args: unknown[]) => fetchSavedDoctorRostersMock(...args),
+  transferDoctorRosterMember: vi.fn(),
+  updateDoctorRosterSection: vi.fn(),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchRosterDutyTypes: (...args: unknown[]) => fetchRosterDutyTypesMock(...args),
@@ -491,6 +495,7 @@ describe("Doctor Portal shell", () => {
     fetchNoShowSummaryMock.mockReset();
     fetchMyDoctorRosterMock.mockReset();
     fetchDoctorRosterWeekMock.mockReset();
+    fetchSavedDoctorRostersMock.mockReset();
     fetchAppointmentLookupsMock.mockReset();
     fetchRosterDoctorsMock.mockReset();
     fetchRosterDutyTypesMock.mockReset();
@@ -618,6 +623,7 @@ describe("Doctor Portal shell", () => {
     fetchMyIrReferralWorklistMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
+    fetchSavedDoctorRostersMock.mockResolvedValue([]);
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
     fetchRosterDoctorsMock.mockResolvedValue([]);
     fetchRosterDutyTypesMock.mockResolvedValue([{ code: "configured_reporting_duty", label: "Configured reporting duty", active: true, requiresSpecialist: false, sortOrder: 0 }]);
@@ -1297,12 +1303,12 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/admin/roster");
 
-    expect((await screen.findAllByText("Roster Management")).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: /Create draft week/i }).length).toBeGreaterThan(0);
-    expect(screen.getByText("No roster week exists for selected week.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Create Roster" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Create Roster" })).toHaveLength(1);
+    expect((await screen.findAllByText("Create a roster to add daily sections and assign doctors.")).length).toBeGreaterThan(0);
   });
 
-  it("draft empty roster shows empty-state guidance and create assignment path", async () => {
+  it("draft roster exposes daily sections without configuration forms", async () => {
     fetchDoctorRosterWeekMock.mockResolvedValue({
       week: {
         id: 99,
@@ -1324,15 +1330,13 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    expect(await screen.findAllByText("No assignments yet")).toHaveLength(2);
-    expect(screen.getAllByText("Create an assignment, then drag doctors into it.").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: /Copy previous week/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: /Open Advanced Setup/i })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /Create assignment/i }).length).toBeGreaterThan(0);
-    expect(screen.queryByText("No roster assignments for this week.")).toBeNull();
+    expect(await screen.findAllByRole("button", { name: "+ Add Roster" })).toHaveLength(7);
+    expect(screen.queryByRole("link", { name: /Open Advanced Setup/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create assignment/i })).toBeNull();
+    expect(screen.getByRole("region", { name: "Daily roster sections" })).toBeTruthy();
   });
 
-  it("create assignment panel opens clearly and keeps date inside selected week", async () => {
+  it("daily section picker keeps its date in the selected roster", async () => {
     fetchDoctorRosterWeekMock.mockResolvedValue({
       week: {
         id: 99,
@@ -1354,16 +1358,11 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    const weekInput = (await screen.findByLabelText("Week start")) as HTMLInputElement;
-    const expectedNextWeek = new Date(`${weekInput.value}T00:00:00Z`);
-    expectedNextWeek.setUTCDate(expectedNextWeek.getUTCDate() + 7);
-    fireEvent.click((await screen.findAllByRole("button", { name: /Create assignment/i }))[0]);
-    expect(screen.getByRole("heading", { name: /Create assignment/i })).toBeTruthy();
-    expect(screen.getByText("This creates the card doctors can be dragged into.")).toBeTruthy();
-    expect((screen.getByLabelText("Assignment date") as HTMLInputElement).value).toBe(weekInput.value);
-
-    fireEvent.click(screen.getByRole("button", { name: /Next week/i }));
-    expect(((await screen.findByLabelText("Assignment date")) as HTMLInputElement).value).toBe(expectedNextWeek.toISOString().slice(0, 10));
+    const addButtons = await screen.findAllByRole("button", { name: "+ Add Roster" });
+    fireEvent.click(addButtons[0]);
+    expect(screen.getByRole("button", { name: "CT" })).toBeTruthy();
+    expect(screen.queryByLabelText("Assignment date")).toBeNull();
+    expect(screen.getByRole("region", { name: "Monday 2027-01-04" })).toBeTruthy();
   });
 
   it("published empty roster explains that the week is read-only", async () => {
@@ -1388,10 +1387,10 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    expect(await screen.findByText("This roster week is published but has no assignments. Published weeks are read-only.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Open Advanced Setup/i })).toBeTruthy();
-    expect(screen.queryByText("Create assignment")).toBeNull();
-    expect(screen.queryByText("Add team member")).toBeNull();
+    expect(await screen.findByText("Read-only roster")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Open Advanced Setup/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ Add Roster" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ Add doctor" })).toBeNull();
   });
 
   it("publish action is visible only for supervisor draft roster", async () => {
@@ -1416,7 +1415,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/admin/roster");
 
-    expect(await screen.findByRole("button", { name: /Publish week/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Publish roster/i })).toBeTruthy();
   });
 
   it("availability page renders and doctor can add unavailable day", async () => {
@@ -1489,16 +1488,13 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    expect(await screen.findByRole("button", { name: /Copy previous week/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Publish week/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Create assignment$/i })).toBeTruthy();
-    expect(screen.getByText("Assignments")).toBeTruthy();
-    expect(screen.getByText("Drag a doctor onto an assignment card.")).toBeTruthy();
-    expect(await screen.findByText("Drop doctor here")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
-    expect((await screen.findAllByText(/This assignment needs a specialist before publishing/)).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("button", { name: "Create Roster" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Publish roster" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "+ Add Roster" })).toHaveLength(7);
+    expect(screen.getByRole("region", { name: "Daily roster sections" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add doctor" })).toBeTruthy();
+    expect(await screen.findByText("Add a qualified specialist before publishing.")).toBeTruthy();
     expect(screen.queryByText(/Published roster has an empty required team slot/)).toBeNull();
-    expect(screen.getByRole("button", { name: /Manual add/i })).toBeTruthy();
     expect(screen.queryByText("No roster assignments for this week.")).toBeNull();
     expect(screen.queryByText("Add team member")).toBeNull();
     expect(screen.queryByText("Roster duty types")).toBeNull();
@@ -1540,7 +1536,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/roster-planner");
 
     expect(await screen.findByText("Published")).toBeTruthy();
-    expect(screen.getByText("This roster week is published but has no assignments. Published weeks are read-only.")).toBeTruthy();
+    expect(screen.getByText("Read-only roster")).toBeTruthy();
     expect(screen.queryByText("Create assignment")).toBeNull();
     expect(screen.queryByText("Add team member")).toBeNull();
     expect(screen.queryByRole("button", { name: /Notify assigned doctors/i })).toBeNull();
@@ -1587,7 +1583,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    expect(await screen.findByText("Published roster is read-only.")).toBeTruthy();
+    expect(await screen.findByText("Read-only roster")).toBeTruthy();
     expect(screen.getByText("CT Team")).toBeTruthy();
     expect(screen.getByText(/Dr Readonly/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Create assignment/i })).toBeNull();
@@ -1595,22 +1591,19 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByText("Drop doctor here")).toBeNull();
   });
 
-  it("Previous and Next week buttons update selected week", async () => {
-    fetchDoctorMeMock.mockResolvedValue({
-      ...normalDoctor,
-      canSupervise: true,
-      moduleCapabilities: ["doctor", "doctor_supervisor"],
-    });
+  it("Previous and Next roster buttons navigate saved ranges", async () => {
+    fetchDoctorMeMock.mockResolvedValue({ ...normalDoctor, canSupervise: true, moduleCapabilities: ["doctor", "doctor_supervisor"] });
+    fetchSavedDoctorRostersMock.mockResolvedValue([
+      { id: 2, weekStartDate: "2091-01-14", weekEndDate: "2091-01-18", status: "draft" },
+      { id: 1, weekStartDate: "2091-01-07", weekEndDate: "2091-01-11", status: "published" },
+    ]);
     renderDoctorPortal("/doctor/roster-planner");
-
-    const weekInput = (await screen.findByLabelText("Week start")) as HTMLInputElement;
-    const initialWeek = weekInput.value;
-    const previousWeek = new Date(`${initialWeek}T00:00:00Z`);
-    previousWeek.setUTCDate(previousWeek.getUTCDate() - 7);
-    fireEvent.click(screen.getByRole("button", { name: /Previous week/i }));
-    expect(weekInput.value).toBe(previousWeek.toISOString().slice(0, 10));
-    fireEvent.click(screen.getByRole("button", { name: /Next week/i }));
-    expect(weekInput.value).toBe(initialWeek);
+    const selector = await screen.findByLabelText("Saved rosters") as HTMLSelectElement;
+    await waitFor(() => expect(selector.value).toBe("2091-01-07"));
+    fireEvent.click(screen.getByRole("button", { name: "Next roster" }));
+    expect(selector.value).toBe("2091-01-14");
+    fireEvent.click(screen.getByRole("button", { name: "Previous roster" }));
+    expect(selector.value).toBe("2091-01-07");
   });
 
   it("Advanced Setup exposes supervisor roster advanced tools", async () => {

@@ -1,0 +1,66 @@
+/* The Doctor shell has no dark theme. Keep system-dark support local to this workflow. */
+.roster-board {
+  color: var(--foreground);
+  background: var(--background);
+  border-radius: var(--radius-xl);
+}
+@media (prefers-color-scheme: dark) {
+  .roster-board {
+    color-scheme: dark;
+    --background: #0f172a;
+    --foreground: #f1f5f9;
+    --card: #1e293b;
+    --surface: var(--card);
+    --muted: #334155;
+    --muted-foreground: #cbd5e1;
+    --border: #475569;
+    --accent: #93b4ff;
+    --accent-foreground: #0f172a;
+    --state-error-text: #fca5a5;
+    --state-warning-text: #fcd34d;
+    --state-success-text: #86efac;
+    --state-info-text: #bfdbfe;
+    --state-draft-text: #bfdbfe;
+    padding: 1rem;
+  }
+}
+.roster-board .roster-toolbar button {
+  min-height: 36px;
+  padding: 0.5rem 0.75rem;
+}
+@media (prefers-color-scheme: dark) {
+  .roster-board {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-card: var(--card);
+    --color-accent: var(--accent);
+    --color-border: var(--border);
+    --text: var(--foreground);
+    --text-muted: var(--muted-foreground);
+    --accent-secondary: #93b4ff;
+    --state-loading-text: #bfdbfe;
+  }
+  .roster-board .input-premium {
+    background: var(--card);
+    color: var(--foreground);
+  }
+  .roster-board .input-premium::placeholder {
+    color: var(--muted-foreground);
+  }
+}
+.roster-board .roster-doctors-title {
+  display: none;
+}
+.roster-board .roster-doctors-toggle {
+  min-height: 36px;
+}
+@media (min-width: 1280px) {
+  .roster-board .roster-doctors-title {
+    display: block;
+  }
+  .roster-board .roster-doctors-toggle {
+    display: none;
+  }
+}

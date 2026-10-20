@@ -1,11 +1,12 @@
 import { pool } from "../../db/pool.js";
-import { findRosterWeekById, listAssignmentsForWeek } from "./roster-repository.js";
+import { findRosterWeekById, listAssignmentsForWeek, type Db } from "./roster-repository.js";
 import type { RosterAssignmentRow, RosterConflict, RosterMemberRow } from "./roster-types.js";
 
 export interface DoctorRosterFacts {
   doctorId: number;
   displayName: string;
   doctorRole: string;
+  active?: boolean;
   modalityIds: Set<number>;
   unavailableDates: Map<string, string>;
   leaveDates: Map<string, string>;
@@ -46,7 +47,7 @@ export function evaluateRosterConflicts(
     const hasLead = assignment.members.some((member) => member.teamRole === "lead");
     const hasSpecialist = assignment.members.some((member) => {
       const doctor = doctors.get(Number(member.doctorId));
-      return member.teamRole === "specialist" || member.teamRole === "supervisor" || Boolean(doctor && isSpecialistRole(doctor.doctorRole));
+      return Boolean(doctor && isSpecialistRole(doctor.doctorRole));
     });
 
     if (assignment.members.length > 0 && !hasLead) {
@@ -84,6 +85,7 @@ export function evaluateRosterConflicts(
       const doctorId = Number(member.doctorId);
       const doctor = doctors.get(doctorId);
       if (!doctor) continue;
+      if (doctor.active === false) conflicts.push({ assignmentId: assignment.id, memberId: member.id, doctorId, severity: "error", code: "inactive_doctor", message: `${doctor.displayName} is no longer active.` });
       const doctorRows = memberAssignments.get(doctorId) ?? [];
       doctorRows.push(assignment);
       memberAssignments.set(doctorId, doctorRows);
@@ -154,16 +156,16 @@ export function evaluateRosterConflicts(
   return conflicts;
 }
 
-async function loadDoctorFacts(assignments: RosterAssignmentRow[]): Promise<Map<number, DoctorRosterFacts>> {
+async function loadDoctorFacts(assignments: RosterAssignmentRow[], db: Db): Promise<Map<number, DoctorRosterFacts>> {
   const doctorIds = [...new Set(assignments.flatMap((assignment) => assignment.members.map((member: RosterMemberRow) => member.doctorId)))];
   const facts = new Map<number, DoctorRosterFacts>();
   if (doctorIds.length === 0) return facts;
 
-  const profileRows = await pool.query<{ id: number; display_name: string; doctor_role: string }>(
+  const profileRows = await db.query<{ id: number; display_name: string; doctor_role: string; active: boolean }>(
     `
-      select id, display_name, doctor_role
-      from doctor_portal.doctor_profiles
-      where id = any($1::bigint[])
+      select dp.id, dp.display_name, dp.doctor_role, (dp.active and u.is_active) as active
+      from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id
+      where dp.id = any($1::bigint[])
     `,
     [doctorIds]
   );
@@ -172,13 +174,14 @@ async function loadDoctorFacts(assignments: RosterAssignmentRow[]): Promise<Map<
       doctorId: Number(row.id),
       displayName: row.display_name,
       doctorRole: row.doctor_role,
+      active: row.active,
       modalityIds: new Set<number>(),
       unavailableDates: new Map<string, string>(),
       leaveDates: new Map<string, string>(),
     });
   }
 
-  const permissionRows = await pool.query<{ doctor_id: number; modality_id: number }>(
+  const permissionRows = await db.query<{ doctor_id: number; modality_id: number }>(
     `
       select doctor_id, modality_id
       from doctor_portal.doctor_modality_permissions
@@ -196,7 +199,7 @@ async function loadDoctorFacts(assignments: RosterAssignmentRow[]): Promise<Map<
   const dateTo = dates.sort()[dates.length - 1];
   if (!dateFrom || !dateTo) return facts;
 
-  const availabilityRows = await pool.query<{ doctor_id: number; date: string; availability_status: string }>(
+  const availabilityRows = await db.query<{ doctor_id: number; date: string; availability_status: string }>(
     `
       select doctor_id, date::text as date, availability_status
       from doctor_portal.doctor_availability
@@ -210,7 +213,7 @@ async function loadDoctorFacts(assignments: RosterAssignmentRow[]): Promise<Map<
     facts.get(Number(row.doctor_id))?.unavailableDates.set(row.date, row.availability_status);
   }
 
-  const leaveRows = await pool.query<{ doctor_id: number; day: string; leave_type: string }>(
+  const leaveRows = await db.query<{ doctor_id: number; day: string; leave_type: string }>(
     `
       select dl.doctor_id, day::date::text as day, dl.leave_type
       from doctor_portal.doctor_leave_requests dl
@@ -229,20 +232,36 @@ async function loadDoctorFacts(assignments: RosterAssignmentRow[]): Promise<Map<
   return facts;
 }
 
-export async function validateRosterWeekConflicts(weekId: number): Promise<RosterConflict[]> {
-  const week = await findRosterWeekById(pool, weekId);
+export async function validateRosterWeekConflicts(weekId: number, db: Db = pool): Promise<RosterConflict[]> {
+  const week = await findRosterWeekById(db, weekId);
   if (!week) return [];
-  const assignments = await listAssignmentsForWeek(pool, weekId);
-  return evaluateRosterConflicts(assignments, await loadDoctorFacts(assignments));
+  const assignments = await listAssignmentsForWeek(db, weekId);
+  const doctorIds = [...new Set(assignments.flatMap(row => row.members.map(member => Number(member.doctorId))))];
+  const otherAssignments: RosterAssignmentRow[] = [];
+  if (doctorIds.length) {
+    // Custom date ranges can overlap an existing published roster. Its duties remain authoritative.
+    const otherWeeks = await db.query<{ id: number }>(`
+      select distinct w.id from doctor_portal.doctor_roster_weeks w
+      join doctor_portal.doctor_roster_assignments a on a.roster_week_id = w.id
+      join doctor_portal.doctor_roster_members rm on rm.roster_assignment_id = a.id
+      where w.id <> $1 and w.status = 'published' and a.status = 'active'
+        and a.date between $2::date and $3::date and rm.doctor_id = any($4::bigint[])`,
+      [weekId, week.weekStartDate, week.weekEndDate, doctorIds]);
+    for (const other of otherWeeks.rows) otherAssignments.push(...(await listAssignmentsForWeek(db, Number(other.id))).filter(row => row.date >= week.weekStartDate && row.date <= week.weekEndDate));
+  }
+  const allAssignments = [...otherAssignments, ...assignments];
+  const currentIds = new Set(assignments.map(row => Number(row.id)));
+  return evaluateRosterConflicts(allAssignments, await loadDoctorFacts(allAssignments, db))
+    .filter(conflict => conflict.assignmentId === null || currentIds.has(Number(conflict.assignmentId)));
 }
 
-export async function validateRosterAssignmentConflicts(assignmentId: number): Promise<RosterConflict[]> {
-  const result = await pool.query<{ roster_week_id: number }>(
+export async function validateRosterAssignmentConflicts(assignmentId: number, db: Db = pool): Promise<RosterConflict[]> {
+  const result = await db.query<{ roster_week_id: number }>(
     `select roster_week_id from doctor_portal.doctor_roster_assignments where id = $1 limit 1`,
     [assignmentId]
   );
   const weekId = result.rows[0]?.roster_week_id;
   if (!weekId) return [];
-  const conflicts = await validateRosterWeekConflicts(Number(weekId));
-  return conflicts.filter((conflict) => conflict.assignmentId === assignmentId);
+  const conflicts = await validateRosterWeekConflicts(Number(weekId), db);
+  return conflicts.filter((conflict) => Number(conflict.assignmentId) === assignmentId);
 }

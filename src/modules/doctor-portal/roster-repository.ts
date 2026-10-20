@@ -1,3 +1,6 @@
+import { HttpError } from "../../utils/http-error.js";
+import { getTripoliToday } from "../../utils/date.js";
+import { mapRosterDate } from "./roster-dates.js";
 import { pool } from "../../db/pool.js";
 import type { PoolClient } from "pg";
 import type { UserId } from "../../types/http.js";
@@ -11,7 +14,7 @@ import type {
   RosterWeekRow,
 } from "./roster-types.js";
 
-type Db = Pick<PoolClient, "query"> | typeof pool;
+export type Db = Pick<PoolClient, "query"> | typeof pool;
 
 export interface AssignmentInput {
   rosterWeekId: number;
@@ -112,9 +115,9 @@ export async function listAssignmentsForWeek(db: Db, weekId: number): Promise<Ro
     [assignments.map((assignment) => assignment.id)]
   );
 
-  const byAssignmentId = new Map(assignments.map((assignment) => [assignment.id, assignment.members]));
+  const byAssignmentId = new Map(assignments.map((assignment) => [Number(assignment.id), assignment.members]));
   for (const member of memberResult.rows) {
-    byAssignmentId.get(member.rosterAssignmentId)?.push(member);
+    byAssignmentId.get(Number(member.rosterAssignmentId))?.push(member);
   }
 
   return assignments;
@@ -122,7 +125,7 @@ export async function listAssignmentsForWeek(db: Db, weekId: number): Promise<Ro
 
 export async function listMyRoster(doctorId: number, weekStart: string | null): Promise<RosterWeekDetails> {
   const params: unknown[] = [doctorId];
-  const weekFilter = weekStart ? "and w.week_start_date = $2::date" : "";
+  const weekFilter = weekStart ? "and w.week_start_date <= $2::date + 6 and w.week_end_date >= $2::date" : "";
   if (weekStart) params.push(weekStart);
 
   const weekResult = await pool.query<RosterWeekRow>(
@@ -150,6 +153,7 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
     `
       ${ASSIGNMENT_SELECT}
       where a.roster_week_id = $1
+        and ($3::date is null or a.date between $3::date and $3::date + 6)
         and exists (
           select 1
           from doctor_portal.doctor_roster_members rm
@@ -158,7 +162,7 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
         )
       order by a.date asc, a.start_time asc nulls first, a.id asc
     `,
-    [week.id, doctorId]
+    [week.id, doctorId, weekStart]
   );
 
   const assignments: RosterAssignmentRow[] = assignmentResult.rows.map((row) => ({ ...row, members: [] }));
@@ -168,8 +172,8 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
   return { week, assignments };
 }
 
-export async function createRosterWeek(input: { weekStartDate: string; weekEndDate: string; actorUserId: UserId; actorDoctorId: number }): Promise<RosterWeekRow> {
-  const result = await pool.query<RosterWeekRow>(
+export async function createRosterWeek(input: { weekStartDate: string; weekEndDate: string; actorUserId: UserId; actorDoctorId: number }, db: Db = pool): Promise<RosterWeekRow> {
+  const result = await db.query<RosterWeekRow>(
     `
       insert into doctor_portal.doctor_roster_weeks (week_start_date, week_end_date, created_by)
       values ($1::date, $2::date, $3)
@@ -180,7 +184,7 @@ export async function createRosterWeek(input: { weekStartDate: string; weekEndDa
     [input.weekStartDate, input.weekEndDate, input.actorUserId]
   );
   const week = result.rows[0];
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: input.actorUserId,
     actorDoctorId: input.actorDoctorId,
     eventType: "roster_week_created",
@@ -195,9 +199,10 @@ export async function createRosterWeek(input: { weekStartDate: string; weekEndDa
 export async function updateRosterWeekDates(
   weekId: number,
   input: { weekStartDate: string; weekEndDate: string },
-  actor: { userId: UserId; doctorId: number }
+  actor: { userId: UserId; doctorId: number },
+  db: Db = pool
 ): Promise<RosterWeekRow | null> {
-  const result = await pool.query<RosterWeekRow>(
+  const result = await db.query<RosterWeekRow>(
     `
       update doctor_portal.doctor_roster_weeks
       set week_start_date = $2::date, week_end_date = $3::date, updated_at = now()
@@ -210,7 +215,7 @@ export async function updateRosterWeekDates(
   );
   const week = result.rows[0] ?? null;
   if (week) {
-    await insertDoctorAuditEvent(pool, {
+    await insertDoctorAuditEvent(db, {
       actorUserId: actor.userId,
       actorDoctorId: actor.doctorId,
       eventType: "roster_week_updated",
@@ -223,8 +228,8 @@ export async function updateRosterWeekDates(
   return week;
 }
 
-export async function insertAssignment(input: AssignmentInput, actor: { userId: UserId; doctorId: number }): Promise<RosterAssignmentRow> {
-  const result = await pool.query<Omit<RosterAssignmentRow, "members">>(
+export async function insertAssignment(input: AssignmentInput, actor: { userId: UserId; doctorId: number }, db: Db = pool): Promise<RosterAssignmentRow> {
+  const result = await db.query<Omit<RosterAssignmentRow, "members">>(
     `
       insert into doctor_portal.doctor_roster_assignments (
         roster_week_id, date, modality_id, duty_type, session_name, start_time, end_time, team_name, status
@@ -249,7 +254,7 @@ export async function insertAssignment(input: AssignmentInput, actor: { userId: 
     ]
   );
   const assignment = { ...result.rows[0], members: [] };
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: actor.userId,
     actorDoctorId: actor.doctorId,
     eventType: "roster_assignment_created",
@@ -264,9 +269,10 @@ export async function insertAssignment(input: AssignmentInput, actor: { userId: 
 export async function updateAssignment(
   assignmentId: number,
   input: Partial<AssignmentInput>,
-  actor: { userId: UserId; doctorId: number }
+  actor: { userId: UserId; doctorId: number },
+  db: Db = pool
 ): Promise<RosterAssignmentRow | null> {
-  const result = await pool.query<Omit<RosterAssignmentRow, "members">>(
+  const result = await db.query<Omit<RosterAssignmentRow, "members">>(
     `
       update doctor_portal.doctor_roster_assignments
       set
@@ -301,7 +307,7 @@ export async function updateAssignment(
   );
   const row = result.rows[0];
   if (!row) return null;
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: actor.userId,
     actorDoctorId: actor.doctorId,
     eventType: "roster_assignment_updated",
@@ -310,11 +316,11 @@ export async function updateAssignment(
     metadata: { rosterWeekId: row.rosterWeekId, dutyType: row.dutyType, date: row.date },
     reason: null,
   });
-  return { ...row, members: await listMembersForAssignment(pool, row.id) };
+  return { ...row, members: await listMembersForAssignment(db, row.id) };
 }
 
-export async function deleteAssignment(assignmentId: number, actor: { userId: UserId; doctorId: number }): Promise<boolean> {
-  const result = await pool.query<{ id: number; roster_week_id: number }>(
+export async function deleteAssignment(assignmentId: number, actor: { userId: UserId; doctorId: number }, db: Db = pool): Promise<boolean> {
+  const result = await db.query<{ id: number; roster_week_id: number }>(
     `
       delete from doctor_portal.doctor_roster_assignments
       where id = $1
@@ -324,7 +330,7 @@ export async function deleteAssignment(assignmentId: number, actor: { userId: Us
   );
   const removed = result.rows[0];
   if (!removed) return false;
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: actor.userId,
     actorDoctorId: actor.doctorId,
     eventType: "roster_assignment_deleted",
@@ -340,9 +346,10 @@ export async function addMember(
   assignmentId: number,
   doctorId: number,
   teamRole: RosterTeamRole,
-  actor: { userId: UserId; doctorId: number }
+  actor: { userId: UserId; doctorId: number },
+  db: Db = pool
 ): Promise<RosterMemberRow> {
-  const result = await pool.query<RosterMemberRow>(
+  const result = await db.query<RosterMemberRow>(
     `
       insert into doctor_portal.doctor_roster_members (roster_assignment_id, doctor_id, team_role)
       values ($1, $2, $3)
@@ -355,7 +362,7 @@ export async function addMember(
     [assignmentId, doctorId, teamRole]
   );
   const member = result.rows[0];
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: actor.userId,
     actorDoctorId: actor.doctorId,
     eventType: "roster_member_added",
@@ -367,8 +374,8 @@ export async function addMember(
   return member;
 }
 
-export async function removeMember(memberId: number, actor: { userId: UserId; doctorId: number }): Promise<boolean> {
-  const result = await pool.query<{ id: number; roster_assignment_id: number; doctor_id: number }>(
+export async function removeMember(memberId: number, actor: { userId: UserId; doctorId: number }, db: Db = pool): Promise<boolean> {
+  const result = await db.query<{ id: number; roster_assignment_id: number; doctor_id: number }>(
     `
       delete from doctor_portal.doctor_roster_members
       where id = $1
@@ -378,7 +385,7 @@ export async function removeMember(memberId: number, actor: { userId: UserId; do
   );
   const removed = result.rows[0];
   if (!removed) return false;
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId: actor.userId,
     actorDoctorId: actor.doctorId,
     eventType: "roster_member_removed",
@@ -412,8 +419,8 @@ export async function listMembersForAssignment(db: Db, assignmentId: number): Pr
   return result.rows;
 }
 
-export async function publishWeek(weekId: number, actor: { userId: UserId; doctorId: number }): Promise<RosterWeekRow | null> {
-  const result = await pool.query<RosterWeekRow>(
+export async function publishWeek(weekId: number, actor: { userId: UserId; doctorId: number }, db: Db = pool): Promise<RosterWeekRow | null> {
+  const result = await db.query<RosterWeekRow>(
     `
       update doctor_portal.doctor_roster_weeks
       set status = 'published', published_by = $2, published_at = now(), updated_at = now()
@@ -426,7 +433,7 @@ export async function publishWeek(weekId: number, actor: { userId: UserId; docto
   );
   const week = result.rows[0] ?? null;
   if (week) {
-    await insertDoctorAuditEvent(pool, {
+    await insertDoctorAuditEvent(db, {
       actorUserId: actor.userId,
       actorDoctorId: actor.doctorId,
       eventType: "roster_published",
@@ -466,82 +473,81 @@ export async function archiveWeek(weekId: number, actor: { userId: UserId; docto
   return week;
 }
 
-export async function copyPreviousWeek(
-  targetWeekId: number,
-  actor: { userId: UserId; doctorId: number }
-): Promise<RosterWeekDetails> {
+export interface RosterCopyOptions {
+  sourceRosterWeekId?: number;
+  structureOnly?: boolean;
+  replaceExisting?: boolean;
+}
+
+export async function listSavedRosterWeeks(): Promise<RosterWeekRow[]> {
+  return (await pool.query<RosterWeekRow>(`${WEEK_SELECT} order by week_start_date desc`)).rows;
+}
+
+export async function withDraftRosterWeek<T>(weekId: number, action: (db: Db, week: RosterWeekRow) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const target = await findRosterWeekById(client, targetWeekId);
-    if (!target) throw new Error("target_not_found");
-
-    const previousResult = await client.query<RosterWeekRow>(
-      `
-        ${WEEK_SELECT}
-        where week_start_date < $1::date
-          and status in ('draft', 'published')
-        order by week_start_date desc
-        limit 1
-      `,
-      [target.weekStartDate]
-    );
-    const previous = previousResult.rows[0];
-    if (!previous) throw new Error("previous_not_found");
-
-    const previousAssignments = await listAssignmentsForWeek(client, previous.id);
-    const dayOffsetMs = Date.parse(target.weekStartDate) - Date.parse(previous.weekStartDate);
-
-    for (const assignment of previousAssignments) {
-      const copiedDate = new Date(Date.parse(assignment.date) + dayOffsetMs).toISOString().slice(0, 10);
-      const inserted = await client.query<{ id: number }>(
-        `
-          insert into doctor_portal.doctor_roster_assignments (
-            roster_week_id, date, modality_id, duty_type, session_name, start_time, end_time, team_name, status
-          )
-          values ($1, $2::date, $3, $4, $5, $6::time, $7::time, $8, $9)
-          returning id
-        `,
-        [
-          target.id,
-          copiedDate,
-          assignment.modalityId,
-          assignment.dutyType,
-          assignment.sessionName,
-          assignment.startTime,
-          assignment.endTime,
-          assignment.teamName,
-          assignment.status,
-        ]
-      );
-      const newAssignmentId = inserted.rows[0].id;
-      for (const member of assignment.members) {
-        await client.query(
-          `
-            insert into doctor_portal.doctor_roster_members (roster_assignment_id, doctor_id, team_role)
-            values ($1, $2, $3)
-            on conflict do nothing
-          `,
-          [newAssignmentId, member.doctorId, member.teamRole]
-        );
-      }
+    await client.query("select id from doctor_portal.doctor_roster_weeks where id = $1 for update", [weekId]);
+    const week = await findRosterWeekById(client, weekId);
+    if (!week) throw new HttpError(404, "Roster week not found.");
+    if (week.status !== "draft" || week.weekEndDate < getTripoliToday()) {
+      throw new HttpError(409, "Only current or future draft rosters can be edited.");
     }
-
-    await insertDoctorAuditEvent(client, {
-      actorUserId: actor.userId,
-      actorDoctorId: actor.doctorId,
-      eventType: "roster_copied",
-      targetType: "doctor_roster_week",
-      targetId: target.id,
-      metadata: { sourceRosterWeekId: previous.id, copiedAssignments: previousAssignments.length },
-      reason: null,
-    });
+    const result = await action(client, week);
     await client.query("commit");
-    return { week: target, assignments: await listAssignmentsForWeek(pool, target.id) };
+    return result;
   } catch (error) {
     await client.query("rollback");
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function copyPreviousWeek(
+  targetWeekId: number,
+  actor: { userId: UserId; doctorId: number },
+  options: RosterCopyOptions = {},
+  transaction?: Db
+): Promise<RosterWeekDetails> {
+  const copy = async (db: Db, target: RosterWeekRow): Promise<RosterWeekDetails> => {
+    const source = options.sourceRosterWeekId
+      ? await findRosterWeekById(db, options.sourceRosterWeekId)
+      : (await db.query<RosterWeekRow>(`${WEEK_SELECT} where week_start_date < $1::date and status in ('draft', 'published') order by week_start_date desc limit 1`, [target.weekStartDate])).rows[0];
+    if (!source) throw new HttpError(404, "No source roster was found.");
+    if (Number(source.id) === Number(target.id)) throw new HttpError(400, "A roster cannot copy itself.");
+    await db.query("select id from doctor_portal.doctor_roster_weeks where id = $1 for share", [source.id]);
+    const existing = await listAssignmentsForWeek(db, target.id);
+    if (existing.length && !options.replaceExisting) throw new HttpError(409, "Target roster already contains sections. Confirm replacement before copying.");
+    const sourceAssignments = await listAssignmentsForWeek(db, source.id);
+    // Read everything before deleting, and retain the original draft on any failure.
+    if (existing.length) await db.query("delete from doctor_portal.doctor_roster_assignments where roster_week_id = $1", [target.id]);
+    let copiedAssignments = 0;
+    for (const assignment of sourceAssignments.filter(row => row.status === "active")) {
+      const date = mapRosterDate(assignment.date, source.weekStartDate, target.weekStartDate, target.weekEndDate);
+      if (!date || assignment.date < source.weekStartDate || assignment.date > source.weekEndDate) continue;
+      const inserted = await db.query<{ id: number }>(`
+        insert into doctor_portal.doctor_roster_assignments
+          (roster_week_id, date, modality_id, duty_type, session_name, start_time, end_time, team_name, status)
+        values ($1, $2::date, $3, $4, $5, $6::time, $7::time, $8, 'active') returning id`,
+        [target.id, date, assignment.modalityId, assignment.dutyType, assignment.sessionName, assignment.startTime, assignment.endTime, assignment.teamName]);
+      if (!options.structureOnly) for (const member of assignment.members) {
+        await db.query(`insert into doctor_portal.doctor_roster_members (roster_assignment_id, doctor_id, team_role) values ($1, $2, $3)`,
+          [inserted.rows[0].id, member.doctorId, member.teamRole]);
+      }
+      copiedAssignments += 1;
+    }
+    await insertDoctorAuditEvent(db, {
+      actorUserId: actor.userId, actorDoctorId: actor.doctorId,
+      eventType: "roster_copied", targetType: "doctor_roster_week", targetId: target.id,
+      metadata: { sourceRosterWeekId: source.id, copiedAssignments, structureOnly: Boolean(options.structureOnly), replacedExisting: existing.length > 0 }, reason: null,
+    });
+    return { week: target, assignments: await listAssignmentsForWeek(db, target.id) };
+  };
+  if (transaction) {
+    const target = await findRosterWeekById(transaction, targetWeekId);
+    if (!target) throw new HttpError(404, "Roster week not found.");
+    return copy(transaction, target);
+  }
+  return withDraftRosterWeek(targetWeekId, copy);
 }
