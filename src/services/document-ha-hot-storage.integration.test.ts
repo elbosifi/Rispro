@@ -37,7 +37,7 @@ const settingsBefore = new Map<string, unknown | null>();
 let fixture: { bookingId: number; patientId: number; userId: number } | null = null;
 let sequence = 0;
 
-const settingKeys = ["storage_path", "storage_fallback_enabled", "ha_hot_storage_enabled", "ha_hot_storage_retention_hours"];
+const settingKeys = ["storage_path", "storage_fallback_enabled", "ha_hot_storage_enabled", "ha_hot_storage_retention_hours", "scan_dpi", "scanner_source"];
 
 async function setDocumentSetting(key: string, value: unknown): Promise<void> {
   await pool.query(
@@ -212,6 +212,29 @@ test("HA retention settings reject values outside the safe bounded range", async
     () => upsertSettings("documents_and_uploads", [{ key: "ha_hot_storage_retention_hours", value: "169" }], currentFixture.userId),
     (error: unknown) => error instanceof Error && error.message.includes("between 24 and 168"),
   );
+});
+
+test("NAPS2 settings accept known sources and the adapter DPI range only", async () => {
+  const currentFixture = fixture;
+  assert.ok(currentFixture);
+
+  for (const source of ["auto", "feeder", "flatbed", "duplex"]) {
+    await upsertSettings("documents_and_uploads", [{ key: "scanner_source", value: source }], currentFixture.userId);
+  }
+  for (const dpi of [50, 150, 200, 300, 400, 600, 1200]) {
+    await upsertSettings("documents_and_uploads", [{ key: "scan_dpi", value: String(dpi) }], currentFixture.userId);
+  }
+
+  await assert.rejects(
+    () => upsertSettings("documents_and_uploads", [{ key: "scanner_source", value: "automatic" }], currentFixture.userId),
+    /scanner_source must be auto, feeder, flatbed or duplex/i,
+  );
+  for (const dpi of ["49", "1201", "300.5", "not-a-number"]) {
+    await assert.rejects(
+      () => upsertSettings("documents_and_uploads", [{ key: "scan_dpi", value: dpi }], currentFixture.userId),
+      /scan_dpi must be an integer between 50 and 1200/i,
+    );
+  }
 });
 
 test("eligible upload stores an atomic HA copy, is idempotent, falls back for reads, and releases healthy retention", async () => {

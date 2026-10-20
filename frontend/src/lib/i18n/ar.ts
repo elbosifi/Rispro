@@ -1521,6 +1521,8 @@ export const ar = {
   "settings.documents.scanDpi": "دقة المسح DPI",
   "settings.documents.scanColorMode": "وضع ألوان المسح",
   "settings.documents.scannerSource": "مصدر الماسح",
+  "settings.documents.autoSource": "تلقائي (المغذي أولاً)",
+  "settings.documents.autoSourceHelp": "يحاول الوضع التلقائي استخدام المغذي أولاً، ولا ينتقل إلى السطح الزجاجي إلا عندما يُبلغ NAPS2 صراحةً أن المغذي فارغ.",
   "settings.documents.grayscale": "تدرج رمادي",
   "settings.documents.color": "ألوان",
   "settings.documents.feeder": "المغذي",

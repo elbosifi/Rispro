@@ -33,7 +33,11 @@ vi.mock("@/pages/settings/qz-tray-printing-section", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
 vi.mock("@/lib/api-hooks", () => ({ fetchIntegrationStatus: () => mockFetchIntegrationStatus() }));
-vi.mock("@/lib/naps2-webscan", () => ({ getNaps2WebScanStatus: (...args: unknown[]) => mockGetNaps2WebScanStatus(...args), scanAppointmentRequest: (...args: unknown[]) => mockScan(...args) }));
+vi.mock("@/lib/naps2-webscan", () => ({
+  getNaps2WebScanStatus: (...args: unknown[]) => mockGetNaps2WebScanStatus(...args),
+  normalizeNaps2Source: (value: unknown) => ["auto", "feeder", "flatbed", "duplex"].includes(String(value)) ? value : "feeder",
+  scanAppointmentRequest: (...args: unknown[]) => mockScan(...args),
+}));
 
 function response(body: unknown) {
   return { ok: true, status: 200, json: async () => body } as Response;
@@ -46,7 +50,7 @@ describe("WorkstationPrintingPage", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: mockRevokeObjectURL.mockReset() });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     mockScan.mockReset();
-    mockScan.mockResolvedValue({ pageCount: 2 });
+    mockScan.mockResolvedValue({ pageCount: 2, paperSourceUsed: "feeder" });
     mockPushToast.mockReset();
     mockGetNaps2WebScanStatus.mockReset();
     mockGetNaps2WebScanStatus.mockResolvedValue({ available: true, endpoint: "http://scanner:9801", kind: "naps2_direct" });
@@ -169,6 +173,14 @@ describe("WorkstationPrintingPage", () => {
     expect(mockScan).not.toHaveBeenCalled();
   });
   it("keeps global enablement distinct from connection and physical test scan", async () => {
+    mockFetchIntegrationStatus.mockResolvedValueOnce({ scanner: {
+      naps2WebScanEnabled: true,
+      naps2WebScanEndpoint: "http://system-scanner:9801",
+      scannerSource: "auto",
+      scanDpi: "300",
+      scanColorMode: "color",
+    } });
+    mockScan.mockResolvedValueOnce({ pageCount: 2, paperSourceUsed: "flatbed" });
     render(<WorkstationPrintingPage />);
     expect(screen.getByText("Not tested on this workstation")).toBeTruthy();
     await screen.findByText("Enabled");
@@ -178,7 +190,8 @@ describe("WorkstationPrintingPage", () => {
     expect(advanced.open).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Test scan" }));
     await waitFor(() => expect(mockScan).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/Test scan succeeded: 2 page/)).toBeTruthy();
+    expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ source: "auto", dpi: 300, colorMode: "color" }));
+    expect(await screen.findByText(/Test scan succeeded: 2 pages \(Flatbed; feeder empty\)\./)).toBeTruthy();
     expect(screen.getByText(/No patient document was uploaded or linked/)).toBeTruthy();
   });
 

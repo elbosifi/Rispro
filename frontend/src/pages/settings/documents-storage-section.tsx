@@ -8,7 +8,7 @@ import {
   fetchIntegrationStatus,
   saveSettings,
 } from "@/lib/api-hooks";
-import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
+import { getNaps2WebScanStatus, normalizeNaps2Source } from "@/lib/naps2-webscan";
 import { normalizeNaps2Origin, resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
@@ -49,6 +49,8 @@ function suggestedRisproHttpAddress(): string {
 function normalizeDocumentsStorageForm(
   settings: Record<string, string> | undefined
 ): DocumentsStorageForm {
+  const savedScanDpi = String(settings?.scan_dpi ?? "");
+
   return {
     requireRequestDocumentForProtocolQueue: String(settings?.require_request_document_for_protocol_queue || "disabled").toLowerCase() === "enabled",
     storagePath: settings?.storage_path || "",
@@ -65,9 +67,9 @@ function normalizeDocumentsStorageForm(
     naps2SetupRisproOrigin: settings?.naps2_setup_rispro_origin ?? suggestedRisproHttpAddress(),
     naps2AllowedOrigins: settings?.naps2_webscan_allowed_origins || "",
     naps2FirewallSources: settings?.naps2_setup_firewall_sources || "",
-    scanDpi: settings?.scan_dpi || "200",
+    scanDpi: ["150", "200", "300", "400", "600"].includes(savedScanDpi) ? savedScanDpi : "200",
     scanColorMode: settings?.scan_color_mode || "grayscale",
-    scannerSource: settings?.scanner_source || "feeder",
+    scannerSource: normalizeNaps2Source(settings?.scanner_source),
   };
 }
 
@@ -270,8 +272,11 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanDpi")}</label>
             <select value={form.scanDpi} onChange={(e) => updateForm("scanDpi", e.target.value)} className="input-premium w-full">
-              <option value="150">150</option>
-              <option value="200">200</option>
+              <option value="150">150 DPI</option>
+              <option value="200">200 DPI</option>
+              <option value="300">300 DPI</option>
+              <option value="400">400 DPI</option>
+              <option value="600">600 DPI</option>
             </select>
           </div>
           <div>
@@ -284,10 +289,12 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerSource")}</label>
             <select value={form.scannerSource} onChange={(e) => updateForm("scannerSource", e.target.value)} className="input-premium w-full">
+              <option value="auto">{t("settings.documents.autoSource")}</option>
               <option value="feeder">{t("settings.documents.feeder")}</option>
               <option value="flatbed">{t("settings.documents.flatbed")}</option>
               <option value="duplex">{t("settings.documents.duplex")}</option>
             </select>
+            <p className="mt-1 text-xs text-muted-foreground">{t("settings.documents.autoSourceHelp")}</p>
           </div>
         </div>
         <details className="border-t border-border pt-3">

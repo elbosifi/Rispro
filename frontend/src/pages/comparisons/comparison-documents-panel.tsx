@@ -10,7 +10,7 @@ import {
   uploadComparisonDocument,
   type RequestDocument,
 } from "@/lib/api-hooks";
-import { scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { normalizeNaps2Source, scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -100,7 +100,7 @@ export function ComparisonDocumentsPanel({
           allowedOrigins: scanner?.naps2WebScanAllowedOrigins,
           dpi: Number(scanner?.scanDpi || 200),
           colorMode: scanner?.scanColorMode === "color" ? "color" : "grayscale",
-          source: scanner?.scannerSource === "flatbed" ? "flatbed" : scanner?.scannerSource === "duplex" ? "duplex" : "feeder",
+          source: normalizeNaps2Source(scanner?.scannerSource),
           fileName: `comparison-${comparisonRequestId}-papers.pdf`,
         });
         const pending = result.files?.length ? [...result.files] : [result.file];

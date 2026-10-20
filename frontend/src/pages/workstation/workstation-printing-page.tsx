@@ -4,7 +4,7 @@ import type { IntegrationStatus } from "@/lib/api/documents-printing";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
 import { fetchIntegrationStatus } from "@/lib/api-hooks";
-import { getNaps2WebScanStatus, scanAppointmentRequest, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
+import { getNaps2WebScanStatus, normalizeNaps2Source, scanAppointmentRequest, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
 import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
 import {
   loadWorkstationNaps2Settings,
@@ -115,8 +115,14 @@ export function WorkstationNaps2Section() {
       if (!status.available) throw new Error(status.message);
       if (scan) {
         setScanMessage("Scanning test paper…");
-        const result = await scanAppointmentRequest({ endpoint: status.endpoint, allowedOrigins: scanner.naps2WebScanAllowedOrigins, dpi: Number(scanner.scanDpi || 200), colorMode: scanner.scanColorMode === "color" ? "color" : "grayscale", source: scanner.scannerSource === "flatbed" ? "flatbed" : scanner.scannerSource === "duplex" ? "duplex" : "feeder", fileName: "naps2-test-scan.pdf" });
-        setScanMessage(`Test scan succeeded: ${result.pageCount} page(s). No patient document was uploaded or linked.`);
+        const requestedSource = normalizeNaps2Source(scanner.scannerSource);
+        const result = await scanAppointmentRequest({ endpoint: status.endpoint, allowedOrigins: scanner.naps2WebScanAllowedOrigins, dpi: Number(scanner.scanDpi || 200), colorMode: scanner.scanColorMode === "color" ? "color" : "grayscale", source: requestedSource, fileName: "naps2-test-scan.pdf" });
+        const physicalSource = result.paperSourceUsed ?? (requestedSource === "auto" ? "feeder" : requestedSource);
+        const sourceLabel = physicalSource === "flatbed"
+          ? requestedSource === "auto" ? "Flatbed; feeder empty" : "Flatbed"
+          : physicalSource === "duplex" ? "Duplex" : "Feeder";
+        const pageLabel = result.pageCount === 1 ? "page" : "pages";
+        setScanMessage(`Test scan succeeded: ${result.pageCount} ${pageLabel} (${sourceLabel}). No patient document was uploaded or linked.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to access NAPS2 Scanner Sharing.";

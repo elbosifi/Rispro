@@ -48,6 +48,15 @@ function validateSettingValue(category: string, key: string, value: unknown): vo
   if (category === "documents_and_uploads") {
     const scalar = extractSettingScalar(value).trim();
     try {
+      if (key === "scanner_source" && !["auto", "feeder", "flatbed", "duplex"].includes(scalar)) {
+        throw new Error("scanner_source must be auto, feeder, flatbed or duplex.");
+      }
+      if (key === "scan_dpi") {
+        const dpi = Number(scalar);
+        if (!Number.isInteger(dpi) || dpi < 50 || dpi > 1200) {
+          throw new Error("scan_dpi must be an integer between 50 and 1200.");
+        }
+      }
       if (key === "naps2_setup_rispro_origin" && scalar) validateNaps2SetupOrigin(scalar);
       if (key === "naps2_setup_firewall_sources") validateNaps2FirewallSources(scalar);
       if ((key === "naps2_webscan_endpoint" || key === "naps2_webscan_allowed_origins") && scalar) {

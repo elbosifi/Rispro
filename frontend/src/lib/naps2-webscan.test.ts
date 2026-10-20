@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getNaps2WebScanStatus, scanAppointmentRequest } from "./naps2-webscan";
+import { getNaps2WebScanStatus, normalizeNaps2Source, scanAppointmentRequest } from "./naps2-webscan";
 
 function response(input: { ok?: boolean; status?: number; headers?: Record<string, string>; blob?: Blob; text?: string } = {}): Response {
   const headers = input.headers ?? {};
@@ -7,8 +7,54 @@ function response(input: { ok?: boolean; status?: number; headers?: Record<strin
 }
 
 const capabilities = '<scan:ScannerCapabilities xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"><scan:DocumentFormatExt>application/pdf</scan:DocumentFormatExt><scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt></scan:ScannerCapabilities>';
+const emptyFeederError = "<Error><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type></Error>";
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: () => ({ promise: Promise.resolve({ numPages: 2 }), destroy: vi.fn().mockResolvedValue(undefined) }) }));
 const jpeg = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03, 0x11, 0x00, 0xff, 0xd9])], { type: "image/jpeg" });
+
+function mockScanner(options: {
+  nextDocument?: (jobId: string, index: number) => Response | Promise<Response>;
+  errorDetails?: (jobId: string) => string;
+  errorDetailsStatus?: number;
+  failErrorDetails?: boolean;
+  createJob?: (jobId: string, body: string) => Response | Promise<Response>;
+  deleteJob?: (jobId: string) => void | Promise<void>;
+} = {}) {
+  let jobIndex = 0;
+  const documentIndexes = new Map<string, number>();
+  const jobBodies: string[] = [];
+  const events: string[] = [];
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("ScannerCapabilities")) return response();
+    if (url.endsWith("ScanJobs")) {
+      jobIndex += 1;
+      const jobId = String(jobIndex);
+      const body = String(init?.body);
+      jobBodies.push(body);
+      events.push(`POST ${jobId}`);
+      return options.createJob?.(jobId, body) ?? response({ status: 201, headers: { Location: `/eSCL/ScanJobs/${jobId}` } });
+    }
+    const jobId = url.match(/ScanJobs\/([^/]+)/)?.[1] ?? "";
+    if (url.endsWith("NextDocument")) {
+      const index = documentIndexes.get(jobId) ?? 0;
+      documentIndexes.set(jobId, index + 1);
+      events.push(`NEXT ${jobId} ${index}`);
+      return options.nextDocument?.(jobId, index) ?? response({ status: 404 });
+    }
+    if (url.endsWith("ErrorDetails")) {
+      events.push(`ERROR ${jobId}`);
+      if (options.failErrorDetails) throw new TypeError("ErrorDetails unavailable");
+      return response({ status: options.errorDetailsStatus ?? 200, text: options.errorDetails?.(jobId) ?? "" });
+    }
+    if (init?.method === "DELETE") {
+      events.push(`DELETE ${jobId}`);
+      await options.deleteJob?.(jobId);
+      return response();
+    }
+    return response();
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, jobBodies, events };
+}
 
 describe("naps2 direct eSCL adapter", () => {
   beforeEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
@@ -42,6 +88,198 @@ describe("naps2 direct eSCL adapter", () => {
     let xml = ""; const fetchMock = vi.fn(async (url: string, init?: RequestInit) => { if (url.endsWith("ScannerCapabilities")) return response(); if (url.endsWith("ScanJobs")) { xml = String(init?.body); return response({ status: 201, headers: { Location: "http://scanner:9801/eSCL/ScanJobs/1" } }); } return response({ status: 404 }); }); vi.stubGlobal("fetch", fetchMock);
     await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "flatbed", colorMode: "grayscale" })).rejects.toThrow();
     expect(xml).toContain("<pwg:InputSource>Platen</pwg:InputSource>"); expect(xml).not.toContain("<scan:Duplex>"); expect(xml).toContain("<scan:ColorMode>Grayscale8</scan:ColorMode>");
+  });
+
+  it("normalizes supported sources and keeps the existing feeder fallback", () => {
+    expect(["auto", "feeder", "flatbed", "duplex"].map(normalizeNaps2Source)).toEqual(["auto", "feeder", "flatbed", "duplex"]);
+    expect(normalizeNaps2Source("unknown")).toBe("feeder");
+    expect(normalizeNaps2Source(undefined)).toBe("feeder");
+  });
+
+  it.each([150, 200, 300, 400, 600])("sends %s DPI unchanged in both eSCL resolution fields", async (dpi) => {
+    const scanner = mockScanner();
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", dpi })).rejects.toThrow("without returning any pages");
+    expect(scanner.jobBodies[0]).toContain(`<scan:XResolution>${dpi}</scan:XResolution>`);
+    expect(scanner.jobBodies[0]).toContain(`<scan:YResolution>${dpi}</scan:YResolution>`);
+  });
+
+  it.each([
+    { source: "feeder" as const, input: "Feeder", duplex: false },
+    { source: "flatbed" as const, input: "Platen", duplex: false },
+    { source: "duplex" as const, input: "Feeder", duplex: true },
+  ])("keeps the explicit $source selection in physical eSCL XML", async ({ source, input, duplex }) => {
+    const scanner = mockScanner();
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source })).rejects.toThrow("without returning any pages");
+    expect(scanner.jobBodies).toHaveLength(1);
+    expect(scanner.jobBodies[0]).toContain(`<pwg:InputSource>${input}</pwg:InputSource>`);
+    expect(scanner.jobBodies[0]).toContain(duplex ? "<scan:Duplex>true</scan:Duplex>" : "<scan:ColorMode>");
+    expect(scanner.jobBodies[0]).not.toContain("Auto");
+  });
+
+  it("tries Auto on Feeder first and returns a successful feeder result without a Flatbed job", async () => {
+    const scanner = mockScanner({
+      nextDocument: (_jobId, index) => index === 0
+        ? response({ blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
+        : response({ status: 404 }),
+    });
+    const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
+
+    expect(scanner.jobBodies).toHaveLength(1);
+    expect(scanner.jobBodies[0]).toContain("<pwg:InputSource>Feeder</pwg:InputSource>");
+    expect(scanner.jobBodies[0]).not.toContain("Platen");
+    expect(result.paperSourceUsed).toBe("feeder");
+    expect(result.source).toBe("naps2_webscan");
+  });
+
+  it.each(["feeder", "flatbed", "duplex"] as const)("reports the explicit %s paper source used", async (source) => {
+    const scanner = mockScanner({
+      nextDocument: (_jobId, index) => index === 0
+        ? response({ blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
+        : response({ status: 404 }),
+    });
+    const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source });
+
+    expect(result.paperSourceUsed).toBe(source);
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("cleans up a confirmed empty feeder job before one Flatbed fallback and returns its PDF", async () => {
+    const scanner = mockScanner({
+      nextDocument: (jobId, index) => jobId === "1"
+        ? response({ status: 500 })
+        : index === 0
+          ? response({ blob: new Blob(["%PDF-1.4 flatbed"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
+          : response({ status: 404 }),
+      errorDetails: () => emptyFeederError,
+    });
+    const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto", fileName: "test-page.pdf" });
+
+    expect(scanner.jobBodies).toHaveLength(2);
+    expect(scanner.jobBodies[0]).toContain("<pwg:InputSource>Feeder</pwg:InputSource>");
+    expect(scanner.jobBodies[1]).toContain("<pwg:InputSource>Platen</pwg:InputSource>");
+    expect(scanner.events.indexOf("DELETE 1")).toBeLessThan(scanner.events.indexOf("POST 2"));
+    expect(result.file.name).toBe("test-page.pdf");
+    expect(await result.file.text()).toContain("flatbed");
+    expect(result.pageCount).toBe(2);
+    expect(result.paperSourceUsed).toBe("flatbed");
+    expect(result.source).toBe("naps2_webscan");
+  });
+
+  it.each(["feeder", "flatbed", "duplex"] as const)("does not switch an explicit %s selection after a confirmed empty-feeder error", async (source) => {
+    const scanner = mockScanner({ nextDocument: () => response({ status: 500 }), errorDetails: () => emptyFeederError });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source })).rejects.toThrow(source === "feeder" ? "document feeder is empty" : "scanner error");
+    expect(scanner.jobBodies).toHaveLength(1);
+    expect(scanner.jobBodies[0]).toContain(source === "flatbed" ? "<pwg:InputSource>Platen</pwg:InputSource>" : "<pwg:InputSource>Feeder</pwg:InputSource>");
+    expect(scanner.jobBodies[0]).toContain(source === "duplex" ? "<scan:Duplex>true</scan:Duplex>" : "<scan:ColorMode>");
+  });
+
+  it.each([
+    "Empty feeder",
+    "<Error><Type>NAPS2.Scan.Exceptions.DeviceCommunicationException</Type></Error>",
+    "<Error><Type>NAPS2.Scan.Exceptions.DevicePaperJamException</Type></Error>",
+    "<Error><Type>NAPS2.Scan.Exceptions.DeviceOfflineException</Type></Error>",
+    "<Error><Message>empty feeder</Message><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type",
+    "<Error><Details><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type></Details></Error>",
+    "<ErrorDetails><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type></ErrorDetails>",
+    "<Error><Type>NAPS2.Scan.Exceptions.DeviceFeederEmptyException</Type></Error>",
+    "",
+  ])("does not infer an empty feeder from untrusted ErrorDetails: %s", async (details) => {
+    const scanner = mockScanner({ nextDocument: () => response({ status: 500 }), errorDetails: () => details, errorDetailsStatus: details.includes("DeviceFeederEmptyException") ? 404 : 200 });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when ErrorDetails cannot be read", async () => {
+    const scanner = mockScanner({ nextDocument: () => response({ status: 500 }), failErrorDetails: true });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it.each([400, 403, 404, 409])("does not fall back on HTTP %s responses without a typed error", async (status) => {
+    const scanner = mockScanner({ nextDocument: () => response({ status }) });
+    const expectedMessage = status === 404 ? "without returning any pages" : status === 409 ? "busy" : `HTTP ${status}`;
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow(expectedMessage);
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when a scan job is rejected with HTTP 503", async () => {
+    const scanner = mockScanner({ createJob: () => response({ status: 503 }) });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("busy");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when a feeder request fails at the network layer", async () => {
+    const scanner = mockScanner({ nextDocument: () => { throw new TypeError("network unavailable"); } });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("Unable to reach NAPS2");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back when the feeder scan times out", async () => {
+    vi.useFakeTimers();
+    const scanner = mockScanner({ nextDocument: () => response({ status: 503 }) });
+    const pending = scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
+    const assertion = expect(pending).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(120_000);
+    await assertion;
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not fall back after a document was returned before the feeder error", async () => {
+    const scanner = mockScanner({
+      nextDocument: (_jobId, index) => index === 0
+        ? response({ blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
+        : response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+    });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(1);
+  });
+
+  it("does not start a third physical job when the Flatbed fallback fails", async () => {
+    const scanner = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: (jobId) => jobId === "1" ? emptyFeederError : "<Error><Type>NAPS2.Scan.Exceptions.DeviceCommunicationException</Type></Error>",
+    });
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" })).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(2);
+    expect(scanner.events.filter((event) => event.startsWith("DELETE "))).toHaveLength(2);
+  });
+
+  it("continues after failed best-effort cleanup without masking the fallback result", async () => {
+    const scanner = mockScanner({
+      nextDocument: (jobId, index) => jobId === "1"
+        ? response({ status: 500 })
+        : index === 0
+          ? response({ blob: new Blob(["%PDF-1.4 fallback"], { type: "application/pdf" }), headers: { "Content-Type": "application/pdf" } })
+          : response({ status: 404 }),
+      errorDetails: () => emptyFeederError,
+      deleteJob: async (jobId) => { if (jobId === "1") throw new TypeError("cleanup unavailable"); },
+    });
+    const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
+
+    expect(result.paperSourceUsed).toBe("flatbed");
+    expect(scanner.jobBodies).toHaveLength(2);
+    expect(scanner.events.indexOf("DELETE 1")).toBeLessThan(scanner.events.indexOf("POST 2"));
+  });
+
+  it("keeps the concurrency guard active while the Flatbed attempt is being created and releases it after failure", async () => {
+    let releaseFlatbed!: (value: Response) => void;
+    const scanner = mockScanner({
+      nextDocument: () => response({ status: 500 }),
+      errorDetails: () => emptyFeederError,
+      createJob: (jobId, body) => body.includes("<pwg:InputSource>Platen</pwg:InputSource>")
+        ? new Promise<Response>((resolve) => { releaseFlatbed = resolve; })
+        : response({ status: 201, headers: { Location: `/eSCL/ScanJobs/${jobId}` } }),
+    });
+    const first = scanAppointmentRequest({ endpoint: "http://scanner:9801", source: "auto" });
+    await vi.waitFor(() => expect(releaseFlatbed).toBeTypeOf("function"));
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801" })).rejects.toThrow("already in progress");
+    releaseFlatbed(response({ status: 201, headers: { Location: "/eSCL/ScanJobs/2" } }));
+    await expect(first).rejects.toThrow("scanner error");
+    expect(scanner.jobBodies).toHaveLength(2);
+
+    vi.stubGlobal("fetch", vi.fn(async () => response({ status: 503 })));
+    await expect(scanAppointmentRequest({ endpoint: "http://scanner:9801" })).rejects.toThrow("busy");
   });
 
   it("follows 503 retries then receives a PDF and finishes on 404", async () => {

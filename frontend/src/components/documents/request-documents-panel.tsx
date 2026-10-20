@@ -21,7 +21,7 @@ import {
 import { getRequestDocumentViewUrl, listReportingBoardAppointmentDocuments } from "@/lib/api/documents-printing";
 import type { ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType } from "@/types/api";
 import type { AnnotationTool } from "./document-annotation-overlay";
-import { scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { normalizeNaps2Source, scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 import { directPrint } from "@/services/printing/direct-print-service";
@@ -335,12 +335,7 @@ export function RequestDocumentsPanel({
     integrationStatus?.scanner?.scannerAppDownloadUrl || "/assets/downloads/RISproScannerSetup.msi";
   const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
   const scanColorMode = integrationStatus?.scanner?.scanColorMode === "color" ? "color" : "grayscale";
-  const scanSource =
-    integrationStatus?.scanner?.scannerSource === "flatbed"
-      ? "flatbed"
-      : integrationStatus?.scanner?.scannerSource === "duplex"
-        ? "duplex"
-        : "feeder";
+  const scanSource = normalizeNaps2Source(integrationStatus?.scanner?.scannerSource);
 
   const uploadMutation = useMutation({
     mutationFn: async () => {

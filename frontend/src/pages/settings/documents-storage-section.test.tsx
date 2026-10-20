@@ -15,7 +15,11 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchIntegrationStatus,
   saveSettings,
 }));
-vi.mock("@/lib/naps2-webscan", () => ({ scanAppointmentRequest: scan, getNaps2WebScanStatus: connection }));
+vi.mock("@/lib/naps2-webscan", () => ({
+  normalizeNaps2Source: (value: unknown) => ["auto", "feeder", "flatbed", "duplex"].includes(String(value)) ? value : "feeder",
+  scanAppointmentRequest: scan,
+  getNaps2WebScanStatus: connection,
+}));
 vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: "en", t: (key: TranslationKey) => translate("en", key) }),
 }));
@@ -27,6 +31,10 @@ function renderSection() {
       <DocumentsStorageSection onReAuthRequired={vi.fn()} />
     </QueryClientProvider>
   );
+}
+
+function selectForLabel(label: string): HTMLSelectElement {
+  return screen.getByText(label, { exact: true }).parentElement?.querySelector("select") as HTMLSelectElement;
 }
 
 describe("Documents & Uploads protocol queue setting", () => {
@@ -154,6 +162,53 @@ describe("Documents & Uploads protocol queue setting", () => {
     fetchSettings.mockResolvedValue({ naps2_setup_rispro_origin: "http://192.9.101.30:8080" });
     renderSection();
     expect((await screen.findByLabelText("RISpro HTTP address") as HTMLInputElement).value).toBe("http://192.9.101.30:8080");
+  });
+
+  it.each(["150", "200", "300", "400", "600"])("shows and persists the %s DPI preset", async (dpi) => {
+    fetchSettings.mockResolvedValue({ scan_dpi: dpi, scanner_source: "auto" });
+    renderSection();
+
+    await screen.findByText("Scan DPI");
+    const dpiSelect = selectForLabel("Scan DPI");
+    await waitFor(() => expect(dpiSelect.value).toBe(dpi));
+    expect(Array.from(dpiSelect.options).map((option) => option.textContent)).toEqual([
+      "150 DPI", "200 DPI", "300 DPI", "400 DPI", "600 DPI",
+    ]);
+    expect(selectForLabel("Scanner source").value).toBe("auto");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({
+      entries: expect.arrayContaining([
+        { key: "scan_dpi", value: { value: dpi } },
+        { key: "scanner_source", value: { value: "auto" } },
+      ]),
+    })));
+  });
+
+  it("defaults invalid saved DPI and source values while exposing Auto above Feeder", async () => {
+    fetchSettings.mockResolvedValue({ scan_dpi: "125", scanner_source: "unknown" });
+    renderSection();
+
+    expect(await screen.findByDisplayValue("200 DPI")).toBeTruthy();
+    const sourceSelect = selectForLabel("Scanner source");
+    expect(sourceSelect.value).toBe("feeder");
+    expect(Array.from(sourceSelect.options).map((option) => option.value)).toEqual([
+      "auto", "feeder", "flatbed", "duplex",
+    ]);
+    expect(screen.getByText("Auto tries the feeder first and switches to the flatbed only when NAPS2 explicitly reports an empty feeder.")).toBeTruthy();
+  });
+
+  it("persists an explicitly selected Auto scanner source", async () => {
+    fetchSettings.mockResolvedValue({ scan_dpi: "300", scanner_source: "feeder" });
+    renderSection();
+    await screen.findByText("Scanner source");
+    const sourceSelect = selectForLabel("Scanner source");
+    await userEvent.selectOptions(sourceSelect, "auto");
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({
+      entries: expect.arrayContaining([{ key: "scanner_source", value: { value: "auto" } }]),
+    })));
   });
 
 });

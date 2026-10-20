@@ -7,12 +7,23 @@ export interface Naps2WebScanStatus {
   message?: string;
 }
 
+export type Naps2ScanSource = "auto" | "feeder" | "flatbed" | "duplex";
+export type Naps2PhysicalSource = Exclude<Naps2ScanSource, "auto">;
+
+export function normalizeNaps2Source(value: unknown): Naps2ScanSource {
+  if (value === "auto" || value === "feeder" || value === "flatbed" || value === "duplex") {
+    return value;
+  }
+
+  return "feeder";
+}
+
 export interface Naps2ScanOptions {
   endpoint?: string;
   allowedOrigins?: string[];
   dpi?: number;
   colorMode?: "grayscale" | "color";
-  source?: "feeder" | "flatbed" | "duplex";
+  source?: Naps2ScanSource;
   fileName?: string;
 }
 
@@ -21,9 +32,15 @@ export interface Naps2ScanResult {
   files?: File[];
   pageCount: number;
   source: "naps2_webscan";
+  paperSourceUsed?: Naps2PhysicalSource;
 }
 
 type EsclDocumentFormat = "application/pdf" | "image/jpeg";
+type PhysicalScanOptions = {
+  dpi: number;
+  colorMode: "grayscale" | "color";
+  source: Naps2PhysicalSource;
+};
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const SCAN_TIMEOUT_MS = 120_000;
@@ -110,7 +127,7 @@ function normalizeDpi(dpi: number | undefined): number {
   return value;
 }
 
-function buildScanSettings(options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>, documentFormat: EsclDocumentFormat): string {
+function buildScanSettings(options: PhysicalScanOptions, documentFormat: EsclDocumentFormat): string {
   const inputSource = options.source === "flatbed" ? "Platen" : "Feeder";
   const duplex = options.source === "duplex" ? "\n  <scan:Duplex>true</scan:Duplex>" : "";
   const colorMode = options.colorMode === "color" ? "RGB24" : "Grayscale8";
@@ -127,13 +144,20 @@ function buildScanSettings(options: Required<Pick<Naps2ScanOptions, "dpi" | "col
 </scan:ScanSettings>`;
 }
 
+class ConfirmedFeederEmptyError extends Error {
+  constructor() {
+    super("NAPS2 reports that the document feeder is empty.");
+    this.name = "ConfirmedFeederEmptyError";
+  }
+}
+
 class ScanJobCreationError extends Error {
   constructor(readonly status: number, readonly format: EsclDocumentFormat) {
     super([400, 406, 415, 422].includes(status) ? `NAPS2 rejected unsupported scan settings (HTTP ${status}). Check feeder/flatbed, duplex, DPI, color and PDF/JPEG support.` : status === 409 || status === 503 ? "The scanner is busy. Try again when the current scan finishes." : `NAPS2 scan job creation failed with HTTP ${status}.`);
   }
 }
 
-async function createScanJob(endpoint: string, options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>, documentFormat: EsclDocumentFormat): Promise<URL> {
+async function createScanJob(endpoint: string, options: PhysicalScanOptions, documentFormat: EsclDocumentFormat): Promise<URL> {
   return request(`${endpoint}/eSCL/ScanJobs`, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -160,13 +184,38 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function readErrorDetails(jobUrl: URL): Promise<string> {
+function isConfirmedEmptyFeederXml(rawXml: string): boolean {
+  const xml = new DOMParser().parseFromString(rawXml, "application/xml");
+
+  if (xml.getElementsByTagName("parsererror").length) {
+    return false;
+  }
+
+  const root = xml.documentElement;
+
+  if (root.localName !== "Error") {
+    return false;
+  }
+
+  const typeElement = Array.from(root.children).find(
+    (element) => element.localName === "Type"
+  );
+
+  return typeElement?.textContent?.trim() ===
+    "NAPS2.Scan.Exceptions.DeviceFeederEmptyException";
+}
+
+async function readErrorDetails(jobUrl: URL): Promise<{ message: string; confirmedEmptyFeeder: boolean }> {
   try {
-    const details = await request(new URL("ErrorDetails", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" }, async (response) => response.text(), 5_000);
+    const result = await request(new URL("ErrorDetails", `${jobUrl.toString().replace(/\/?$/, "/")}`).toString(), { method: "GET" }, async (response) => ({ ok: response.ok, text: await response.text() }), 5_000);
+    const details = result.text;
     const body = details.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    return body ? ` NAPS2 details: ${body.slice(0, 300)}` : "";
+    return {
+      message: body ? ` NAPS2 details: ${body.slice(0, 300)}` : "",
+      confirmedEmptyFeeder: result.ok && isConfirmedEmptyFeederXml(details),
+    };
   } catch {
-    return "";
+    return { message: "", confirmedEmptyFeeder: false };
   }
 }
 
@@ -174,7 +223,7 @@ function responseMimeType(response: Response, blob: Blob): string {
   return (response.headers.get("Content-Type") || blob.type || "").split(";", 1)[0].trim().toLowerCase();
 }
 
-async function readScannedDocuments(jobUrl: URL): Promise<Blob[]> {
+async function readScannedDocuments(jobUrl: URL, source: Naps2PhysicalSource): Promise<Blob[]> {
   const documents: Blob[] = [];
   const deadline = Date.now() + SCAN_TIMEOUT_MS;
   while (true) {
@@ -190,7 +239,13 @@ async function readScannedDocuments(jobUrl: URL): Promise<Blob[]> {
       if (!documents.length) throw new Error("NAPS2 completed the scan without returning any pages.");
       return documents;
     }
-    if (response.status === 500) throw new Error(`NAPS2 reported a scanner error.${await readErrorDetails(jobUrl)}`);
+    if (response.status === 500) {
+      const details = await readErrorDetails(jobUrl);
+      if (source === "feeder" && documents.length === 0 && details.confirmedEmptyFeeder) {
+        throw new ConfirmedFeederEmptyError();
+      }
+      throw new Error(`NAPS2 reported a scanner error.${details.message}`);
+    }
     if (!response.ok) throw new Error(response.status === 409 ? "The scanner is busy. Wait for the current scan to finish." : `NAPS2 failed while reading scanned pages with HTTP ${response.status}.`);
     const mimeType = responseMimeType(response, blob);
     if (!blob.size) throw new Error("NAPS2 returned an empty scanned document.");
@@ -265,22 +320,46 @@ async function scannedFiles(documents: Blob[], baseName: string): Promise<{ file
 export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Promise<Naps2ScanResult> {
   if (scanInProgress) throw new Error("A scan is already in progress in this browser. Wait for it to finish.");
   scanInProgress = true;
-  let jobUrl: URL | undefined;
   try {
     const status = await getNaps2WebScanStatus(options.endpoint, options.allowedOrigins);
     if (!status.available || !status.endpoint) throw new Error(status.message || CONNECTION_HELP);
-    const scanOptions = { dpi: normalizeDpi(options.dpi), colorMode: options.colorMode || "grayscale", source: options.source || "feeder" } as const;
-    try { jobUrl = await createScanJob(status.endpoint, scanOptions, "application/pdf"); }
-    catch (error) {
-      if (!(error instanceof ScanJobCreationError) || ![400, 406, 415, 422].includes(error.status)) throw error;
-      jobUrl = await createScanJob(status.endpoint, scanOptions, "image/jpeg");
+    const requestedSource = normalizeNaps2Source(options.source);
+    const scanOptions = { dpi: normalizeDpi(options.dpi), colorMode: options.colorMode || "grayscale" } as const;
+    let usedSource: Naps2PhysicalSource = requestedSource === "auto" ? "feeder" : requestedSource;
+    let documents: Blob[];
+
+    try {
+      documents = await scanOnce(status.endpoint, { ...scanOptions, source: usedSource });
+    } catch (error) {
+      if (requestedSource !== "auto" || !(error instanceof ConfirmedFeederEmptyError)) {
+        throw error;
+      }
+
+      usedSource = "flatbed";
+      documents = await scanOnce(status.endpoint, { ...scanOptions, source: "flatbed" });
     }
-    const documents = await readScannedDocuments(jobUrl);
+
     const baseName = (options.fileName?.trim() || "appointment-request.pdf").replace(/\.[a-z0-9]+$/i, "");
     const { files, pageCount } = await scannedFiles(documents, baseName);
-    return { file: files[0], files, pageCount, source: "naps2_webscan" };
+    return { file: files[0], files, pageCount, source: "naps2_webscan", paperSourceUsed: usedSource };
+  } finally {
+    scanInProgress = false;
+  }
+}
+
+async function scanOnce(endpoint: string, scanOptions: PhysicalScanOptions): Promise<Blob[]> {
+  let jobUrl: URL | undefined;
+  try {
+    try {
+      jobUrl = await createScanJob(endpoint, scanOptions, "application/pdf");
+    } catch (error) {
+      if (!(error instanceof ScanJobCreationError) || ![400, 406, 415, 422].includes(error.status)) {
+        throw error;
+      }
+      jobUrl = await createScanJob(endpoint, scanOptions, "image/jpeg");
+    }
+    return await readScannedDocuments(jobUrl, scanOptions.source);
   } finally {
     if (jobUrl) await deleteScanJob(jobUrl);
-    scanInProgress = false;
   }
 }

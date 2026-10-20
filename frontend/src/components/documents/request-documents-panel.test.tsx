@@ -108,6 +108,7 @@ vi.mock("@/services/printing/direct-print-service", () => ({ directPrint: (...ar
 vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => mockLoadQzPrinterSettings() }));
 
 vi.mock("@/lib/naps2-webscan", () => ({
+  normalizeNaps2Source: (value: unknown) => ["auto", "feeder", "flatbed", "duplex"].includes(String(value)) ? value : "feeder",
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
@@ -385,7 +386,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         documentLinkScope: "patient_and_appointment",
         scannerBridgeMode: "naps2_webscan",
         scannerProfileName: "default",
-        scannerSource: "feeder",
+        scannerSource: "auto",
         scanDpi: "200",
         scanColorMode: "grayscale",
         scanFileFormat: "pdf",
@@ -602,7 +603,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         documentLinkScope: "patient_and_appointment",
         scannerBridgeMode: "naps2_webscan",
         scannerProfileName: "default",
-        scannerSource: "feeder",
+        scannerSource: "auto",
         scanDpi: "200",
         scanColorMode: "grayscale",
         scanFileFormat: "pdf",
@@ -621,7 +622,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     await waitFor(() => {
       expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
-        expect.objectContaining({ endpoint: "http://localhost:9810", dpi: 200, colorMode: "grayscale", source: "feeder" })
+        expect.objectContaining({ endpoint: "http://localhost:9810", dpi: 200, colorMode: "grayscale", source: "auto" })
       );
     });
   });

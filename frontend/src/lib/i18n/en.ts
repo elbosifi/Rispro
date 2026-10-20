@@ -1479,6 +1479,8 @@ export const en = {
   "settings.documents.scanDpi": "Scan DPI",
   "settings.documents.scanColorMode": "Scan color mode",
   "settings.documents.scannerSource": "Scanner source",
+  "settings.documents.autoSource": "Auto (Feeder preferred)",
+  "settings.documents.autoSourceHelp": "Auto tries the feeder first and switches to the flatbed only when NAPS2 explicitly reports an empty feeder.",
   "settings.documents.grayscale": "Grayscale",
   "settings.documents.color": "Color",
   "settings.documents.feeder": "Feeder",

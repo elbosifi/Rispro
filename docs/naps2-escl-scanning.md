@@ -120,9 +120,21 @@ the previously confirmed local endpoint, then port 9801, with at most eight
 concurrent probes and a 6.5-second overall budget. Explicit endpoint failures
 remain explicit. A generic HTTP 200/HTML page is not a compatible scanner.
 
+The scan DPI selector offers 150, 200, 300, 400 and 600 DPI. RISpro sends the
+selected resolution unchanged; a scanner that rejects it reports the existing
+unsupported-settings error.
+
+Source modes are Feeder, Flatbed, Duplex and Auto (Feeder preferred). Auto is
+best-effort rather than true hardware-level feeder detection. NAPS2 8.3.2 does
+not reliably reveal whether the feeder contains paper through its eSCL
+ScannerStatus API. RISpro switches from Feeder to Flatbed only when NAPS2
+returns the recognized `DeviceFeederEmptyException` in structured ErrorDetails
+before returning any document. Other scanner errors stop the scan. Actual
+hardware behavior requires Windows acceptance testing.
+
 Test scan physically scans test paper with the saved DPI, source, duplex and
-color preferences. It reports real page counts, including multipage PDFs, and
-never uploads or links a test document. Clinical Scan Paper retains the existing
+color preferences. It reports real page counts and the physical source used,
+including multipage PDFs, and never uploads or links a test document. Clinical Scan Paper retains the existing
 patient/appointment preparation, document authorization, upload and audit APIs.
 PDF segments stay PDFs; JPEG pages become PDFs. Multiple returned PDF segments
 are uploaded individually in order. Failed uploads remain retryable without

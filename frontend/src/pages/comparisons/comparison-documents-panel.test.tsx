@@ -18,7 +18,10 @@ vi.mock("@/lib/api-hooks", () => ({
   listComparisonDocuments: apiMocks.list,
   uploadComparisonDocument: apiMocks.upload,
 }));
-vi.mock("@/lib/naps2-webscan", () => ({ scanAppointmentRequest: apiMocks.scan }));
+vi.mock("@/lib/naps2-webscan", () => ({
+  normalizeNaps2Source: (value: unknown) => ["auto", "feeder", "flatbed", "duplex"].includes(String(value)) ? value : "feeder",
+  scanAppointmentRequest: apiMocks.scan,
+}));
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/services/scanning/workstation-naps2-settings", () => ({
   resolveEffectiveNaps2Endpoint: (endpoint: string) => ({ endpoint }),
@@ -113,6 +116,7 @@ describe("ComparisonDocumentsPanel", () => {
   });
   it("retains failed PDF segments and retries upload without rescanning", async () => {
     apiMocks.list.mockResolvedValue([]);
+    apiMocks.integration.mockResolvedValue({ scanner: { naps2WebScanEnabled: true, naps2WebScanEndpoint: "http://localhost:5000", scanDpi: "200", scanColorMode: "grayscale", scannerSource: "auto" } });
     const first = new File(["%PDF-first"], "first.pdf", { type: "application/pdf" });
     const second = new File(["%PDF-second"], "second.pdf", { type: "application/pdf" });
     apiMocks.scan.mockResolvedValue({ file: first, files: [first, second], pageCount: 3, source: "naps2_webscan" });
@@ -120,6 +124,7 @@ describe("ComparisonDocumentsPanel", () => {
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: /Scan/i }));
     const retry = await screen.findByRole("button", { name: "Retry scanned uploads" });
+    await waitFor(() => expect(apiMocks.scan).toHaveBeenCalledWith(expect.objectContaining({ source: "auto" })));
     fireEvent.click(retry);
     await waitFor(() => expect(apiMocks.upload).toHaveBeenCalledTimes(3));
     expect(apiMocks.scan).toHaveBeenCalledTimes(1);
