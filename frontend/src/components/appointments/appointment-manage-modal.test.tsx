@@ -206,6 +206,13 @@ afterEach(() => {
 });
 
 describe("AppointmentManageModal", () => {
+  it("shows the patient identity badge beside the patient name", async () => {
+    mocks.getAppointmentById.mockResolvedValue({ ...appointment, identityDocumentVerified: true });
+    renderModal();
+
+    expect(await screen.findByRole("img", { name: "Verified identity" })).toBeTruthy();
+  });
+
   it("offers the dedicated reopen-for-scanning action only to authorized discontinued-case roles and requires a reason", async () => {
     mocks.userRole = "supervisor";
     mocks.getAppointmentById.mockResolvedValue({ ...appointment, status: "discontinued" });

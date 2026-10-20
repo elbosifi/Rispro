@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { mapAppointmentWithDetails, mapNameDictionaryEntry, mapQueueSnapshot } from "./mappers";
+import { mapAppointmentWithDetails, mapNameDictionaryEntry, mapPatient, mapQueueSnapshot } from "./mappers";
 
 describe("workflow timestamp mapping", () => {
+  it("preserves patient and appointment identity verification status", () => {
+    expect(mapPatient({ id: 7, arabic_full_name: "Patient", identity_document_verified: true }).identityDocumentVerified).toBe(true);
+    expect(mapPatient({ id: 8, arabicFullName: "Patient", identityDocumentVerified: true }).identityDocumentVerified).toBe(true);
+
+    expect(mapAppointmentWithDetails({ identity_document_verified: true }).identityDocumentVerified).toBe(true);
+    expect(mapAppointmentWithDetails({ identityDocumentVerified: true }).identityDocumentVerified).toBe(true);
+    expect(mapAppointmentWithDetails({}).identityDocumentVerified).toBe(false);
+  });
+
   it("maps persisted dictionary entries with a numeric ID", () => {
     const entry = mapNameDictionaryEntry({
       id: 17,

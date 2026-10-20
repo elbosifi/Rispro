@@ -1601,6 +1601,7 @@ export interface Patient {
   englishFullName?: string | null;
   ageYears: number;
   demographicsEstimated?: boolean;
+  identityDocumentVerified?: boolean;
   estimatedDateOfBirth?: string | null;
   sex: string;
   phone1: string;

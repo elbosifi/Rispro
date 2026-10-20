@@ -193,4 +193,30 @@ describe("PatientIdentityDocumentSection", () => {
     });
     expect(verifyDocument).not.toHaveBeenCalled();
   });
+
+  it("invalidates appointment badge queries after verification", async () => {
+    fetchState.mockResolvedValue({
+      status: "pending",
+      document: {
+        id: 9,
+        originalFilename: "national-id.pdf",
+        mimeType: "application/pdf",
+        uploadedAt: "2026-10-19T10:00:00.000Z",
+        verifiedAt: null,
+        verifiedByUserId: null,
+        verifiedByName: null,
+      },
+    });
+    verifyDocument.mockResolvedValue({ status: "verified", document: null });
+
+    const { queryClient } = renderSection();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    fireEvent.click(await screen.findByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Verify Identity" }));
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["registrations"] });
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["appointment-manage-modal"] });
+    });
+  });
 });

@@ -75,6 +75,7 @@ export interface AppointmentWithDetails extends Appointment {
   caseCategory?: "oncology" | "non_oncology" | null;
   arabicFullName: string;
   englishFullName: string | null;
+  identityDocumentVerified?: boolean;
   nationalId: string | null;
   mrn: string | null;
   ageYears: number;
@@ -237,6 +238,7 @@ export function mapPatient(raw: RawRecord): Patient {
     englishFullName: strOrNull(raw, 'english_full_name') ?? strOrNull(raw, 'englishFullName'),
     ageYears: num(raw, 'age_years') || num(raw, 'ageYears'),
     demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
+    identityDocumentVerified: bool(raw, 'identity_document_verified', bool(raw, 'identityDocumentVerified', false)),
     estimatedDateOfBirth: strOrNull(raw, 'estimated_date_of_birth') ?? strOrNull(raw, 'estimatedDateOfBirth'),
     sex: str(raw, 'sex'),
     phone1: str(raw, 'phone_1') || str(raw, 'phone1'),
@@ -384,6 +386,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     mrn: strOrNull(raw, 'mrn'),
     ageYears: num(raw, 'age_years') || num(raw, 'ageYears'),
     demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
+    identityDocumentVerified: bool(raw, 'identity_document_verified', bool(raw, 'identityDocumentVerified', false)),
     sex: str(raw, 'sex'),
     phone1: strOrNull(raw, 'phone_1') ?? strOrNull(raw, 'phone1'),
     address: strOrNull(raw, 'address'),

@@ -62,6 +62,12 @@ export function PatientIdentityDocumentSection({
       queryClient.invalidateQueries({
         queryKey: ["patient-directory"],
       }),
+      queryClient.invalidateQueries({
+        queryKey: ["registrations"],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ["appointment-manage-modal"],
+      }),
     ]);
   };
 

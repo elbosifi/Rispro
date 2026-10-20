@@ -40,6 +40,7 @@ import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingMod
 import { asString } from "../../../../utils/request-coercion.js";
 import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, getModalitySonicDicomRedirect, recordModalityHistoricalPacsPatientAttestation, searchModalityHistoricalPacsPatientId } from "../../../doctor-portal/protocoling-repository.js";
 import { loadAppointmentAcquisitionSummaries } from "../../../../services/appointment-acquisition-summary.js";
+import { getVerifiedPatientIds } from "../../../../services/patient-identity-document-service.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -554,9 +555,10 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const [rowsWithNotes, acquisitionSummaries] = await Promise.all([
+    const [rowsWithNotes, acquisitionSummaries, verifiedPatientIds] = await Promise.all([
       attachSonicDicomStudyNotesToAppointments(result.rows),
       loadAppointmentAcquisitionSummaries(result.rows.map((row) => Number(row.id))),
+      getVerifiedPatientIds(result.rows.map((row) => Number(row.patient_id))),
     ]);
     let publicBaseUrl: string | null = null;
     try { publicBaseUrl = await getPublicAppBaseUrl(); } catch { /* URL field remains unavailable until configured. */ }
@@ -567,6 +569,7 @@ router.get(
           : null;
       return {
         ...row,
+        identity_document_verified: verifiedPatientIds.has(Number(row.patient_id)),
         acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
@@ -729,6 +732,8 @@ router.get(
       return;
     }
 
+    const verifiedPatientIds = await getVerifiedPatientIds([Number(appointment.patient_id)]);
+
     const safetyResult = await pool.query<{
       modality_safety_workflow_type: "standard_acknowledgement" | "mri_primary_implant_screening";
       result: "no_known_implant_reported" | "implant_reported_review_required" | null;
@@ -763,6 +768,7 @@ router.get(
     res.json({
       appointment: {
         ...appointmentWithNote,
+        identity_document_verified: verifiedPatientIds.has(Number(appointment.patient_id)),
         acquisitionSummary: acquisitionSummaries.get(bookingId) ?? null,
         modality_safety_workflow_type: safety?.modality_safety_workflow_type ?? "standard_acknowledgement",
         mriPrimaryScreening: safety?.result ? {

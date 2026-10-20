@@ -559,6 +559,25 @@ describe("RegistrationsPage print actions", () => {
     expect(actionLabels.filter(Boolean)).toEqual(["Print", "Preview slip", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
   });
 
+  it("shows the identity badge in desktop and mobile rows only when verified", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({ identityDocumentVerified: true }),
+    ]);
+    const verifiedView = renderRegistrationsPage();
+
+    await screen.findAllByText("ACC-7");
+    expect(screen.getAllByRole("img", { name: "Verified identity" })).toHaveLength(2);
+
+    verifiedView.unmount();
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({ identityDocumentVerified: false }),
+    ]);
+    renderRegistrationsPage();
+
+    await screen.findAllByText("ACC-7");
+    expect(screen.queryAllByRole("img", { name: "Verified identity" })).toHaveLength(0);
+  });
+
   it("opens the patient drawer from the patient name while row click opens manage drawer", async () => {
     renderRegistrationsPage();
 

@@ -59,6 +59,8 @@ export function AppointmentCreatePage() {
         sex: preloadPatientQuery.data[0].sex,
         ageYears: preloadPatientQuery.data[0].ageYears,
         demographicsEstimated: preloadPatientQuery.data[0].demographicsEstimated,
+        identityDocumentVerified:
+          preloadPatientQuery.data[1].identityDocumentVerified,
         estimatedDateOfBirth: preloadPatientQuery.data[1].estimatedDateOfBirth,
         identityRisk: preloadPatientQuery.data[1].identityRisk,
         identityVerificationRequired: preloadPatientQuery.data[1].identityVerificationRequired,

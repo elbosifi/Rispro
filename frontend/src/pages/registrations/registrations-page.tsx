@@ -20,6 +20,7 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { normalizeAppointmentId } from "@/lib/appointment-id";
 import { AppointmentManageModal, type AppointmentManageTab } from "@/components/appointments/appointment-manage-modal";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
+import { PatientIdentityBadge } from "@/components/patients/patient-identity-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -1073,7 +1074,14 @@ export default function RegistrationsPage() {
                             openPatientDrawer(apt);
                           }}
                         >
-                          {patientName}
+                          <span className="inline-flex max-w-full items-center gap-1.5">
+                            <span className="min-w-0 truncate">{patientName}</span>
+                            <PatientIdentityBadge
+                              verified={apt.identityDocumentVerified}
+                              showUnverified={false}
+                              size={16}
+                            />
+                          </span>
                         </button>
                         <p className="mt-1 font-mono text-xs text-muted-foreground">{apt.accessionNumber}</p>
                         <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
@@ -1207,6 +1215,11 @@ export default function RegistrationsPage() {
                           >
                             {patientName}
                           </button>
+                          <PatientIdentityBadge
+                            verified={apt.identityDocumentVerified}
+                            showUnverified={false}
+                            size={16}
+                          />
                           {apt.patientWebPushSubscribed ? (
                             <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
                               {t("registrations.webPushBadge")}
