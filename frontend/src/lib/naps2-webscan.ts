@@ -36,7 +36,7 @@ let scanInProgress = false;
 export function assertNaps2EndpointApproved(endpoint: string, allowedOrigins?: string[]): string {
   const origin = normalizeNaps2Origin(endpoint);
   if (allowedOrigins && !allowedOrigins.includes(origin)) {
-    throw new Error(`Scanner origin ${origin} is not approved by server CSP. Ask an administrator to add this exact origin to NAPS2_WEBSCAN_ALLOWED_ORIGINS and restart RISpro.`);
+    throw new Error(`Scanner origin ${origin} is not approved by server CSP. Ask an administrator to approve this exact endpoint in Settings > Documents & Uploads > Advanced shared scanner settings, then reload this page.`);
   }
   return origin;
 }

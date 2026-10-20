@@ -2,6 +2,8 @@ import http, { type Server } from "http";
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
 import { pool } from "./db/pool.js";
+import { configureNaps2ConnectOrigins } from "./config/naps2.js";
+import { loadSettingsMap } from "./services/settings-service.js";
 import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
 import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js";
 import type { SanteWorklistWorker } from "./services/sante-worklist-worker-service.js";
@@ -484,6 +486,9 @@ async function start(): Promise<void> {
     startupSummary.ohif_viewer = "disabled";
   }
 
+  await measureStartupStage("naps2_csp", async () => {
+    configureNaps2ConnectOrigins((await loadSettingsMap(["documents_and_uploads"])).documents_and_uploads || {});
+  });
   server.listen(env.port, async () => {
     console.log(JSON.stringify({ type: "startup_timing", stage: "total_start_to_http_listen", status: "completed", durationMs: Math.round(performance.now() - startupStartedAt) }));
     // Print startup summary

@@ -130,7 +130,7 @@ try {
     $script:Firewall = $null
     function New-NetFirewallRule { param($Name, $DisplayName, $Direction, $Action, $Protocol, $LocalPort, $RemoteAddress, $Profile) $script:Firewall = $PSBoundParameters }
     Check 'firewall refuses broad/default access and the scanner-client role' {
-        Expect-Failure { Set-ScannerHostFirewall ([uri]'http://192.9.101.40:9828') @() $false } 'requires.*FIREWALL_SOURCES'
+        Expect-Failure { Set-ScannerHostFirewall ([uri]'http://192.9.101.40:9828') @() $false } 'requires approved scanner client addresses'
         Expect-Failure { Set-ScannerHostFirewall ([uri]'http://192.9.101.40:9828') @('Any') $false } 'no broad access'
         Expect-Failure { Set-ScannerHostFirewall ([uri]'http://192.9.101.41:9828') @('192.9.101.12') $false } 'scanner host IP'
         Assert ($null -eq $script:Firewall) 'Unexpected firewall mutation'

@@ -5,29 +5,38 @@ available. The Scanner Companion and Node Scanner Bridge are rollback code only;
 the normal UI and integration status expose NAPS2. No new application, service,
 Node runtime, NAPS2 installer, or certificate is delivered by scanner setup.
 
-## Deployment configuration
+## Administrator configuration — through RISpro
 
-Set `NAPS2_SETUP_RISPRO_ORIGIN` on the RISpro server to its **actual, approved
-HTTP IPv4 origin**, including any nondefault port, and restart RISpro. It must
-contain only an origin: no credentials, path, query, fragment or wildcard. This
-is an administrator deployment setting; the download never trusts Host,
-Forwarded, query parameters, or the browser's current address as authority.
-The server address is intentionally not supplied as a guessed default.
+Open **Settings > Documents & Uploads > Appointment request scanning**.
+Enable NAPS2, confirm the **RISpro HTTP address** (the approved hospital IPv4
+address, including any nondefault port), and **Save document settings**. Saving
+uses the existing supervisor re-authentication and audit flow. No environment
+variable, configuration file, migration or server restart is required.
 
-Enable NAPS2 globally in Settings > Documents & Uploads (or
-`NAPS2_WEBSCAN_ENABLED=true`). Global enablement does not prove workstation
-connectivity. Leave the system scanner endpoint empty for automatic local
-HTTP discovery. Clear an old saved port-9801 default if discovery is intended.
-Endpoint precedence is saved workstation override, explicit system endpoint,
-then local discovery. `NAPS2_WEBSCAN_ENDPOINT`, when set, overrides the saved
-system endpoint. An explicit endpoint never falls back to another scanner.
+When opened over an HTTP IPv4 address, the form proposes that address visibly.
+Only the administrator's protected Save action approves it. The download uses
+the saved, strictly validated origin, never Host, Forwarded or query parameters.
+No hospital IP is hard-coded. Paths, credentials, queries and wildcards are rejected.
+
+For a normal local scanner, leave **Advanced shared scanner settings** closed
+and its fields empty. This selects automatic local HTTP discovery. Global
+enablement does not prove workstation connectivity. Endpoint precedence is saved
+workstation override, explicit saved system endpoint, then local discovery.
+An explicit endpoint never falls back to another scanner. Saved UI values,
+including disabled/empty values, override legacy NAPS2 environment defaults.
 
 CSP allows exact HTTP origins for `127.0.0.1` and `localhost` on ports 9801–9850.
-It also allows a valid environment-configured scanner origin and the exact
-comma-separated origins in `NAPS2_WEBSCAN_ALLOWED_ORIGINS`. A remote endpoint
-saved in Settings or a browser override must be approved in that environment
-list; the UI reports the mismatch before scanning. CSP never reads the DB
-per response. No LAN wildcard or QZ rule is introduced or changed.
+Saving a system scanner endpoint approves its exact origin automatically;
+additional workstation scanner origins can be approved in the collapsed
+Advanced section. Permissions are loaded at server startup and refreshed after
+a successful settings transaction; response headers do not read the DB.
+Reload affected workstation pages after changing approvals to get the new CSP.
+No LAN wildcard or QZ rule is introduced or changed.
+
+If the address is missing, the download button directs the administrator to
+Settings. It checks HTTP status, content type and script framing before saving;
+errors remain visible on the workstation page. Discard a JSON error saved by an
+older version as `.cmd`. These checks detect error responses, not HTTP tampering.
 
 ## Operator setup
 
@@ -89,12 +98,14 @@ administrator action; setup does not manufacture a service or scheduled task.
 
 Use the approved scanner host's direct IPv4 HTTP origin and its actual sticky
 NAPS2 port (9801–9850), not an assumed port 9801. Configure the system endpoint
-and CSP allowlist before downloading setup. Normal Repair on a remote scanner
+in Settings > Documents & Uploads > Advanced shared scanner settings before
+downloading setup, then reload RISpro. Normal Repair on a remote scanner
 client configures Edge and tests the remote host; it does not edit a local NAPS2
 installation or open an inbound port.
 
-On the **scanner host only**, set server-side `NAPS2_SETUP_FIREWALL_SOURCES` to
-approved IPv4 client addresses or restricted CIDRs (/16–/32), then run the same
+In that same Advanced section, save **Approved scanner client addresses** as
+approved IPv4 client addresses or restricted CIDRs (/16–/32). On the
+**scanner host only**, run the same
 file as `RISpro-NAPS2-Setup.cmd HostRepair`. It confirms that the configured
 scanner IP belongs to this machine and creates only a Domain/Private inbound
 TCP rule for the responding exact port and approved source list. Missing

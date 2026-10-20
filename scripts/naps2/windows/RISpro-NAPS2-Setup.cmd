@@ -168,7 +168,7 @@ function Get-EsclEndpoint([string[]]$Candidates, [string]$Origin) {
 }
 function Set-ScannerHostFirewall([uri]$Endpoint, [string[]]$Sources, [bool]$Diagnose) {
     if ($Endpoint.IsLoopback -or $Endpoint.HostNameType -ne 'IPv4') { throw 'HostRepair requires an explicitly configured scanner-host LAN IPv4 endpoint. Loopback setup never creates an inbound firewall rule.' }
-    if ($Sources.Count -eq 0) { throw 'HostRepair requires server-configured NAPS2_SETUP_FIREWALL_SOURCES. No unrestricted inbound rule will be created.' }
+    if ($Sources.Count -eq 0) { throw 'HostRepair requires approved scanner client addresses saved in RISpro Settings > Documents & Uploads > Advanced shared scanner settings. No unrestricted inbound rule will be created.' }
     foreach ($source in $Sources) {
         if ($source -notmatch '^(\d{1,3}\.){3}\d{1,3}(?:/(?:1[6-9]|2\d|3[0-2]))?$') { throw 'Firewall sources must be approved IPv4 addresses or restricted /16-/32 CIDRs; no broad access is allowed.' }
         $ip = $null

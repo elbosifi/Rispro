@@ -12,6 +12,9 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { invalidateAllCache } from "../utils/cache.js";
+import { parseNaps2WebscanAllowedOrigins } from "../config/env.js";
+import { configureNaps2ConnectOrigins } from "../config/naps2.js";
+import { validateNaps2SetupOrigin, validateNaps2FirewallSources } from "./scanner-bootstrap-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId } from "../types/http.js";
 import type { CategorySettings, GroupedSettings, SettingsMap } from "../types/settings.js";
@@ -42,6 +45,18 @@ const DOCUMENT_HA_RETENTION_MIN_HOURS = 24;
 const DOCUMENT_HA_RETENTION_MAX_HOURS = 168;
 
 function validateSettingValue(category: string, key: string, value: unknown): void {
+  if (category === "documents_and_uploads") {
+    const scalar = extractSettingScalar(value).trim();
+    try {
+      if (key === "naps2_setup_rispro_origin" && scalar) validateNaps2SetupOrigin(scalar);
+      if (key === "naps2_setup_firewall_sources") validateNaps2FirewallSources(scalar);
+      if ((key === "naps2_webscan_endpoint" || key === "naps2_webscan_allowed_origins") && scalar) {
+        const origins = scalar.split(",").map((origin) => origin.trim()).filter(Boolean);
+        if (!origins.length || (key === "naps2_webscan_endpoint" && origins.length !== 1) || origins.some((origin) => parseNaps2WebscanAllowedOrigins(origin).length !== 1)) throw new Error("Scanner endpoints must be exact HTTP/HTTPS origins without credentials, paths or wildcards.");
+      }
+      if (key === "naps2_webscan_enabled" && !["enabled", "disabled"].includes(scalar.toLowerCase())) throw new Error("NAPS2 scanning must be enabled or disabled.");
+    } catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid NAPS2 settings."); }
+  }
   if (category !== "documents_and_uploads" || key !== "ha_hot_storage_retention_hours") return;
   const parsed = Number(extractSettingScalar(value).trim());
   if (!Number.isInteger(parsed) || parsed < DOCUMENT_HA_RETENTION_MIN_HOURS || parsed > DOCUMENT_HA_RETENTION_MAX_HOURS) {
@@ -189,7 +204,13 @@ export async function upsertSettings(
       results.push(savedRow);
     }
 
+    let scannerSettings: CategorySettings | undefined;
+    if (category === "documents_and_uploads") {
+      const snapshot = await client.query<SettingsMapRow>("select category, setting_key, setting_value from system_settings where category = $1", [category]);
+      scannerSettings = Object.fromEntries(snapshot.rows.map((row) => [row.setting_key, extractSettingScalar(row.setting_value)]));
+    }
     await client.query("commit");
+    if (scannerSettings) configureNaps2ConnectOrigins(scannerSettings);
     
     // Invalidate cache when settings are updated
     invalidateAllCache();

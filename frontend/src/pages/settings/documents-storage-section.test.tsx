@@ -134,4 +134,26 @@ describe("Documents & Uploads protocol queue setting", () => {
     await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({ entries: expect.arrayContaining([{ key: "scanner_app_enabled", value: { value: "disabled" } }, { key: "naps2_webscan_endpoint", value: { value: "" } }]) })));
   });
 
+  it("saves the approved RISpro address and optional shared-scanner settings through the protected settings API", async () => {
+    renderSection();
+    await userEvent.type(await screen.findByLabelText("RISpro HTTP address"), "http://192.9.101.30:8080");
+    const advanced = screen.getByText("Advanced shared scanner settings").closest("details")!;
+    expect(advanced.open).toBe(false);
+    await userEvent.click(screen.getByText("Advanced shared scanner settings"));
+    await userEvent.type(screen.getByLabelText("Additional approved scanner endpoints"), "http://192.9.101.40:9828");
+    await userEvent.type(screen.getByLabelText("Approved scanner client addresses"), "192.9.101.12,192.9.102.0/24");
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({ entries: expect.arrayContaining([
+      { key: "naps2_setup_rispro_origin", value: { value: "http://192.9.101.30:8080" } },
+      { key: "naps2_webscan_allowed_origins", value: { value: "http://192.9.101.40:9828" } },
+      { key: "naps2_setup_firewall_sources", value: { value: "192.9.101.12,192.9.102.0/24" } },
+    ]) })));
+    expect(document.body.textContent).not.toContain("NAPS2_SETUP_");
+  });
+  it("displays the saved approved origin without substituting the current page address", async () => {
+    fetchSettings.mockResolvedValue({ naps2_setup_rispro_origin: "http://192.9.101.30:8080" });
+    renderSection();
+    expect((await screen.findByLabelText("RISpro HTTP address") as HTMLInputElement).value).toBe("http://192.9.101.30:8080");
+  });
+
 });

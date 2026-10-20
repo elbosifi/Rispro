@@ -1,6 +1,5 @@
 import crypto from "crypto";
-import { env } from "../config/env.js";
-import { naps2ConnectOrigins } from "../config/naps2.js";
+import { configuredNaps2Enabled, configuredNaps2Endpoint, naps2ConnectOrigins } from "../config/naps2.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -193,10 +192,8 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   const settings = await loadSettingsMap(["printing_and_labels", "documents_and_uploads"]);
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
-  const naps2WebScanEndpoint = env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim();
-  const naps2WebScanEnabled =
-    env.naps2WebscanEnabled ||
-    String(documentSettings.naps2_webscan_enabled || "").trim().toLowerCase() === "enabled";
+  const naps2WebScanEndpoint = configuredNaps2Endpoint(documentSettings);
+  const naps2WebScanEnabled = configuredNaps2Enabled(documentSettings);
   const scannerBridgeMode = naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload";
   const dicomGateway = await getDicomGatewayOverview();
 

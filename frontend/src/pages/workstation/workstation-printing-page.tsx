@@ -41,6 +41,8 @@ export function WorkstationNaps2Section() {
   const [scanner, setScanner] = useState<IntegrationStatus["scanner"] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [testing, setTesting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   const [connection, setConnection] = useState<Naps2WebScanStatus | null>(null);
   const [scanMessage, setScanMessage] = useState("No test scan completed.");
   const [, setSettingsRevision] = useState(0);
@@ -61,6 +63,34 @@ export function WorkstationNaps2Section() {
   catch (error) { endpointError = error instanceof Error ? error.message : "Invalid system scanner endpoint."; }
   const enabled = scanner?.naps2WebScanEnabled === true;
   const sourceLabel = effective.source === "workstation" ? "Workstation override" : effective.source === "system" ? "System default" : "Automatic localhost discovery";
+
+  async function downloadSetup() {
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const url = effective.source === "workstation" ? `/api/scanner-bootstrap/windows-setup?endpoint=${encodeURIComponent(effective.endpoint!)}` : "/api/scanner-bootstrap/windows-setup";
+      const response = await fetch(url, { cache: "no-store", redirect: "error" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(body?.error?.message || `NAPS2 setup download failed (HTTP ${response.status}).`);
+      }
+      const script = await response.text();
+      if (response.headers.get("Content-Type")?.split(";", 1)[0].trim() !== "application/octet-stream" || !script.startsWith("@echo off\r\n") || !script.includes("\r\n# RISPRO_NAPS2_POWERSHELL\r\n")) {
+        throw new Error("RISpro returned an invalid NAPS2 setup file. Ask an administrator to check the scanner setup configuration, then retry.");
+      }
+      const blobUrl = URL.createObjectURL(new Blob([script], { type: "application/octet-stream" }));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "RISpro-NAPS2-Setup.cmd";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Unable to download NAPS2 setup. Retry or contact an administrator.");
+    } finally { setDownloading(false); }
+  }
 
   function clearResult() { setConnection(null); setScanMessage("No test scan completed."); }
   function saveEndpoint() {
@@ -109,7 +139,8 @@ export function WorkstationNaps2Section() {
         <li>Install official NAPS2, select the scanner, enable Scanner Sharing and its background-sharing option.</li>
         <li>Download the setup and run it as administrator on this Windows workstation. Follow any action reported in its log.</li>
       </ol>
-      <div className="mt-3"><DownloadLink href={effective.source === "workstation" ? `/api/scanner-bootstrap/windows-setup?endpoint=${encodeURIComponent(effective.endpoint!)}` : "/api/scanner-bootstrap/windows-setup"} filename="RISpro-NAPS2-Setup.cmd" primary>Download NAPS2 setup</DownloadLink></div>
+      <div className="mt-3"><Button type="button" onClick={() => void downloadSetup()} disabled={downloading || Boolean(endpointError)}>{downloading ? "Downloading NAPS2 setup…" : "Download NAPS2 setup"}</Button></div>
+      {downloadError ? <p className="mt-3 text-sm text-destructive" role="alert">{downloadError}</p> : null}
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
         <StatusItem label="Global scanning" value={scanner ? enabled ? "Enabled" : "Disabled in Documents & Uploads" : "Configuration unavailable"} />
         <StatusItem label="Scanner connection status" value={connection ? connection.available ? "Connected — capabilities verified" : "Action required" : "Not tested on this workstation"} />

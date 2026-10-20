@@ -30,7 +30,7 @@ describe("NAPS2 workstation download", () => {
       assert.throws(() => renderNaps2WindowsSetup({ origin: "http://192.9.101.30", endpoint: "http://192.9.101.41:9828" }), /CSP/);
       const setup = renderNaps2WindowsSetup({ origin: "http://192.9.101.30", endpoint: "http://192.9.101.40:9828", sources: "192.9.101.12,192.9.102.0/24" });
       assert.match(setup, /-RemoteAddress \$Sources -Profile Domain,Private/);
-      for (const sources of ["*", "Any", "LocalSubnet", "0.0.0.0/0", "192.9.0.0/8", "192.9.1.1;whoami"]) assert.throws(() => renderNaps2WindowsSetup({ origin: "http://192.9.101.30", endpoint: "", sources }), /approved IPv4/);
+      for (const sources of ["*", "Any", "LocalSubnet", "0.0.0.0/0", "192.9.0.0/8", "192.9.1.1;whoami"]) assert.throws(() => renderNaps2WindowsSetup({ origin: "http://192.9.101.30", endpoint: "", sources }), /IPv4/);
     } finally { env.naps2WebscanAllowedOrigins = old; }
   });
 });

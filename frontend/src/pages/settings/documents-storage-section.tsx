@@ -11,6 +11,7 @@ import {
 import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
 import { normalizeNaps2Origin, resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
 import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 import { useLanguage } from "@/providers/language-provider";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
 
@@ -25,6 +26,9 @@ type DocumentsStorageForm = {
   haHotStorageRetentionHours: string;
   naps2WebScanEnabled: boolean;
   naps2WebScanEndpoint: string;
+  naps2SetupRisproOrigin: string;
+  naps2AllowedOrigins: string;
+  naps2FirewallSources: string;
   scanDpi: string;
   scanColorMode: string;
   scannerSource: string;
@@ -34,6 +38,13 @@ type DocumentsStorageFormOverride = {
   baseUpdatedAt: number;
   value: DocumentsStorageForm;
 };
+
+function suggestedRisproHttpAddress(): string {
+  // A visible proposal only. The protected Save action explicitly approves it.
+  if (typeof window === "undefined") return "";
+  const { protocol, hostname, origin } = window.location;
+  return protocol === "http:" && /^\d+\.\d+\.\d+\.\d+$/.test(hostname) && !hostname.startsWith("127.") && hostname !== "0.0.0.0" ? origin : "";
+}
 
 function normalizeDocumentsStorageForm(
   settings: Record<string, string> | undefined
@@ -51,6 +62,9 @@ function normalizeDocumentsStorageForm(
     haHotStorageRetentionHours: settings?.ha_hot_storage_retention_hours || "48",
     naps2WebScanEnabled: String(settings?.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled",
     naps2WebScanEndpoint: settings?.naps2_webscan_endpoint || "",
+    naps2SetupRisproOrigin: settings?.naps2_setup_rispro_origin ?? suggestedRisproHttpAddress(),
+    naps2AllowedOrigins: settings?.naps2_webscan_allowed_origins || "",
+    naps2FirewallSources: settings?.naps2_setup_firewall_sources || "",
     scanDpi: settings?.scan_dpi || "200",
     scanColorMode: settings?.scan_color_mode || "grayscale",
     scannerSource: settings?.scanner_source || "feeder",
@@ -110,6 +124,9 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           { key: "ha_hot_storage_retention_hours", value: { value: form.haHotStorageRetentionHours } },
           { key: "naps2_webscan_enabled", value: { value: form.naps2WebScanEnabled ? "enabled" : "disabled" } },
           { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint.trim() ? normalizeNaps2Origin(form.naps2WebScanEndpoint) : "" } },
+          { key: "naps2_setup_rispro_origin", value: { value: form.naps2SetupRisproOrigin.trim() ? normalizeNaps2Origin(form.naps2SetupRisproOrigin) : "" } },
+          { key: "naps2_webscan_allowed_origins", value: { value: form.naps2AllowedOrigins.trim() } },
+          { key: "naps2_setup_firewall_sources", value: { value: form.naps2FirewallSources.trim() } },
           { key: "scanner_bridge_mode", value: { value: form.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
           { key: "scanner_app_enabled", value: { value: "disabled" } },
           { key: "scan_dpi", value: { value: form.scanDpi } },
@@ -121,7 +138,7 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
     onSuccess: () => {
       setResultMessage(t("settings.documents.saved"));
       queryClient.invalidateQueries({ queryKey: ["settings", "documents_and_uploads"] });
-      queryClient.invalidateQueries({ queryKey: ["integration-status", "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["integration-status"] });
     },
     onError: (err: unknown) => {
       setResultMessage(err instanceof Error ? err.message : t("settings.documents.saveFailed"));
@@ -232,8 +249,8 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
           </span>
         </label>
       </div>
-      <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
-        <h4 className="font-medium text-sm">{t("settings.documents.naps2Title")}</h4>
+      <div role="group" aria-labelledby="documents-naps2-title" className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
+        <h4 id="documents-naps2-title" className="font-medium text-sm">{t("settings.documents.naps2Title")}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="flex items-end">
             <label className="inline-flex items-center gap-2 text-sm">
@@ -246,13 +263,9 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
             </label>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">{t("settings.documents.naps2Endpoint")}</label>
-            <input
-              value={form.naps2WebScanEndpoint}
-              onChange={(e) => updateForm("naps2WebScanEndpoint", e.target.value)}
-              placeholder="Automatic local discovery"
-              className="input-premium w-full"
-            />
+            <label className="block text-sm font-medium mb-1" htmlFor="naps2-rispro-address">{language === "ar" ? "عنوان RISpro عبر HTTP" : "RISpro HTTP address"}</label>
+            <Input id="naps2-rispro-address" type="url" dir="ltr" value={form.naps2SetupRisproOrigin} onChange={(event) => updateForm("naps2SetupRisproOrigin", event.target.value)} placeholder="http://RISpro-server-IP" className="w-full" />
+            <p className="mt-1 text-xs text-muted-foreground">{language === "ar" ? "أكد عنوان المستشفى واحفظه مرة واحدة لإعداد Edge. لا يلزم تعديل ملفات أو إعادة تشغيل الخادم." : "Confirm the hospital address and save once for Edge setup. No configuration files or server restart are needed."}</p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanDpi")}</label>
@@ -277,6 +290,30 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
             </select>
           </div>
         </div>
+        <details className="border-t border-border pt-3">
+          <summary className="cursor-pointer text-sm font-medium">{language === "ar" ? "إعدادات الماسح المشترك المتقدمة" : "Advanced shared scanner settings"}</summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-1" htmlFor="naps2-system-endpoint">{t("settings.documents.naps2Endpoint")}</label>
+              <Input
+                id="naps2-system-endpoint"
+                value={form.naps2WebScanEndpoint}
+                onChange={(e) => updateForm("naps2WebScanEndpoint", e.target.value)}
+                placeholder="Automatic local discovery"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" htmlFor="naps2-approved-origins">{language === "ar" ? "عناوين الماسحات الإضافية المعتمدة" : "Additional approved scanner endpoints"}</label>
+              <Input id="naps2-approved-origins" dir="ltr" value={form.naps2AllowedOrigins} onChange={(event) => updateForm("naps2AllowedOrigins", event.target.value)} className="w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" htmlFor="naps2-firewall-sources">{language === "ar" ? "عناوين أجهزة العملاء المعتمدة" : "Approved scanner client addresses"}</label>
+              <Input id="naps2-firewall-sources" dir="ltr" value={form.naps2FirewallSources} onChange={(event) => updateForm("naps2FirewallSources", event.target.value)} className="w-full" />
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{language === "ar" ? "اترك هذه الحقول فارغة للماسح المحلي. للماسح المشترك: العنوان العام معتمد تلقائياً؛ استخدم قوائم مفصولة بفواصل للعناوين الإضافية وعناوين العملاء أو CIDR المسموح بها لجدار حماية المضيف. احفظ ثم أعد تحميل RISpro على الأجهزة المتأثرة." : "Leave these fields empty for a local scanner. The system scanner endpoint is approved automatically. Use comma-separated lists for additional endpoints and approved client IPs/CIDRs for the host firewall. Save, then reload RISpro on affected workstations."}</p>
+        </details>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"

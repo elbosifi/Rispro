@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { signInWithSession } from "../helpers/auth.js";
+import { E2E_PASSWORD, signInWithSession } from "../helpers/auth.js";
 
 // Real cross-origin HTTP/CORS transport, synthetic eSCL responses, no hardware.
 const endpoint = "http://127.0.0.1:9849";
@@ -44,10 +44,30 @@ test("desktop and mobile NAPS2 setup separates connection, scan and attachment",
   const section = page.locator('section[aria-labelledby="workstation-naps2-title"]');
   await expect(section.getByText("Enabled", { exact: true })).toBeVisible();
   await expect(section.getByText("Not tested on this workstation")).toBeVisible();
-  await expect(section.getByRole("link", { name: "Download NAPS2 setup" })).toHaveAttribute("href", "/api/scanner-bootstrap/windows-setup");
+  let setupRequest = "";
+  let failSetupDownload = true;
+  await page.route("**/api/scanner-bootstrap/windows-setup*", async (route) => {
+    setupRequest = route.request().url();
+    if (failSetupDownload) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "Set the RISpro HTTP address in Settings > Documents & Uploads > NAPS2, save, then download again." } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/octet-stream", body: "@echo off\r\nexit /b 0\r\n# RISPRO_NAPS2_POWERSHELL\r\n" });
+  });
+  let downloads = 0;
+  page.on("download", () => downloads++);
+  await section.getByRole("button", { name: "Download NAPS2 setup" }).click();
+  await expect(section.getByRole("alert")).toContainText("Set the RISpro HTTP address in Settings");
+  expect(downloads).toBe(0);
   await section.getByText("Advanced endpoint override").click();
   await section.getByLabel("NAPS2 eSCL endpoint").fill(endpoint);
   await section.getByRole("button", { name: "Save workstation endpoint" }).click();
+  failSetupDownload = false;
+  const downloadPromise = page.waitForEvent("download");
+  await section.getByRole("button", { name: "Download NAPS2 setup" }).click();
+  expect((await downloadPromise).suggestedFilename()).toBe("RISpro-NAPS2-Setup.cmd");
+  expect(new URL(setupRequest).searchParams.get("endpoint")).toBe(endpoint);
+  await expect(section.getByRole("alert")).toHaveCount(0);
   await section.getByRole("button", { name: "Test connection" }).click();
   await expect(section.getByText(/Connected/)).toBeVisible();
   expect(jobs).toBe(0);
@@ -72,5 +92,51 @@ test("desktop and mobile NAPS2 setup separates connection, scan and attachment",
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await section.screenshot({ path: testInfo.outputPath(`naps2-${viewport.width}.png`) });
   }
+  expect(errors).toEqual([]);
+});
+
+test("administrator saves NAPS2 configuration and downloads setup entirely through the UI", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await signInWithSession(page, "e2e_super_admin");
+  await page.goto("/settings?section=documents_and_uploads");
+  await page.getByRole("button", { name: "Re-authenticate", exact: true }).click();
+  await page.locator('input[type="password"]').fill(E2E_PASSWORD);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Supervisor Re-Authentication", exact: true })).toHaveCount(0);
+  const section = page.getByRole("group", { name: "Appointment request scanning" });
+  await section.getByLabel("Enable NAPS2.WebScan", { exact: true }).check();
+  await section.getByLabel("RISpro HTTP address", { exact: true }).fill("http://192.9.101.30:8080");
+  const advanced = section.locator("details");
+  await expect(advanced).not.toHaveAttribute("open");
+  await advanced.getByText("Advanced shared scanner settings").click();
+  await section.locator("#naps2-system-endpoint").fill("");
+  await section.getByLabel("Additional approved scanner endpoints").fill("http://192.9.101.40:9828");
+  await section.getByLabel("Approved scanner client addresses").fill("192.9.101.12,192.9.102.0/24");
+  const saved = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().includes("/api/settings/documents_and_uploads"));
+  await page.getByRole("button", { name: "Save document settings", exact: true }).click();
+  expect((await saved).ok()).toBe(true);
+  const status = await page.request.get("http://127.0.0.1:3100/api/integrations/status");
+  expect(status.ok()).toBe(true);
+  expect((await status.json()).status.scanner.naps2WebScanEndpoint).toBe("");
+  expect(status.headers()["content-security-policy"]).toContain("http://192.9.101.40:9828");
+  expect(status.headers()["content-security-policy"]).toContain("wss://localhost:8181");
+  await page.reload();
+  await expect(section.getByLabel("RISpro HTTP address", { exact: true })).toHaveValue("http://192.9.101.30:8080");
+  for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expect(section).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await section.screenshot({ path: testInfo.outputPath(`naps2-settings-${viewport.width}.png`) });
+  }
+  await page.goto("/workstation/printing");
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download NAPS2 setup", exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("RISpro-NAPS2-Setup.cmd");
+  const script = readFileSync((await download.path())!, "utf8");
+  expect(script).toMatch(/^@echo off\r\n/);
+  const config = JSON.parse(Buffer.from(script.match(/FromBase64String\('([^']+)'\)/)![1], "base64").toString());
+  expect(config).toEqual({ origin: "http://192.9.101.30:8080", endpoint: "", sources: ["192.9.101.12", "192.9.102.0/24"] });
   expect(errors).toEqual([]);
 });

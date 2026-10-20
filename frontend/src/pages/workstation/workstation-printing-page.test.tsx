@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorkstationPrintingPage from "./workstation-printing-page";
 import { WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
 
-const { mockPushToast, mockGetNaps2WebScanStatus, mockFetchIntegrationStatus, mockScan } = vi.hoisted(() => ({
+const { mockPushToast, mockGetNaps2WebScanStatus, mockFetchIntegrationStatus, mockScan, mockCreateObjectURL, mockRevokeObjectURL } = vi.hoisted(() => ({
+  mockCreateObjectURL: vi.fn(),
+  mockRevokeObjectURL: vi.fn(),
   mockScan: vi.fn(),
   mockPushToast: vi.fn(),
   mockGetNaps2WebScanStatus: vi.fn(),
@@ -40,6 +42,9 @@ function response(body: unknown) {
 describe("WorkstationPrintingPage", () => {
   beforeEach(() => {
     localStorage.clear();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: mockCreateObjectURL.mockReset().mockReturnValue("blob:naps2-setup") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: mockRevokeObjectURL.mockReset() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     mockScan.mockReset();
     mockScan.mockResolvedValue({ pageCount: 2 });
     mockPushToast.mockReset();
@@ -52,6 +57,7 @@ describe("WorkstationPrintingPage", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("renders the ready manifest and uses every returned artifact URL", async () => {
@@ -88,7 +94,9 @@ describe("WorkstationPrintingPage", () => {
 
     expect(JSON.parse(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY) || "null").endpoint).toBe("http://workstation-scanner:9801");
     expect(await screen.findByText("Workstation override")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download NAPS2 setup" }).getAttribute("href")).toBe("/api/scanner-bootstrap/windows-setup?endpoint=http%3A%2F%2Fworkstation-scanner%3A9801");
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("@echo off\r\nexit /b 0\r\n# RISPRO_NAPS2_POWERSHELL\r\n", { headers: { "Content-Type": "application/octet-stream" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Download NAPS2 setup" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/scanner-bootstrap/windows-setup?endpoint=http%3A%2F%2Fworkstation-scanner%3A9801", { cache: "no-store", redirect: "error" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset to system default" }));
     expect(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY)).toBeNull();
     expect(await screen.findByText("System default")).toBeTruthy();
@@ -165,13 +173,48 @@ describe("WorkstationPrintingPage", () => {
     expect(screen.getByText("Not tested on this workstation")).toBeTruthy();
     await screen.findByText("Enabled");
     expect(screen.getByText("No test scan completed.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download NAPS2 setup" }).getAttribute("href")).toBe("/api/scanner-bootstrap/windows-setup");
+    expect(screen.getByRole("button", { name: "Download NAPS2 setup" })).toBeTruthy();
     const advanced = screen.getByText("Advanced endpoint override").closest("details")!;
     expect(advanced.open).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Test scan" }));
     await waitFor(() => expect(mockScan).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Test scan succeeded: 2 page/)).toBeTruthy();
     expect(screen.getByText(/No patient document was uploaded or linked/)).toBeTruthy();
+  });
+
+  it("shows a server configuration error without creating or downloading a CMD, then supports retry", async () => {
+    render(<WorkstationPrintingPage />);
+    await screen.findByText("Enabled");
+    const message = "Set the RISpro HTTP address in Settings > Documents & Uploads > NAPS2, save, then download again.";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message, details: null } }), { status: 503, headers: { "Content-Type": "application/json" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Download NAPS2 setup" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(message);
+    expect(mockCreateObjectURL).not.toHaveBeenCalled();
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+
+    const script = "@echo off\r\nexit /b 0\r\n# RISPRO_NAPS2_POWERSHELL\r\n";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(script, { headers: { "Content-Type": "application/octet-stream" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Download NAPS2 setup" }));
+    await waitFor(() => expect(mockCreateObjectURL).toHaveBeenCalledTimes(1));
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+    const link = vi.mocked(HTMLAnchorElement.prototype.click).mock.instances[0] as HTMLAnchorElement;
+    expect(link.download).toBe("RISpro-NAPS2-Setup.cmd");
+    expect(link.href).toBe("blob:naps2-setup");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    { type: "application/json", body: '{"error":{"message":"proxy error"}}' },
+    { type: "text/html", body: '<html>Sign in</html>' },
+    { type: "application/octet-stream", body: '{"error":{"message":"proxy error"}}' },
+  ])("rejects a successful HTTP response that contains $type error content", async ({ type, body }) => {
+    render(<WorkstationPrintingPage />);
+    await screen.findByText("Enabled");
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { headers: { "Content-Type": type } }));
+    fireEvent.click(screen.getByRole("button", { name: "Download NAPS2 setup" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("invalid NAPS2 setup file");
+    expect(mockCreateObjectURL).not.toHaveBeenCalled();
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
   });
 
 });
