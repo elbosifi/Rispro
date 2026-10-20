@@ -1030,7 +1030,12 @@ export async function deleteDocumentsByScope(
   scope: DocumentsDeleteScope,
   currentUserId: OptionalUserId
 ): Promise<DocumentsDeleteResult> {
-  const documents = await selectDocumentsForScope(scope);
+  const documents = (
+    await selectDocumentsForScope(scope)
+  ).filter(
+    (document) =>
+      document.document_type !== "patient_identity_document"
+  );
   const failures: Array<{ documentId: number; reason: string }> = [];
   const deletedIds: number[] = [];
 
@@ -1045,7 +1050,15 @@ export async function deleteDocumentsByScope(
   }
 
   if (deletedIds.length > 0) {
-    await pool.query(`delete from documents where id = any($1::bigint[])`, [deletedIds]);
+    await pool.query(
+      `
+        delete from documents
+        where id = any($1::bigint[])
+          and document_type is distinct from
+              'patient_identity_document'
+      `,
+      [deletedIds]
+    );
   }
 
   await logAuditEntry({

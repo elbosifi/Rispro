@@ -22,15 +22,16 @@ vi.mock("@/lib/api/patient-identity-documents", () => ({
 }));
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 
-function renderSection() {
+function renderSection(patientId = 7) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
-        <PatientIdentityDocumentSection patientId={7} />
+        <PatientIdentityDocumentSection patientId={patientId} />
       </LanguageProvider>
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
 }
 
 describe("PatientIdentityDocumentSection", () => {
@@ -107,5 +108,89 @@ describe("PatientIdentityDocumentSection", () => {
 
     renderSection();
     expect(await screen.findByRole("button", { name: "Revoke Verification" })).toBeTruthy();
+  });
+
+  it("confirmation resets when a newer identity document is loaded", async () => {
+    fetchState
+      .mockResolvedValueOnce({
+        status: "pending",
+        document: {
+          id: 9,
+          originalFilename: "national-id-9.pdf",
+          mimeType: "application/pdf",
+          uploadedAt: "2026-10-19T10:00:00.000Z",
+          verifiedAt: null,
+          verifiedByUserId: null,
+          verifiedByName: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "pending",
+        document: {
+          id: 10,
+          originalFilename: "national-id-10.pdf",
+          mimeType: "application/pdf",
+          uploadedAt: "2026-10-19T10:01:00.000Z",
+          verifiedAt: null,
+          verifiedByUserId: null,
+          verifiedByName: null,
+        },
+      });
+
+    const { queryClient } = renderSection(7);
+    const verifyButton = await screen.findByRole("button", { name: "Verify Identity" });
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+
+    fireEvent.click(checkbox);
+    expect(verifyButton.hasAttribute("disabled")).toBe(false);
+
+    await queryClient.invalidateQueries({ queryKey: ["patient-identity-document", 7] });
+    await screen.findByText("national-id-10.pdf");
+
+    await waitFor(() => {
+      expect(checkbox.checked).toBe(false);
+      expect(verifyButton.hasAttribute("disabled")).toBe(true);
+    });
+
+    fireEvent.click(checkbox);
+    expect(verifyButton.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("confirmation does not transfer between patients", async () => {
+    fetchState.mockImplementation(async (patientId: number) => ({
+      status: "pending",
+      document: {
+        id: patientId === 7 ? 9 : 11,
+        originalFilename: `national-id-${patientId}.pdf`,
+        mimeType: "application/pdf",
+        uploadedAt: "2026-10-19T10:00:00.000Z",
+        verifiedAt: null,
+        verifiedByUserId: null,
+        verifiedByName: null,
+      },
+    }));
+
+    const rendered = renderSection(7);
+    const verifyButton = await screen.findByRole("button", { name: "Verify Identity" });
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    fireEvent.click(checkbox);
+    expect(verifyButton.hasAttribute("disabled")).toBe(false);
+
+    rendered.rerender(
+      <QueryClientProvider client={rendered.queryClient}>
+        <LanguageProvider>
+          <PatientIdentityDocumentSection patientId={8} />
+        </LanguageProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("national-id-8.pdf");
+    const currentCheckbox = screen.getByRole("checkbox") as HTMLInputElement;
+    const currentVerifyButton = screen.getByRole("button", { name: "Verify Identity" });
+    await waitFor(() => {
+      expect(currentCheckbox.checked).toBe(false);
+      expect(currentVerifyButton.hasAttribute("disabled")).toBe(true);
+    });
+    expect(verifyDocument).not.toHaveBeenCalled();
   });
 });

@@ -262,6 +262,40 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
         `,
         [patient.id, generated.englishName.trim()]
       );
+
+      const revokedIdentityDocuments =
+        await client.query<{ id: number }>(
+          `
+            update documents
+            set
+              identity_verified_at = null,
+              identity_verified_by_user_id = null
+            where patient_id = $1
+              and document_type = 'patient_identity_document'
+              and identity_verified_at is not null
+            returning id
+          `,
+          [patient.id]
+        );
+
+      for (const document of revokedIdentityDocuments.rows) {
+        await logAuditEntry(
+          {
+            entityType: "patient_identity_document",
+            entityId: Number(document.id),
+            actionType:
+              "identity_verification_revoked_after_name_dictionary_update",
+            oldValues: {
+              patientId: patient.id,
+              documentId: Number(document.id),
+            },
+            newValues: null,
+            changedByUserId: currentUserId,
+          },
+          client
+        );
+      }
+
       updatedCount += 1;
     }
 

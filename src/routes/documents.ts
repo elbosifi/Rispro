@@ -61,22 +61,38 @@ documentsRouter.get(
     ) {
       throw new HttpError(403, "Not authorized to view patient identity documents.");
     }
+    const isIdentityDocument =
+      document.document_type === "patient_identity_document";
+    if (isIdentityDocument) {
+      res.setHeader(
+        "Cache-Control",
+        "private, no-store, max-age=0"
+      );
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
     const absolutePath = getDocumentAbsolutePath(document);
     res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="${String(document.original_filename || "document").replace(/"/g, "")}"`
     );
-    res.sendFile(absolutePath, (error) => {
-      if (!error) return;
-      if (res.headersSent) {
-        next(error);
-        return;
+    res.sendFile(
+      absolutePath,
+      {
+        cacheControl: !isIdentityDocument,
+      },
+      (error) => {
+        if (!error) return;
+        if (res.headersSent) {
+          next(error);
+          return;
+        }
+        void readDocumentContent(document)
+          .then((content) => res.send(content))
+          .catch(next);
       }
-      void readDocumentContent(document)
-        .then((content) => res.send(content))
-        .catch(next);
-    });
+    );
   })
 );
 

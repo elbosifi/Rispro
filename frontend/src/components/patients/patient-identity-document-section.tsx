@@ -26,7 +26,7 @@ export function PatientIdentityDocumentSection({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<"upload" | "verify" | "revoke" | null>(null);
   const canManage = IDENTITY_DOCUMENT_ROLES.includes(user?.role as (typeof IDENTITY_DOCUMENT_ROLES)[number]);
   const canRevoke = user?.role === "supervisor" || user?.role === "super_admin";
@@ -42,6 +42,13 @@ export function PatientIdentityDocumentSection({
 
   const document = query.data?.document ?? null;
   const status = query.data?.status ?? "not_uploaded";
+  const documentKey = document
+    ? `${patientId}:${document.id}`
+    : null;
+  const confirmed =
+    status === "pending" &&
+    documentKey !== null &&
+    confirmedFor === documentKey;
   const busy = busyAction != null || query.isFetching;
 
   const refreshIdentityData = async () => {
@@ -69,7 +76,7 @@ export function PatientIdentityDocumentSection({
     try {
       await uploadPatientIdentityDocument(patientId, file);
       await refreshIdentityData();
-      setConfirmed(false);
+      setConfirmedFor(null);
       pushToast({
         type: "success",
         title: t(language, "patients.identity.uploadSuccess"),
@@ -92,7 +99,7 @@ export function PatientIdentityDocumentSection({
     try {
       await verifyPatientIdentityDocument(patientId, document.id);
       await refreshIdentityData();
-      setConfirmed(false);
+      setConfirmedFor(null);
       pushToast({
         type: "success",
         title: t(language, "patients.identity.verifySuccess"),
@@ -115,7 +122,7 @@ export function PatientIdentityDocumentSection({
     try {
       await revokePatientIdentityDocument(patientId);
       await refreshIdentityData();
-      setConfirmed(false);
+      setConfirmedFor(null);
       pushToast({
         type: "success",
         title: t(language, "patients.identity.revokeSuccess"),
@@ -191,7 +198,16 @@ export function PatientIdentityDocumentSection({
       {document && status === "pending" ? (
         <div className="space-y-3 border-t border-border pt-3">
           <label className="flex items-start gap-2 text-sm leading-5">
-            <Checkbox checked={confirmed} disabled={busy} onCheckedChange={setConfirmed} className="mt-0.5" />
+            <Checkbox
+              checked={confirmed}
+              disabled={busy}
+              onCheckedChange={(checked) => {
+                setConfirmedFor(
+                  checked === true ? documentKey : null
+                );
+              }}
+              className="mt-0.5"
+            />
             <span>{t(language, "patients.identity.confirmMatch")}</span>
           </label>
           <Button type="button" size="sm" disabled={busy || !confirmed} onClick={() => void handleVerify()}>

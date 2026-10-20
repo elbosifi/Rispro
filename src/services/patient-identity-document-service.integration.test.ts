@@ -8,6 +8,7 @@ import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { mergePatients, updatePatient } from "./patient-service.js";
+import { applyNameDictionaryToPatients } from "./name-dictionary-service.js";
 import {
   getPatientIdentityDocumentState,
   getVerifiedPatientIds,
@@ -20,6 +21,7 @@ const originalUploadsDir = env.uploadsDir;
 const tempUploadsDir = path.join(os.tmpdir(), `rispro-patient-identity-${crypto.randomUUID()}`);
 const createdPatientIds: number[] = [];
 const createdDocumentIds: number[] = [];
+const createdDictionaryIds: number[] = [];
 const createdUserIds: number[] = [];
 let databaseAvailable = false;
 let previousHaSetting: unknown | null = null;
@@ -114,6 +116,7 @@ test.before(async () => {
 test.after(async () => {
   if (databaseAvailable) {
     await pool.query("delete from documents where id=any($1::bigint[])", [createdDocumentIds]).catch(() => undefined);
+    await pool.query("delete from name_dictionary where id=any($1::bigint[])", [createdDictionaryIds]).catch(() => undefined);
     await pool.query("delete from audit_log where changed_by_user_id=any($1::bigint[])", [createdUserIds]).catch(() => undefined);
     await pool.query("delete from patients where id=any($1::bigint[])", [createdPatientIds]).catch(() => undefined);
     await pool.query("delete from users where id=any($1::bigint[])", [createdUserIds]).catch(() => undefined);
@@ -197,6 +200,49 @@ test("replacement resets verification while retaining document history", async (
   assert.equal(state.status, "pending");
   assert.equal(state.document?.id, Number(replacement.id));
   assert.equal((await pool.query("select 1 from documents where id=$1", [original.id])).rowCount, 1);
+});
+
+test("name dictionary changes revoke verified identity without deleting document", async (t) => {
+  if (await skipWithoutDatabase(t)) return;
+  const userId = await createUser();
+  const patient = await createFixturePatient(userId);
+  const document = await uploadIdentity(patient.id, userId);
+  await verifyPatientIdentityDocument(patient.id, document.id, userId);
+
+  const dictionaryEntry = await pool.query<{ id: number }>(
+    `
+      insert into name_dictionary (arabic_text, english_text, is_active)
+      values ($1, $2, true)
+      returning id
+    `,
+    [patient.arabicFullName, `Dictionary Changed ${crypto.randomUUID().slice(0, 8)}`],
+  );
+  createdDictionaryIds.push(Number(dictionaryEntry.rows[0]!.id));
+
+  await applyNameDictionaryToPatients(userId);
+
+  const updatedPatient = await pool.query<{ english_full_name: string }>(
+    "select english_full_name from patients where id=$1",
+    [patient.id],
+  );
+  assert.notEqual(updatedPatient.rows[0]?.english_full_name, patient.englishFullName);
+  assert.equal((await getPatientIdentityDocumentState(patient.id)).status, "pending");
+  assert.equal((await pool.query("select 1 from documents where id=$1", [document.id])).rowCount, 1);
+
+  const auditQuery = `
+    select id
+    from audit_log
+    where entity_type = 'patient_identity_document'
+      and entity_id = $1
+      and action_type = 'identity_verification_revoked_after_name_dictionary_update'
+      and changed_by_user_id = $2
+  `;
+  const firstAudit = await pool.query(auditQuery, [document.id, userId]);
+  assert.equal(firstAudit.rowCount, 1);
+
+  await applyNameDictionaryToPatients(userId);
+  const secondAudit = await pool.query(auditQuery, [document.id, userId]);
+  assert.equal(secondAudit.rowCount, 1);
 });
 
 test("revocation clears verification without deleting the file", async (t) => {
