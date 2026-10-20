@@ -60,6 +60,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "exam_types",
   "modalities",
   "equipment",
+  "name_dictionary",
   "not_allowed_name_words",
   "appointment_slip",
   "qz_tray",

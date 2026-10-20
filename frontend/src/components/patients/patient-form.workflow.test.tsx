@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api-client";
 import PatientForm from "@/components/patients/patient-form";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import type { Patient } from "@/types/api";
@@ -13,7 +14,7 @@ import {
   searchPatients,
   fetchNameDictionary,
   fetchPatientNotAllowedNameWords,
-  upsertNameDictionaryEntry,
+  createMissingNameDictionaryEntry,
   fetchPatientById,
   fetchPatientMrnPreview,
   fetchPatientIdentifierTypes,
@@ -31,7 +32,7 @@ vi.mock("@/lib/api-hooks", () => ({
   searchPatients: vi.fn(),
   fetchNameDictionary: vi.fn(),
   fetchPatientNotAllowedNameWords: vi.fn(),
-  upsertNameDictionaryEntry: vi.fn(),
+  createMissingNameDictionaryEntry: vi.fn(),
   fetchPatientById: vi.fn(),
   fetchPatientMrnPreview: vi.fn(),
   fetchPatientIdentifierTypes: vi.fn(),
@@ -127,7 +128,7 @@ describe("PatientForm workflow hardening", () => {
     }));
     vi.mocked(fetchPatientNotAllowedNameWords).mockResolvedValue(withNotAllowedNameWordMetadata({ entries: [{ id: 1, arabicText: "عبد", normalizedArabicText: "عبد", isActive: true }] }));
     vi.mocked(searchPatients).mockResolvedValue([]);
-    vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } });
+    vi.mocked(createMissingNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } });
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
     vi.mocked(fetchPatientIdentifierTypes).mockResolvedValue([]);
     vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "optional" });
@@ -640,7 +641,7 @@ describe("PatientForm workflow hardening", () => {
         { arabicText: "حسن", englishText: "Hassan" }
       ]
     }));
-    vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "زيد", english_text: "Zaid" } });
+    vi.mocked(createMissingNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "زيد", english_text: "Zaid" } });
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
@@ -648,7 +649,7 @@ describe("PatientForm workflow hardening", () => {
     await user.type(screen.getByPlaceholderText(/English translation/i), "Zaid");
     await user.click(screen.getByRole("button", { name: /^Add$/i }));
 
-    await waitFor(() => expect(upsertNameDictionaryEntry).toHaveBeenCalledWith("زيد", "Zaid"));
+    await waitFor(() => expect(createMissingNameDictionaryEntry).toHaveBeenCalledWith("زيد", "Zaid"));
     await waitFor(() => expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).value).toBe("Mohamed Zaid Hassan"));
     expect(screen.queryByText(/Unrecognized name tokens/i)).toBeNull();
 
@@ -663,4 +664,35 @@ describe("PatientForm workflow hardening", () => {
     expect(payload.englishFullName).toBe("Mohamed Zaid Hassan");
     expect(payload.autoGenerateEnglish).toBe(true);
   });
+  it("preserves patient names during dictionary errors, hides false missing tokens, and recovers on Retry", async () => {
+    vi.mocked(fetchNameDictionary).mockRejectedValue(new ApiError("Dictionary unavailable", 400));
+    renderPatientForm({ mode: "edit", patientId: 9 });
+    await waitFor(() => expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).value).toBe("Mohamed Ali Hassan"));
+    expect(await screen.findByText(/Could not load the name dictionary/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Arabic Full Name/i), { target: { value: "محمد علي حسن " } });
+    expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).value).toBe("Mohamed Ali Hassan");
+    expect(screen.queryByText(/Unrecognized name tokens/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/English translation/i)).toBeNull();
+    expect(createMissingNameDictionaryEntry).not.toHaveBeenCalled();
+    vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({ entries: [
+      { arabicText: "محمد", englishText: "Mohamed" }, { arabicText: "علي", englishText: "Ali" }, { arabicText: "حسن", englishText: "Hassan" }
+    ] }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByText(/Could not load the name dictionary/)).toBeNull());
+    expect((screen.getByLabelText(/English Full Name/i) as HTMLInputElement).value).toBe("Mohamed Ali Hassan");
+    expect(updatePatient).not.toHaveBeenCalled();
+  });
+
+  it("blocks registration during dictionary unavailability without changing the entered Arabic name", async () => {
+    vi.mocked(fetchNameDictionary).mockRejectedValue(new ApiError("Dictionary unavailable", 400));
+    renderPatientForm({ mode: "create" });
+    await screen.findByText(/Could not load the name dictionary/);
+    fireEvent.change(screen.getByLabelText(/Arabic Full Name/i), { target: { value: "محمد علي حسن" } });
+    fireEvent.submit(screen.getByRole("button", { name: /Register Patient/i }).closest("form")!);
+    expect(await screen.findByText(/Retry loading it before saving the patient/)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/Arabic Full Name/i) as HTMLInputElement).value).toBe("محمد علي حسن");
+    expect(screen.queryByText(/Unrecognized name tokens/i)).toBeNull();
+  });
+
 });

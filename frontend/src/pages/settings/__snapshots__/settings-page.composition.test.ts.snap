@@ -83,6 +83,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "clinical",
   ],
   [
+    "name_dictionary",
+    "clinical",
+  ],
+  [
     "not_allowed_name_words",
     "clinical",
   ],

@@ -1,3 +1,5 @@
+import type { PoolClient } from "pg";
+import { normalizeArabicNameCompact } from "../utils/normalize.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { invalidateCache } from "../utils/cache.js";
@@ -22,200 +24,131 @@ export interface NameDictionaryPayload {
   isActive?: boolean | string | number | null;
 }
 
-function normalizeDictionaryText(value: unknown, fieldName: string): string {
-  const clean = String(value || "").trim();
+const MAX_IMPORT_ENTRIES = 50_000;
+const DICTIONARY_COLUMNS = "id, arabic_text, english_text, is_active, created_at";
 
-  if (!clean) {
-    throw new HttpError(400, `${fieldName} is required.`);
+function normalizePayload(payload: NameDictionaryPayload | null | undefined): { arabicText: string; englishText: string; isActive: boolean } {
+  const text = (value: unknown, field: string) => {
+    if (typeof value !== "string" || !value.trim() || value.length > 1_000 || value.includes("\0")) {
+      throw new HttpError(400, `${field} must be non-empty text of at most 1000 characters.`);
+    }
+    return value.trim();
+  };
+  const flag = payload?.isActive;
+  if (flag != null && flag !== "" && ![true, false, "true", "false", 1, 0].includes(flag)) {
+    throw new HttpError(400, "isActive must be true or false.");
   }
-
-  return clean;
+  return { arabicText: text(payload?.arabicText, "arabicText"), englishText: text(payload?.englishText, "englishText"),
+    isActive: flag !== false && flag !== "false" && flag !== 0 };
 }
 
-function normalizeActiveFlag(value: boolean | string | number | null | undefined): boolean {
-  if (value === undefined || value === null || value === "") {
-    return true;
+async function mutateDictionary<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let discardClient = false;
+  try {
+    await client.query("begin");
+    await client.query("set local lock_timeout = '5s'");
+    // Serialize dictionary writers, including alias checks for create-only additions.
+    // Reads remain available throughout imports.
+    await client.query("lock table name_dictionary in share row exclusive mode");
+    const result = await operation(client);
+    await client.query("commit");
+    invalidateCache("name_dictionary");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => { discardClient = true; });
+    throw error;
+  } finally {
+    client.release(discardClient);
   }
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return String(value).trim().toLowerCase() !== "false";
 }
 
 export async function listNameDictionary({ includeInactive = false }: { includeInactive?: boolean } = {}): Promise<NameDictionaryRow[]> {
-  const { rows } = await pool.query(
-    `
-      select id, arabic_text, english_text, is_active, created_at
-      from name_dictionary
-      ${includeInactive ? "" : "where is_active = true"}
-      order by arabic_text asc
-    `
-  );
-
-  return rows as NameDictionaryRow[];
+  const query = {
+    text: `select ${DICTIONARY_COLUMNS} from name_dictionary ${includeInactive ? "" : "where is_active = true"} order by arabic_text asc`,
+    query_timeout: 8_000
+  };
+  const { rows } = await pool.query<NameDictionaryRow>(query);
+  return rows;
 }
 
-export async function upsertNameDictionary(
-  payload: NameDictionaryPayload | null | undefined,
-  currentUserId: UserId
-): Promise<NameDictionaryRow> {
-  const arabicText = normalizeDictionaryText(payload?.arabicText, "arabicText");
-  const englishText = normalizeDictionaryText(payload?.englishText, "englishText");
-  const isActive = normalizeActiveFlag(payload?.isActive);
-
-  const { rows } = await pool.query(
-    `
-      insert into name_dictionary (arabic_text, english_text, is_active)
-      values ($1, $2, $3)
-      on conflict (arabic_text)
-      do update set english_text = excluded.english_text, is_active = excluded.is_active
-      returning id, arabic_text, english_text, is_active, created_at
-    `,
-    [arabicText, englishText, isActive]
-  );
-
-  const entry = rows[0] as NameDictionaryRow | undefined;
-
-  if (!entry) {
-    throw new HttpError(500, "Failed to save dictionary entry.");
-  }
-
-  await logAuditEntry({
-    entityType: "name_dictionary",
-    entityId: entry.id,
-    actionType: "upsert",
-    oldValues: null,
-    newValues: entry,
-    changedByUserId: currentUserId
-  });
-
-  invalidateCache("name_dictionary");
+async function upsertWithClient(client: PoolClient, payload: ReturnType<typeof normalizePayload>, currentUserId: UserId): Promise<NameDictionaryRow> {
+  const previous = await client.query<NameDictionaryRow>(`select ${DICTIONARY_COLUMNS} from name_dictionary where arabic_text = $1`, [payload.arabicText]);
+  const { rows } = await client.query<NameDictionaryRow>(
+    `insert into name_dictionary (arabic_text, english_text, is_active) values ($1, $2, $3)
+     on conflict (arabic_text) do update set english_text = excluded.english_text, is_active = excluded.is_active
+     returning ${DICTIONARY_COLUMNS}`, [payload.arabicText, payload.englishText, payload.isActive]);
+  const entry = rows[0]!;
+  await logAuditEntry({ entityType: "name_dictionary", entityId: entry.id, actionType: "upsert",
+    oldValues: previous.rows[0] ?? null, newValues: entry, changedByUserId: currentUserId }, client);
   return entry;
 }
 
-export async function updateNameDictionaryEntry(
-  entryId: UserId,
-  payload: NameDictionaryPayload | null | undefined,
-  currentUserId: UserId
-): Promise<NameDictionaryRow> {
-  const cleanEntryId = Number(entryId);
-
-  if (!Number.isInteger(cleanEntryId) || cleanEntryId <= 0) {
-    throw new HttpError(400, "entryId must be a positive whole number.");
-  }
-
-  const { rows: existingRows } = await pool.query(
-    `
-      select id, arabic_text, english_text, is_active, created_at
-      from name_dictionary
-      where id = $1
-      limit 1
-    `,
-    [cleanEntryId]
-  );
-
-  const existing = existingRows[0] as NameDictionaryRow | undefined;
-
-  if (!existing) {
-    throw new HttpError(404, "Dictionary entry not found.");
-  }
-
-  const englishText = payload?.englishText
-    ? normalizeDictionaryText(payload.englishText, "englishText")
-    : existing.english_text;
-  const isActive = payload?.isActive === undefined ? existing.is_active : normalizeActiveFlag(payload.isActive);
-
-  const { rows } = await pool.query(
-    `
-      update name_dictionary
-      set english_text = $2,
-          is_active = $3
-      where id = $1
-      returning id, arabic_text, english_text, is_active, created_at
-    `,
-    [cleanEntryId, englishText, isActive]
-  );
-
-  const updated = rows[0] as NameDictionaryRow | undefined;
-
-  if (!updated) {
-    throw new HttpError(500, "Failed to update dictionary entry.");
-  }
-
-  await logAuditEntry({
-    entityType: "name_dictionary",
-    entityId: updated.id,
-    actionType: "update",
-    oldValues: existing,
-    newValues: updated,
-    changedByUserId: currentUserId
-  });
-
-  invalidateCache("name_dictionary");
-  return updated;
+export async function upsertNameDictionary(payload: NameDictionaryPayload | null | undefined, currentUserId: UserId): Promise<NameDictionaryRow> {
+  const normalized = normalizePayload(payload);
+  return mutateDictionary((client) => upsertWithClient(client, normalized, currentUserId));
 }
 
-export async function deleteNameDictionaryEntry(
-  entryId: UserId,
-  currentUserId: UserId
-): Promise<NameDictionaryRow> {
-  const cleanEntryId = Number(entryId);
-
-  if (!Number.isInteger(cleanEntryId) || cleanEntryId <= 0) {
-    throw new HttpError(400, "entryId must be a positive whole number.");
-  }
-
-  const { rows } = await pool.query(
-    `
-      delete from name_dictionary
-      where id = $1
-      returning id, arabic_text, english_text, is_active, created_at
-    `,
-    [cleanEntryId]
-  );
-
-  const removed = rows[0] as NameDictionaryRow | undefined;
-
-  if (!removed) {
-    throw new HttpError(404, "Dictionary entry not found.");
-  }
-
-  await logAuditEntry({
-    entityType: "name_dictionary",
-    entityId: removed.id,
-    actionType: "delete",
-    oldValues: removed,
-    newValues: null,
-    changedByUserId: currentUserId
+export async function createMissingNameDictionaryEntry(payload: NameDictionaryPayload | null | undefined, currentUserId: UserId): Promise<NameDictionaryRow> {
+  const normalized = normalizePayload(payload);
+  if (!normalized.isActive) throw new HttpError(400, "New registration mappings must be active.");
+  return mutateDictionary(async (client) => {
+    const existing = await client.query<{ arabic_text: string }>("select arabic_text from name_dictionary");
+    const key = normalizeArabicNameCompact(normalized.arabicText);
+    if (existing.rows.some((entry) => normalizeArabicNameCompact(entry.arabic_text) === key)) {
+      throw new HttpError(409, "This name mapping already exists. Reload the dictionary; changes require supervisor re-authentication.");
+    }
+    return upsertWithClient(client, normalized, currentUserId);
   });
-
-  invalidateCache("name_dictionary");
-  return removed;
 }
 
-export async function importNameDictionaryEntries(
-  entries: Array<NameDictionaryPayload | null | undefined>,
-  currentUserId: UserId
-): Promise<NameDictionaryRow[]> {
-  if (!Array.isArray(entries) || !entries.length) {
-    throw new HttpError(400, "entries must be a non-empty array.");
+function entryIdNumber(entryId: UserId): number {
+  const id = Number(entryId);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new HttpError(400, "entryId must be a positive whole number.");
+  return id;
+}
+
+export async function updateNameDictionaryEntry(entryId: UserId, payload: NameDictionaryPayload | null | undefined, currentUserId: UserId): Promise<NameDictionaryRow> {
+  const id = entryIdNumber(entryId);
+  return mutateDictionary(async (client) => {
+    const existing = (await client.query<NameDictionaryRow>(`select ${DICTIONARY_COLUMNS} from name_dictionary where id = $1`, [id])).rows[0];
+    if (!existing) throw new HttpError(404, "Dictionary entry not found.");
+    const normalized = normalizePayload({ arabicText: payload?.arabicText ?? existing.arabic_text, englishText: payload?.englishText ?? existing.english_text, isActive: payload?.isActive ?? existing.is_active });
+    const entry = (await client.query<NameDictionaryRow>(`update name_dictionary set arabic_text = $2, english_text = $3, is_active = $4 where id = $1 returning ${DICTIONARY_COLUMNS}`,
+      [id, normalized.arabicText, normalized.englishText, normalized.isActive])).rows[0]!;
+    await logAuditEntry({ entityType: "name_dictionary", entityId: entry.id, actionType: "update", oldValues: existing,
+      newValues: entry, changedByUserId: currentUserId }, client);
+    return entry;
+  });
+}
+
+export async function deleteNameDictionaryEntry(entryId: UserId, currentUserId: UserId): Promise<NameDictionaryRow> {
+  const id = entryIdNumber(entryId);
+  return mutateDictionary(async (client) => {
+    const entry = (await client.query<NameDictionaryRow>(`delete from name_dictionary where id = $1 returning ${DICTIONARY_COLUMNS}`, [id])).rows[0];
+    if (!entry) throw new HttpError(404, "Dictionary entry not found.");
+    await logAuditEntry({ entityType: "name_dictionary", entityId: entry.id, actionType: "delete", oldValues: entry, newValues: null, changedByUserId: currentUserId }, client);
+    return entry;
+  });
+}
+
+export async function importNameDictionaryEntries(entries: Array<NameDictionaryPayload | null | undefined>, currentUserId: UserId): Promise<NameDictionaryRow[]> {
+  if (!Array.isArray(entries) || entries.length === 0 || entries.length > MAX_IMPORT_ENTRIES) {
+    throw new HttpError(400, `entries must contain between 1 and ${MAX_IMPORT_ENTRIES} mappings.`);
   }
-
-  const imported: NameDictionaryRow[] = [];
-
-  for (const entry of entries) {
-    const normalizedEntry: NameDictionaryPayload = {
-      arabicText: entry?.arabicText,
-      englishText: entry?.englishText,
-      isActive: entry?.isActive
-    };
-    const result = await upsertNameDictionary(normalizedEntry, currentUserId);
-    imported.push(result);
-  }
-
-  return imported;
+  // Validate every row before acquiring a connection or modifying anything.
+  const normalized = entries.map((entry, index) => {
+    try { return normalizePayload(entry); }
+    catch (error) { throw new HttpError(400, `CSV row ${index + 1}: ${error instanceof Error ? error.message : "Invalid mapping."}`); }
+  });
+  // Exact duplicate Arabic keys use the last row, matching the previous upsert semantics.
+  const unique = [...new Map(normalized.map((entry) => [entry.arabicText, entry])).values()];
+  return mutateDictionary(async (client) => {
+    const imported: NameDictionaryRow[] = [];
+    // Serial writes bound DB load; one connection and one transaction for the file.
+    for (const entry of unique) imported.push(await upsertWithClient(client, entry, currentUserId));
+    return imported;
+  });
 }
 
 export async function applyNameDictionaryToPatients(currentUserId: UserId): Promise<{
@@ -224,6 +157,7 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
   skippedMissingTokensCount: number;
 }> {
   const client = await pool.connect();
+  let discardClient = false;
   try {
     await client.query("begin");
     const { rows: dictionaryRows } = await client.query<NameDictionaryRow>(
@@ -239,6 +173,7 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
         select id, arabic_full_name, english_full_name
         from patients
         where coalesce(arabic_full_name, '') <> ''
+        order by id for update
       `
     );
     const dictionaryLookup = buildNameDictionaryLookup(dictionaryRows);
@@ -257,11 +192,15 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
       await client.query(
         `
           update patients
-          set english_full_name = $2
+          set english_full_name = $2, updated_at = now(), updated_by_user_id = $3
           where id = $1
         `,
-        [patient.id, generated.englishName.trim()]
+        [patient.id, generated.englishName.trim(), currentUserId]
       );
+
+      await logAuditEntry({ entityType: "patient", entityId: patient.id, actionType: "name_dictionary_update",
+        oldValues: { englishFullName: patient.english_full_name }, newValues: { englishFullName: generated.englishName.trim() },
+        changedByUserId: currentUserId }, client);
 
       const revokedIdentityDocuments =
         await client.query<{ id: number }>(
@@ -314,10 +253,10 @@ export async function applyNameDictionaryToPatients(currentUserId: UserId): Prom
     await client.query("commit");
     return { scannedCount: patientRows.length, updatedCount, skippedMissingTokensCount };
   } catch (error) {
-    await client.query("rollback");
+    await client.query("rollback").catch(() => { discardClient = true; });
     throw error;
   } finally {
-    client.release();
+    client.release(discardClient);
   }
 }
 

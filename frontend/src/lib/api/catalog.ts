@@ -43,8 +43,9 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
 
 export async function fetchNameDictionary(): Promise<{ entries: PersistedDictionaryEntry[]; meta: RawRecord }> {
   const raw = await api<{ entries: RawRecord[]; meta?: RawRecord }>("/settings/name-dictionary");
+  if (!Array.isArray(raw.entries)) throw new Error("Invalid dictionary response.");
   return {
-    entries: mapNameDictionary(raw.entries ?? []),
+    entries: mapNameDictionary(raw.entries),
     meta: raw.meta ?? {}
   };
 }
@@ -73,6 +74,16 @@ export async function upsertNameDictionaryEntry(arabicText: string, englishText:
   });
 }
 
+export async function createMissingNameDictionaryEntry(arabicText: string, englishText: string) {
+  return api<{ entry: RawRecord }>("/settings/name-dictionary/missing", {
+    method: "POST", body: JSON.stringify({ arabicText, englishText })
+  });
+}
+
+export async function updateNameDictionaryEntry(entryId: number, payload: { arabicText: string; englishText: string }) {
+  return api<{ entry: RawRecord }>(`/settings/name-dictionary/${entryId}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
 export async function deleteNameDictionaryEntry(entryId: number) {
   return api<{ entry: RawRecord }>(`/settings/name-dictionary/${entryId}`, { method: "DELETE" });
 }
@@ -88,7 +99,7 @@ export async function importNameDictionary(entries: { arabicText: string; englis
   return api<{ entries: RawRecord[] }>("/name-dictionary/import", {
     method: "POST",
     body: JSON.stringify({ entries })
-  });
+  }, CATALOG_IMPORT_TIMEOUT_MS);
 }
 
 function mapPatientNotAllowedNameWord(raw: RawRecord): PatientNotAllowedNameWord {

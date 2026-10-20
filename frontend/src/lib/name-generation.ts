@@ -37,6 +37,10 @@ function normalizeArabicToken(text: string): string {
     .replace(/\s+/g, " ");
 }
 
+function compactArabicToken(text: string): string {
+  return normalizeArabicToken(text).replace(/\u0640|[\u064B-\u065F]|\u0670/g, "").replace(/\s+/g, "");
+}
+
 /**
  * Generate an English name from an Arabic full name using a dictionary.
  *
@@ -57,14 +61,25 @@ export function generateEnglishFromDictionary(
   for (const entry of dictionary) {
     const normalizedKey = normalizeArabicToken(entry.arabicText);
     normalizedDict.set(normalizedKey, entry.englishText);
+    normalizedDict.set(compactArabicToken(entry.arabicText), entry.englishText);
   }
 
   const englishParts: string[] = [];
   const missingTokens: string[] = [];
 
-  for (const token of tokens) {
+  // Keep this specification aligned with the backend; the parity suite runs
+  // both implementations against the same compound/alias fixtures.
+  for (let index = 0; index < tokens.length; index += 1) {
+    const phrase = tokens.slice(index, index + 2).join(" ");
+    const phraseMatch = normalizedDict.get(normalizeArabicToken(phrase)) || normalizedDict.get(compactArabicToken(phrase));
+    if (phraseMatch) {
+      englishParts.push(phraseMatch);
+      index += 1;
+      continue;
+    }
+    const token = tokens[index];
     const normalizedToken = normalizeArabicToken(token);
-    const englishMatch = normalizedDict.get(normalizedToken);
+    const englishMatch = normalizedDict.get(normalizedToken) || normalizedDict.get(compactArabicToken(token));
 
     if (englishMatch) {
       englishParts.push(englishMatch);

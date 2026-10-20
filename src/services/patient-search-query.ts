@@ -16,14 +16,16 @@ export async function loadPatientNameDictionary(): Promise<NameDictionaryLookup[
     return cached;
   }
 
-  const { rows } = await pool.query<NameDictionaryLookup>(
-    `
+  const query = {
+    text: `
       select arabic_text, english_text
       from name_dictionary
       where is_active = true
       order by arabic_text asc
-    `
-  );
+    `,
+    query_timeout: 8_000
+  };
+  const { rows } = await pool.query<NameDictionaryLookup>(query);
 
   setCached(cacheKey, rows, 5 * 60 * 1000);
   return rows;

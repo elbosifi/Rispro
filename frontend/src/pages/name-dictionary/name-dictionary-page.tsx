@@ -8,7 +8,14 @@ import {
   fetchUnresolvedNameDictionaryPatients,
   importNameDictionary,
   upsertNameDictionaryEntry,
+  updateNameDictionaryEntry,
 } from "@/lib/api-hooks";
+import { ApiError } from "@/lib/api-client";
+import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
+import { useAuth } from "@/providers/auth-provider";
+import { dictionaryReadOptions } from "@/lib/name-dictionary-query";
+import { DictionaryLoadStatus } from "@/components/name-dictionary/dictionary-load-status";
+import { DictionaryCsvError, parseDictionaryCsv, exportDictionaryCsv } from "@/lib/name-dictionary-csv";
 import { Button, Card } from "@/components/shared";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
@@ -24,6 +31,15 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export default function NameDictionaryPage() {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
+  const canManage = user?.role === "supervisor" || user?.role === "super_admin";
+  const [showReauth, setShowReauth] = useState(false);
+  const reportMutationError = (error: unknown, title: string) => {
+    if (error instanceof ApiError && error.status === 403 && error.message.includes("re-authentication")) setShowReauth(true);
+    pushToast({ type: "error", title, message: errorMessage(error, title) });
+  };
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [arabicText, setArabicText] = useState("");
   const [englishText, setEnglishText] = useState("");
@@ -35,19 +51,21 @@ export default function NameDictionaryPage() {
   const dictionaryQuery = useQuery({
     queryKey: ["name-dictionary"],
     queryFn: fetchNameDictionary,
-    retry: false,
+    ...dictionaryReadOptions,
   });
 
   const unresolvedPatientsQuery = useQuery({
     queryKey: ["name-dictionary", "unresolved-patients"],
     queryFn: fetchUnresolvedNameDictionaryPatients,
-    retry: false,
+    enabled: canManage,
+    ...dictionaryReadOptions,
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
 
   const saveMutation = useMutation({
-    mutationFn: (payload: { arabicText: string; englishText: string }) => upsertNameDictionaryEntry(payload.arabicText, payload.englishText),
+    retry: false,
+    mutationFn: (payload: { arabicText: string; englishText: string }) => editingId == null ? upsertNameDictionaryEntry(payload.arabicText, payload.englishText) : updateNameDictionaryEntry(editingId, payload),
     onSuccess: async () => {
       setArabicText("");
       setEnglishText("");
@@ -55,28 +73,31 @@ export default function NameDictionaryPage() {
       await invalidate();
       pushToast({ type: "success", title: t("nameDictionary.saved") });
     },
-    onError: (error) => pushToast({ type: "error", title: t("nameDictionary.saveFailed"), message: errorMessage(error, t("nameDictionary.saveFailed")) }),
+    onError: (error) => reportMutationError(error, t("nameDictionary.saveFailed")),
   });
 
   const deleteMutation = useMutation({
+    retry: false,
     mutationFn: (id: number) => deleteNameDictionaryEntry(id),
     onSuccess: async () => {
       await invalidate();
       pushToast({ type: "success", title: t("nameDictionary.deleted") });
     },
-    onError: (error) => pushToast({ type: "error", title: t("nameDictionary.deleteFailed"), message: errorMessage(error, t("nameDictionary.deleteFailed")) }),
+    onError: (error) => reportMutationError(error, t("nameDictionary.deleteFailed")),
   });
 
   const importMutation = useMutation({
+    retry: false,
     mutationFn: (entries: { arabicText: string; englishText: string }[]) => importNameDictionary(entries),
     onSuccess: async (result) => {
       await invalidate();
       pushToast({ type: "success", title: t("nameDictionary.imported"), message: t("nameDictionary.importedMessage", { count: result.entries.length }) });
     },
-    onError: (error) => pushToast({ type: "error", title: t("nameDictionary.importFailed"), message: errorMessage(error, t("nameDictionary.importFailed")) }),
+    onError: (error) => reportMutationError(error, t("nameDictionary.importFailed")),
   });
 
   const applyMutation = useMutation({
+    retry: false,
     mutationFn: applyNameDictionaryToPatients,
     onSuccess: async (result) => {
       await invalidate();
@@ -90,7 +111,7 @@ export default function NameDictionaryPage() {
         }),
       });
     },
-    onError: (error) => pushToast({ type: "error", title: t("nameDictionary.applyFailed"), message: errorMessage(error, t("nameDictionary.applyFailed")) }),
+    onError: (error) => reportMutationError(error, t("nameDictionary.applyFailed")),
   });
 
   const entries = dictionaryQuery.data?.entries ?? EMPTY_DICTIONARY_ENTRIES;
@@ -119,24 +140,21 @@ export default function NameDictionaryPage() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (loadEvent) => {
-      const text = String(loadEvent.target?.result || "");
-      const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      const parsed = rows
-        .map((row) => row.split(",").map((part) => part.trim().replace(/^"|"$/g, "")))
-        .filter((parts) => parts.length >= 2 && parts[0] && parts[1])
-        .map(([arabicText, englishText]) => ({ arabicText: arabicText!, englishText: englishText! }));
-      if (parsed.length === 0) {
-        pushToast({ type: "error", title: t("nameDictionary.importFailed"), message: t("nameDictionary.noImportRows") });
-        return;
+      try {
+        importMutation.mutate(parseDictionaryCsv(String(loadEvent.target?.result || "")));
+      } catch (error) {
+        const message = error instanceof DictionaryCsvError ? t(`nameDictionary.csv.${error.reason}`, { row: error.row }) : t("nameDictionary.importFailed");
+        pushToast({ type: "error", title: t("nameDictionary.importFailed"), message });
       }
-      importMutation.mutate(parsed);
     };
+    reader.onerror = () => pushToast({ type: "error", title: t("nameDictionary.importFailed") });
     reader.readAsText(file);
     event.target.value = "";
   };
 
   return (
     <div className="mx-auto max-w-7xl space-y-4" dir={language === "ar" ? "rtl" : "ltr"}>
+      {showReauth && <SupervisorReAuthModal onClose={() => setShowReauth(false)} onSuccess={() => { setShowReauth(false); void invalidate(); }} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <BookOpenText size={22} className="text-accent" />
@@ -145,7 +163,7 @@ export default function NameDictionaryPage() {
             <p className="text-sm text-muted-foreground">{t("nameDictionary.description")}</p>
           </div>
         </div>
-        <Button
+        {canManage && <Button
           type="button"
           variant="secondary"
           onClick={() => {
@@ -155,18 +173,18 @@ export default function NameDictionaryPage() {
         >
           <RefreshCw size={16} className={applyMutation.isPending ? "animate-spin" : ""} />
           {t("nameDictionary.applyToPatients")}
-        </Button>
+        </Button>}
       </div>
 
-      <Card className="p-4">
+      {canManage && <Card className="p-4">
         <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={submitEntry}>
           <input value={arabicText} onChange={(event) => setArabicText(event.target.value)} className="input-premium input-rtl h-10" placeholder={t("nameDictionary.arabicPlaceholder")} />
           <input value={englishText} onChange={(event) => setEnglishText(event.target.value)} className="input-premium input-ltr h-10" placeholder={t("nameDictionary.englishPlaceholder")} />
           <Button type="submit" disabled={saveMutation.isPending || !arabicText.trim() || !englishText.trim()}>{t("nameDictionary.addOrUpdate")}</Button>
         </form>
-      </Card>
+      </Card>}
 
-      <Card className="p-4">
+      {canManage && <Card className="p-4">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-semibold text-foreground">{t("nameDictionary.unresolvedTitle")}</h3>
@@ -178,7 +196,9 @@ export default function NameDictionaryPage() {
         {unresolvedPatientsQuery.isLoading ? (
           <p className="mt-4 text-sm text-muted-foreground">{t("settings.loading")}</p>
         ) : unresolvedPatientsQuery.isError ? (
-          <p className="mt-4 text-sm text-muted-foreground">{t("nameDictionary.unresolvedLoadFailed")}</p>
+          <div className="mt-4 space-y-2"><p>{t("nameDictionary.unresolvedLoadFailed")}</p>
+            <Button type="button" variant="secondary" disabled={unresolvedPatientsQuery.isFetching} onClick={() => void unresolvedPatientsQuery.refetch()}>{t("nameDictionary.retry")}</Button>
+            <Button type="button" variant="ghost" onClick={() => setShowReauth(true)}>{t("common.reAuthenticate")}</Button></div>
         ) : unresolvedPatientsQuery.data?.patients.length ? (
           <div className="mt-4 overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[720px] text-sm">
@@ -211,7 +231,7 @@ export default function NameDictionaryPage() {
         ) : (
           <p className="mt-4 text-sm text-muted-foreground">{t("nameDictionary.unresolvedEmpty")}</p>
         )}
-      </Card>
+      </Card>}
 
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -225,15 +245,23 @@ export default function NameDictionaryPage() {
               <option value="english">{t("nameDictionary.sortEnglish")}</option>
               <option value="recent">{t("nameDictionary.sortRecent")}</option>
             </select>
-            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-semibold text-foreground hover:bg-muted/50">
+            {canManage && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-semibold text-foreground hover:bg-muted/50">
               <Download size={15} />
               {t("nameDictionary.importCsv")}
               <input type="file" accept=".csv,.txt" onChange={handleImport} className="hidden" />
-            </label>
+            </label>}
+            <Button type="button" variant="secondary" disabled={exporting} onClick={async () => {
+              setExportError(null); setExporting(true);
+              try { await exportDictionaryCsv(fetchNameDictionary); }
+              catch { setExportError(t("nameDictionary.exportFailed")); }
+              finally { setExporting(false); }
+            }}>{t("nameDictionary.exportCsv")}</Button>
             <span className="text-sm text-muted-foreground">{t("nameDictionary.entryCount", { visible: visibleEntries.length, total: entries.length })}</span>
           </div>
         </div>
 
+        {exportError && <p role="alert" className="mt-3 text-destructive">{exportError}</p>}
+        <DictionaryLoadStatus isPending={false} isError={dictionaryQuery.isError} isFetching={dictionaryQuery.isFetching} hasData={!!dictionaryQuery.data} onRetry={() => void dictionaryQuery.refetch()} />
         <div className="mt-4 overflow-auto rounded-lg border border-border">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-muted/50 text-muted-foreground">
@@ -247,7 +275,7 @@ export default function NameDictionaryPage() {
             <tbody className="divide-y divide-border">
               {dictionaryQuery.isLoading ? (
                 <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">{t("settings.loading")}</td></tr>
-              ) : visibleEntries.length === 0 ? (
+              ) : dictionaryQuery.isError && !dictionaryQuery.data ? null : visibleEntries.length === 0 ? (
                 <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">{t("nameDictionary.empty")}</td></tr>
               ) : (
                 visibleEntries.map((entry) => (
@@ -270,13 +298,13 @@ export default function NameDictionaryPage() {
                         <td className="p-2 input-ltr">{entry.englishText}</td>
                         <td className="p-2 text-muted-foreground">{entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : "-"}</td>
                         <td className="p-2 text-center">
-                          <div className="flex justify-center gap-2">
+                          {canManage && <div className="flex justify-center gap-2">
                             <Button type="button" size="sm" variant="outline" onClick={() => { setEditingId(entry.id ?? null); setEditForm({ arabicText: entry.arabicText, englishText: entry.englishText }); }}>{t("common.edit")}</Button>
                             <Button type="button" size="sm" variant="ghost" onClick={() => { if (entry.id && window.confirm(t("nameDictionary.deleteConfirm", { word: entry.arabicText }))) deleteMutation.mutate(entry.id); }} disabled={deleteMutation.isPending}>
                               <Trash2 size={14} />
                               {t("common.delete")}
                             </Button>
-                          </div>
+                          </div>}
                         </td>
                       </>
                     )}

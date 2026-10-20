@@ -12,7 +12,7 @@ import {
 describe("settings page composition", () => {
   it("preserves the ordered settings menu and group assignment matrix", () => {
     expect(SETTINGS_GROUPS).toEqual(["all", "clinical", "scheduling", "integrations", "admin", "system"]);
-    expect(SETTINGS_MENU_SECTIONS).toHaveLength(34);
+    expect(SETTINGS_MENU_SECTIONS).toHaveLength(35);
     expect(SETTINGS_MENU_SECTIONS).toEqual([
       "mobile_widget",
       "patient_registration", "patient_import", "patient_duplicate_resolver",
@@ -20,7 +20,7 @@ describe("settings page composition", () => {
       "pacs_connection", "dicom_gateway_config",
       "dicom_gateway_monitoring", "mwl_policy", "orthanc_mwl_sync", "sante_worklist_hl7",
       "users", "action_pin_policy", "role_page_access", "audit_log", "exam_types",
-      "modalities", "equipment", "not_allowed_name_words", "appointment_slip", "qz_tray", "deployment_identity",
+      "modalities", "equipment", "name_dictionary", "not_allowed_name_words", "appointment_slip", "qz_tray", "deployment_identity",
       "patient_qr_self_service", "passkey_configuration", "sonicdicom_reports",
       "ohif_viewer", "documents_and_uploads", "backup_restore", "system_diagnostics",
       "request_scan_automation", "email_notifications", "authoritative_orthanc",
@@ -29,6 +29,7 @@ describe("settings page composition", () => {
   });
 
   it("preserves valid settings query-string deep links", () => {
+    expect(initialSettingsSection("?section=name_dictionary")).toBe("name_dictionary");
     expect(initialSettingsSection("?section=qz_tray")).toBe("qz_tray");
     expect(initialSettingsSection("?section=users")).toBe("users");
     expect(initialSettingsSection("?section=backup_restore")).toBe("backup_restore");

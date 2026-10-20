@@ -10,12 +10,14 @@ import {
   fetchSettings,
   fetchNameDictionary,
   fetchPatientNotAllowedNameWords,
-  upsertNameDictionaryEntry,
+  createMissingNameDictionaryEntry,
   fetchPatientById,
   updatePatient,
   deletePatient,
   type PatientUpdatePayload
 } from "@/lib/api-hooks";
+import { dictionaryReadOptions } from "@/lib/name-dictionary-query";
+import { DictionaryLoadStatus } from "@/components/name-dictionary/dictionary-load-status";
 import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
 import { normalizeArabic } from "@/lib/arabic-normalize";
 import {
@@ -199,11 +201,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const requiredMark = " *";
 
   // Dictionary
-  const { data: dictData } = useQuery({
+  const dictionaryQuery = useQuery({
     queryKey: ["name-dictionary"],
     queryFn: fetchNameDictionary,
+    ...dictionaryReadOptions,
     staleTime: 1000 * 60 * 5
   });
+  const dictData = dictionaryQuery.data;
+  const dictionaryAvailable = !!dictData && !dictionaryQuery.isError;
   const serverDictionary: DictionaryEntry[] = dictData?.entries ?? [];
   const dictionary: DictionaryEntry[] = [...serverDictionary, ...localDictionary];
   const { data: notAllowedNameWordsData } = useQuery({
@@ -544,7 +549,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     setForm((f) => {
       const u: Partial<PatientFormState> = { arabicFullName: value };
       // Generate English only when a token is completed (space typed after word)
-      if (tokenJustCompleted) {
+      if (tokenJustCompleted && dictionaryAvailable) {
         const generated = generateEnglishFromDictionary(value, dictionary);
         u.englishFullName = generated.missingTokens.length === 0 ? generated.englishName : "";
       }
@@ -554,6 +559,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   };
 
   const handleRegenerateEnglishName = () => {
+    if (!dictionaryAvailable) return;
     const r = generateEnglishFromDictionary(form.arabicFullName, dictionary);
     setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
     setRegenerateEnglishName(true);
@@ -568,11 +574,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleAddTokenToDictionary = async (token: string) => {
     const ev = missingTokenInputs[token]?.trim();
-    if (!ev) return;
+    if (!ev || !dictionaryAvailable) return;
     setAddingToken(token);
     setAddTokenError(null);
     try {
-      const res = await upsertNameDictionaryEntry(token, ev);
+      const res = await createMissingNameDictionaryEntry(token, ev);
       const e = res.entry as Record<string, unknown>;
       const ne: DictionaryEntry = {
         arabicText: String(e.arabic_text ?? e.arabicText ?? token),
@@ -585,6 +591,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setRegenerateEnglishName(true);
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
     } catch (err: unknown) {
+      void queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
       setAddTokenError(getUnknownErrorMessage(err) || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
     } finally {
       setAddingToken(null);
@@ -604,6 +611,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!dictionaryAvailable) { showToast(t("nameDictionary.unavailableForRegistration"), "error"); return; }
     const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     const blockedWords = new Set(notAllowedNameWords.map((entry) => normalizeArabic(entry.arabicText)).filter(Boolean));
     const blockedWord = arabicNameParts.map((part) => normalizeArabic(part)).find((part) => blockedWords.has(part));
@@ -694,7 +702,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   };
 
   const fullNameGeneration = generateEnglishFromDictionary(form.arabicFullName.trim(), dictionary);
-  const currentMissingTokens = fullNameGeneration.missingTokens;
+  const currentMissingTokens = dictionaryAvailable ? fullNameGeneration.missingTokens : [];
   const hasShortArabicNameWarning = (() => {
     const parts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     return parts.length > 0 && parts.length < 3;
@@ -792,7 +800,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               ref={englishFullNameRef}
               className={`input-ltr w-full ${isDuplicateField("englishFullName") ? duplicateFocusClass : ""}`}
             />
-            {form.arabicFullName && (
+            {form.arabicFullName && dictionaryAvailable && (
               <p className={helperTextClass}>
                 {currentMissingTokens.length === 0
                   ? (language === "ar" ? "مُولّد من قاموس الأسماء." : "Generated from name dictionary.")
@@ -802,6 +810,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             )}
           </div>
         </div>
+        <DictionaryLoadStatus isPending={dictionaryQuery.isPending} isError={dictionaryQuery.isError} isFetching={dictionaryQuery.isFetching} hasData={!!dictData} onRetry={() => void dictionaryQuery.refetch()} />
         {hasShortArabicNameWarning && (
           <p className="text-sm font-semibold text-amber-600">
             {language === "ar" ? "تنبيه: الاسم العربي عادة يتكون من 3 أجزاء على الأقل." : "Warning: patient name usually includes at least 3 parts."}

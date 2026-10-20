@@ -1,12 +1,15 @@
 import express, { Request, Response } from "express";
 import { type AuthRequest, hasRecentSupervisorReauth, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
+  createMissingNameDictionaryEntry,
   deleteNameDictionaryEntry,
   applyNameDictionaryToPatients,
   importNameDictionaryEntries,
+  listUnresolvedNameDictionaryPatients,
   listNameDictionary,
   updateNameDictionaryEntry,
   upsertNameDictionary
@@ -21,7 +24,7 @@ nameDictionaryRouter.get(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as AuthRequest;
-    const canSeeInactive = request.user!.role === "supervisor" && hasRecentSupervisorReauth(request);
+    const canSeeInactive = hasRecentSupervisorReauth(request);
     const includeInactive = asString(request.query?.includeInactive).trim() === "true" && canSeeInactive;
     const entries = await listNameDictionary({ includeInactive });
     res.json({ entries });
@@ -61,6 +64,25 @@ nameDictionaryRouter.post(
       Array.isArray(body.entries) ? body.entries : [];
     const entries = await importNameDictionaryEntries(entriesPayload, request.user!.sub as UserId);
     res.status(201).json({ entries });
+  })
+);
+
+nameDictionaryRouter.post(
+  "/missing",
+  requirePageAccess("patients"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as AuthRequest;
+    const entry = await createMissingNameDictionaryEntry(request.body ?? undefined, request.user!.sub as UserId);
+    res.status(201).json({ entry });
+  })
+);
+
+nameDictionaryRouter.get(
+  "/unresolved-patients",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json(await listUnresolvedNameDictionaryPatients());
   })
 );
 

@@ -4,16 +4,22 @@ import {
   deleteNameDictionaryEntry,
   fetchNameDictionary,
   importNameDictionary,
-  upsertNameDictionaryEntry,
+  updateNameDictionaryEntry,
 } from "@/lib/api-hooks";
+import { Button } from "@/components/shared";
+import { dictionaryReadOptions } from "@/lib/name-dictionary-query";
+import { DictionaryLoadStatus } from "@/components/name-dictionary/dictionary-load-status";
+import { DictionaryCsvError, parseDictionaryCsv, exportDictionaryCsv } from "@/lib/name-dictionary-csv";
 import { useLanguage } from "@/providers/language-provider";
-import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
+import { ReAuthPrompt } from "./settings-section-helpers";
 import { mutationErrorMessage } from "./settings-section-utils";
 
 export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["name-dictionary"], queryFn: fetchNameDictionary });
+  const dictionaryQuery = useQuery({ queryKey: ["name-dictionary"], queryFn: fetchNameDictionary, ...dictionaryReadOptions });
+  const { data, isLoading, error } = dictionaryQuery;
+  const [exporting, setExporting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -27,6 +33,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
   };
 
   const deleteMutation = useMutation({
+    retry: false,
     mutationFn: (id: number) => deleteNameDictionaryEntry(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
     onError: (error: unknown) => {
@@ -38,6 +45,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
     }
   });
   const deleteAllMutation = useMutation({
+    retry: false,
     mutationFn: async (ids: number[]) => { for (const id of ids) await deleteNameDictionaryEntry(id); },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
     onError: (error: unknown) => {
@@ -49,7 +57,8 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
     }
   });
   const updateMutation = useMutation({
-    mutationFn: (_data: { arabicText: string; englishText: string }) => upsertNameDictionaryEntry(_data.arabicText, _data.englishText),
+    retry: false,
+    mutationFn: (_data: { arabicText: string; englishText: string }) => updateNameDictionaryEntry(editingId!, _data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setEditingId(null); setMutationError(null); },
     onError: (error: unknown) => {
       if (isReauthError(error)) {
@@ -60,6 +69,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
     }
   });
   const importMutation = useMutation({
+    retry: false,
     mutationFn: (entries: { arabicText: string; englishText: string }[]) => importNameDictionary(entries),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
@@ -87,23 +97,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
     reader.onload = (ev) => {
       try {
         setCsvImportStage("parsing");
-        const text = ev.target?.result as string;
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        // Skip header row if present; expect: arabic,english per line
-        const entries = lines
-          .map((line) => {
-            const parts = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
-            if (parts.length >= 2 && parts[0] && parts[1]) {
-              return { arabicText: parts[0], englishText: parts[1] };
-            }
-            return null;
-          })
-          .filter(Boolean) as { arabicText: string; englishText: string }[];
-        if (entries.length === 0) {
-          setMutationError("No valid entries found in CSV. Expected format: arabic,english per line.");
-          setCsvImportStage("idle");
-          return;
-        }
+        const entries = parseDictionaryCsv(String(ev.target?.result || ""));
         setCsvImportCount(entries.length);
         if (window.confirm(`Import ${entries.length} entries from CSV? This will upsert (update existing or create new).`)) {
           setCsvImportStage("uploading");
@@ -111,8 +105,8 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
         } else {
           setCsvImportStage("idle");
         }
-      } catch {
-        setMutationError("Failed to parse CSV file.");
+      } catch (error) {
+        setMutationError(error instanceof DictionaryCsvError ? t(`nameDictionary.csv.${error.reason}`, { row: error.row }) : t("nameDictionary.importFailed"));
         setCsvImportStage("idle");
       }
     };
@@ -133,10 +127,10 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
     }
   };
 
-  if (error) {
+  if (error && !data) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["name-dictionary"])} />;
-    return <QueryError message={msg} />;
+
   }
 
   const allEntries = data?.entries ?? [];
@@ -157,6 +151,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
 
   return (
     <div className="space-y-4">
+      <DictionaryLoadStatus isPending={dictionaryQuery.isPending} isError={dictionaryQuery.isError} isFetching={dictionaryQuery.isFetching} hasData={!!data} onRetry={() => void dictionaryQuery.refetch()} />
       {importStatusMessage && (
         <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm space-y-2">
           <p>{importStatusMessage}</p>
@@ -201,6 +196,12 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
             disabled={importMutation.isPending || csvImportStage === "reading" || csvImportStage === "parsing"}
           />
         </label>
+        <Button type="button" variant="secondary" size="sm" disabled={exporting} onClick={async () => {
+          setMutationError(null); setExporting(true);
+          try { await exportDictionaryCsv(fetchNameDictionary); }
+          catch { setMutationError(t("nameDictionary.exportFailed")); }
+          finally { setExporting(false); }
+        }}>{t("nameDictionary.exportCsv")}</Button>
         {allEntries.length > 0 && (
           <button onClick={handleDeleteAll} disabled={deleteAllMutation.isPending} className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50">
             {deleteAllMutation.isPending ? "Deleting…" : "Delete All"}
@@ -208,7 +209,7 @@ export default function NameDictionarySection({ onReAuthRequired }: { onReAuthRe
         )}
       </div>
 
-      {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
+      {isLoading || (error && !data) ? null : (
         <div className="max-h-[500px] overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400 sticky top-0">

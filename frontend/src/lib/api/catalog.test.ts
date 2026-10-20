@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
 import {
   applyNameDictionaryToPatients,
+  createMissingNameDictionaryEntry,
+  importNameDictionary,
+  updateNameDictionaryEntry,
   applyCatalogWorkbookImport,
   createModality,
   deactivateModality,
@@ -23,6 +26,23 @@ vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
 
 describe("settings catalog API contracts", () => {
   beforeEach(() => vi.mocked(api).mockReset());
+
+  it("uses create-only registration additions, explicit edits and the extended import timeout", async () => {
+    vi.mocked(api).mockResolvedValue({ entry: {}, entries: [] });
+    await createMissingNameDictionaryEntry("محمد", "Mohamed");
+    await updateNameDictionaryEntry(4, { arabicText: "محمد", englishText: "Muhammad" });
+    await importNameDictionary([{ arabicText: "محمد", englishText: "Mohamed" }]);
+    expect(api).toHaveBeenNthCalledWith(1, "/settings/name-dictionary/missing", { method: "POST", body: JSON.stringify({ arabicText: "محمد", englishText: "Mohamed" }) });
+    expect(api).toHaveBeenNthCalledWith(2, "/settings/name-dictionary/4", { method: "PUT", body: JSON.stringify({ arabicText: "محمد", englishText: "Muhammad" }) });
+    expect(api).toHaveBeenNthCalledWith(3, "/name-dictionary/import", { method: "POST", body: JSON.stringify({ entries: [{ arabicText: "محمد", englishText: "Mohamed" }] }) }, 180_000);
+  });
+
+  it("propagates failed and malformed dictionary responses instead of manufacturing an empty dictionary", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new TypeError("offline"));
+    await expect(fetchNameDictionary()).rejects.toThrow("offline");
+    vi.mocked(api).mockResolvedValueOnce({});
+    await expect(fetchNameDictionary()).rejects.toThrow("Invalid dictionary response");
+  });
 
   it("preserves catalog lookup and modality mutation routes", async () => {
     vi.mocked(api).mockResolvedValue({ modalities: [], examTypes: [], entries: [], meta: {}, modality: {} });

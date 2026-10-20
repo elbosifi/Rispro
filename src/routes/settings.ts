@@ -10,7 +10,8 @@
  */
 
 import express, { Request, Response } from "express";
-import { requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { type AuthRequest, hasRecentSupervisorReauth, requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { HttpError } from "../utils/http-error.js";
 import { asBooleanFlag, asString } from "../utils/request-coercion.js";
@@ -37,7 +38,9 @@ import {
 } from "../services/dicom-service.js";
 import { createEquipment, deactivateEquipment, listEquipment, manageEquipmentDicomIdentity, updateEquipment } from "../services/equipment-service.js";
 import {
+  createMissingNameDictionaryEntry,
   deleteNameDictionaryEntry,
+  importNameDictionaryEntries,
   listNameDictionary,
   listUnresolvedNameDictionaryPatients,
   updateNameDictionaryEntry,
@@ -150,14 +153,14 @@ interface SettingsRequest {
 
 export const settingsRouter = express.Router();
 
-// Name-dictionary routes: only require auth, not supervisor re-auth
+// Active dictionary reads remain available to authenticated registration clients.
 settingsRouter.use(requireAuth);
 
 settingsRouter.get(
   "/name-dictionary",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
-    const includeInactive = asBooleanFlag(request.query?.includeInactive);
+    const includeInactive = asBooleanFlag(request.query?.includeInactive) && hasRecentSupervisorReauth(req as AuthRequest);
     const entries = await listNameDictionary({ includeInactive });
     res.json({ entries });
   })
@@ -165,6 +168,8 @@ settingsRouter.get(
 
 settingsRouter.post(
   "/name-dictionary",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const entry = await upsertNameDictionary(request.body ?? undefined, request.user.sub as UserId);
@@ -172,8 +177,32 @@ settingsRouter.post(
   })
 );
 
+settingsRouter.post(
+  "/name-dictionary/missing",
+  requirePageAccess("patients"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const entry = await createMissingNameDictionaryEntry(request.body ?? undefined, request.user!.sub as UserId);
+    res.status(201).json({ entry });
+  })
+);
+
+settingsRouter.post(
+  "/name-dictionary/import",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body);
+    const entries = await importNameDictionaryEntries(Array.isArray(body.entries) ? body.entries : [], request.user.sub as UserId);
+    res.status(201).json({ entries });
+  })
+);
+
 settingsRouter.put(
   "/name-dictionary/:entryId",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const entry = await updateNameDictionaryEntry(asString(request.params?.entryId), request.body ?? undefined, request.user.sub as UserId);
@@ -183,6 +212,8 @@ settingsRouter.put(
 
 settingsRouter.delete(
   "/name-dictionary/:entryId",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const entry = await deleteNameDictionaryEntry(asString(request.params?.entryId), request.user.sub as UserId);
@@ -192,6 +223,8 @@ settingsRouter.delete(
 
 settingsRouter.post(
   "/name-dictionary/apply-to-patients",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const result = await applyNameDictionaryToPatients(request.user.sub as UserId);
@@ -201,6 +234,8 @@ settingsRouter.post(
 
 settingsRouter.get(
   "/name-dictionary/unresolved-patients",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
   asyncRoute(async (_req: Request, res: Response) => {
     const result = await listUnresolvedNameDictionaryPatients();
     res.json(result);
