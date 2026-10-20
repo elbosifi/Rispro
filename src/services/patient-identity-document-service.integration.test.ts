@@ -63,13 +63,18 @@ async function createFixturePatient(userId: number, suffix = crypto.randomUUID()
   return { id, nationalId, arabicFullName, englishFullName };
 }
 
-async function uploadIdentity(patientId: number, userId: number, filename = `identity-${crypto.randomUUID()}.pdf`) {
+async function uploadIdentity(
+  patientId: number,
+  userId: number,
+  filename = `identity-${crypto.randomUUID()}.pdf`,
+  source: "manual_upload" | "naps2_webscan" = "manual_upload",
+) {
   const document = await uploadDocument({
     patientId,
     documentType: "patient_identity_document",
     originalFilename: filename,
     mimeType: "application/pdf",
-    source: "manual_upload",
+    source,
     fileContentBase64: Buffer.from(`identity-${crypto.randomUUID()}`).toString("base64"),
   }, userId);
   createdDocumentIds.push(document.id);
@@ -149,6 +154,73 @@ test("patient identity documents upload as pending patient-only documents", asyn
   assert.equal((await getPatientIdentityDocumentState(patient.id)).status, "pending");
 });
 
+test("NAPS2 identity uploads are patient-only and pending", async (t) => {
+  if (await skipWithoutDatabase(t)) return;
+  const userId = await createUser("receptionist");
+  const patient = await createFixturePatient(userId);
+  const document = await uploadIdentity(patient.id, userId, "scanned-identity.pdf", "naps2_webscan");
+  const row = (await pool.query<{
+    patient_id: number;
+    appointment_id: number | null;
+    v2_booking_id: number | null;
+    incident_id: number | null;
+    source: string;
+  }>(
+    "select patient_id,appointment_id,v2_booking_id,incident_id,source from documents where id=$1",
+    [document.id],
+  )).rows[0]!;
+  assert.equal(Number(row.patient_id), patient.id);
+  assert.equal(row.appointment_id, null);
+  assert.equal(row.v2_booking_id, null);
+  assert.equal(row.incident_id, null);
+  assert.equal(row.source, "naps2_webscan");
+  assert.equal((await getPatientIdentityDocumentState(patient.id)).status, "pending");
+});
+
+test("patient identity uploads reject unsupported sources and scanner file references", async (t) => {
+  if (await skipWithoutDatabase(t)) return;
+  const userId = await createUser("receptionist");
+  const patient = await createFixturePatient(userId);
+  const fileContentBase64 = Buffer.from("identity").toString("base64");
+
+  await assert.rejects(
+    () => uploadDocument({
+      patientId: patient.id,
+      documentType: "patient_identity_document",
+      originalFilename: "identity.pdf",
+      mimeType: "application/pdf",
+      fileContentBase64,
+      source: "scanner_app",
+    }, userId),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 400,
+  );
+
+  await assert.rejects(
+    () => uploadDocument({
+      patientId: patient.id,
+      appointmentId: 1,
+      documentType: "patient_identity_document",
+      originalFilename: "identity.pdf",
+      mimeType: "application/pdf",
+      fileContentBase64,
+      source: "naps2_webscan",
+    }, userId),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 400,
+  );
+
+  await assert.rejects(
+    () => uploadDocument({
+      patientId: patient.id,
+      documentType: "patient_identity_document",
+      originalFilename: "identity.pdf",
+      mimeType: "application/pdf",
+      fileContentBuffer: Buffer.from("identity"),
+      source: "naps2_webscan",
+    }, userId),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 400,
+  );
+});
+
 test("identity verification requires the matching latest document", async (t) => {
   if (await skipWithoutDatabase(t)) return;
   const userId = await createUser();
@@ -195,10 +267,11 @@ test("replacement resets verification while retaining document history", async (
   const patient = await createFixturePatient(userId);
   const original = await uploadIdentity(patient.id, userId);
   await verifyPatientIdentityDocument(patient.id, original.id, userId);
-  const replacement = await uploadIdentity(patient.id, userId);
+  const replacement = await uploadIdentity(patient.id, userId, "replacement.pdf", "naps2_webscan");
   const state = await getPatientIdentityDocumentState(patient.id);
   assert.equal(state.status, "pending");
   assert.equal(state.document?.id, Number(replacement.id));
+  assert.equal((await pool.query<{ source: string }>("select source from documents where id=$1", [replacement.id])).rows[0]?.source, "naps2_webscan");
   assert.equal((await pool.query("select 1 from documents where id=$1", [original.id])).rowCount, 1);
 });
 

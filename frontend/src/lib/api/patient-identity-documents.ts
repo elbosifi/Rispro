@@ -18,6 +18,8 @@ export interface PatientIdentityDocumentState {
   } | null;
 }
 
+export type PatientIdentityDocumentUploadSource = "manual_upload" | "naps2_webscan";
+
 export function fetchPatientIdentityDocument(
   patientId: number
 ): Promise<PatientIdentityDocumentState> {
@@ -44,7 +46,8 @@ export function revokePatientIdentityDocument(
 
 export async function uploadPatientIdentityDocument(
   patientId: number,
-  file: File
+  file: File,
+  source: PatientIdentityDocumentUploadSource = "manual_upload",
 ): Promise<void> {
   const allowedTypes = new Set([
     "application/pdf",
@@ -78,7 +81,7 @@ export async function uploadPatientIdentityDocument(
       originalFilename: file.name,
       mimeType: file.type,
       fileContentBase64: base64,
-      source: "manual_upload",
+      source,
     }),
   });
 }

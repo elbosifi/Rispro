@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
@@ -7,6 +7,9 @@ import { formatDateTimeLy } from "@/lib/date-format";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { patientDirectorySummaryQueryKey } from "@/components/patients/patient-summary-formatters";
+import { fetchIntegrationStatus } from "@/lib/api-hooks";
+import { scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
 import {
   fetchPatientIdentityDocument,
   uploadPatientIdentityDocument,
@@ -26,8 +29,11 @@ export function PatientIdentityDocumentSection({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const patientIdRef = useRef<number | null>(patientId);
+  patientIdRef.current = patientId;
+  const scanRequestLock = useRef(false);
   const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<"upload" | "verify" | "revoke" | null>(null);
+  const [busyAction, setBusyAction] = useState<"scan" | "upload" | "verify" | "revoke" | null>(null);
   const canManage = IDENTITY_DOCUMENT_ROLES.includes(user?.role as (typeof IDENTITY_DOCUMENT_ROLES)[number]);
   const canRevoke = user?.role === "supervisor" || user?.role === "super_admin";
 
@@ -37,6 +43,15 @@ export function PatientIdentityDocumentSection({
     enabled: patientId > 0 && canManage,
     staleTime: 30_000,
   });
+  const integrationQuery = useQuery({
+    queryKey: ["integration-status", "patient-identity-document"],
+    queryFn: fetchIntegrationStatus,
+    enabled: canManage,
+    staleTime: 60_000,
+  });
+  useEffect(() => () => {
+    patientIdRef.current = null;
+  }, []);
 
   if (!canManage) return null;
 
@@ -49,7 +64,11 @@ export function PatientIdentityDocumentSection({
     status === "pending" &&
     documentKey !== null &&
     confirmedFor === documentKey;
-  const busy = busyAction != null || query.isFetching;
+  const naps2ScannerEnabled = Boolean(
+    integrationQuery.data?.scanner?.naps2WebScanEnabled ||
+    integrationQuery.data?.scanner?.scannerBridgeMode === "naps2_webscan"
+  );
+  const busy = busyAction != null || query.isFetching || integrationQuery.isFetching;
 
   const refreshIdentityData = async () => {
     await Promise.all([
@@ -71,8 +90,13 @@ export function PatientIdentityDocumentSection({
     ]);
   };
 
+  const confirmReplacement = () => {
+    if (status !== "verified") return true;
+    return window.confirm(t(language, "patients.identity.replaceConfirm"));
+  };
+
   const openFilePicker = () => {
-    if (status === "verified" && !window.confirm(t(language, "patients.identity.replaceConfirm"))) return;
+    if (!confirmReplacement()) return;
     fileInputRef.current?.click();
   };
 
@@ -95,6 +119,62 @@ export function PatientIdentityDocumentSection({
         message: error instanceof Error ? error.message : t(language, "patients.identity.actionFailed"),
       });
     } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleScanPaper = async () => {
+    if (scanRequestLock.current || busy || !naps2ScannerEnabled) return;
+    if (!confirmReplacement()) return;
+
+    const scanPatientId = patientId;
+    scanRequestLock.current = true;
+    setBusyAction("scan");
+    try {
+      const scanner = integrationQuery.data?.scanner;
+      const effectiveScanEndpoint = resolveEffectiveNaps2Endpoint(scanner?.naps2WebScanEndpoint);
+      const scanDpi = Number(scanner?.scanDpi || 200);
+      const scanColorMode = scanner?.scanColorMode === "color" ? "color" : "grayscale";
+      const scanSource = scanner?.scannerSource === "flatbed"
+        ? "flatbed"
+        : scanner?.scannerSource === "duplex"
+          ? "duplex"
+          : "feeder";
+      const scanResult = await scanAppointmentRequest({
+        endpoint: effectiveScanEndpoint.endpoint,
+        allowedOrigins: scanner?.naps2WebScanAllowedOrigins,
+        dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
+        colorMode: scanColorMode,
+        source: scanSource,
+        fileName: `patient-${scanPatientId}-identity.pdf`,
+      });
+
+      if (patientIdRef.current !== scanPatientId) {
+        throw new Error(t(language, "patients.identity.patientChangedDuringScan"));
+      }
+
+      const scanFiles = scanResult.files ?? [scanResult.file];
+      if (scanFiles.length !== 1 || !scanFiles[0]) {
+        throw new Error(t(language, "patients.identity.multipleScanFiles"));
+      }
+
+      setBusyAction("upload");
+      await uploadPatientIdentityDocument(scanPatientId, scanFiles[0], scanResult.source);
+      await refreshIdentityData();
+      setConfirmedFor(null);
+      pushToast({
+        type: "success",
+        title: t(language, "patients.identity.uploadSuccess"),
+        message: t(language, "patients.identity.pending"),
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: t(language, "documents.scanFailedTitle"),
+        message: error instanceof Error ? error.message : t(language, "documents.scanFailedMessage"),
+      });
+    } finally {
+      scanRequestLock.current = false;
       setBusyAction(null);
     }
   };
@@ -195,11 +275,25 @@ export function PatientIdentityDocumentSection({
             <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={openFilePicker}>
               {t(language, "patients.identity.replace")}
             </Button>
+            {naps2ScannerEnabled ? (
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleScanPaper()}>
+                {busyAction === "scan" ? t(language, "documents.scanning") : busyAction === "upload" ? t(language, "documents.uploading") : t(language, "patients.identity.scanPaper")}
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
 
-      {!document ? <Button type="button" size="sm" disabled={busy} onClick={openFilePicker}>{t(language, "patients.identity.upload")}</Button> : null}
+      {!document ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" disabled={busy} onClick={openFilePicker}>{t(language, "patients.identity.upload")}</Button>
+          {naps2ScannerEnabled ? (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void handleScanPaper()}>
+              {busyAction === "scan" ? t(language, "documents.scanning") : busyAction === "upload" ? t(language, "documents.uploading") : t(language, "patients.identity.scanPaper")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {document && status === "pending" ? (
         <div className="space-y-3 border-t border-border pt-3">

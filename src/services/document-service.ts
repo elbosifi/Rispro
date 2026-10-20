@@ -620,8 +620,8 @@ export async function uploadDocument(
     }
 
     if (
-      (rawSource && rawSource !== "manual_upload") ||
-      source !== "manual_upload" ||
+      (rawSource && rawSource !== "manual_upload" && rawSource !== "naps2_webscan") ||
+      (source !== "manual_upload" && source !== "naps2_webscan") ||
       payload.fileSourcePath != null ||
       payload.fileContentBuffer != null
     ) {
