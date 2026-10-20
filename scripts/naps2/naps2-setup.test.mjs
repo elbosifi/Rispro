@@ -9,7 +9,7 @@ const probe = spawnSync(executable, ['-NoProfile', '-Command', '$PSVersionTable.
 test('NAPS2 setup XML, policy and restricted firewall behavior', { skip: probe.error ? `PowerShell unavailable: ${probe.error.message}. Run this file on Windows or set RISPRO_TEST_PWSH to a portable runtime.` : false }, () => {
   const result = spawnSync(executable, ['-NoProfile', '-File', fileURLToPath(new URL('./naps2-setup.test.ps1', import.meta.url))], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /PASS: 14 setup tests/);
+  assert.match(result.stdout, /PASS: 15 setup tests/);
 });
 
 test('setup probes real HTTP capabilities and CORS without scanning, rejects HTML 200', { skip: probe.error ? 'PowerShell unavailable' : false }, async () => {

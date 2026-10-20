@@ -32,6 +32,23 @@ try {
         Assert-Naps2Version '8.2.1.0'
     }
     $xmlPath = Join-Path $temp 'appsettings.xml'
+    Check 'duplicate discovery paths use Windows case-insensitive normalized comparison' {
+        $programFilesCandidate = 'C:\Program Files\NAPS2'
+        $registryCandidate = 'c:\program files\naps2\'
+        $processCandidate = 'C:\PROGRAM FILES\NAPS2\\'
+        $normalized = @(Get-NormalizedNaps2InstallationPaths @($programFilesCandidate, $registryCandidate, $processCandidate))
+        Assert ($normalized.Count -eq 1) 'Equivalent Windows NAPS2 paths were counted as separate installations'
+        Assert ($normalized[0] -eq 'C:\Program Files\NAPS2') 'Installation path was not normalized'
+
+        [IO.File]::WriteAllText($xmlPath, '<AppConfig/>')
+        $sameInstallation = Find-Naps2Installation @($temp, ($temp.ToUpperInvariant() + [IO.Path]::DirectorySeparatorChar))
+        Assert ($sameInstallation -eq $xmlPath) 'Equivalent discovery sources did not resolve to the same installation'
+        $otherInstallation = Join-Path $temp 'other-naps2'
+        [void](New-Item -ItemType Directory -Path $otherInstallation)
+        [IO.File]::WriteAllText((Join-Path $otherInstallation 'NAPS2.exe'), '')
+        [IO.File]::WriteAllText((Join-Path $otherInstallation 'appsettings.xml'), '<AppConfig/>')
+        Expect-Failure { Find-Naps2Installation @($temp, $otherInstallation) } 'Multiple NAPS2 installations found'
+    }
     Check 'XML backup, missing element, whitespace and unrelated settings preservation' {
         $original = "<?xml version=`"1.0`"?>`n<AppConfig><!--keep--><OcrTimeoutInSeconds>600</OcrTimeoutInSeconds><Other attr=`"a`">value</Other></AppConfig>"
         [IO.File]::WriteAllText($xmlPath, $original)

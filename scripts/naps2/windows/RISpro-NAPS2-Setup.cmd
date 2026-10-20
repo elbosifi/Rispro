@@ -42,8 +42,21 @@ function Read-SafeXml([string]$Path) {
         return ,$document
     } finally { $reader.Dispose() }
 }
+function Get-NormalizedNaps2InstallationPaths([string[]]$Candidates) {
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $paths = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($candidate in $Candidates) {
+        if (-not $candidate) { continue }
+        # Program Files, registry and a running process can name the same folder
+        # with different case or a trailing separator. Windows path comparison is
+        # case-insensitive, so normalize both before counting installations.
+        $path = $candidate.Trim().TrimEnd([char[]]"\/")
+        if ($path -and $seen.Add($path)) { $paths.Add($path) }
+    }
+    return $paths.ToArray()
+}
 function Find-Naps2Installation([string[]]$Candidates) {
-    $found = @($Candidates | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'NAPS2.exe')) } | Select-Object -Unique)
+    $found = @(Get-NormalizedNaps2InstallationPaths $Candidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'NAPS2.exe') })
     if ($found.Count -eq 0) { throw 'NAPS2 is not installed in a supported location. Install the official NAPS2 release; this setup never downloads or installs software.' }
     if ($found.Count -gt 1) { throw ('Multiple NAPS2 installations found. An administrator must identify the active installation: ' + ($found -join ', ')) }
     $path = Join-Path $found[0] 'appsettings.xml'
