@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -28,14 +29,122 @@ async function setDocumentSetting(key: string, value: unknown): Promise<void> {
   );
 }
 
-function isDisposableDatabase(): boolean {
-  return /(?:localhost|127\.0\.0\.1)/i.test(env.databaseUrl)
-    && /test/i.test(env.databaseUrl);
+type DisposableDatabaseSafety =
+  | { ok: true; databaseUrl: URL }
+  | { ok: false; reason: string };
+
+function parseDatabaseUrl(value: string | undefined): URL | null {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function databaseIdentity(url: URL): string {
+  const port = url.port || "5432";
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  return `${url.hostname.toLowerCase()}:${port}/${database}`;
+}
+
+async function verifyDisposableDatabaseSafety(): Promise<DisposableDatabaseSafety> {
+  const databaseUrl = parseDatabaseUrl(process.env.DATABASE_URL ?? env.databaseUrl);
+  const testDatabaseUrl = parseDatabaseUrl(process.env.TEST_DATABASE_URL);
+
+  if (!databaseUrl || !testDatabaseUrl) {
+    return {
+      ok: false,
+      reason: "DATABASE_URL and TEST_DATABASE_URL must both be valid PostgreSQL URLs.",
+    };
+  }
+
+  if (!["localhost", "127.0.0.1"].includes(databaseUrl.hostname.toLowerCase())) {
+    return {
+      ok: false,
+      reason: "DATABASE_URL must point to localhost or 127.0.0.1.",
+    };
+  }
+
+  const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\//, ""));
+  const username = decodeURIComponent(databaseUrl.username);
+  if (!/test/i.test(databaseName) || !/test/i.test(username)) {
+    return {
+      ok: false,
+      reason: "DATABASE_URL database name and username must both contain test.",
+    };
+  }
+
+  if (databaseIdentity(databaseUrl) !== databaseIdentity(testDatabaseUrl)) {
+    return {
+      ok: false,
+      reason: "DATABASE_URL and TEST_DATABASE_URL must identify the same database.",
+    };
+  }
+
+  let inspectedContainer: Array<{
+    State?: { Running?: boolean };
+    Config?: { Labels?: Record<string, string> };
+    NetworkSettings?: {
+      Ports?: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>;
+    };
+  }>;
+
+  try {
+    inspectedContainer = JSON.parse(
+      execFileSync("docker", ["inspect", "rispro-test-postgres"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    ) as typeof inspectedContainer;
+  } catch {
+    return {
+      ok: false,
+      reason: "Docker container rispro-test-postgres could not be inspected.",
+    };
+  }
+
+  const container = inspectedContainer[0];
+  if (!container?.State?.Running) {
+    return {
+      ok: false,
+      reason: "Docker container rispro-test-postgres is not running.",
+    };
+  }
+
+  if (container.Config?.Labels?.["rispro.role"] !== "test-db") {
+    return {
+      ok: false,
+      reason: "Docker container rispro-test-postgres is not labeled rispro.role=test-db.",
+    };
+  }
+
+  const publishedPorts = container.NetworkSettings?.Ports?.["5432/tcp"] ?? [];
+  const databasePort = databaseUrl.port || "5432";
+  const matchingPort = publishedPorts.find(
+    (publishedPort) =>
+      publishedPort.HostIp === "127.0.0.1"
+      && publishedPort.HostPort === databasePort,
+  );
+  if (!matchingPort) {
+    return {
+      ok: false,
+      reason: "Docker PostgreSQL must publish container port 5432 to DATABASE_URL on 127.0.0.1.",
+    };
+  }
+
+  return { ok: true, databaseUrl };
 }
 
 test("bulk document deletion preserves patient identity documents", async (t) => {
-  if (!isDisposableDatabase()) {
-    t.skip("Destructive bulk-delete test requires the local disposable test database.");
+  const safety = await verifyDisposableDatabaseSafety();
+  if (!safety.ok) {
+    t.skip(`Destructive bulk-delete test safety guard: ${safety.reason}`);
     return;
   }
 
@@ -45,6 +154,15 @@ test("bulk document deletion preserves patient identity documents", async (t) =>
     t.skip("PostgreSQL is not reachable at the configured disposable test database.");
     return;
   }
+
+  const existingDocuments = await pool.query<{ count: number }>(
+    "select count(*)::int as count from documents",
+  );
+  assert.equal(
+    Number(existingDocuments.rows[0]?.count ?? 0),
+    0,
+    "Bulk-delete test refused: unexpected documents exist in the test database.",
+  );
 
   const marker = crypto.randomUUID();
   const tempUploadsDir = path.join(os.tmpdir(), `rispro-document-delete-${marker}`);
@@ -116,6 +234,19 @@ test("bulk document deletion preserves patient identity documents", async (t) =>
     }, userId);
     createdDocumentIds.push(Number(ordinary.id));
     const ordinaryPath = getDocumentAbsolutePath(ordinary);
+
+    const documentsBeforeDelete = await pool.query<{ id: number }>(
+      "select id from documents order by id",
+    );
+    const expectedDocumentIds = [...new Set(createdDocumentIds)].sort((left, right) => left - right);
+    const actualDocumentIds = documentsBeforeDelete.rows
+      .map((document) => Number(document.id))
+      .sort((left, right) => left - right);
+    assert.deepEqual(
+      actualDocumentIds,
+      expectedDocumentIds,
+      "Bulk-delete test refused: document IDs changed unexpectedly before deletion.",
+    );
 
     const result = await deleteDocumentsByScope({ mode: "all" }, userId);
 
