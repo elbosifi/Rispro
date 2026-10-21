@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
+import { AppointmentSuccessState } from "@/v2/appointments/components/AppointmentSuccessState";
 import { RequestDocumentsPanel } from "./request-documents-panel";
 import {
   saveWorkstationNaps2Settings,
@@ -325,6 +326,38 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanSessionExpiryMinutes: "15",
       },
     });
+  });
+
+  it("shows Scan Paper on the appointment-created success screen for an authorized receptionist with valid V2 identifiers", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LanguageProvider>
+          <AppointmentSuccessState
+            appointmentSummary={{
+              bookingId: 42,
+              patientId: 9,
+              patientName: "Test Patient",
+              bookingDate: "2026-01-01",
+              modalityName: "CT",
+              wasOverride: false,
+            }}
+            onPrintView={() => {}}
+            onPrintNow={() => {}}
+            onCreateAnother={() => {}}
+            onViewDetails={() => {}}
+          />
+        </LanguageProvider>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("button", { name: "Scan Paper" })).toBeTruthy();
+    expect(mockFetchCurrentSession).toHaveBeenCalledTimes(1);
+    expect(mockFetchIntegrationStatus).toHaveBeenCalledTimes(1);
+    expect(mockListAppointmentDocuments).toHaveBeenCalledWith(42, "v2_booking");
   });
 
   it("uses scoped Reporting Desk list and view URLs without querying the generic protocol policy", async () => {
