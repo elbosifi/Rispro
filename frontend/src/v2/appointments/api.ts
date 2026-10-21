@@ -178,11 +178,28 @@ export async function fetchV2Priorities(): Promise<ReportingPriorityDto[]> {
   return response.items;
 }
 
+function toPositiveSafeInteger(value: number | string, fieldName: string): number {
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throw new Error(`Create booking response contains an invalid ${fieldName}.`);
+  }
+  return normalized;
+}
+
 export async function createV2Booking(input: CreateBookingRequest): Promise<BookingResponse> {
-  return api<BookingResponse>("/v2/appointments", {
+  const response = await api<BookingResponse>("/v2/appointments", {
     method: "POST",
     body: JSON.stringify(input),
   });
+
+  return {
+    ...response,
+    booking: {
+      ...response.booking,
+      id: toPositiveSafeInteger(response.booking.id, "booking ID"),
+      patientId: toPositiveSafeInteger(response.booking.patientId, "patient ID"),
+    },
+  };
 }
 
 export async function rescheduleV2Booking(

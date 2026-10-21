@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
+import { createV2Booking } from "@/v2/appointments/api";
 import { AppointmentSuccessState } from "@/v2/appointments/components/AppointmentSuccessState";
 import { RequestDocumentsPanel } from "./request-documents-panel";
 import {
@@ -60,7 +61,7 @@ const mockListProtocolDocumentAnnotations = vi.fn<(documentId?: number) => Promi
 const mockCreateProtocolDocumentAnnotation = vi.fn<(documentId: number, payload: unknown) => Promise<unknown>>(async (documentId, payload) => ({ id: 11, documentId, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
 const mockUpdateProtocolDocumentAnnotation = vi.fn<(documentId: number, annotationId: number, payload: unknown) => Promise<unknown>>(async (documentId, annotationId, payload) => ({ id: annotationId, documentId, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
 const mockDeleteProtocolDocumentAnnotation = vi.fn(async (documentId: number, annotationId: number) => { void documentId; void annotationId; });
-const { mockDirectPrint, mockLoadQzPrinterSettings, mockPushToast } = vi.hoisted(() => ({ mockDirectPrint: vi.fn(), mockLoadQzPrinterSettings: vi.fn(), mockPushToast: vi.fn() }));
+const { mockDirectPrint, mockLoadQzPrinterSettings, mockPushToast, mockCreateV2BookingApi } = vi.hoisted(() => ({ mockDirectPrint: vi.fn(), mockLoadQzPrinterSettings: vi.fn(), mockPushToast: vi.fn(), mockCreateV2BookingApi: vi.fn() }));
 const mockFetchCurrentSession = vi.fn(async () => ({
   id: 1,
   role: "receptionist",
@@ -102,6 +103,8 @@ vi.mock("@/lib/api-hooks", () => ({
   updateProtocolDocumentAnnotation: (documentId: number, annotationId: number, payload: unknown) => mockUpdateProtocolDocumentAnnotation(documentId, annotationId, payload),
   deleteProtocolDocumentAnnotation: (documentId: number, annotationId: number) => mockDeleteProtocolDocumentAnnotation(documentId, annotationId),
 }));
+
+vi.mock("@/lib/api-client", () => ({ api: mockCreateV2BookingApi }));
 
 vi.mock("@/lib/api/documents-printing", () => ({
   listReportingBoardAppointmentDocuments: (token: string, caseId: number) => mockListReportingDeskDocuments(token, caseId),
@@ -260,6 +263,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockDeleteProtocolDocumentAnnotation.mockReset();
     mockPushToast.mockReset();
     mockDirectPrint.mockReset();
+    mockCreateV2BookingApi.mockReset();
     mockLoadQzPrinterSettings.mockReset().mockReturnValue({ profiles: [{ documentType: "A4_DOCUMENT", enabled: false, printerName: "" }] });
     mockFetchCurrentSession.mockClear();
     mockFetchIntegrationStatus.mockClear();
@@ -328,7 +332,41 @@ describe("RequestDocumentsPanel local scan flow", () => {
     });
   });
 
-  it("shows Scan Paper on the appointment-created success screen for an authorized receptionist with valid V2 identifiers", async () => {
+  it("normalizes API booking IDs before showing Scan Paper on the appointment-created success screen", async () => {
+    mockCreateV2BookingApi.mockResolvedValueOnce({
+      booking: {
+        id: "42",
+        patientId: "9",
+        modalityId: 1,
+        examTypeId: 101,
+        reportingPriorityId: null,
+        bookingDate: "2026-01-01",
+        bookingTime: null,
+        caseCategory: "non_oncology",
+        status: "scheduled",
+        notes: null,
+        policyVersionId: 1,
+        capacityResolutionMode: "standard",
+        usesSpecialQuota: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      decision: {},
+      wasOverride: false,
+    });
+    const createdBooking = await createV2Booking({
+      patientId: 9,
+      modalityId: 1,
+      examTypeId: 101,
+      reportingPriorityId: null,
+      bookingDate: "2026-01-01",
+      bookingTime: null,
+      caseCategory: "non_oncology",
+      notes: null,
+    });
+    expect(createdBooking.booking.id).toBe(42);
+    expect(createdBooking.booking.patientId).toBe(9);
+
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -338,8 +376,8 @@ describe("RequestDocumentsPanel local scan flow", () => {
         <LanguageProvider>
           <AppointmentSuccessState
             appointmentSummary={{
-              bookingId: 42,
-              patientId: 9,
+              bookingId: createdBooking.booking.id,
+              patientId: createdBooking.booking.patientId,
               patientName: "Test Patient",
               bookingDate: "2026-01-01",
               modalityName: "CT",
