@@ -44,7 +44,12 @@ older version as `.cmd`. These checks detect error responses, not HTTP tampering
    installed release's supported background-sharing/start-at-login options.
 2. Open RISpro > Workstation printing and scanning > NAPS2. Download
    `RISpro-NAPS2-Setup.cmd` and run it as administrator. A normal double-click
-   requests UAC elevation if needed. No further payload is downloaded.
+   requests UAC elevation if needed. When Repair finds the insecure-origin
+   exception missing, review its warning and exact RISpro HTTP origin, then
+   type `YES` to approve that one policy. UAC approval alone does not approve
+   the compatibility exception. If declined or noninteractive, setup leaves
+   that policy unchanged and reports Action required. No further payload is
+   downloaded.
 
 Download: authenticated `GET /api/scanner-bootstrap/windows-setup`.
 Workstation roles can download it independently of QZ readiness. For a saved
@@ -66,24 +71,58 @@ The self-contained batch uses built-in Windows PowerShell and:
   `.bak` beside the XML; preserves unrelated elements/comments, ensures exactly
   one `EsclSecurityPolicy=ServerAllowAnyOrigin`, and replaces the file atomically
   after checking that it has not changed concurrently. Correct XML is untouched.
-- Adds only the exact configured RISpro origin to machine Edge policy
-  `LocalNetworkAccessAllowedForUrls`, using an explicit port (including `:80`).
-  It chooses an unused numbered REG_SZ entry, preserves existing entries and
-  avoids duplicates. Matching or unrecognized higher-priority network/loopback
-  blocking policies are reported; they are never removed or bypassed.
-- On domain/MDM-managed machines, missing policy is an administrator issue;
-  setup does not insert entries into a centrally managed list. Registry readback
-  is verified. Cloud/profile policy and effective precedence still require
-  `edge://policy` > Reload policies; this cannot be proven by registry readback.
+- Reads the installed `msedge.exe` ProductVersion as a four-part Windows
+  version. It does not use the Edge Update version. Missing, malformed and
+  pre-77 versions fail safely without writing browser policies.
+- Configures only policies supported by the detected Edge version, using the
+  exact validated RISpro HTTP origin from the downloaded setup:
+
+  | Edge version | Policies configured |
+  | --- | --- |
+  | Below 77 | Unsupported; no policy writes |
+  | 77–139 | `OverrideSecurityRestrictionsOnInsecureOrigin` |
+  | 140–145 | Above, plus `LocalNetworkAccessAllowedForUrls` |
+  | 146+ | Above, plus `LoopbackNetworkAllowedForUrls` |
+
+  These minimum versions describe policy support only; they do not prove
+  browser-to-scanner or physical scanner compatibility. `HostRepair` does not
+  add the insecure-origin exception; use Repair for its explicit approval.
+  Each policy uses an unused numbered REG_SZ value, preserves unrelated
+  entries, verifies registry readback, and does not add wildcard origins. The
+  insecure-origin policy is added only after explicit administrator approval.
+  A newly installed policy requires closing and reopening Edge; policy reload
+  alone does not activate the insecure-origin exception. Setup never terminates
+  Edge or NAPS2. Repeat Repair does not request another restart when all
+  applicable policies are already installed.
+- Checks machine and loaded user Edge policy locations for higher-priority
+  blocking policies. Conflicts are reported and preserved. On domain/MDM-managed
+  devices, missing entries are reported by exact policy name for central
+  administrator configuration; local setup never fills centrally managed
+  policy lists. Effective cloud/domain/profile policy still needs verification
+  in `edge://policy`.
 - Probes the configured endpoint, or all 50 documented HTTP loopback ports with
   one bounded asynchronous deadline, validates eSCL capabilities/PDF or JPEG
-  support and checks the CORS origin header. It starts no physical scan.
+  support and checks the CORS origin header. This is an HTTP/CORS check only; it
+  cannot prove Edge-to-NAPS2 access, browser Test Connection, or physical
+  scanning.
 - Creates logs at `%ProgramData%\RISpro\NAPS2Setup\setup-<timestamp>.log` and
-  exits with `0` Ready, `2` Action required, or `1` Failed, with a specific reason.
+  exits with `0` Setup ready — browser verification required, `2` Action
+  required, or `1` Failed, with separate readiness states. A zero exit is not
+  operational scanner acceptance.
 
-Run `RISpro-NAPS2-Setup.cmd Diagnose` for checks without XML, policy or firewall
-changes (diagnostic logs are still written). `Repair` is the default and is safe
-to repeat. Administrator access is required for complete machine-policy checks.
+Run `RISpro-NAPS2-Setup.cmd Diagnose` for read-only, noninteractive checks
+without XML, policy or firewall changes (diagnostic logs are still written).
+`Repair` is the default and is safe to repeat. Administrator access is required
+for complete machine-policy checks.
+
+After first-time policy installation, close and reopen Edge without forcing
+other applications closed. Visit `edge://policy`, select **Reload policies**
+for diagnosis, and verify the exact origin and each applicable policy's status.
+The reload is not a substitute for restarting Edge after
+`OverrideSecurityRestrictionsOnInsecureOrigin` was added. Then open RISpro,
+run **Test Connection** (capabilities only; no paper movement), and explicitly
+run **Test Scan** with synthetic paper. The CMD setup never reports either
+browser acceptance or a successful physical scan.
 
 **Supported automation limit:** application-level NAPS2 changes need NAPS2 to
 reload them. Setup never terminates or restarts a running NAPS2 process because
@@ -160,10 +199,14 @@ scope. Do not describe this deployment as cryptographically secure.
 NAPS2's required `ServerAllowAnyOrigin` permits CORS from any website reaching
 the scanner. The exact Edge exception and RISpro CSP are not scanner-side
 origin authentication. Keep scanner hosts on the approved hospital network and
-restrict remote firewall sources. HTTP scan content is unencrypted on the LAN.
+restrict remote firewall sources. The insecure-origin exception does not enable
+HTTPS and does not encrypt RISpro HTTP traffic or scan content on the LAN. HTTPS
+is the preferred long-term design.
 Setup embeds no credentials, tokens, patient data or arbitrary remote commands.
 
-Policy references: [Edge LocalNetworkAccessAllowedForUrls](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/localnetworkaccessallowedforurls),
+Policy references: [Edge OverrideSecurityRestrictionsOnInsecureOrigin](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/overridesecurityrestrictionsoninsecureorigin),
+[Edge LocalNetworkAccessAllowedForUrls](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/localnetworkaccessallowedforurls),
+[Edge LoopbackNetworkAllowedForUrls](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/loopbacknetworkallowedforurls),
 [loopback blocking precedence](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/loopbacknetworkblockedforurls),
 [NAPS2 sharing/ports](https://www.naps2.com/doc/scanner-sharing),
 [NAPS2 application configuration](https://www.naps2.com/doc/org-use).

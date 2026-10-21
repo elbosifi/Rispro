@@ -16,6 +16,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:LogFile = $null
 $script:Issues = New-Object 'System.Collections.Generic.List[string]'
+$script:Naps2ConfigurationValid = $false
+$script:EdgePolicyStates = @{}
+$script:EdgePolicyChanges = New-Object 'System.Collections.Generic.List[string]'
 
 function Write-SetupLog([string]$Message) {
     Write-Host $Message
@@ -77,10 +80,10 @@ function Set-Naps2Xml([string]$Path, [bool]$Diagnose) {
     if ($values.Count -gt 1 -or @($values | Where-Object { $_ -notin @('', 'None', 'ServerAllowAnyOrigin') }).Count -gt 0) {
         throw ('Conflicting EsclSecurityPolicy: ' + ($values -join ', ') + '. Preserved unchanged. An administrator must review HTTP/security requirements.')
     }
-    if ($nodes.Count -eq 1 -and $values[0] -eq 'ServerAllowAnyOrigin') { Write-SetupLog 'NAPS2 XML configuration: correct (no changes).'; return }
-    if ($Diagnose) { Add-Action 'NAPS2 appsettings.xml needs ServerAllowAnyOrigin exactly once. Run Repair after reviewing any policy conflict.'; return }
+    if ($nodes.Count -eq 1 -and $values[0] -eq 'ServerAllowAnyOrigin') { Write-SetupLog 'NAPS2 XML configuration: correct (no changes).'; return $true }
+    if ($Diagnose) { Add-Action 'NAPS2 appsettings.xml needs ServerAllowAnyOrigin exactly once. Run Repair after reviewing any policy conflict.'; return $false }
     $backup = $Path + '.RISpro-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.bak'
-    Copy-Item -LiteralPath $Path -Destination $backup -ErrorAction Stop
+    [void](Copy-Item -LiteralPath $Path -Destination $backup -ErrorAction Stop)
     Write-SetupLog "XML backup: $backup"
     if ($nodes.Count -eq 0) {
         $node = $document.CreateElement('EsclSecurityPolicy')
@@ -97,6 +100,7 @@ function Set-Naps2Xml([string]$Path, [bool]$Diagnose) {
         [IO.File]::Replace($temporary, $Path, $backup)
         Write-SetupLog 'NAPS2 XML configuration: repaired atomically; unrelated elements preserved.'
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary } }
+    return $true
 }
 function Get-PolicyValues([string]$Path) {
     if (Test-Path -LiteralPath $Path) {
@@ -117,9 +121,81 @@ function Test-PolicyPattern([string]$Pattern, [uri]$Origin) {
     Add-Action "Cannot evaluate Edge policy pattern '$Pattern'. Ask the administrator to inspect edge://policy."
     return $true
 }
-function Set-EdgeOriginPolicy([uri]$Origin, [bool]$Diagnose, [bool]$Managed, [string]$MachineRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', [string[]]$UserRoots = @()) {
+
+function ConvertTo-EdgeVersion([string]$ProductVersion) {
+    if ($ProductVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') { return $null }
+    $version = $null
+    if ([version]::TryParse($ProductVersion, [ref]$version) -and $version.Build -ge 0 -and $version.Revision -ge 0) { return $version }
+    return $null
+}
+function Find-EdgeExecutable([string[]]$Candidates) {
+    foreach ($candidate in $Candidates) { if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate } }
+    return $null
+}
+function Get-RequiredEdgePolicies([version]$Version) {
+    if ($null -eq $Version -or $Version -lt [version]'77.0.0.0') { return @() }
+    $policies = @('OverrideSecurityRestrictionsOnInsecureOrigin')
+    if ($Version -ge [version]'140.0.0.0') { $policies += 'LocalNetworkAccessAllowedForUrls' }
+    if ($Version -ge [version]'146.0.0.0') { $policies += 'LoopbackNetworkAllowedForUrls' }
+    return $policies
+}
+function Test-ExactEdgePolicyOrigin([string]$Path, [string]$Exact) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $key = Get-Item -LiteralPath $Path
+    foreach ($name in $key.GetValueNames()) {
+        if ([string]$key.GetValue($name) -ceq $Exact) {
+            try { if ($key.GetValueKind($name) -eq [Microsoft.Win32.RegistryValueKind]::String) { return $true } }
+            catch { }
+        }
+    }
+    return $false
+}
+function Confirm-InsecureOriginCompatibility([string]$Exact, [bool]$Interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected)) {
+    Write-SetupLog 'RISpro is configured for HTTP LAN access. Microsoft Edge requires an insecure-origin compatibility exception to permit browser-based local scanning. This exception applies only to the configured RISpro address. It does NOT enable HTTPS or encrypt network traffic.'
+    Write-SetupLog "Configured RISpro origin: $Exact"
+    if (-not $Interactive) { Write-SetupLog 'Administrator confirmation is unavailable in this noninteractive session.'; return $false }
+    try { return ((Read-Host 'Administrator approval required. Type YES to add this exact-origin Edge policy') -ceq 'YES') }
+    catch { Write-SetupLog 'Administrator confirmation was unavailable; the insecure-origin policy was not added.'; return $false }
+}
+function Set-EdgePolicyOrigin([string]$Policy, [uri]$Origin, [bool]$Diagnose, [bool]$Managed, [bool]$RequireApproval, [bool]$AllowInsecurePolicy, [bool]$Interactive, [string]$MachineRoot) {
     # Explicit :80 is intentional: an omitted port in a policy pattern can allow other ports.
     $exact = '{0}://{1}:{2}' -f $Origin.Scheme, $Origin.Host, $Origin.Port
+    $path = Join-Path $MachineRoot $Policy
+    $script:EdgePolicyStates[$Policy] = $false
+    if (Test-ExactEdgePolicyOrigin $path $exact) {
+        $script:EdgePolicyStates[$Policy] = $true
+        Write-SetupLog "Edge machine policy ${Policy}: exact REG_SZ origin already present: $exact"
+        return
+    }
+    if ($Diagnose) { Add-Action "Required Edge policy $Policy is missing exact origin $exact. Diagnose did not modify policy."; return }
+    if ($Managed) { Add-Action "This domain/MDM-managed machine needs central configuration of Edge policy $Policy with exact origin $exact. No local policy was written."; return }
+    if ($RequireApproval -and -not $AllowInsecurePolicy) { Add-Action "HostRepair did not add Edge policy $Policy. Run Repair to review and explicitly approve the exact-origin HTTP compatibility exception for $exact."; return }
+    if ($RequireApproval -and -not (Confirm-InsecureOriginCompatibility $exact $Interactive)) {
+        Add-Action "Administrator approval was declined or unavailable. Edge policy $Policy was not added for $exact; browser-based scanning is not ready."
+        return
+    }
+    try {
+        if (-not (Test-Path -LiteralPath $path)) { [void](New-Item -Path $path -Force) }
+        $key = Get-Item -LiteralPath $path
+        $index = 1
+        while ($key.GetValueNames() -contains [string]$index) { $index++ }
+        # No -Force: never overwrite another entry, even if a policy refresh races setup.
+        [void](New-ItemProperty -LiteralPath $path -Name ([string]$index) -PropertyType String -Value $exact)
+        if (-not (Test-ExactEdgePolicyOrigin $path $exact)) { throw 'Registry readback did not contain the exact REG_SZ origin.' }
+        $script:EdgePolicyStates[$Policy] = $true
+        $script:EdgePolicyChanges.Add($Policy)
+        Write-SetupLog "Edge machine policy ${Policy}: added only exact origin $exact as REG_SZ; unrelated values preserved."
+    } catch {
+        Add-Action "Could not configure Edge policy $Policy at HKLM\SOFTWARE\Policies\Microsoft\Edge. Check administrator registry permissions and domain/MDM policy. Details: $($_.Exception.Message)"
+    }
+}
+function Set-EdgeOriginPolicy([uri]$Origin, [version]$EdgeVersion, [bool]$Diagnose, [bool]$Managed, [string]$MachineRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', [string[]]$UserRoots = @(), [string]$Mode = 'Repair', [bool]$Interactive = ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected)) {
+    $script:EdgePolicyStates = @{}
+    $script:EdgePolicyChanges = New-Object 'System.Collections.Generic.List[string]'
+    $policies = @(Get-RequiredEdgePolicies $EdgeVersion)
+    if ($null -eq $EdgeVersion) { Add-Action 'Microsoft Edge version is unavailable or invalid. No browser policy was written.'; return }
+    if ($EdgeVersion -lt [version]'77.0.0.0') { Add-Action "Microsoft Edge $EdgeVersion is unsupported for the insecure-origin policy (requires Edge 77 or later). No browser policy was written."; return }
+
     $blocked = $false
     foreach ($root in @($MachineRoot) + $UserRoots) {
         foreach ($policy in @('LocalNetworkBlockedForUrls', 'LoopbackNetworkBlockedForUrls', 'LocalNetworkAccessBlockedForUrls')) {
@@ -128,19 +204,14 @@ function Set-EdgeOriginPolicy([uri]$Origin, [bool]$Diagnose, [bool]$Managed, [st
             }
         }
     }
-    if ($blocked) { return }
-    $path = Join-Path $MachineRoot 'LocalNetworkAccessAllowedForUrls'
-    $existing = @(Get-PolicyValues $path)
-    if ($existing -contains $exact) { Write-SetupLog "Edge machine policy: exact origin already present: $exact"; return }
-    if ($Diagnose -or $Managed) { Add-Action "Exact Edge policy $exact is absent. Domain/MDM-managed policies must be configured by their administrator; unmanaged machines can run Repair."; return }
-    if (-not (Test-Path -LiteralPath $path)) { [void](New-Item -Path $path -Force) }
-    $key = Get-Item -LiteralPath $path
-    $index = 1
-    while ($key.GetValueNames() -contains [string]$index) { $index++ }
-    # No -Force: never overwrite another entry, even if a policy refresh races setup.
-    [void](New-ItemProperty -LiteralPath $path -Name ([string]$index) -PropertyType String -Value $exact)
-    if (@(Get-PolicyValues $path) -notcontains $exact) { throw 'Edge policy write could not be verified. Check administrator permissions and domain/MDM policy.' }
-    Write-SetupLog "Edge machine policy: added only $exact; all existing entries preserved."
+    if ($blocked) { foreach ($policy in $policies) { $script:EdgePolicyStates[$policy] = $false }; return }
+    foreach ($policy in $policies) {
+        $requiresApproval = $policy -eq 'OverrideSecurityRestrictionsOnInsecureOrigin'
+        Set-EdgePolicyOrigin $policy $Origin $Diagnose $Managed $requiresApproval ($Mode -ne 'HostRepair') $Interactive $MachineRoot
+    }
+    if ($script:EdgePolicyChanges.Count -gt 0) {
+        Add-Action ('New Edge policy entries were installed: ' + ($script:EdgePolicyChanges -join ', ') + '. Close and reopen Edge; a policy reload alone does not activate the insecure-origin exception. Then verify the effective origin and policies in edge://policy.')
+    }
 }
 function Get-EsclEndpoint([string[]]$Candidates, [string]$Origin) {
     # 50 asynchronous probes share one bounded deadline. No physical scan is started.
@@ -201,6 +272,19 @@ function Set-ScannerHostFirewall([uri]$Endpoint, [string[]]$Sources, [bool]$Diag
     [void](New-NetFirewallRule -Name $name -DisplayName $name -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Endpoint.Port -RemoteAddress $Sources -Profile Domain,Private)
     Write-SetupLog "Scanner-host firewall: added restricted TCP port $($Endpoint.Port) for $($Sources -join ', '). Existing firewall policies were preserved."
 }
+function Get-SetupReadinessMessages([string]$Naps2State, [bool]$HttpReady, [bool]$PoliciesConfigured, [bool]$RestartRequired, [string]$RestartDetails) {
+    $restartState = if ($RestartRequired) { "restart Edge is required after new policy entries ($RestartDetails); then inspect edge://policy." }
+        elseif ($PoliciesConfigured) { 'No new Edge policy entries this run; no additional restart is requested. Confirm effective settings in edge://policy.' }
+        else { 'pending required policy configuration; see Action required.' }
+    return @(
+        "READINESS 1/6 - NAPS2 installed and configuration valid: $Naps2State"
+        "READINESS 2/6 - NAPS2 HTTP capabilities and CORS responding: $HttpReady"
+        "READINESS 3/6 - Applicable Edge registry policies configured: $PoliciesConfigured"
+        "READINESS 4/6 - Edge restart/policy verification: $restartState"
+        'READINESS 5/6 - RISpro browser Test Connection: not run by setup; required after Edge policy verification.'
+        'READINESS 6/6 - Physical Test Scan: not run by setup; required in RISpro. Setup does not claim physical scanning success.'
+    )
+}
 function Invoke-Naps2Setup {
     if ($Mode -notin @('Repair', 'Diagnose', 'HostRepair')) { throw 'Usage: RISpro-NAPS2-Setup.cmd [Repair|Diagnose|HostRepair]' }
     $os = Get-CimInstance Win32_OperatingSystem
@@ -234,17 +318,34 @@ function Invoke-Naps2Setup {
         $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path (Split-Path $path) 'NAPS2.exe')).FileVersion
         Write-SetupLog "NAPS2 version: $version"
         Assert-Naps2Version $version
-        Set-Naps2Xml $path $diagnose
+        $script:Naps2ConfigurationValid = Set-Naps2Xml $path $diagnose
     } else { Write-SetupLog 'Role: scanner client. NAPS2 installation/XML and inbound firewall are managed on the remote scanner host.' }
     $machine = Get-CimInstance Win32_ComputerSystem
     $managed = $machine.PartOfDomain -or @(Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts' -ErrorAction SilentlyContinue).Count -gt 0
-    $userRoots = @(Get-ChildItem Registry::HKEY_USERS | Where-Object { $_.PSChildName -match '^S-1-5-21-(\d+-){3}\d+$' } | ForEach-Object { 'Registry::' + $_.Name + '\SOFTWARE\Policies\Microsoft\Edge' })
-    Set-EdgeOriginPolicy $origin $diagnose $managed 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' $userRoots
-    $edge = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'Microsoft\Edge\Application\msedge.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if (-not $edge) { Add-Action 'Microsoft Edge installation was not found.' }
-    elseif ([version](Get-Item -LiteralPath $edge).VersionInfo.ProductVersion -lt [version]'140.0') { Add-Action 'Edge 140 or later is required for LocalNetworkAccessAllowedForUrls. Ask the administrator to update Edge.' }
+    $userRoots = @('HKCU:\SOFTWARE\Policies\Microsoft\Edge') + @(Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^S-1-5-21-(\d+-){3}\d+$' } | ForEach-Object { 'Registry::' + $_.Name + '\SOFTWARE\Policies\Microsoft\Edge' } | Select-Object -Unique)
+    $edgeCandidates = @()
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432)) { if ($root) { $edgeCandidates += Join-Path $root 'Microsoft\Edge\Application\msedge.exe' } }
+    if ($env:LOCALAPPDATA) { $edgeCandidates += Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe' }
+    $edge = Find-EdgeExecutable $edgeCandidates
+    $edgeVersion = $null
+    if (-not $edge) { Add-Action 'Microsoft Edge installation was not found in supported machine or per-user installation paths. No browser policy was written.' }
+    else {
+        $edgeProductVersion = ''
+        try { $edgeProductVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($edge).ProductVersion } catch { }
+        $edgeVersion = ConvertTo-EdgeVersion $edgeProductVersion
+        if ($null -eq $edgeVersion) {
+            Write-SetupLog "Microsoft Edge executable: $edge; unrecognized ProductVersion: '$edgeProductVersion'"
+            Add-Action 'The installed Microsoft Edge ProductVersion could not be parsed as a four-part Windows version. No browser policy was written.'
+        } else {
+            Write-SetupLog "Microsoft Edge version detected from msedge.exe: $edgeVersion (ProductVersion $edgeProductVersion)"
+            if ($edgeVersion -lt [version]'77.0.0.0') {
+                Add-Action "Microsoft Edge $edgeVersion is unsupported for the insecure-origin policy (requires Edge 77 or later). No browser policy was written. Ask the administrator to update Edge."
+            } else { Set-EdgeOriginPolicy $origin $edgeVersion $diagnose $managed 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' $userRoots $Mode ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) }
+        }
+    }
     $candidates = if ($endpoint) { @($endpoint) } else { @(9801..9850 | ForEach-Object { 'http://127.0.0.1:' + $_ }) }
     $found = @(Get-EsclEndpoint $candidates $origin.GetLeftPart([UriPartial]::Authority))
+    $httpReady = $found.Count -eq 1 -and [bool]$found[0].Cors
     Write-SetupLog "Scanner Sharing active / compatible HTTP endpoint count: $($found.Count)"
     foreach ($scanner in $found) { Write-SetupLog "HTTP endpoint responds: $($scanner.Endpoint); browser-origin CORS: $($scanner.Cors)" }
     if ($found.Count -eq 0) { Add-Action 'No compatible HTTP scanner responded. Enable Scanner Sharing, keep NAPS2 running with background sharing enabled, check device/network/port. If XML was repaired, exit and reopen NAPS2 after all scans finish, then rerun setup.' }
@@ -252,9 +353,11 @@ function Invoke-Naps2Setup {
     elseif (-not $found[0].Cors) { Add-Action 'HTTP responds but CORS does not allow RISpro. Exit and reopen NAPS2 after all scans finish to load appsettings.xml, then rerun setup. Setup never stops an active scan.' }
     if ($Mode -eq 'HostRepair' -and $found.Count -eq 1) { Set-ScannerHostFirewall ([uri]$found[0].Endpoint) @($config.sources) $diagnose }
     else { Write-SetupLog 'Inbound firewall: unchanged. Loopback scanners and scanner clients need no inbound exception.' }
-    Write-SetupLog 'Registry configuration was checked. Effective cloud/domain/profile policy can only be confirmed in Edge: edge://policy > Reload policies. Test connection and Test scan in RISpro; no paper was scanned by this setup.'
+    $naps2State = if ($remote -and $Mode -ne 'HostRepair') { 'not checked on this scanner client; NAPS2 is on the remote scanner host' } else { [string]$script:Naps2ConfigurationValid }
+    $policyConfigured = $script:EdgePolicyStates.Count -gt 0 -and @($script:EdgePolicyStates.Values | Where-Object { -not $_ }).Count -eq 0
+    foreach ($readiness in (Get-SetupReadinessMessages $naps2State $httpReady $policyConfigured ($script:EdgePolicyChanges.Count -gt 0) ($script:EdgePolicyChanges -join ', '))) { Write-SetupLog $readiness }
     if ($script:Issues.Count -gt 0) { Write-SetupLog ('RESULT: Action required - ' + ($script:Issues -join ' | ')); return 2 }
-    Write-SetupLog 'RESULT: Ready - XML, exact machine policy and compatible HTTP/CORS endpoint verified. Confirm effective Edge policy and physical scanning in RISpro.'
+    Write-SetupLog 'RESULT: Setup ready — browser verification required. NAPS2 configuration, exact applicable Edge registry policies and HTTP capabilities/CORS were checked. Confirm effective policy in edge://policy, then run Test Connection and Test Scan in RISpro.'
     return 0
 }
 

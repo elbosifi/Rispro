@@ -87,60 +87,172 @@ try {
         Set-Naps2Xml $xmlPath $true
         Assert ([IO.File]::ReadAllText($xmlPath) -eq $content) 'Diagnose changed XML'
     }
-    # Simulated registry: exercise the real policy function without changing host policies.
+    # Simulated registry: exercise real policy functions without touching Windows policy.
     $script:Registry = @{}
+    $script:RegistryTypes = @{}
     $script:DenyWrite = $false
+    $script:ConfirmationAnswer = 'YES'
+    $script:ReadHostCalls = 0
     $policyRoot = Join-Path $temp 'Edge'
-    $script:PolicyPath = Join-Path $policyRoot 'LocalNetworkAccessAllowedForUrls'
-    $script:Registry[$script:PolicyPath] = @{ '1' = 'https://existing.example:443'; '3' = 'http://192.9.101.30:8081' }
+    function Reset-PolicyRegistry {
+        $script:Registry = @{}
+        $script:RegistryTypes = @{}
+        $script:DenyWrite = $false
+        $script:Issues.Clear()
+        $script:ReadHostCalls = 0
+    }
+    function Test-Path([string]$LiteralPath, [string]$PathType = 'Any') {
+        if ($script:Registry.ContainsKey($LiteralPath)) { return $true }
+        Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath -PathType $PathType
+    }
     function Get-PolicyValues([string]$Path) { if ($script:Registry.ContainsKey($Path)) { $script:Registry[$Path].Values } }
     function Get-Item([string]$LiteralPath) {
         if ($script:Registry.ContainsKey($LiteralPath)) {
-            $item = [pscustomobject]@{ Entries = $script:Registry[$LiteralPath] }
+            $item = [pscustomobject]@{ Entries = $script:Registry[$LiteralPath]; Kinds = $script:RegistryTypes[$LiteralPath] }
             $item | Add-Member ScriptMethod GetValueNames { @($this.Entries.Keys) }
+            $item | Add-Member ScriptMethod GetValue { param($Name) $this.Entries[$Name] }
+            $item | Add-Member ScriptMethod GetValueKind { param($Name) $this.Kinds[$Name] }
             return $item
         }
         Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath
     }
+    function New-Item([string]$Path, [switch]$Force) {
+        if ($script:DenyWrite) { throw 'Registry permission denied by enterprise policy' }
+        if (-not $script:Registry.ContainsKey($Path)) { $script:Registry[$Path] = @{}; $script:RegistryTypes[$Path] = @{} }
+        return [pscustomobject]@{ Path = $Path }
+    }
     function New-ItemProperty([string]$LiteralPath, [string]$Name, [string]$PropertyType, [string]$Value) {
         if ($script:DenyWrite) { throw 'Registry permission denied by enterprise policy' }
+        if (-not $script:Registry.ContainsKey($LiteralPath)) { throw 'Policy key does not exist' }
         if ($script:Registry[$LiteralPath].ContainsKey($Name)) { throw 'Attempted to overwrite existing policy' }
         $script:Registry[$LiteralPath][$Name] = $Value
+        $script:RegistryTypes[$LiteralPath][$Name] = if ($PropertyType -eq 'String') { [Microsoft.Win32.RegistryValueKind]::String } else { $PropertyType }
     }
-    Check 'exact HTTP origin with explicit port preserves all existing Edge entries' {
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.30:8080') $false $false $policyRoot
-        Assert ($script:Registry[$script:PolicyPath]['1'] -eq 'https://existing.example:443') 'Existing policy overwritten'
-        Assert ($script:Registry[$script:PolicyPath]['3'] -eq 'http://192.9.101.30:8081') 'Other port overwritten'
-        Assert ($script:Registry[$script:PolicyPath]['2'] -eq 'http://192.9.101.30:8080') 'Exact origin not added in unused slot'
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.30:8080') $false $false $policyRoot
-        Assert ($script:Registry[$script:PolicyPath].Count -eq 3) 'Duplicate policy added'
+    function Read-Host([string]$Prompt) { $script:ReadHostCalls++; return $script:ConfirmationAnswer }
+    $script:PolicyMachineRoot = $policyRoot
+    $script:PolicyOrigin = [uri]'http://192.9.101.30:8080'
+    $script:PolicyExact = 'http://192.9.101.30:8080'
+
+    Check 'Edge four-part version parsing and missing executable fail safely' {
+        Assert ((ConvertTo-EdgeVersion '146.0.3124.51') -eq [version]'146.0.3124.51') 'Valid Edge version was not parsed'
+        foreach ($invalid in @('', '146.0.3124', '146.0.3124.51-beta', 'unknown', '999999999999.0.0.0')) { Assert ($null -eq (ConvertTo-EdgeVersion $invalid)) "Invalid Edge version accepted: $invalid" }
+        Assert ($null -eq (Find-EdgeExecutable @((Join-Path $temp 'missing-msedge.exe')))) 'Missing Edge executable was accepted'
     }
-    Check 'default HTTP port is restricted to :80, with no wildcard' {
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.30') $false $false $policyRoot
-        Assert ($script:Registry[$script:PolicyPath].Values -contains 'http://192.9.101.30:80') 'Default port missing'
+    Check 'Edge version matrix writes only supported exact-origin policies' {
+        $matrix = @(
+            @{ Version = '76.0.0.0'; Policies = @() },
+            @{ Version = '77.0.0.0'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin') },
+            @{ Version = '139.0.0.0'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin') },
+            @{ Version = '140.0.0.0'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls') },
+            @{ Version = '145.0.0.0'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls') },
+            @{ Version = '146.0.0.0'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls', 'LoopbackNetworkAllowedForUrls') },
+            @{ Version = '151.2.3.4'; Policies = @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls', 'LoopbackNetworkAllowedForUrls') }
+        )
+        foreach ($case in $matrix) {
+            Reset-PolicyRegistry
+            $version = ConvertTo-EdgeVersion $case.Version
+            Set-EdgeOriginPolicy $script:PolicyOrigin $version $false $false $script:PolicyMachineRoot @() 'Repair' $true
+            $actual = @($script:Registry.Keys | Where-Object { $_ -match '\\(OverrideSecurityRestrictionsOnInsecureOrigin|LocalNetworkAccessAllowedForUrls|LoopbackNetworkAllowedForUrls)$' } | ForEach-Object { Split-Path $_ -Leaf })
+            Assert (@(Compare-Object @($case.Policies | Sort-Object) @($actual | Sort-Object)).Count -eq 0) "Wrong policy set for Edge $($case.Version): $($actual -join ', ')"
+            foreach ($policy in $case.Policies) {
+                $path = Join-Path $script:PolicyMachineRoot $policy
+                Assert (@($script:Registry[$path].Values) -contains $script:PolicyExact) "Edge $($case.Version) policy $policy did not use exact origin and port"
+                Assert (@($script:RegistryTypes[$path].Values | Where-Object { $_ -ne [Microsoft.Win32.RegistryValueKind]::String }).Count -eq 0) "Edge $($case.Version) policy $policy was not REG_SZ"
+            }
+            if ($version -lt [version]'77.0.0.0') { Assert ($script:Issues -match 'unsupported') 'Edge 76 did not report unsupported version' }
+        }
     }
-    Check 'higher-priority loopback blocking policy is reported and preserved' {
-        Assert (Test-PolicyPattern 'http://192.9.101.30' ([uri]'http://192.9.101.30:8080')) 'A pattern with no port must match every port'
-        Assert (-not (Test-PolicyPattern 'http://192.9.101.30:8081' ([uri]'http://192.9.101.30:8080'))) 'Wrong port matched'
-        $blockPath = Join-Path $policyRoot 'LoopbackNetworkBlockedForUrls'
-        $script:Registry[$blockPath] = @{ '1' = '*' }
-        $count = $script:Registry[$script:PolicyPath].Count
-        $script:Issues.Clear()
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.31') $false $false $policyRoot
-        Assert ($script:Issues[0] -match 'Higher-priority.*Loopback') 'Missing blocking-policy diagnosis'
-        Assert ($script:Registry[$script:PolicyPath].Count -eq $count) 'Wrote policy despite blocker'
-        $script:Registry.Remove($blockPath)
+    Check 'exact policy entry preserves unrelated values, uses next free slot and is idempotent' {
+        Reset-PolicyRegistry
+        $path = Join-Path $script:PolicyMachineRoot 'LocalNetworkAccessAllowedForUrls'
+        $script:Registry[$path] = @{ '1' = 'https://existing.example:443'; '3' = 'http://192.9.101.30:8081' }
+        $script:RegistryTypes[$path] = @{ '1' = [Microsoft.Win32.RegistryValueKind]::String; '3' = [Microsoft.Win32.RegistryValueKind]::String }
+        Set-EdgePolicyOrigin 'LocalNetworkAccessAllowedForUrls' $script:PolicyOrigin $false $false $false $true $true $script:PolicyMachineRoot
+        Assert ($script:Registry[$path]['1'] -eq 'https://existing.example:443') 'Existing policy overwritten'
+        Assert ($script:Registry[$path]['3'] -eq 'http://192.9.101.30:8081') 'Other port overwritten'
+        Assert ($script:Registry[$path]['2'] -eq $script:PolicyExact) 'Exact origin not added in the next free numeric slot'
+        Assert ($script:RegistryTypes[$path]['2'] -eq [Microsoft.Win32.RegistryValueKind]::String) 'New value was not REG_SZ'
+        $before = $script:Registry[$path].Count
+        Set-EdgePolicyOrigin 'LocalNetworkAccessAllowedForUrls' $script:PolicyOrigin $false $false $false $true $true $script:PolicyMachineRoot
+        Assert ($script:Registry[$path].Count -eq $before) 'Repeated policy repair created a duplicate'
     }
-    Check 'domain managed and diagnostic modes never write missing Edge policy' {
-        $count = $script:Registry[$script:PolicyPath].Count
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.31') $false $true $policyRoot
-        Set-EdgeOriginPolicy ([uri]'http://192.9.101.31') $true $false $policyRoot
-        Assert ($script:Registry[$script:PolicyPath].Count -eq $count) 'Changed managed/diagnostic policy'
+    Check 'already configured insecure-origin policy does not prompt again' {
+        Reset-PolicyRegistry
+        $path = Join-Path $script:PolicyMachineRoot 'OverrideSecurityRestrictionsOnInsecureOrigin'
+        $script:Registry[$path] = @{ '4' = $script:PolicyExact }
+        $script:RegistryTypes[$path] = @{ '4' = [Microsoft.Win32.RegistryValueKind]::String }
+        Set-EdgePolicyOrigin 'OverrideSecurityRestrictionsOnInsecureOrigin' $script:PolicyOrigin $false $false $true $true $true $script:PolicyMachineRoot
+        Assert ($script:ReadHostCalls -eq 0) 'Already configured policy prompted for approval'
+        Assert ($script:Issues.Count -eq 0) 'Correct existing exception was reported as missing'
     }
-    Check 'registry permissions produce an actionable failure' {
+    Check 'declined or noninteractive insecure-origin approval never writes the policy' {
+        foreach ($case in @(@{ Answer = 'NO'; Interactive = $true }, @{ Answer = 'YES'; Interactive = $false })) {
+            Reset-PolicyRegistry
+            $script:ConfirmationAnswer = $case.Answer
+            Set-EdgePolicyOrigin 'OverrideSecurityRestrictionsOnInsecureOrigin' $script:PolicyOrigin $false $false $true $true $case.Interactive $script:PolicyMachineRoot
+            $path = Join-Path $script:PolicyMachineRoot 'OverrideSecurityRestrictionsOnInsecureOrigin'
+            Assert (-not $script:Registry.ContainsKey($path)) 'Policy was written without affirmative interactive approval'
+            Assert ($script:Issues -match 'approval.*declined or unavailable') 'Missing Action required diagnostic'
+            if (-not $case.Interactive) { Assert ($script:ReadHostCalls -eq 0) 'Noninteractive run attempted to read confirmation' }
+        }
+        $script:ConfirmationAnswer = 'YES'
+    }
+    Check 'missing registry permissions produce an actionable diagnostic' {
+        Reset-PolicyRegistry
         $script:DenyWrite = $true
-        Expect-Failure { Set-EdgeOriginPolicy ([uri]'http://192.9.101.31') $false $false $policyRoot } 'permission denied'
-        $script:DenyWrite = $false
+        Set-EdgePolicyOrigin 'LocalNetworkAccessAllowedForUrls' $script:PolicyOrigin $false $false $false $true $true $script:PolicyMachineRoot
+        Assert ($script:Issues -match 'Could not configure Edge policy LocalNetworkAccessAllowedForUrls.*permissions') 'Missing registry permission diagnostic'
+        Assert ($script:Registry.Count -eq 0) 'Policy registry changed after permission denial'
+    }
+    Check 'managed devices and Diagnose do not write policies and name central requirements' {
+        Reset-PolicyRegistry
+        Set-EdgeOriginPolicy $script:PolicyOrigin ([version]'146.0.0.0') $false $true $script:PolicyMachineRoot @() 'Repair' $true
+        Assert ($script:Registry.Count -eq 0) 'Managed machine registry was modified'
+        foreach ($policy in @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls', 'LoopbackNetworkAllowedForUrls')) { Assert ($script:Issues -match [regex]::Escape($policy)) "Managed diagnostic omitted $policy" }
+        Reset-PolicyRegistry
+        Set-EdgeOriginPolicy $script:PolicyOrigin ([version]'146.0.0.0') $true $false $script:PolicyMachineRoot @() 'Diagnose' $true
+        Assert ($script:Registry.Count -eq 0) 'Diagnose wrote policy registry values'
+        foreach ($policy in @('OverrideSecurityRestrictionsOnInsecureOrigin', 'LocalNetworkAccessAllowedForUrls', 'LoopbackNetworkAllowedForUrls')) { Assert ($script:Issues -match [regex]::Escape($policy)) "Diagnose omitted required policy $policy" }
+    }
+    Check 'malformed or unknown Edge version and Edge 76 write no policies' {
+        foreach ($version in @($null, (ConvertTo-EdgeVersion '146.0.3124'))) {
+            Reset-PolicyRegistry
+            Set-EdgeOriginPolicy $script:PolicyOrigin $version $false $false $script:PolicyMachineRoot @() 'Repair' $true
+            Assert ($script:Registry.Count -eq 0) 'Unknown version wrote Edge policies'
+        }
+        Reset-PolicyRegistry
+        Set-EdgeOriginPolicy $script:PolicyOrigin ([version]'76.0.0.0') $false $false $script:PolicyMachineRoot @() 'Repair' $true
+        Assert ($script:Registry.Count -eq 0) 'Edge 76 wrote an insecure-origin policy'
+    }
+    Check 'user-level higher-priority blockers are reported and preserved' {
+        Reset-PolicyRegistry
+        Assert (Test-PolicyPattern 'http://192.9.101.30' $script:PolicyOrigin) 'A pattern with no port must match every port'
+        Assert (-not (Test-PolicyPattern 'http://192.9.101.30:8081' $script:PolicyOrigin)) 'Wrong port matched'
+        $userRoot = Join-Path $temp 'UserEdge'
+        $blockPath = Join-Path $userRoot 'LoopbackNetworkBlockedForUrls'
+        $script:Registry[$blockPath] = @{ '1' = '*' }
+        $script:RegistryTypes[$blockPath] = @{ '1' = [Microsoft.Win32.RegistryValueKind]::String }
+        Set-EdgeOriginPolicy $script:PolicyOrigin ([version]'146.0.0.0') $false $false $script:PolicyMachineRoot @($userRoot) 'Repair' $true
+        Assert ($script:Issues -match 'Higher-priority.*LoopbackNetworkBlockedForUrls') 'Missing user-level blocking-policy diagnosis'
+        Assert ($script:Registry.Keys -notmatch 'AllowedForUrls|OverrideSecurity') 'Wrote policy despite higher-priority blocker'
+        Assert ($script:Registry[$blockPath]['1'] -eq '*') 'Blocking policy was modified'
+    }
+    Check 'HostRepair never silently adds the insecure-origin exception' {
+        Reset-PolicyRegistry
+        Set-EdgeOriginPolicy $script:PolicyOrigin ([version]'146.0.0.0') $false $false $script:PolicyMachineRoot @() 'HostRepair' $true
+        $overridePath = Join-Path $script:PolicyMachineRoot 'OverrideSecurityRestrictionsOnInsecureOrigin'
+        Assert (-not $script:Registry.ContainsKey($overridePath)) 'HostRepair added insecure-origin exception'
+        Assert ($script:Issues -match 'HostRepair did not add.*OverrideSecurityRestrictionsOnInsecureOrigin') 'HostRepair omission was not reported'
+        Assert ($script:ReadHostCalls -eq 0) 'HostRepair prompted for or approved the exception'
+    }
+    Check 'readiness reporting keeps HTTP response separate from browser and physical acceptance' {
+        $messages = @(Get-SetupReadinessMessages 'True' $true $true $true 'OverrideSecurityRestrictionsOnInsecureOrigin')
+        Assert ($messages[1] -match 'HTTP capabilities and CORS responding: True') 'Missing HTTP readiness state'
+        Assert ($messages[3] -match 'restart Edge is required') 'New policy did not require restart'
+        Assert ($messages[4] -match 'browser Test Connection: not run') 'HTTP success claimed browser Test Connection'
+        Assert ($messages[5] -match 'Physical Test Scan: not run.*does not claim physical scanning success') 'HTTP success claimed physical scan success'
+        $repeat = @(Get-SetupReadinessMessages 'True' $true $true $false '')
+        Assert ($repeat[3] -match 'no additional restart is requested') 'Repeated complete Repair required another restart'
     }
     function Get-NetIPAddress { [pscustomobject]@{ IPAddress = '192.9.101.40' } }
     function Get-NetFirewallRule { @() }
