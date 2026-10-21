@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorkstationPrintingPage from "./workstation-printing-page";
-import { WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
+import {
+  WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY,
+  WORKSTATION_NAPS2_SETTINGS_KEY,
+  saveWorkstationNaps2ScanPreferences,
+} from "@/services/scanning/workstation-naps2-settings";
 
 const { mockPushToast, mockGetNaps2WebScanStatus, mockFetchIntegrationStatus, mockScan, mockCreateObjectURL, mockRevokeObjectURL } = vi.hoisted(() => ({
   mockCreateObjectURL: vi.fn(),
@@ -33,6 +37,15 @@ vi.mock("@/pages/settings/qz-tray-printing-section", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
 vi.mock("@/lib/api-hooks", () => ({ fetchIntegrationStatus: () => mockFetchIntegrationStatus() }));
+vi.mock("@/providers/language-provider", async () => {
+  const { t } = await import("@/lib/i18n");
+  return {
+    useLanguage: () => ({
+      language: "en",
+      t: (key: string, params?: Record<string, string | number>) => t("en", key as import("@/lib/i18n").TranslationKey, params),
+    }),
+  };
+});
 vi.mock("@/lib/naps2-webscan", () => ({
   getNaps2WebScanStatus: (...args: unknown[]) => mockGetNaps2WebScanStatus(...args),
   normalizeNaps2Source: (value: unknown) => ["auto", "feeder", "flatbed", "duplex"].includes(String(value)) ? value : "feeder",
@@ -193,6 +206,61 @@ describe("WorkstationPrintingPage", () => {
     expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ source: "auto", dpi: 300, colorMode: "color" }));
     expect(await screen.findByText(/Test scan succeeded: 2 pages \(Flatbed; feeder empty\)\./)).toBeTruthy();
     expect(screen.getByText(/No patient document was uploaded or linked/)).toBeTruthy();
+  });
+
+  it("saves and resets local scan preferences without changing the scanner endpoint", async () => {
+    localStorage.setItem(WORKSTATION_NAPS2_SETTINGS_KEY, JSON.stringify({ version: 1, endpoint: "http://local-scanner:9801", updatedAt: new Date().toISOString() }));
+    render(<WorkstationPrintingPage />);
+
+    fireEvent.change(await screen.findByLabelText("Paper source"), { target: { value: "flatbed" } });
+    fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "300" } });
+    fireEvent.change(screen.getByLabelText("Color mode"), { target: { value: "color" } });
+    expect(screen.getByText("Effective: Flatbed · 300 DPI · Color")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save workstation preferences" }));
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY) || "null").overrides).toEqual({ source: "flatbed", dpi: 300, colorMode: "color" }));
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY)).toContain("local-scanner");
+    expect(mockFetchIntegrationStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset scan preferences to system defaults" }));
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY)).toBeNull();
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SETTINGS_KEY)).toContain("local-scanner");
+  });
+
+  it("reports a local-storage save failure instead of showing success", async () => {
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY) throw new Error("Browser storage blocked");
+      return originalSetItem.call(this, key, value);
+    });
+    render(<WorkstationPrintingPage />);
+    fireEvent.change(await screen.findByLabelText("Resolution"), { target: { value: "400" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save workstation preferences" }));
+
+    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Unable to save workstation scan preferences.",
+      message: "Browser storage blocked",
+    }));
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY)).toBeNull();
+  });
+
+  it("uses saved effective preferences for Test Scan without uploading a document", async () => {
+    saveWorkstationNaps2ScanPreferences({ source: "auto", dpi: 600, colorMode: "color" });
+    mockFetchIntegrationStatus.mockResolvedValueOnce({ scanner: {
+      naps2WebScanEnabled: true,
+      naps2WebScanEndpoint: "http://system-scanner:9801",
+      scannerSource: "feeder",
+      scanDpi: "200",
+      scanColorMode: "grayscale",
+    } });
+    mockScan.mockResolvedValueOnce({ pageCount: 1, paperSourceUsed: "feeder" });
+    render(<WorkstationPrintingPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test scan" }));
+    await waitFor(() => expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ source: "auto", dpi: 600, colorMode: "color" })));
+    expect(screen.getByText(/No patient document was uploaded or linked/)).toBeTruthy();
+    expect(mockFetchIntegrationStatus).toHaveBeenCalledTimes(1);
   });
 
   it("shows a server configuration error without creating or downloading a CMD, then supports retry", async () => {

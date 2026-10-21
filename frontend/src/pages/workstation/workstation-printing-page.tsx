@@ -4,13 +4,19 @@ import type { IntegrationStatus } from "@/lib/api/documents-printing";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
 import { fetchIntegrationStatus } from "@/lib/api-hooks";
-import { getNaps2WebScanStatus, normalizeNaps2Source, scanAppointmentRequest, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
+import { getNaps2WebScanStatus, scanAppointmentRequest, type Naps2ScanSource, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
 import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
+import { useLanguage } from "@/providers/language-provider";
 import {
+  loadWorkstationNaps2ScanPreferences,
   loadWorkstationNaps2Settings,
+  resetWorkstationNaps2ScanPreferences,
   resetWorkstationNaps2Settings,
+  resolveEffectiveNaps2ScanPreferences,
   resolveEffectiveNaps2Endpoint,
+  saveWorkstationNaps2ScanPreferences,
   saveWorkstationNaps2Settings,
+  type Naps2ScanPreferenceOverrides,
 } from "@/services/scanning/workstation-naps2-settings";
 
 const MANIFEST_URL = "/api/public/printing-bootstrap/manifest";
@@ -37,7 +43,9 @@ export default function WorkstationPrintingPage() {
 }
 
 export function WorkstationNaps2Section() {
+  const { t } = useLanguage();
   const [endpointInput, setEndpointInput] = useState(() => loadWorkstationNaps2Settings()?.endpoint || "");
+  const [scanPreferenceOverrides, setScanPreferenceOverrides] = useState<Naps2ScanPreferenceOverrides>(() => loadWorkstationNaps2ScanPreferences()?.overrides ?? {});
   const [scanner, setScanner] = useState<IntegrationStatus["scanner"] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [testing, setTesting] = useState(false);
@@ -63,6 +71,22 @@ export function WorkstationNaps2Section() {
   catch (error) { endpointError = error instanceof Error ? error.message : "Invalid system scanner endpoint."; }
   const enabled = scanner?.naps2WebScanEnabled === true;
   const sourceLabel = effective.source === "workstation" ? "Workstation override" : effective.source === "system" ? "System default" : "Automatic localhost discovery";
+  const globalScanPreferences = {
+    source: scanner?.scannerSource,
+    dpi: scanner?.scanDpi,
+    colorMode: scanner?.scanColorMode,
+  };
+  const systemScanPreferences = resolveEffectiveNaps2ScanPreferences(globalScanPreferences, {}, {});
+  const effectiveScanPreferences = resolveEffectiveNaps2ScanPreferences(globalScanPreferences, {}, scanPreferenceOverrides);
+  const scanSourceLabel = (source: Naps2ScanSource) => source === "auto"
+    ? t("settings.documents.autoSource")
+    : source === "flatbed" ? t("settings.documents.flatbed") : source === "duplex" ? t("settings.documents.duplex") : t("settings.documents.feeder");
+  const scanColorLabel = (colorMode: "grayscale" | "color") => t(colorMode === "color" ? "settings.documents.color" : "settings.documents.grayscale");
+  const effectiveScanSummary = t("scanPreferences.effective", {
+    source: scanSourceLabel(effectiveScanPreferences.source),
+    dpi: effectiveScanPreferences.dpi,
+    colorMode: scanColorLabel(effectiveScanPreferences.colorMode),
+  });
 
   async function downloadSetup() {
     if (downloading) return;
@@ -115,8 +139,13 @@ export function WorkstationNaps2Section() {
       if (!status.available) throw new Error(status.message);
       if (scan) {
         setScanMessage("Scanning test paper…");
-        const requestedSource = normalizeNaps2Source(scanner.scannerSource);
-        const result = await scanAppointmentRequest({ endpoint: status.endpoint, allowedOrigins: scanner.naps2WebScanAllowedOrigins, dpi: Number(scanner.scanDpi || 200), colorMode: scanner.scanColorMode === "color" ? "color" : "grayscale", source: requestedSource, fileName: "naps2-test-scan.pdf" });
+        const requestedPreferences = resolveEffectiveNaps2ScanPreferences({
+          source: scanner.scannerSource,
+          dpi: scanner.scanDpi,
+          colorMode: scanner.scanColorMode,
+        });
+        const result = await scanAppointmentRequest({ endpoint: status.endpoint, allowedOrigins: scanner.naps2WebScanAllowedOrigins, ...requestedPreferences, fileName: "naps2-test-scan.pdf" });
+        const requestedSource = requestedPreferences.source;
         const physicalSource = result.paperSourceUsed ?? (requestedSource === "auto" ? "feeder" : requestedSource);
         const sourceLabel = physicalSource === "flatbed"
           ? requestedSource === "auto" ? "Flatbed; feeder empty" : "Flatbed"
@@ -138,6 +167,34 @@ export function WorkstationNaps2Section() {
     clearResult();
   }
 
+  function saveScanPreferences() {
+    try {
+      const saved = saveWorkstationNaps2ScanPreferences(scanPreferenceOverrides);
+      setScanPreferenceOverrides(saved.overrides);
+      pushToast({ type: "success", title: t("scanPreferences.save"), message: t("scanPreferences.saved") });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: t("scanPreferences.saveFailed"),
+        message: error instanceof Error ? error.message : t("scanPreferences.saveFailed"),
+      });
+    }
+  }
+
+  function resetScanPreferences() {
+    try {
+      resetWorkstationNaps2ScanPreferences();
+      setScanPreferenceOverrides({});
+      pushToast({ type: "success", title: t("scanPreferences.reset"), message: t("scanPreferences.resetDone") });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: t("scanPreferences.resetFailed"),
+        message: error instanceof Error ? error.message : t("scanPreferences.resetFailed"),
+      });
+    }
+  }
+
   return (
     <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="workstation-naps2-title">
       <h2 id="workstation-naps2-title" className="font-semibold">Workstation NAPS2 scanner</h2>
@@ -153,6 +210,64 @@ export function WorkstationNaps2Section() {
         <StatusItem label="Effective scanner endpoint" value={effective.endpoint || connection?.endpoint || "Automatic HTTP loopback discovery, ports 9801–9850"} mono />
         <StatusItem label="Endpoint source" value={sourceLabel} />
       </dl>
+      <section className="mt-4 rounded-lg border border-border p-3" aria-labelledby="workstation-scan-preferences-title">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 id="workstation-scan-preferences-title" className="text-sm font-semibold">{t("scanPreferences.title")}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{t("scanPreferences.browserOnly")}</p>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground" role="status">{effectiveScanSummary}</p>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <label className="block text-sm">
+            <span className="font-medium">{t("scanPreferences.paperSource")}</span>
+            <select
+              className="input-premium mt-1 h-10 w-full"
+              value={scanPreferenceOverrides.source ?? ""}
+              disabled={testing}
+              onChange={(event) => setScanPreferenceOverrides((current) => ({ ...current, source: event.target.value ? event.target.value as Naps2ScanSource : undefined }))}
+            >
+              <option value="">{t("scanPreferences.useSystemDefault", { value: scanSourceLabel(systemScanPreferences.source) })}</option>
+              <option value="auto">{t("settings.documents.autoSource")}</option>
+              <option value="feeder">{t("settings.documents.feeder")}</option>
+              <option value="flatbed">{t("settings.documents.flatbed")}</option>
+              <option value="duplex">{t("settings.documents.duplex")}</option>
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium">{t("scanPreferences.dpi")}</span>
+            <select
+              className="input-premium mt-1 h-10 w-full"
+              value={scanPreferenceOverrides.dpi == null ? "" : String(scanPreferenceOverrides.dpi)}
+              disabled={testing}
+              onChange={(event) => setScanPreferenceOverrides((current) => ({ ...current, dpi: event.target.value ? Number(event.target.value) : undefined }))}
+            >
+              <option value="">{t("scanPreferences.useSystemDefault", { value: `${systemScanPreferences.dpi} DPI` })}</option>
+              {scanPreferenceOverrides.dpi != null && ![150, 200, 300, 400, 600].includes(scanPreferenceOverrides.dpi)
+                ? <option value={scanPreferenceOverrides.dpi}>{t("scanPreferences.customDpi", { dpi: scanPreferenceOverrides.dpi })}</option>
+                : null}
+              {[150, 200, 300, 400, 600].map((dpi) => <option key={dpi} value={dpi}>{dpi} DPI</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium">{t("scanPreferences.colorMode")}</span>
+            <select
+              className="input-premium mt-1 h-10 w-full"
+              value={scanPreferenceOverrides.colorMode ?? ""}
+              disabled={testing}
+              onChange={(event) => setScanPreferenceOverrides((current) => ({ ...current, colorMode: event.target.value ? event.target.value as "grayscale" | "color" : undefined }))}
+            >
+              <option value="">{t("scanPreferences.useSystemDefault", { value: scanColorLabel(systemScanPreferences.colorMode) })}</option>
+              <option value="grayscale">{t("settings.documents.grayscale")}</option>
+              <option value="color">{t("settings.documents.color")}</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button type="button" onClick={saveScanPreferences} disabled={testing}>{t("scanPreferences.save")}</Button>
+          <Button type="button" variant="secondary" onClick={resetScanPreferences} disabled={testing}>{t("scanPreferences.reset")}</Button>
+        </div>
+      </section>
       {loadError || endpointError ? <p className="mt-3 text-sm text-destructive" role="alert">{loadError || endpointError}</p> : null}
       {connection?.message ? <p className="mt-3 text-sm" role="status">{connection.message}</p> : null}
       <p className="mt-3 text-sm" role="status">{scanMessage}</p>

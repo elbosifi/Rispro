@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Loader2, ScanLine, Trash2, Upload } from "lucide-react";
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/shared";
 import { DocumentPreviewWorkspace } from "@/components/documents/document-preview-workspace";
+import { ScanOptionsDisclosure } from "@/components/documents/scan-options-disclosure";
 import {
   deleteComparisonDocument,
   fetchIntegrationStatus,
@@ -10,11 +11,15 @@ import {
   uploadComparisonDocument,
   type RequestDocument,
 } from "@/lib/api-hooks";
-import { normalizeNaps2Source, scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
+import {
+  resolveEffectiveNaps2Endpoint,
+  resolveEffectiveNaps2ScanPreferences,
+  type Naps2ScanPreferenceOverrides,
+} from "@/services/scanning/workstation-naps2-settings";
 
 async function fileToBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -42,8 +47,10 @@ export function ComparisonDocumentsPanel({
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [failedScanUpload, setFailedScanUpload] = useState<{ requestId: number; files: File[] } | null>(null);
+  const [oneTimeScanOverrides, setOneTimeScanOverrides] = useState<Naps2ScanPreferenceOverrides>({});
   const failedScans = failedScanUpload?.requestId === comparisonRequestId ? failedScanUpload.files : [];
   const scanLock = useRef(false);
+  useEffect(() => { setOneTimeScanOverrides({}); }, [comparisonRequestId]);
   const [file, setFile] = useState<File | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<RequestDocument | null>(null);
   const queryKey = useMemo(() => ["comparison-documents", comparisonRequestId], [comparisonRequestId]);
@@ -93,14 +100,17 @@ export function ComparisonDocumentsPanel({
       if (!enabled) throw new Error(t(language, "comparisons.scanDisabled"));
       const endpoint = resolveEffectiveNaps2Endpoint(scanner?.naps2WebScanEndpoint);
       if (scanLock.current) throw new Error("A scan is already in progress.");
+      const scanPreferences = resolveEffectiveNaps2ScanPreferences({
+        source: scanner?.scannerSource,
+        dpi: scanner?.scanDpi,
+        colorMode: scanner?.scanColorMode,
+      }, oneTimeScanOverrides);
       scanLock.current = true;
       try {
         const result = await scanAppointmentRequest({
           endpoint: endpoint.endpoint,
           allowedOrigins: scanner?.naps2WebScanAllowedOrigins,
-          dpi: Number(scanner?.scanDpi || 200),
-          colorMode: scanner?.scanColorMode === "color" ? "color" : "grayscale",
-          source: normalizeNaps2Source(scanner?.scannerSource),
+          ...scanPreferences,
           fileName: `comparison-${comparisonRequestId}-papers.pdf`,
         });
         const pending = result.files?.length ? [...result.files] : [result.file];
@@ -109,7 +119,10 @@ export function ComparisonDocumentsPanel({
           catch (error) { setFailedScanUpload({ requestId: comparisonRequestId, files: pending }); throw error; }
         }
         setFailedScanUpload(null);
-      } finally { scanLock.current = false; }
+      } finally {
+        scanLock.current = false;
+        setOneTimeScanOverrides({});
+      }
     },
     onError: (error) => pushToast({
       type: "error",
@@ -167,10 +180,20 @@ export function ComparisonDocumentsPanel({
               </Button>
             ) : null}
             {naps2Enabled ? (
-              <Button size="sm" variant="secondary" type="button" disabled={busy || failedScans.length > 0} onClick={() => scanMutation.mutate()}>
-                {scanMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={14} />}
-                {t(language, "comparisons.scan")}
-              </Button>
+              <>
+                <Button size="sm" variant="secondary" type="button" disabled={busy || failedScans.length > 0} onClick={() => scanMutation.mutate()}>
+                  {scanMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={14} />}
+                  {t(language, "comparisons.scan")}
+                </Button>
+                <ScanOptionsDisclosure
+                  className="mt-0 rounded-lg border border-border bg-background px-2.5 py-2"
+                  language={language}
+                  globalPreferences={{ source: scanner?.scannerSource, dpi: scanner?.scanDpi, colorMode: scanner?.scanColorMode }}
+                  overrides={oneTimeScanOverrides}
+                  onChange={setOneTimeScanOverrides}
+                  disabled={busy || failedScans.length > 0}
+                />
+              </>
             ) : null}
           </div>
         ) : null}

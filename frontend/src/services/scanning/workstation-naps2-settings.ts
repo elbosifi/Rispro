@@ -1,4 +1,27 @@
+import type { Naps2ScanSource } from "@/lib/naps2-webscan";
+
 export const WORKSTATION_NAPS2_SETTINGS_KEY = "rispro.naps2WebScanWorkstation.v1";
+export const WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY = "rispro.naps2ScanPreferences.v1";
+
+export type Naps2ScanPreferences = {
+  source: Naps2ScanSource;
+  dpi: number;
+  colorMode: "grayscale" | "color";
+};
+
+export type Naps2ScanPreferenceOverrides = Partial<Naps2ScanPreferences>;
+
+export type Naps2ScanPreferenceDefaults = {
+  source?: unknown;
+  dpi?: unknown;
+  colorMode?: unknown;
+};
+
+export interface StoredNaps2ScanPreferences {
+  version: 1;
+  overrides: Naps2ScanPreferenceOverrides;
+  updatedAt: string;
+}
 
 export interface WorkstationNaps2Settings {
   version: 1;
@@ -53,4 +76,95 @@ export function resolveEffectiveNaps2Endpoint(globalEndpoint?: string | null, st
   const systemEndpoint = globalEndpoint?.trim();
   if (systemEndpoint) return { endpoint: normalizeNaps2Origin(systemEndpoint), source: "system" };
   return { endpoint: undefined, source: "localhost" };
+}
+
+function availableStorage(storage?: Storage): Storage | undefined {
+  if (storage) return storage;
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function validScanSource(value: unknown): value is Naps2ScanSource {
+  return value === "auto" || value === "feeder" || value === "flatbed" || value === "duplex";
+}
+
+function validColorMode(value: unknown): value is "grayscale" | "color" {
+  return value === "grayscale" || value === "color";
+}
+
+function validDpi(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 50 && value <= 1200;
+}
+
+function globalDpi(value: unknown): number {
+  const parsed = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value;
+  return validDpi(parsed) ? parsed : 200;
+}
+
+function normalizeScanPreferenceOverrides(value: unknown): Naps2ScanPreferenceOverrides {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const normalized: Naps2ScanPreferenceOverrides = {};
+  if (validScanSource(raw.source)) normalized.source = raw.source;
+  if (validDpi(raw.dpi)) normalized.dpi = raw.dpi;
+  if (validColorMode(raw.colorMode)) normalized.colorMode = raw.colorMode;
+  return normalized;
+}
+
+export function loadWorkstationNaps2ScanPreferences(storage?: Storage): StoredNaps2ScanPreferences | null {
+  try {
+    const target = availableStorage(storage);
+    if (!target) return null;
+    const raw = JSON.parse(target.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY) || "null") as Partial<StoredNaps2ScanPreferences> | null;
+    if (!raw || raw.version !== 1 || typeof raw.updatedAt !== "string" || Number.isNaN(Date.parse(raw.updatedAt))) return null;
+    return { version: 1, overrides: normalizeScanPreferenceOverrides(raw.overrides), updatedAt: raw.updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorkstationNaps2ScanPreferences(
+  overrides: Naps2ScanPreferenceOverrides,
+  storage?: Storage,
+  now = new Date(),
+): StoredNaps2ScanPreferences {
+  const target = availableStorage(storage);
+  if (!target) throw new Error("Browser storage is unavailable. Workstation scan preferences were not saved.");
+  const saved: StoredNaps2ScanPreferences = {
+    version: 1,
+    overrides: normalizeScanPreferenceOverrides(overrides),
+    updatedAt: now.toISOString(),
+  };
+  target.setItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY, JSON.stringify(saved));
+  return saved;
+}
+
+export function resetWorkstationNaps2ScanPreferences(storage?: Storage): void {
+  const target = availableStorage(storage);
+  if (!target) throw new Error("Browser storage is unavailable. Workstation scan preferences were not reset.");
+  target.removeItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY);
+}
+
+export function resolveEffectiveNaps2ScanPreferences(
+  globalPreferences: Naps2ScanPreferenceDefaults,
+  oneTimeOverrides: Naps2ScanPreferenceOverrides = {},
+  workstationOverrides?: Naps2ScanPreferenceOverrides,
+  storage?: Storage,
+): Naps2ScanPreferences {
+  const globalSource = validScanSource(globalPreferences.source) ? globalPreferences.source : "feeder";
+  const globalColor = validColorMode(globalPreferences.colorMode) ? globalPreferences.colorMode : "grayscale";
+  const defaults: Naps2ScanPreferences = {
+    source: globalSource,
+    dpi: globalDpi(globalPreferences.dpi),
+    colorMode: globalColor,
+  };
+  const savedOverrides = workstationOverrides ?? loadWorkstationNaps2ScanPreferences(storage)?.overrides ?? {};
+  return {
+    ...defaults,
+    ...normalizeScanPreferenceOverrides(savedOverrides),
+    ...normalizeScanPreferenceOverrides(oneTimeOverrides),
+  };
 }

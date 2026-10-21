@@ -21,7 +21,12 @@ import {
 import { getRequestDocumentViewUrl, listReportingBoardAppointmentDocuments } from "@/lib/api/documents-printing";
 import type { ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType } from "@/types/api";
 import type { AnnotationTool } from "./document-annotation-overlay";
-import { normalizeNaps2Source, scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { scanAppointmentRequest } from "@/lib/naps2-webscan";
+import { ScanOptionsDisclosure } from "@/components/documents/scan-options-disclosure";
+import {
+  resolveEffectiveNaps2ScanPreferences,
+  type Naps2ScanPreferenceOverrides,
+} from "@/services/scanning/workstation-naps2-settings";
 import { pushToast } from "@/lib/toast";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 import { directPrint } from "@/services/printing/direct-print-service";
@@ -93,7 +98,7 @@ export function RequestDocumentsPanel({
   newDocumentType = "appointment_request",
   reportingBoardScope,
 }: RequestDocumentsPanelProps) {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -101,6 +106,7 @@ export function RequestDocumentsPanel({
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
   const [fileMenuDocumentId, setFileMenuDocumentId] = useState<number | null>(null);
   const [scanUploading, setScanUploading] = useState(false);
+  const [oneTimeScanOverrides, setOneTimeScanOverrides] = useState<Naps2ScanPreferenceOverrides>({});
   const [scannerAppLaunching, setScannerAppLaunching] = useState(false);
   const [lastScannerAppLaunchUrl, setLastScannerAppLaunchUrl] = useState("");
   const [showScannerAppFallback, setShowScannerAppFallback] = useState(false);
@@ -109,6 +115,9 @@ export function RequestDocumentsPanel({
   const [documentRailCollapsed, setDocumentRailCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches);
   const [printingDocumentId, setPrintingDocumentId] = useState<number | null>(null);
+  useEffect(() => {
+    setOneTimeScanOverrides({});
+  }, [appointmentId, patientId, newDocumentType]);
   const resolvedTitle = title ?? t("documents.title");
   const uploadDocumentLabel = newDocumentType === "clinical_document"
     ? t("documents.uploadClinicalDocument")
@@ -333,9 +342,11 @@ export function RequestDocumentsPanel({
   const scannerAppEnabled = false;
   const scannerAppDownloadUrl =
     integrationStatus?.scanner?.scannerAppDownloadUrl || "/assets/downloads/RISproScannerSetup.msi";
-  const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
-  const scanColorMode = integrationStatus?.scanner?.scanColorMode === "color" ? "color" : "grayscale";
-  const scanSource = normalizeNaps2Source(integrationStatus?.scanner?.scannerSource);
+  const globalScanPreferences = {
+    source: integrationStatus?.scanner?.scannerSource,
+    dpi: integrationStatus?.scanner?.scanDpi,
+    colorMode: integrationStatus?.scanner?.scanColorMode,
+  };
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -460,6 +471,8 @@ export function RequestDocumentsPanel({
       return;
     }
 
+    const scanPreferences = resolveEffectiveNaps2ScanPreferences(globalScanPreferences, oneTimeScanOverrides);
+
     scanRequestLock.current = true;
     setScanUploading(true);
     setFailedScanUploads([]);
@@ -487,9 +500,7 @@ export function RequestDocumentsPanel({
       const scanResult = await scanAppointmentRequest({
         endpoint: effectiveScanEndpoint.endpoint,
         allowedOrigins: integrationStatus?.scanner?.naps2WebScanAllowedOrigins,
-        dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
-        colorMode: scanColorMode,
-        source: scanSource,
+        ...scanPreferences,
         fileName: suggestedFileName || `appointment-${appointmentId}-${newDocumentType}.pdf`,
       });
       let successfulUploads = 0;
@@ -540,6 +551,7 @@ export function RequestDocumentsPanel({
     } finally {
       scanRequestLock.current = false;
       setScanUploading(false);
+      setOneTimeScanOverrides({});
     }
   }
 
@@ -660,6 +672,13 @@ export function RequestDocumentsPanel({
           </button>
         ) : null}
       </div>
+      {naps2ScannerEnabled ? <ScanOptionsDisclosure
+        language={language}
+        globalPreferences={globalScanPreferences}
+        overrides={oneTimeScanOverrides}
+        onChange={setOneTimeScanOverrides}
+        disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+      /> : null}
       {!naps2ScannerEnabled && canAttachDocuments ? <p className="mt-2 text-[11px] text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p> : null}
       {enableLocalScan && canAttachDocuments && (layout !== "workspace" || !isMobile) ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -721,6 +740,13 @@ export function RequestDocumentsPanel({
                 <input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />
                 {file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}
                 {!isMobile && naps2ScannerEnabled ? <button type="button" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scanUploading ? t("documents.scanning") : t("documents.scanPaper")}</button> : null}
+                {!isMobile && naps2ScannerEnabled ? <ScanOptionsDisclosure
+                  language={language}
+                  globalPreferences={globalScanPreferences}
+                  overrides={oneTimeScanOverrides}
+                  onChange={setOneTimeScanOverrides}
+                  disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+                /> : null}
                 {!isMobile && !naps2ScannerEnabled && scannerAppEnabled ? <button type="button" onClick={handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}</button> : null}
               </> : null}
               {documents.length === 0 ? null : (
@@ -815,6 +841,13 @@ export function RequestDocumentsPanel({
           </button> : null}
         </div>
       </div> : null}
+      {!expanded && naps2ScannerEnabled ? <ScanOptionsDisclosure
+        language={language}
+        globalPreferences={globalScanPreferences}
+        overrides={oneTimeScanOverrides}
+        onChange={setOneTimeScanOverrides}
+        disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+      /> : null}
       {!expanded && enableLocalScan && canAttachDocuments && !naps2ScannerEnabled && (
         <p className="mt-2 shrink-0 text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
       )}

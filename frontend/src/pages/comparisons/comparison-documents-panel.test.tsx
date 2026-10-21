@@ -23,7 +23,8 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: apiMocks.scan,
 }));
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
-vi.mock("@/services/scanning/workstation-naps2-settings", () => ({
+vi.mock("@/services/scanning/workstation-naps2-settings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/scanning/workstation-naps2-settings")>()),
   resolveEffectiveNaps2Endpoint: (endpoint: string) => ({ endpoint }),
 }));
 vi.mock("@/components/documents/document-preview-workspace", () => ({
@@ -49,16 +50,17 @@ const attachedDocument: RequestDocument = {
   createdAt: "2026-08-11T08:00:00Z",
 };
 
-function renderPanel(props: { canAttach?: boolean; canDelete?: boolean } = {}) {
+function renderPanel(props: { comparisonRequestId?: number; canAttach?: boolean; canDelete?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ComparisonDocumentsPanel comparisonRequestId={77} canAttach={props.canAttach ?? true} canDelete={props.canDelete ?? false} />
+      <ComparisonDocumentsPanel comparisonRequestId={props.comparisonRequestId ?? 77} canAttach={props.canAttach ?? true} canDelete={props.canDelete ?? false} />
     </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
+  localStorage.clear();
   apiMocks.integration.mockResolvedValue({ scanner: { naps2WebScanEnabled: true, naps2WebScanEndpoint: "http://localhost:5000", scanDpi: "200", scanColorMode: "grayscale", scannerSource: "feeder" } });
   apiMocks.upload.mockResolvedValue(attachedDocument);
 });
@@ -113,6 +115,36 @@ describe("ComparisonDocumentsPanel", () => {
     apiMocks.list.mockResolvedValue([attachedDocument]);
     renderPanel({ canDelete: true });
     expect(await screen.findByRole("button", { name: "Remove comparison-paper.pdf" })).toBeTruthy();
+  });
+
+  it("applies temporary comparison scan options without changing request linkage or saving them", async () => {
+    const scannedFile = new File(["%PDF-options"], "comparison-77-papers.pdf", { type: "application/pdf" });
+    apiMocks.scan.mockResolvedValue({ file: scannedFile, source: "naps2_webscan" });
+    renderPanel();
+    fireEvent.click(await screen.findByText("Scan options"));
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "flatbed" } });
+    fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "400" } });
+    fireEvent.change(screen.getByLabelText("Color mode"), { target: { value: "color" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    await waitFor(() => expect(apiMocks.scan).toHaveBeenCalledWith(expect.objectContaining({ source: "flatbed", dpi: 400, colorMode: "color" })));
+    await waitFor(() => expect(apiMocks.upload).toHaveBeenCalledWith(expect.objectContaining({ comparisonRequestId: 77, source: "naps2_webscan" })));
+    expect(localStorage.getItem("rispro.naps2ScanPreferences.v1")).toBeNull();
+  });
+
+  it("resets comparison scan options after failure and when changing comparison requests", async () => {
+    apiMocks.scan.mockRejectedValueOnce(new Error("scanner unavailable"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const view = (id: number) => <QueryClientProvider client={client}><ComparisonDocumentsPanel comparisonRequestId={id} canAttach canDelete={false} /></QueryClientProvider>;
+    const rendered = render(view(77));
+    fireEvent.click(await screen.findByText("Scan options"));
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "flatbed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    await waitFor(() => expect((screen.getByLabelText("Source") as HTMLSelectElement).value).toBe(""));
+
+    rendered.rerender(view(88));
+    await waitFor(() => expect((screen.getByLabelText("Source") as HTMLSelectElement).value).toBe(""));
+    expect(apiMocks.upload).not.toHaveBeenCalled();
   });
   it("retains failed PDF segments and retries upload without rescanning", async () => {
     apiMocks.list.mockResolvedValue([]);

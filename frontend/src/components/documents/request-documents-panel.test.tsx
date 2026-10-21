@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { RequestDocumentsPanel } from "./request-documents-panel";
-import { saveWorkstationNaps2Settings, WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
+import {
+  saveWorkstationNaps2Settings,
+  WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY,
+  WORKSTATION_NAPS2_SETTINGS_KEY,
+} from "@/services/scanning/workstation-naps2-settings";
 
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(async () => []);
 const mockListReportingDeskDocuments = vi.fn<(token: string, caseId: number) => Promise<unknown[]>>(async () => []);
@@ -112,7 +116,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document"; reportingBoardScope?: { token: string; caseId: number } } = {}) {
+function renderPanel(options: { appointmentId?: number; patientId?: number | null; previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; workspaceRailSize?: "standard" | "wide"; compactMobileWorkspace?: boolean; supplementaryPanelPlacement?: "before-documents" | "after-documents"; hideSatisfiedProtocolEligibilityStatus?: boolean; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document"; reportingBoardScope?: { token: string; caseId: number } } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -128,8 +132,8 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
         <RequestDocumentsPanel
-          appointmentId={42}
-          patientId={9}
+          appointmentId={options.appointmentId ?? 42}
+          patientId={options.patientId === undefined ? 9 : options.patientId}
           appointmentRefType="v2_booking"
           previewMode={options.previewMode}
           enableLocalScan
@@ -238,6 +242,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     localStorage.removeItem(WORKSTATION_NAPS2_SETTINGS_KEY);
+    localStorage.removeItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY);
     setMobileViewport(false);
     mockListAppointmentDocuments.mockReset();
     mockListReportingDeskDocuments.mockReset().mockResolvedValue([]);
@@ -370,6 +375,61 @@ describe("RequestDocumentsPanel local scan flow", () => {
         source: "naps2_webscan",
       })
     );
+  });
+
+  it("applies temporary scan choices to one appointment scan and resets them afterward", async () => {
+    renderPanel();
+    await userEvent.click(await screen.findByText("Scan options"));
+    await userEvent.selectOptions(screen.getByLabelText("Source"), "flatbed");
+    await userEvent.selectOptions(screen.getByLabelText("Resolution"), "300");
+    await userEvent.selectOptions(screen.getByLabelText("Color mode"), "color");
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Scan Paper" }));
+    await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledWith(expect.objectContaining({
+      source: "flatbed", dpi: 300, colorMode: "color",
+    })));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(expect.objectContaining({
+      patientId: 9, appointmentId: 42, appointmentRefType: "v2_booking", documentType: "appointment_request",
+    })));
+    await waitFor(() => expect(screen.getByText(/Effective: Feeder · 200 DPI · Grayscale/)).toBeTruthy());
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY)).toBeNull();
+  });
+
+  it("resets temporary scan choices after a failed scan attempt", async () => {
+    mockScanAppointmentRequest.mockRejectedValueOnce(new Error("scanner unavailable"));
+    renderPanel();
+    await userEvent.click(await screen.findByText("Scan options"));
+    await userEvent.selectOptions(screen.getByLabelText("Resolution"), "400");
+    await userEvent.click(screen.getByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledWith(expect.objectContaining({ dpi: 400 })));
+    await waitFor(() => expect(screen.getByText(/Effective: Feeder · 200 DPI · Grayscale/)).toBeTruthy());
+    expect(localStorage.getItem(WORKSTATION_NAPS2_SCAN_PREFERENCES_KEY)).toBeNull();
+    expect(mockUploadAppointmentDocument).not.toHaveBeenCalled();
+  });
+
+  it("does not carry temporary options into a different appointment", async () => {
+    const { queryClient, rerender } = renderPanel();
+    await userEvent.click(await screen.findByText("Scan options"));
+    await userEvent.selectOptions(screen.getByLabelText("Source"), "flatbed");
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <LanguageProvider>
+          <RequestDocumentsPanel appointmentId={43} patientId={10} appointmentRefType="v2_booking" enableLocalScan />
+        </LanguageProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect((screen.getByLabelText("Source") as HTMLSelectElement).value).toBe(""));
+    await userEvent.click(screen.getByRole("button", { name: "Scan Paper" }));
+    await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledWith(expect.objectContaining({ source: "feeder" })));
+  });
+
+  it("offers scan options beside Scan Paper in the workspace document rail", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.pdf", "application/pdf")]);
+    renderPanel({ layout: "workspace" });
+    expect(await screen.findByRole("button", { name: "Scan Paper" })).toBeTruthy();
+    expect(screen.getByText("Scan options")).toBeTruthy();
   });
 
   it("shows the NAPS2 scan button when the feature is enabled and user has access", async () => {
@@ -799,6 +859,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     expect(screen.queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
+    expect(screen.queryByText("Scan options")).toBeNull();
     const image = await screen.findByRole("img", { name: "request.png" });
     fireEvent.load(image);
     expect(screen.queryByLabelText("Annotations for page 1")).toBeNull();
