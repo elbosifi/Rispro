@@ -27,7 +27,7 @@ usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 usersRouter.get(
   "/",
   asyncRoute(async (_req: Request, res: Response) => {
-    const users = await listUsers(_req.user!.role);
+    const users = await listUsers(_req.user!.role, _req.user!.sub);
     res.json({ users });
   })
 );
@@ -46,7 +46,10 @@ usersRouter.get(
 usersRouter.get(
   "/:userId/security-activity",
   asyncRoute(async (req: Request, res: Response) => {
-    res.json(await listUserSecurityActivity(asString(req.params.userId), req.user!.role, {
+    res.json(await listUserSecurityActivity(asString(req.params.userId), {
+      userId: req.user!.sub,
+      role: req.user!.role
+    }, {
       page: asString(req.query.page),
       pageSize: asString(req.query.pageSize)
     }));

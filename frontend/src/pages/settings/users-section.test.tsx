@@ -168,11 +168,23 @@ describe("UsersSection", () => {
     await screen.findAllByText("Root Admin");
     await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[4]!);
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getAllByText("Security details for Super Admin accounts are restricted.").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("Protected administrative account details are restricted.").length).toBeGreaterThan(0);
     expect(within(dialog).queryByText("Password change required", { exact: true })).toBeNull();
     expect(within(dialog).queryByText("Password change not required", { exact: true })).toBeNull();
     expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/5/effective-access"))).toBe(false);
     expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/5/security-activity"))).toBe(false);
+  });
+
+  it("restricts other Supervisor accounts for supervisors", async () => {
+    renderSection("supervisor");
+    await screen.findAllByText("Supervisor");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[2]!);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getAllByText("Protected administrative account details are restricted.").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByRole("button", { name: "Edit details" })).toBeNull();
+    expect(within(dialog).queryByRole("combobox", { name: "Edit role" })).toBeNull();
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/3/effective-access"))).toBe(false);
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/3/security-activity"))).toBe(false);
   });
 
   it("edits an existing role and limits Supervisor grants to non-administrative roles", async () => {

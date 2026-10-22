@@ -87,7 +87,10 @@ export async function listCandidateDoctorsForAssignment(assignment: RosterAssign
     `
       select dp.id, dp.display_name as "displayName", dp.doctor_role as "doctorRole"
       from doctor_portal.doctor_profiles dp
-      where ${where.join(" and ")}
+      join users u on u.id = dp.user_id
+      where u.is_active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
+        and ${where.join(" and ")}
       order by
         case when dp.doctor_role in ('consultant', 'specialist') then 0 else 1 end,
         dp.display_name asc,

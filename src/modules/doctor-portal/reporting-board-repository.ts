@@ -575,6 +575,7 @@ export async function findActiveSavedViewByToken(token: string): Promise<Reporti
             where target_dp.id = target_doctor_id
               and target_dp.active = true
               and target_user.is_active = true
+              and target_user.role in ('doctor', 'supervisor', 'super_admin')
           )
         )
       limit 1
@@ -2110,9 +2111,11 @@ export async function clearReportingBoardCaseManualFinal(input: {
 export async function findAssignableDoctorForReporting(doctorId: number) {
   const result = await pool.query<{ id: number; displayName: string; canFinalizeReports: boolean }>(
     `
-      select id, display_name as "displayName", can_finalize_reports as "canFinalizeReports"
-      from doctor_portal.doctor_profiles
-      where id = $1 and active = true
+      select dp.id, dp.display_name as "displayName", dp.can_finalize_reports as "canFinalizeReports"
+      from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
+      where dp.id = $1 and dp.active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
       limit 1
     `,
     [doctorId]
@@ -2125,12 +2128,15 @@ export async function doctorCanReportAllModalities(doctorId: number, modalityIds
   const uniqueModalityIds = [...new Set(modalityIds)];
   const result = await pool.query<{ modality_id: number }>(
     `
-      select distinct modality_id
-      from doctor_portal.doctor_modality_permissions
-      where doctor_id = $1
-        and modality_id = any($2::bigint[])
-        and can_report = true
-        and active = true
+      select distinct dmp.modality_id
+      from doctor_portal.doctor_modality_permissions dmp
+      join doctor_portal.doctor_profiles dp on dp.id = dmp.doctor_id
+      join users u on u.id = dp.user_id
+      where dmp.doctor_id = $1
+        and u.role in ('doctor', 'supervisor', 'super_admin')
+        and dmp.modality_id = any($2::bigint[])
+        and dmp.can_report = true
+        and dmp.active = true
     `,
     [doctorId, uniqueModalityIds]
   );
@@ -2140,11 +2146,14 @@ export async function doctorCanReportAllModalities(doctorId: number, modalityIds
 export async function listDoctorReportableModalityIds(doctorId: number): Promise<number[]> {
   const result = await pool.query<{ modality_id: number }>(
     `
-      select modality_id
-      from doctor_portal.doctor_modality_permissions
-      where doctor_id = $1
-        and can_report = true
-        and active = true
+      select dmp.modality_id
+      from doctor_portal.doctor_modality_permissions dmp
+      join doctor_portal.doctor_profiles dp on dp.id = dmp.doctor_id
+      join users u on u.id = dp.user_id
+      where dmp.doctor_id = $1
+        and u.role in ('doctor', 'supervisor', 'super_admin')
+        and dmp.can_report = true
+        and dmp.active = true
     `,
     [doctorId]
   );
@@ -2209,7 +2218,12 @@ export async function bulkAssignReportingCases(input: {
       : new Set<number>();
     const reportableModalityIds = input.restrictToDoctorReportPermissions
       ? new Set((await client.query<{ modality_id: number }>(
-        `select modality_id from doctor_portal.doctor_modality_permissions where doctor_id = $1 and can_report = true and active = true`,
+        `select dmp.modality_id
+           from doctor_portal.doctor_modality_permissions dmp
+           join doctor_portal.doctor_profiles dp on dp.id = dmp.doctor_id
+           join users u on u.id = dp.user_id
+          where dmp.doctor_id = $1 and dmp.can_report = true and dmp.active = true
+            and u.role in ('doctor', 'supervisor', 'super_admin')`,
         [input.doctorId]
       )).rows.map((row) => Number(row.modality_id)))
       : null;
@@ -2985,6 +2999,7 @@ export async function createAssignedToMeNotifications(input: {
         and rbsv.active = true
         and dp.active = true
         and u.is_active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
         and coalesce((rbsv.notification_settings_json->>'notifyAssignedToMe')::boolean, false) = true
     `,
     [input.doctorId]
@@ -3103,7 +3118,7 @@ export async function createAdditionalImagingNotification(input: { recallRequest
     from appointments_v2.complementary_recall_requests r
     join doctor_portal.case_team_assignments cta on cta.appointment_id=r.original_appointment_id and cta.assignment_type='reporting' and cta.status='active'
     join doctor_portal.doctor_profiles dp on dp.id=cta.assigned_doctor_id and dp.active=true
-    join users u on u.id=dp.user_id and u.is_active=true
+    join users u on u.id=dp.user_id and u.is_active=true and u.role in ('doctor', 'supervisor', 'super_admin')
     where r.id=$1 and r.recall_appointment_id=$2
   `, [input.recallRequestId, input.recallAppointmentId]);
   const recipient = context.rows[0];

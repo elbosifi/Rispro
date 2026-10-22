@@ -88,7 +88,8 @@ export async function listRosterDoctors(
 ): Promise<DoctorProfileRow[]> {
   await requireRosterManager(actor);
   return (await listDoctorProfiles()).filter(
-    (profile) => profile.active && profile.userActive !== false,
+    (profile) => profile.active && profile.userActive !== false &&
+      (profile.coreRole === "doctor" || profile.coreRole === "supervisor" || profile.coreRole === "super_admin"),
   );
 }
 
@@ -249,7 +250,11 @@ export async function addRosterMember(
       throw new HttpError(409, "Choose an active roster section.");
     const profile = (
       await db.query<{ doctor_role: string }>(
-        "select doctor_role from doctor_portal.doctor_profiles where id = $1 and active = true and exists (select 1 from users u where u.id = doctor_portal.doctor_profiles.user_id and u.is_active = true)",
+        `select dp.doctor_role
+           from doctor_portal.doctor_profiles dp
+           join users u on u.id = dp.user_id
+          where dp.id = $1 and dp.active = true and u.is_active = true
+            and u.role in ('doctor', 'supervisor', 'super_admin')`,
         [doctorId],
       )
     ).rows[0];

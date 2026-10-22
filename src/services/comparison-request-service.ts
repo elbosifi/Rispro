@@ -548,7 +548,8 @@ export async function listComparisonReportingDoctors(actor: ComparisonActor, mod
      from doctor_portal.doctor_profiles dp
      join users u on u.id = dp.user_id
      join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
-     where dp.active = true and dp.can_finalize_reports = true
+     where dp.active = true and u.role in ('doctor', 'supervisor', 'super_admin')
+       and dp.can_finalize_reports = true
        and dmp.modality_id = $1 and dmp.can_report = true and dmp.active = true
      order by dp.display_name asc, dp.id asc`,
     [modalityId]

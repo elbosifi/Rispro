@@ -59,7 +59,7 @@ test("user security controls revoke sessions, enforce forced password change, re
     userIds.push(result.rows[0]!.id);
     return result.rows[0]!.id;
   };
-  const request = async (path: string, method: "GET" | "POST", cookie?: string, body?: unknown) => {
+  const request = async (path: string, method: "GET" | "POST" | "PUT" | "DELETE", cookie?: string, body?: unknown) => {
     const response = await fetch(`${baseUrl}${path}`, {
       method,
       headers: {
@@ -81,7 +81,9 @@ test("user security controls revoke sessions, enforce forced password change, re
     const actorId = await insertUser(`security_actor_${suffix}`, "supervisor", actorPassword);
     const targetId = await insertUser(`security_target_${suffix}`, "receptionist", targetPassword);
     const superAdminId = await insertUser(`security_admin_${suffix}`, "super_admin", "SecurityAdminPass123!");
+    const protectedSupervisorId = await insertUser(`security_protected_supervisor_${suffix}`, "supervisor", "ProtectedSupervisorPass123!");
     await pool.query("update users set must_change_password=true, last_login_at=now() where id=$1", [superAdminId]);
+    await pool.query("update users set must_change_password=true, last_login_at=now() where id=$1", [protectedSupervisorId]);
     const actorSession = jwt.sign({ sub: actorId, role: "supervisor", authVersion: 0 }, env.jwtSecret);
     const actorReauth = jwt.sign({ sub: actorId, role: "supervisor", authVersion: 0, purpose: "supervisor-reauth" }, env.jwtSecret);
     const actorCookie = `${env.cookieName}=${actorSession}; ${env.reauthCookieName}=${actorReauth}`;
@@ -137,13 +139,79 @@ test("user security controls revoke sessions, enforce forced password change, re
     const listedSuperAdmin = listedUsers.data.users.find((user: { id: number }) => user.id === superAdminId);
     assert.equal(listedSuperAdmin.last_login_at, null);
     assert.equal(listedSuperAdmin.must_change_password, null);
+    const listedSupervisor = listedUsers.data.users.find((user: { id: number }) => user.id === protectedSupervisorId);
+    assert.equal(listedSupervisor.last_login_at, null);
+    assert.equal(listedSupervisor.must_change_password, null);
+
+    const protectedBefore = await pool.query<{ username: string; role: string; is_active: boolean; password_hash: string; must_change_password: boolean; auth_version: number }>(
+      `select username, role, is_active, password_hash, must_change_password, auth_version from users where id=$1`,
+      [protectedSupervisorId]
+    );
+    const protectedIdentity = await request(`/api/users/${protectedSupervisorId}/identity`, "PUT", actorCookie, {
+      username: `security_attempt_${suffix}`, fullName: "Attempted Change"
+    });
+    const protectedRole = await request(`/api/users/${protectedSupervisorId}/role`, "PUT", actorCookie, { role: "doctor" });
+    const protectedSchedulingPermission = await request(`/api/users/${protectedSupervisorId}/scheduling-override-permission`, "PUT", actorCookie, { canRequestSchedulingOverride: true });
+    const protectedPassword = await request(`/api/users/${protectedSupervisorId}/password`, "PUT", actorCookie, { password: "DeniedDirectPassword123!" });
+    const protectedTemporaryPassword = await request(`/api/users/${protectedSupervisorId}/temporary-password`, "POST", actorCookie, { password: "DeniedTemporaryPassword123!" });
+    const protectedForce = await request(`/api/users/${protectedSupervisorId}/force-password-change`, "POST", actorCookie);
+    const protectedRevoke = await request(`/api/users/${protectedSupervisorId}/revoke-sessions`, "POST", actorCookie);
+    const protectedDeactivate = await request(`/api/users/${protectedSupervisorId}/active`, "PUT", actorCookie, { isActive: false });
+    const protectedReactivate = await request(`/api/users/${protectedSupervisorId}/active`, "PUT", actorCookie, { isActive: true });
+    const protectedDelete = await request(`/api/users/${protectedSupervisorId}`, "DELETE", actorCookie);
+    const protectedAccess = await request(`/api/users/${protectedSupervisorId}/effective-access`, "GET", actorCookie);
+    const protectedActivity = await request(`/api/users/${protectedSupervisorId}/security-activity`, "GET", actorCookie);
+    for (const denied of [protectedIdentity, protectedRole, protectedSchedulingPermission, protectedPassword, protectedTemporaryPassword, protectedForce, protectedRevoke, protectedDeactivate, protectedReactivate, protectedDelete, protectedAccess, protectedActivity]) {
+      assert.equal(denied.status, 403, JSON.stringify(denied.data));
+      assert.doesNotMatch(JSON.stringify(denied.data), /security_protected_supervisor/);
+    }
+    const protectedAfter = await pool.query<{ username: string; role: string; is_active: boolean; password_hash: string; must_change_password: boolean; auth_version: number }>(
+      `select username, role, is_active, password_hash, must_change_password, auth_version from users where id=$1`,
+      [protectedSupervisorId]
+    );
+    assert.deepEqual(protectedAfter.rows[0], protectedBefore.rows[0], "denied administration leaves protected account state unchanged");
+
+    await pool.query("update users set must_change_password=false where id=$1", [superAdminId]);
+    const adminSession = jwt.sign({ sub: superAdminId, role: "super_admin", username: `security_admin_${suffix}`, authVersion: 0 }, env.jwtSecret);
+    const adminReauth = jwt.sign({ sub: superAdminId, role: "super_admin", authVersion: 0, purpose: "supervisor-reauth" }, env.jwtSecret);
+    const adminCookie = `${env.cookieName}=${adminSession}; ${env.reauthCookieName}=${adminReauth}`;
+    const allowedProtectedIdentity = await request(`/api/users/${protectedSupervisorId}/identity`, "PUT", adminCookie, {
+      username: `security_protected_updated_${suffix}`, fullName: "Admin Updated Supervisor"
+    });
+    assert.equal(allowedProtectedIdentity.status, 200, JSON.stringify(allowedProtectedIdentity.data));
+    assert.equal(allowedProtectedIdentity.data.user.username, `security_protected_updated_${suffix}`);
+
+    const actorLogin = await request("/api/auth/login", "POST", undefined, {
+      username: `security_actor_${suffix}`, password: actorPassword
+    });
+    assert.equal(actorLogin.status, 200, JSON.stringify(actorLogin.data));
+    const actorSessionCookie = cookieFrom(actorLogin.setCookies, env.cookieName);
+    assert.ok(actorSessionCookie);
+    const actorRename = await request(`/api/users/${actorId}/identity`, "PUT", adminCookie, {
+      username: `security_actor_renamed_${suffix}`,
+      fullName: "Renamed Security Actor",
+      englishName: "Renamed Security Actor English"
+    });
+    assert.equal(actorRename.status, 200, JSON.stringify(actorRename.data));
+    const renamedMe = await request("/api/auth/me", "GET", actorSessionCookie);
+    assert.equal(renamedMe.status, 200, JSON.stringify(renamedMe.data));
+    assert.equal(renamedMe.data.user.username, `security_actor_renamed_${suffix}`);
+    assert.equal(renamedMe.data.user.fullName, "Renamed Security Actor");
+    assert.equal(renamedMe.data.user.englishName, "Renamed Security Actor English");
+    const reauthenticated = await request("/api/auth/re-auth", "POST", actorSessionCookie, { password: actorPassword });
+    assert.equal(reauthenticated.status, 200, JSON.stringify(reauthenticated.data));
+    assert.equal(reauthenticated.data.user.username, `security_actor_renamed_${suffix}`);
+    const actorReauthCookie = cookieFrom(reauthenticated.setCookies, env.reauthCookieName);
+    assert.ok(actorReauthCookie);
+    const actorReauthenticatedCookie = `${actorSessionCookie}; ${actorReauthCookie}`;
+    assert.equal((await request("/api/protected", "GET", actorSessionCookie)).status, 200, "identity changes do not revoke the existing session");
 
     await logSecurityAuditEntry({
       entityType: "user", entityId: targetId, actionType: "security_redaction_check",
       newValues: { password: "must-not-be-returned", accessToken: "must-not-be-returned" },
       changedByUserId: actorId
     });
-    const activity = await request(`/api/users/${targetId}/security-activity`, "GET", actorCookie);
+    const activity = await request(`/api/users/${targetId}/security-activity`, "GET", actorReauthenticatedCookie);
     assert.equal(activity.status, 200, JSON.stringify(activity.data));
     assert.equal(activity.data.pagination.pageSize, 25);
     const forceEntry = activity.data.entries.find((entry: { actionType: string }) => entry.actionType === "force_password_change");
@@ -151,18 +219,18 @@ test("user security controls revoke sessions, enforce forced password change, re
     const redactedEntry = activity.data.entries.find((entry: { actionType: string }) => entry.actionType === "security_redaction_check");
     assert.equal(redactedEntry.newValues.password, "[REDACTED]");
     assert.equal(redactedEntry.newValues.accessToken, "[REDACTED]");
-    const invalidPageSize = await request(`/api/users/${targetId}/security-activity?pageSize=101`, "GET", actorCookie);
+    const invalidPageSize = await request(`/api/users/${targetId}/security-activity?pageSize=101`, "GET", actorReauthenticatedCookie);
     assert.equal(invalidPageSize.status, 400);
 
-    const revoke = await request(`/api/users/${targetId}/revoke-sessions`, "POST", actorCookie);
+    const revoke = await request(`/api/users/${targetId}/revoke-sessions`, "POST", actorReauthenticatedCookie);
     assert.equal(revoke.status, 200, JSON.stringify(revoke.data));
     assert.equal((await request("/api/protected", "GET", replacementCookie)).status, 401);
 
-    const selfRevoke = await request(`/api/users/${actorId}/revoke-sessions`, "POST", actorCookie);
+    const selfRevoke = await request(`/api/users/${actorId}/revoke-sessions`, "POST", actorReauthenticatedCookie);
     assert.equal(selfRevoke.status, 200, JSON.stringify(selfRevoke.data));
     assert.equal(selfRevoke.data.selfRevoked, true);
     assert.ok(selfRevoke.setCookies.some((value) => value.startsWith(`${env.cookieName}=`)));
-    assert.equal((await request("/api/protected", "GET", actorCookie)).status, 401);
+    assert.equal((await request("/api/protected", "GET", actorSessionCookie)).status, 401);
   } finally {
     if (previousAuditSetting.rows[0]) {
       await pool.query(

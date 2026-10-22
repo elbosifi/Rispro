@@ -42,9 +42,11 @@ export async function requirePatientIdentityReconciliationAccess(userId: UserId,
     `
       select true as allowed
       from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
       join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
       where dp.user_id = $1
         and dp.active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
         and dmp.modality_id = $2
         and dmp.active = true
         and dmp.can_protocol = true

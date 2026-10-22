@@ -110,8 +110,11 @@ export async function listEffectiveDoctorModalityCodes(doctorId: number, globall
     `
       select distinct upper(m.code) as code
       from doctor_portal.doctor_modality_permissions dmp
+      join doctor_portal.doctor_profiles dp on dp.id = dmp.doctor_id
+      join users u on u.id = dp.user_id
       join modalities m on m.id = dmp.modality_id
       where dmp.doctor_id = $1
+        and u.role in ('doctor', 'supervisor', 'super_admin')
         and dmp.active = true
         and dmp.can_report = true
         and upper(m.code) = any($2::text[])
@@ -129,8 +132,11 @@ export async function listEffectiveDoctorModalityCodesGrouped(globallyEnabled: s
     `
       select dmp.doctor_id, array_agg(distinct upper(m.code) order by upper(m.code)) as codes
       from doctor_portal.doctor_modality_permissions dmp
+      join doctor_portal.doctor_profiles dp on dp.id = dmp.doctor_id
+      join users u on u.id = dp.user_id
       join modalities m on m.id = dmp.modality_id
-      where dmp.active = true and dmp.can_report = true
+      where u.role in ('doctor', 'supervisor', 'super_admin')
+        and dmp.active = true and dmp.can_report = true
         and upper(m.code) = any($1::text[])
       group by dmp.doctor_id
     `,

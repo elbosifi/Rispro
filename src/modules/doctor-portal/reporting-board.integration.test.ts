@@ -2526,10 +2526,17 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal((await api(admin.cookie, `/api/doctor/profiles/${noFinalizeDoctor.doctorId}`, { method: "PATCH", body: { active: true } })).status, 200);
     assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 200);
 
+    const authBeforeLifecycle = await pool.query<{ auth_version: number }>(`select auth_version from users where id = $1`, [noFinalizeDoctor.id]);
     assert.equal((await api(admin.cookie, `/api/doctor/admin/doctors/${noFinalizeDoctor.id}/deactivate`, { method: "POST" })).status, 200);
     assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 404);
     assert.equal((await api(admin.cookie, `/api/doctor/admin/doctors/${noFinalizeDoctor.id}/activate`, { method: "POST" })).status, 200);
     assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 200);
+    const currentAuth = await pool.query<{ auth_version: number; is_active: boolean }>(`select auth_version, is_active from users where id = $1`, [noFinalizeDoctor.id]);
+    assert.equal(currentAuth.rows[0].is_active, true);
+    assert.equal(Number(currentAuth.rows[0].auth_version), Number(authBeforeLifecycle.rows[0].auth_version) + 2);
+    assert.equal((await api(noFinalizeDoctor.cookie, "/api/doctor/reporting-board/doctor-worklists/me")).status, 401);
+    noFinalizeDoctor.cookie = createTestAuthCookie(noFinalizeDoctor.id, "doctor", Number(currentAuth.rows[0].auth_version));
+    assert.equal((await api(noFinalizeDoctor.cookie, "/api/doctor/reporting-board/doctor-worklists/me")).status, 200);
     const restored = await pool.query<{ token: string }>(`select token from doctor_portal.reporting_board_saved_views where id = $1`, [first.id]);
     assert.equal(restored.rows[0].token, first.token);
   });

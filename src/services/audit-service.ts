@@ -17,6 +17,7 @@ import type { AuditEvent } from "../types/domain.js";
 import type { Role } from "../types/domain.js";
 import type { DbExecutor } from "../types/db.js";
 import type { UserId, NullableUserId } from "../types/http.js";
+import { assertCanManageProtectedAccount } from "./protected-account-authorization.js";
 
 export interface AuditEntryInput {
   entityType: string;
@@ -399,7 +400,7 @@ export async function listAuditPage(filters: AuditFilters = {}): Promise<AuditPa
 
 export async function listUserSecurityActivity(
   userId: UserId,
-  actorRole: Role,
+  actor: { userId: UserId | null; role: Role },
   options: { page?: unknown; pageSize?: unknown } = {}
 ): Promise<{ entries: AuditApiEntry[]; pagination: AuditPagination }> {
   const cleanUserId = normalizePositiveInteger(userId, "userId", { required: true });
@@ -410,11 +411,9 @@ export async function listUserSecurityActivity(
   const client = await pool.connect();
   try {
     await client.query("begin isolation level repeatable read read only");
-    const target = await client.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
+    const target = await client.query<{ id: number; role: Role }>("select id, role from users where id = $1", [cleanUserId]);
     if (!target.rows[0]) throw new HttpError(404, "User not found.");
-    if (target.rows[0].role === "super_admin" && actorRole !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can view super_admin security details.");
-    }
+    assertCanManageProtectedAccount(actor.role, target.rows[0].role, actor.userId, target.rows[0].id);
 
     const countResult = await client.query<{ total: string }>(
       `select count(*)::text as total from audit_log ${whereClause}`,

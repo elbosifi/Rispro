@@ -27,6 +27,119 @@ async function cleanupUsers(pool: import("pg").Pool, ids: number[]) {
   await pool.query("delete from users where id = any($1::bigint[])", [ids]);
 }
 
+test("identity updates lock authorization and commit identity plus audit atomically", async () => {
+  const [{ pool }, { updateUserIdentity }] = await Promise.all([
+    import("../db/pool.js"),
+    import("./user-service.js"),
+  ]);
+  const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
+  const ids: number[] = [];
+  let triggerName = "";
+  let functionName = "";
+  let lockClient: import("pg").PoolClient | undefined;
+
+  try {
+    const supervisorId = await createUser(pool, `identity_actor_${suffix}`, "supervisor");
+    const targetId = await createUser(pool, `identity_target_${suffix}`, "receptionist");
+    const duplicateId = await createUser(pool, `identity_duplicate_${suffix}`, "receptionist");
+    const raceTargetId = await createUser(pool, `identity_race_target_${suffix}`, "receptionist");
+    ids.push(supervisorId, targetId, duplicateId, raceTargetId);
+
+    const updated = await updateUserIdentity(
+      targetId,
+      { username: `  IDENTITY_Normalized_${suffix}  `, email: " identity@example.test ", fullName: " Updated Identity ", englishName: " Updated English " },
+      { userId: supervisorId, role: "supervisor" },
+    );
+    assert.equal(updated.username, `identity_normalized_${suffix}`);
+    assert.equal(updated.email, "identity@example.test");
+    assert.equal(updated.full_name, "Updated Identity");
+    assert.equal(updated.english_name, "Updated English");
+    const identityEvent = await pool.query<{ old_values: Record<string, unknown>; new_values: Record<string, unknown>; changed_by_user_id: number }>(
+      `select old_values, new_values, changed_by_user_id from audit_log
+        where entity_type='user' and entity_id=$1 and action_type='update_identity' order by id desc limit 1`,
+      [targetId],
+    );
+    assert.equal(identityEvent.rows[0]?.new_values.username, `identity_normalized_${suffix}`);
+    assert.equal(identityEvent.rows[0]?.changed_by_user_id, supervisorId);
+
+    const beforeDuplicate = await pool.query<{ username: string; email: string | null; full_name: string; english_name: string | null }>(
+      "select username, email, full_name, english_name from users where id=$1", [targetId],
+    );
+    await assert.rejects(
+      updateUserIdentity(targetId, { username: `identity_duplicate_${suffix}`, email: "new@example.test", fullName: "Must Roll Back", englishName: "Must Roll Back" }, { userId: supervisorId, role: "supervisor" }),
+      (error: unknown) => (error as { statusCode?: number }).statusCode === 409,
+    );
+    const afterDuplicate = await pool.query("select username, email, full_name, english_name from users where id=$1", [targetId]);
+    assert.deepEqual(afterDuplicate.rows[0], beforeDuplicate.rows[0], "duplicate username leaves all identity fields unchanged");
+
+    triggerName = `identity_audit_fail_${suffix}`;
+    functionName = `identity_audit_fail_fn_${suffix}`;
+    await pool.query(
+      `create function public.${functionName}() returns trigger language plpgsql as $$
+       begin
+         if new.entity_type = 'user' and new.entity_id = ${targetId} and new.action_type = 'update_identity' then
+           raise exception 'forced identity audit failure';
+         end if;
+         return new;
+       end $$`,
+    );
+    await pool.query(`create trigger ${triggerName} before insert on audit_log for each row execute function public.${functionName}()`);
+    await assert.rejects(
+      updateUserIdentity(targetId, { username: `identity_audit_fail_${suffix}`, email: "fail@example.test", fullName: "Must Roll Back", englishName: "Must Roll Back" }, { userId: supervisorId, role: "supervisor" }),
+      /forced identity audit failure/,
+    );
+    const afterAuditFailure = await pool.query("select username, email, full_name, english_name from users where id=$1", [targetId]);
+    assert.deepEqual(afterAuditFailure.rows[0], beforeDuplicate.rows[0], "audit failure rolls back every identity field");
+    await pool.query(`drop trigger ${triggerName} on audit_log`);
+    await pool.query(`drop function public.${functionName}()`);
+    triggerName = "";
+    functionName = "";
+
+    lockClient = await pool.connect();
+    await lockClient.query("begin");
+    await lockClient.query("select id from users where id=$1 for update", [raceTargetId]);
+    let raceOutcome: { error?: unknown; username?: string } | undefined;
+    const raceUpdate = updateUserIdentity(
+      raceTargetId,
+      { username: `identity_race_renamed_${suffix}`, fullName: "Race Rename" },
+      { userId: supervisorId, role: "supervisor" },
+    ).then(
+      (result) => { raceOutcome = { username: result.username }; },
+      (error: unknown) => { raceOutcome = { error }; },
+    );
+    let targetLockWaitObserved = false;
+    const lockDeadline = Date.now() + 5000;
+    while (!targetLockWaitObserved && Date.now() < lockDeadline) {
+      const wait = await pool.query<{ waiting: boolean }>(
+        `select exists (
+           select 1 from pg_stat_activity
+            where pid <> pg_backend_pid() and wait_event_type = 'Lock'
+              and query ilike '%from users%for update%'
+         ) as waiting`,
+      );
+      targetLockWaitObserved = wait.rows[0]?.waiting === true;
+      if (!targetLockWaitObserved) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    await lockClient.query("update users set role='supervisor' where id=$1", [raceTargetId]);
+    await lockClient.query("commit");
+    lockClient.release();
+    lockClient = undefined;
+    await raceUpdate;
+    assert.equal(targetLockWaitObserved, true, "identity authorization waits for the concurrently locked target row");
+    assert.equal((raceOutcome?.error as { statusCode?: number } | undefined)?.statusCode, 403);
+    const raceAfter = await pool.query<{ username: string; role: Role }>("select username, role from users where id=$1", [raceTargetId]);
+    assert.deepEqual(raceAfter.rows[0], { username: `identity_race_target_${suffix}`, role: "supervisor" });
+  } finally {
+    if (lockClient) {
+      await lockClient.query("rollback").catch(() => undefined);
+      lockClient.release();
+    }
+    if (triggerName) await pool.query(`drop trigger if exists ${triggerName} on audit_log`).catch(() => undefined);
+    if (functionName) await pool.query(`drop function if exists public.${functionName}()`).catch(() => undefined);
+    await cleanupUsers(pool, ids);
+  }
+});
+
 test("user role changes enforce authorization, preserve Doctor Workspace history, and audit atomically", async () => {
   const [{ pool }, { createUser: createManagedUser, updateUserRole }] = await Promise.all([
     import("../db/pool.js"),
@@ -43,6 +156,13 @@ test("user role changes enforce authorization, preserve Doctor Workspace history
     const superAdminId = await createUser(pool, `role_super_admin_${suffix}`, "super_admin");
     const privilegedTargetId = await createUser(pool, `role_privileged_target_${suffix}`, "receptionist");
     ids.push(supervisorId, targetId, superAdminId, privilegedTargetId);
+
+    await assert.rejects(
+      updateUserRole(supervisorId, "super_admin", { userId: supervisorId, role: "supervisor" }),
+      (error: unknown) => (error as { statusCode?: number }).statusCode === 403,
+    );
+    const selfPromotionState = await pool.query<{ role: Role }>("select role from users where id=$1", [supervisorId]);
+    assert.equal(selfPromotionState.rows[0]?.role, "supervisor", "a supervisor cannot grant themselves Super Admin");
 
     const grantedSupervisor = await updateUserRole(privilegedTargetId, "supervisor", { userId: superAdminId, role: "super_admin" });
     assert.equal(grantedSupervisor.role, "supervisor");

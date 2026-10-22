@@ -1789,7 +1789,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       const refreshed = await api(login.cookie, "/api/auth/me");
       const user = (refreshed.data as { user: { username: string; role: string; mustChangePassword: boolean; fullName: string; englishName: string | null } }).user;
       assert.equal(refreshed.status, 200, JSON.stringify(refreshed.data));
-      assert.equal(user.username, original.username);
+      assert.equal(user.username, `${original.username}_renamed`);
       assert.equal(user.role, "doctor");
       assert.equal(user.mustChangePassword, false);
       assert.equal(user.fullName, `${TEST_PREFIX} Supervisor Renamed Arabic`);
@@ -1797,6 +1797,174 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     } finally {
       await pool.query("update users set username = $2, role = $3, full_name = $4, english_name = $5 where id = $1", [supervisor.id, original.username, original.role, original.full_name, original.english_name]);
     }
+  });
+
+  it("prevents supervisors from managing other protected accounts through Doctor Directory and CSV/XLSX import", async () => {
+    guard();
+    const protectedSupervisor = await createDoctorUser("protected_directory_supervisor", "supervisor", { canAssignProtocols: true, canSupervise: true });
+    const original = (await pool.query<{ username: string; full_name: string; role: string; is_active: boolean; auth_version: number }>(
+      "select username, full_name, role, is_active, auth_version from users where id=$1", [protectedSupervisor.id]
+    )).rows[0]!;
+    await pool.query(
+      `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+       values ($1, $2, true, true, true, true)`,
+      [protectedSupervisor.doctorId, testData.modalityId]
+    );
+    const account = await api(supervisor.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/account`, {
+      method: "PATCH",
+      body: { username: `${original.username}_attempt`, fullName: "Attempted Directory Edit", coreRole: "doctor", active: true },
+    });
+    const reset = await api(supervisor.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/reset-password`, {
+      method: "POST", body: { temporaryPassword: "DeniedDirectoryReset123!" },
+    });
+    const force = await api(supervisor.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/force-password-change`, { method: "POST" });
+    const deactivate = await api(supervisor.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/deactivate`, { method: "POST" });
+    const activate = await api(supervisor.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/activate`, { method: "POST" });
+    const profile = await api(supervisor.cookie, `/api/doctor/profiles/${protectedSupervisor.doctorId}`, { method: "PATCH", body: { active: false } });
+    const readModalities = await api(supervisor.cookie, `/api/doctor/profiles/${protectedSupervisor.doctorId}/modalities`);
+    const modalities = await api(supervisor.cookie, `/api/doctor/profiles/${protectedSupervisor.doctorId}/modalities`, {
+      method: "PUT", body: { permissions: [{ modalityId: testData.modalityId, canProtocol: false, canReport: false, canSupervise: false, active: false }] },
+    });
+    const createProfile = await api(supervisor.cookie, "/api/doctor/profiles", {
+      method: "POST", body: { userId: protectedSupervisor.id, displayName: "Attempted Profile", doctorRole: "consultant", active: true },
+    });
+    for (const denied of [account, reset, force, deactivate, activate, profile, readModalities, modalities, createProfile]) {
+      assert.equal(denied.status, 403, JSON.stringify(denied.data));
+    }
+
+    const directoryTarget = await pool.query<{ username: string; full_name: string; role: string; is_active: boolean; auth_version: number }>(
+      "select username, full_name, role, is_active, auth_version from users where id=$1", [protectedSupervisor.id]
+    );
+    assert.deepEqual(directoryTarget.rows[0], original);
+    const profileTarget = await pool.query<{ active: boolean; can_protocol: boolean; can_report: boolean; can_supervise: boolean }>(
+      `select dp.active, dmp.can_protocol, dmp.can_report, dmp.can_supervise
+         from doctor_portal.doctor_profiles dp
+         join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id=dp.id
+        where dp.id=$1 and dmp.modality_id=$2`,
+      [protectedSupervisor.doctorId, testData.modalityId]
+    );
+    assert.deepEqual(profileTarget.rows[0], { active: true, can_protocol: true, can_report: true, can_supervise: true });
+
+    const importHeaders = "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password";
+    const csv = `${importHeaders}\n${original.username},Attempted Import Edit,,doctor,true,consultant,true,true,true,true,,,,false`;
+    const csvPreview = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST", body: { fileContentBase64: Buffer.from(csv, "utf8").toString("base64") },
+    });
+    assert.equal((csvPreview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, true);
+    const csvConfirm = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST", body: { fileContentBase64: Buffer.from(csv, "utf8").toString("base64") },
+    });
+    assert.equal(csvConfirm.status, 403, JSON.stringify(csvConfirm.data));
+
+    const xlsx = await workbookBase64([{
+      username: original.username, full_name: "Attempted XLSX Edit", temporary_password: "", core_role: "doctor",
+      user_active: "true", doctor_role: "consultant", doctor_profile_active: "true", can_finalize_reports: "true",
+      can_assign_protocols: "true", can_supervise: "true", modalities_protocol: "", modalities_report: "",
+      modalities_supervise: "", reset_password: "false",
+    }]);
+    const xlsxPreview = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST", body: { fileContentBase64: xlsx, format: "xlsx" },
+    });
+    assert.equal((xlsxPreview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, true);
+    const xlsxConfirm = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST", body: { fileContentBase64: xlsx, format: "xlsx" },
+    });
+    assert.equal(xlsxConfirm.status, 403, JSON.stringify(xlsxConfirm.data));
+
+    const adminEdit = await api(admin.cookie, `/api/doctor/admin/doctors/${protectedSupervisor.id}/account`, {
+      method: "PATCH",
+      body: { username: `${original.username}_admin_edit`, fullName: "Super Admin Directory Edit", coreRole: "supervisor", active: true },
+    });
+    assert.equal(adminEdit.status, 200, JSON.stringify(adminEdit.data));
+    assert.equal((adminEdit.data as { user: { role: string; username: string } }).user.role, "supervisor");
+
+    const actorUsername = (await pool.query<{ username: string }>("select username from users where id=$1", [supervisor.id])).rows[0]!.username;
+    const selfPromotionCsv = `${importHeaders}\n${actorUsername},Attempted Self Promotion,,super_admin,true,consultant,true,true,true,true,,,,false`;
+    const selfPromotion = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST", body: { fileContentBase64: Buffer.from(selfPromotionCsv, "utf8").toString("base64") },
+    });
+    assert.equal(selfPromotion.status, 403, JSON.stringify(selfPromotion.data));
+    const actorRole = await pool.query<{ role: string }>("select role from users where id=$1", [supervisor.id]);
+    assert.equal(actorRole.rows[0]?.role, "supervisor", "a supervisor cannot use doctor import to grant themselves Super Admin");
+  });
+
+  it("enforces Doctor Workspace core-role eligibility and preserves demoted doctors' records", async () => {
+    guard();
+    const { updateUserRole } = await import("../../services/user-service.js");
+    const { getDoctorMe } = await import("./profile-service.js");
+    const { canDoctorProtocolModality, canDoctorSuperviseModality } = await import("./profile-repository.js");
+    const { doctorCanReportAllModalities, findAssignableDoctorForReporting, listDoctorReportableModalityIds } = await import("./reporting-board-repository.js");
+
+    for (const eligible of [normal, supervisor, admin]) {
+      await pool.query("update doctor_portal.doctor_profiles set active=false where id=$1", [eligible.doctorId]);
+      const activation = await api(admin.cookie, `/api/doctor/admin/doctors/${eligible.id}/activate`, { method: "POST" });
+      assert.equal(activation.status, 200, JSON.stringify(activation.data));
+      assert.equal((activation.data as { profile: { active: boolean } }).profile.active, true);
+    }
+
+    for (const incompatibleRole of ["receptionist", "administrative", "modality_staff"] as const) {
+      const incompatible = await createDoctorUser(`incompatible_${incompatibleRole}`, incompatibleRole, { canAssignProtocols: true, canSupervise: true });
+      await pool.query("update doctor_portal.doctor_profiles set active=false where id=$1", [incompatible.doctorId]);
+      const activation = await api(admin.cookie, `/api/doctor/admin/doctors/${incompatible.id}/activate`, { method: "POST" });
+      assert.equal(activation.status, 409, `${incompatibleRole}: ${JSON.stringify(activation.data)}`);
+      const profileActivation = await api(admin.cookie, `/api/doctor/profiles/${incompatible.doctorId}`, { method: "PATCH", body: { active: true } });
+      assert.equal(profileActivation.status, 409, `${incompatibleRole}: ${JSON.stringify(profileActivation.data)}`);
+      const profileCreation = await api(admin.cookie, "/api/doctor/profiles", {
+        method: "POST", body: { userId: incompatible.id, displayName: "Incompatible", doctorRole: "consultant", active: true },
+      });
+      assert.equal(profileCreation.status, 409, `${incompatibleRole}: ${JSON.stringify(profileCreation.data)}`);
+      const me = await api(incompatible.cookie, "/api/doctor/me");
+      assert.equal(me.status, 200, JSON.stringify(me.data));
+      assert.equal((me.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).hasActiveDoctorProfile, false);
+      assert.equal((me.data as { canAccessClinicalDoctorPortal: boolean }).canAccessClinicalDoctorPortal, false);
+      assert.equal((await pool.query<{ active: boolean }>("select active from doctor_portal.doctor_profiles where id=$1", [incompatible.doctorId])).rows[0]?.active, false);
+    }
+
+    const demoted = await createDoctorUser("demoted_historical", "doctor", { canAssignProtocols: true, canSupervise: true });
+    await pool.query(
+      `insert into doctor_portal.doctor_modality_permissions (doctor_id, modality_id, can_protocol, can_report, can_supervise, active)
+       values ($1, $2, true, true, true, true)`,
+      [demoted.doctorId, testData.modalityId]
+    );
+    const historicalBookingId = await createBooking(testData, today);
+    await pool.query(
+      `insert into doctor_portal.case_team_assignments (appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, status)
+       select id, null, $2, modality_id, 'reporting', booking_date, 'active' from appointments_v2.bookings where id=$1`,
+      [historicalBookingId, demoted.doctorId]
+    );
+    await updateUserRole(demoted.id, "administrative", { userId: admin.id, role: "super_admin" });
+    const deniedReactivation = await api(admin.cookie, `/api/doctor/admin/doctors/${demoted.id}/activate`, { method: "POST" });
+    assert.equal(deniedReactivation.status, 409, JSON.stringify(deniedReactivation.data));
+    const deniedProfileReactivation = await api(admin.cookie, `/api/doctor/profiles/${demoted.doctorId}`, { method: "PATCH", body: { active: true } });
+    assert.equal(deniedProfileReactivation.status, 409, JSON.stringify(deniedProfileReactivation.data));
+    const demotedMe = await getDoctorMe(demoted.id, "administrative");
+    assert.equal(demotedMe.hasActiveDoctorProfile, false);
+    assert.equal(demotedMe.canAccessClinicalDoctorPortal, false);
+    assert.equal(demotedMe.canFinalizeReports, false);
+    assert.deepEqual(demotedMe.allowedModalities, []);
+    assert.equal(await canDoctorProtocolModality(demoted.id, testData.modalityId), false);
+    assert.equal(await canDoctorSuperviseModality(demoted.id, testData.modalityId), false);
+    assert.equal(await findAssignableDoctorForReporting(demoted.doctorId), null);
+    assert.equal(await doctorCanReportAllModalities(demoted.doctorId, [testData.modalityId]), false);
+    assert.deepEqual(await listDoctorReportableModalityIds(demoted.doctorId), []);
+    const preserved = await pool.query<{ profile_active: boolean; permission_count: number; assignment_count: number }>(
+      `select dp.active as profile_active,
+              (select count(*)::int from doctor_portal.doctor_modality_permissions where doctor_id=dp.id) as permission_count,
+              (select count(*)::int from doctor_portal.case_team_assignments where assigned_doctor_id=dp.id and appointment_id=$2) as assignment_count
+         from doctor_portal.doctor_profiles dp where dp.id=$1`,
+      [demoted.doctorId, historicalBookingId]
+    );
+    assert.deepEqual(preserved.rows[0], { profile_active: false, permission_count: 1, assignment_count: 1 });
+
+    await updateUserRole(demoted.id, "doctor", { userId: admin.id, role: "super_admin" });
+    const restoredRole = await pool.query<{ role: string; active: boolean }>(
+      `select u.role, dp.active from users u join doctor_portal.doctor_profiles dp on dp.user_id=u.id where u.id=$1`,
+      [demoted.id]
+    );
+    assert.deepEqual(restoredRole.rows[0], { role: "doctor", active: false }, "restoring a compatible role does not silently reactivate the historical profile");
+    const restoredMe = await getDoctorMe(demoted.id, "doctor");
+    assert.equal(restoredMe.hasActiveDoctorProfile, false);
+    assert.equal(restoredMe.canAccessClinicalDoctorPortal, false);
   });
 
   it("rejects /auth/me when an existing session user becomes inactive", async () => {
@@ -2166,6 +2334,39 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(preserve.status, 200, JSON.stringify(preserve.data));
     assert.equal((await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username])).rows[0].password_hash, resetUser.rows[0].password_hash);
     assert.equal((await pool.query<{ english_name: string | null }>(`select english_name from users where username = $1`, [username])).rows[0].english_name, `${TEST_PREFIX} Imported Doctor EN`);
+
+    const incompatibleCsv = [
+      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${username},${TEST_PREFIX} Imported Doctor,,receptionist,true,consultant,true,true,true,false,,,false`,
+    ].join("\n");
+    const incompatibleCsvPreview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST", body: { fileContentBase64: Buffer.from(incompatibleCsv, "utf8").toString("base64") },
+    });
+    assert.equal((incompatibleCsvPreview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, false);
+    const incompatibleCsvConfirm = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST", body: { fileContentBase64: Buffer.from(incompatibleCsv, "utf8").toString("base64") },
+    });
+    assert.equal(incompatibleCsvConfirm.status, 409, JSON.stringify(incompatibleCsvConfirm.data));
+
+    const incompatibleXlsx = await workbookBase64([{
+      username, full_name: `${TEST_PREFIX} Imported Doctor`, temporary_password: "", core_role: "administrative",
+      user_active: "true", doctor_role: "consultant", doctor_profile_active: "true", can_finalize_reports: "true",
+      can_assign_protocols: "true", can_supervise: "false", modalities_protocol: "", modalities_report: "",
+      modalities_supervise: "", reset_password: "false",
+    }]);
+    const incompatibleXlsxPreview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST", body: { fileContentBase64: incompatibleXlsx, format: "xlsx" },
+    });
+    assert.equal((incompatibleXlsxPreview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, false);
+    const incompatibleXlsxConfirm = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST", body: { fileContentBase64: incompatibleXlsx, format: "xlsx" },
+    });
+    assert.equal(incompatibleXlsxConfirm.status, 409, JSON.stringify(incompatibleXlsxConfirm.data));
+    const unchangedImportTarget = await pool.query<{ role: string; profile_active: boolean }>(
+      `select u.role, dp.active as profile_active from users u join doctor_portal.doctor_profiles dp on dp.user_id=u.id where u.username=$1`,
+      [username]
+    );
+    assert.deepEqual(unchangedImportTarget.rows[0], { role: "doctor", profile_active: true });
 
     const deniedUsername = `${TEST_PREFIX.toLowerCase()}supervisor_import_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const deniedCsv = [

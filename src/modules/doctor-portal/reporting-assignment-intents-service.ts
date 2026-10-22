@@ -35,10 +35,12 @@ interface PendingIntentRow {
 async function findActorDoctorId(client: PoolClient, userId: number): Promise<number | null> {
   const result = await client.query<{ id: number }>(
     `
-      select id
-      from doctor_portal.doctor_profiles
-      where user_id = $1 and active = true
-      order by id asc
+      select dp.id
+      from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
+      where dp.user_id = $1 and dp.active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
+      order by dp.id asc
       limit 1
     `,
     [userId]
@@ -53,11 +55,13 @@ export async function canCreateReportingAssignmentIntent(
   if (actor.role === "super_admin" || actor.role === "supervisor") return true;
   const result = await client.query<{ id: number }>(
     `
-      select id
-      from doctor_portal.doctor_profiles
-      where user_id = $1
-        and active = true
-        and can_supervise = true
+      select dp.id
+      from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
+      where dp.user_id = $1
+        and dp.active = true
+        and dp.can_supervise = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
       limit 1
     `,
     [actor.userId]
@@ -82,6 +86,7 @@ async function assertDoctorCanReportModality(
     `
       select dp.id
       from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
       join doctor_portal.doctor_modality_permissions dmp
         on dmp.doctor_id = dp.id
        and dmp.modality_id = $2
@@ -89,6 +94,7 @@ async function assertDoctorCanReportModality(
        and dmp.active = true
       where dp.id = $1
         and dp.active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
         and dp.can_finalize_reports = true
       limit 1
     `,
@@ -115,12 +121,14 @@ export async function listEligibleIntendedReportingDoctors(input: {
       `
         select dp.id, dp.display_name as "displayName", dp.can_finalize_reports as "canFinalizeReports"
         from doctor_portal.doctor_profiles dp
+        join users u on u.id = dp.user_id
         join doctor_portal.doctor_modality_permissions dmp
           on dmp.doctor_id = dp.id
          and dmp.modality_id = $1
          and dmp.can_report = true
          and dmp.active = true
         where dp.active = true
+          and u.role in ('doctor', 'supervisor', 'super_admin')
           and dp.can_finalize_reports = true
         order by dp.display_name asc, dp.id asc
       `,

@@ -121,7 +121,7 @@ test("users identity, active-state, and temporary-password routes preserve middl
     assert.match(duplicateUsername.data.error?.message ?? "", /already exists/);
     const protectedIdentity = await request(`/${superAdminId}/identity`, "PUT", { username: `protected_${suffix}`, fullName: "Protected Admin" });
     assert.equal(protectedIdentity.status, 403);
-    assert.match(protectedIdentity.data.error?.message ?? "", /Only super_admin/);
+    assert.match(protectedIdentity.data.error?.message ?? "", /Protected administrative accounts may be managed only by a Super Admin/);
 
     const activate = await request(`/${targetId}/active`, "PUT", { isActive: true });
     assert.equal(activate.status, 200);

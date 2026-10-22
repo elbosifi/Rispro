@@ -156,16 +156,27 @@ test("passkey routes require auth for registration options, store registrations,
     const loginCookie = login.cookies.find((value) => value.startsWith(`${env.cookieName}=`));
     assert.ok(loginCookie, "successful passkey verification creates the normal RISpro session cookie");
 
-    const reauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: authCookie });
+    const renamedUsername = `${activeUsername}_renamed`;
+    await pool.query(
+      "update users set username=$2, full_name=$3, english_name=$4 where id=$1",
+      [active.id, renamedUsername, "Renamed Passkey User", "Renamed English User"]
+    );
+    const postRenameOptions = await request<{ challenge: string }>(server.baseUrl, "/register/options", { cookie: loginCookie });
+    assert.equal(postRenameOptions.status, 200, "an existing passkey session remains valid after an identity update");
+
+    const reauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: loginCookie });
     assert.equal(reauthOptions.status, 200);
     assert.equal(reauthOptions.data.challenge, "authentication-challenge");
-    const reauth = await request<{ ok: boolean; user: { id: number; recentSupervisorReauth: boolean } }>(server.baseUrl, "/re-auth/verify", {
-      cookie: `${authCookie}; ${cookieHeader(reauthOptions.cookies)}`,
+    const reauth = await request<{ ok: boolean; user: { id: number; username: string; fullName: string; englishName: string | null; recentSupervisorReauth: boolean } }>(server.baseUrl, "/re-auth/verify", {
+      cookie: `${loginCookie}; ${cookieHeader(reauthOptions.cookies)}`,
       body: { response: { id: registeredCredential } }
     });
     assert.equal(reauth.status, 200);
     assert.equal(reauth.data.ok, true);
     assert.equal(Number(reauth.data.user.id), active.id);
+    assert.equal(reauth.data.user.username, renamedUsername);
+    assert.equal(reauth.data.user.fullName, "Renamed Passkey User");
+    assert.equal(reauth.data.user.englishName, "Renamed English User");
     assert.equal(reauth.data.user.recentSupervisorReauth, true);
     assert.ok(reauth.cookies.some((value) => value.startsWith(`${env.reauthCookieName}=`)), "passkey re-auth creates the existing supervisor re-auth cookie");
     assert.equal(reauth.cookies.some((value) => value.startsWith(`${env.cookieName}=`)), false, "passkey re-auth does not replace the normal session");

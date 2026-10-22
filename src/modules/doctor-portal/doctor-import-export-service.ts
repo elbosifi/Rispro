@@ -10,6 +10,7 @@ import type { DoctorRole } from "./profile-repository.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import { emailFromUsername } from "../../utils/email-address.js";
 import { lockActiveSuperAdminSet } from "../../services/user-service.js";
+import { assertCanManageProtectedAccount } from "../../services/protected-account-authorization.js";
 import { logSecurityAuditEntry } from "../../services/audit-service.js";
 
 const EXPORT_COLUMNS = [
@@ -235,13 +236,18 @@ export async function previewDoctorImport(input: { fileContentBase64: string; fo
     if (!coreRole || !isRole(coreRole)) errors.push("invalid core_role");
     if (!doctorRole || !DOCTOR_ROLES.has(doctorRole as DoctorRole)) errors.push("invalid doctor_role");
     let resetPassword = false;
+    let requestedProfileActive = true;
     try {
-      ["user_active", "doctor_profile_active", "can_finalize_reports", "can_assign_protocols", "can_supervise"].forEach((column) => {
+      ["user_active", "can_finalize_reports", "can_assign_protocols", "can_supervise"].forEach((column) => {
         if (row.values[column]) boolValue(row.values[column], false);
       });
+      requestedProfileActive = boolValue(row.values.doctor_profile_active, true);
       resetPassword = boolValue(row.values.reset_password, false);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "invalid boolean");
+    }
+    if (coreRole && isRole(coreRole) && requestedProfileActive && !DOCTOR_WORKSPACE_ROLES.has(coreRole)) {
+      errors.push("An active Doctor Workspace profile requires core_role doctor, supervisor, or super_admin.");
     }
     if (!existingUsernames.has(username)) {
       try {
@@ -273,6 +279,9 @@ export async function confirmDoctorImportCsv(fileContentBase64: string, actorUse
 
 export async function confirmDoctorImport(input: { fileContentBase64: string; format?: string | null; fileName?: string | null }, actorUserId: UserId) {
   const preview = await previewDoctorImport(input);
+  if (preview.rows.some((row) => row.errors.includes("An active Doctor Workspace profile requires core_role doctor, supervisor, or super_admin."))) {
+    throw new HttpError(409, "An active Doctor Workspace profile requires a compatible core role.", { rows: preview.rows });
+  }
   if (!preview.canConfirm) throw new HttpError(400, "Doctor import has validation errors.", { rows: preview.rows });
   const modalityMap = await modalityCodeMap();
   const summary = {
@@ -312,12 +321,8 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
       const previousUser = existing.rows[0];
       const nextRole = values.core_role as Role;
       const nextIsActive = boolValue(values.user_active, true);
-      if (actor.role === "supervisor" && (nextRole === "super_admin" || previousUser?.role === "super_admin")) {
-        throw new HttpError(403, "Only super_admin can assign or modify a super_admin user.");
-      }
-      if (actor.role === "supervisor" && nextRole === "supervisor" && previousUser?.role !== "supervisor") {
-        throw new HttpError(403, "Only super_admin can grant the supervisor role.");
-      }
+      if (!previousUser || nextRole !== previousUser.role) assertCanManageProtectedAccount(actor.role, nextRole);
+      if (previousUser) assertCanManageProtectedAccount(actor.role, previousUser.role, actorUserId, previousUser.id);
       if (previousUser?.role === "super_admin" && previousUser.is_active && (nextRole !== "super_admin" || !nextIsActive)) {
         const activeAdmins = await client.query<{ count: string }>(
           "select count(*)::text as count from users where role = 'super_admin' and is_active = true"

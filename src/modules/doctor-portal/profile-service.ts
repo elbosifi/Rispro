@@ -12,6 +12,7 @@ import { normalizeUsername, requireExactPassword } from "../../utils/credentials
 import { emailFromUsername, normalizeOptionalEmail } from "../../utils/email-address.js";
 import { lockActiveSuperAdminSet } from "../../services/user-service.js";
 import { logSecurityAuditEntry } from "../../services/audit-service.js";
+import { assertCanManageProtectedAccount } from "../../services/protected-account-authorization.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -64,9 +65,17 @@ const CORE_ROUTE_KEYS = [
   "settings",
 ] as const;
 
+const DOCTOR_WORKSPACE_ROLES = new Set<Role>(["doctor", "supervisor", "super_admin"]);
+
+function assertDoctorWorkspaceRole(role: Role): void {
+  if (!DOCTOR_WORKSPACE_ROLES.has(role)) {
+    throw new HttpError(409, "The account role is not eligible for an active Doctor Workspace profile.");
+  }
+}
+
 export async function getDoctorMe(userId: UserId, appRole: Role): Promise<DoctorMeResponse> {
   const profile = await findDoctorProfileByUserId(userId);
-  const hasActiveDoctorProfile = Boolean(profile?.active);
+  const hasActiveDoctorProfile = Boolean(profile?.active && profile.coreRole && DOCTOR_WORKSPACE_ROLES.has(profile.coreRole as Role));
   const isSuperAdmin = appRole === "super_admin";
   const canManageDoctorProfiles = isSuperAdmin || appRole === "supervisor";
   const canAccessClinicalDoctorPortal = hasActiveDoctorProfile;
@@ -117,7 +126,26 @@ export async function createProfileForAdmin(
   input: CreateDoctorProfileInput
 ): Promise<DoctorProfileRow> {
   await requireDoctorAdmin(actorUserId, appRole);
-  const profile = await createDoctorProfile(input, actorUserId);
+  const client = await pool.connect();
+  let profile: DoctorProfileRow;
+  try {
+    await client.query("begin");
+    const target = await client.query<{ id: number; role: Role }>(
+      "select id, role from users where id = $1 for update",
+      [input.userId]
+    );
+    const user = target.rows[0];
+    if (!user) throw new HttpError(404, "User not found.");
+    assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.id);
+    if (input.active) assertDoctorWorkspaceRole(user.role);
+    profile = await createDoctorProfile(input, actorUserId, client);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
   await syncDoctorWorklistLifecycle(profile.id);
   return profile;
 }
@@ -165,9 +193,7 @@ export async function createDoctorWithUserForAdmin(
   if (!isRole(input.coreRole)) {
     throw new HttpError(400, "coreRole is invalid.");
   }
-  if (input.coreRole === "supervisor" && appRole !== "super_admin") {
-    throw new HttpError(403, "Only super_admin can grant the supervisor role.");
-  }
+  assertCanManageProtectedAccount(appRole, input.coreRole as Role);
   if (!input.userActive) {
     throw new HttpError(400, "New doctor users must be active.");
   }
@@ -334,9 +360,31 @@ export async function updateProfileForAdmin(
   input: UpdateDoctorProfileInput
 ): Promise<DoctorProfileRow> {
   await requireDoctorAdmin(actorUserId, appRole);
-  const profile = await updateDoctorProfile(profileId, input, actorUserId);
-  if (!profile) {
-    throw new HttpError(404, "Doctor profile not found.");
+  const client = await pool.connect();
+  let profile: DoctorProfileRow;
+  try {
+    await client.query("begin");
+    const target = await client.query<{ userId: number; role: Role; profileActive: boolean }>(
+      `select u.id as "userId", u.role, dp.active as "profileActive"
+         from doctor_portal.doctor_profiles dp
+         join users u on u.id = dp.user_id
+        where dp.id = $1
+        for update of u`,
+      [profileId]
+    );
+    const user = target.rows[0];
+    if (!user) throw new HttpError(404, "Doctor profile not found.");
+    assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.userId);
+    if (input.active === true || (input.active === undefined && user.profileActive)) assertDoctorWorkspaceRole(user.role);
+    const updated = await updateDoctorProfile(profileId, input, actorUserId, client);
+    if (!updated) throw new HttpError(404, "Doctor profile not found.");
+    profile = updated;
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
   await syncDoctorWorklistLifecycle(profile.id);
   return profile;
@@ -398,15 +446,11 @@ export async function updateLinkedDoctorUserForAdmin(
     if (Number(actorUserId) === targetUserId && !input.active) {
       throw new HttpError(400, "You cannot deactivate your own account.");
     }
-    if (previous.role === "super_admin" && appRole !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
-    }
+    assertCanManageProtectedAccount(appRole, previous.role, actorUserId, previous.id);
     if (previous.role !== "doctor" && previous.role !== "supervisor") {
       throw new HttpError(409, "Only doctor or supervisor accounts can be edited through Doctor Directory.");
     }
-    if (input.coreRole === "supervisor" && previous.role !== "supervisor" && appRole !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can grant the supervisor role.");
-    }
+    if (input.coreRole !== previous.role) assertCanManageProtectedAccount(appRole, input.coreRole as Role);
     const result = await client.query<DoctorAdminUserRow>(
       `update users
           set username = $2, email = $3, full_name = $4, english_name = $5, role = $6, is_active = $7,
@@ -469,9 +513,8 @@ export async function setDoctorIdentityActiveForAdmin(
     if (Number(actorUserId) === targetUserId && !active) {
       throw new HttpError(400, "You cannot deactivate your own account.");
     }
-    if (previous.role === "super_admin" && appRole !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
-    }
+    assertCanManageProtectedAccount(appRole, previous.role, actorUserId, previous.id);
+    if (active) assertDoctorWorkspaceRole(previous.role);
     if (previous.role === "super_admin" && previous.is_active && !active) {
       const count = await client.query<{ count: string }>("select count(*)::text as count from users where role = 'super_admin' and is_active = true");
       if (Number(count.rows[0]?.count ?? "0") <= 1) {
@@ -523,6 +566,17 @@ export async function setDoctorIdentityActiveForAdmin(
 
 export async function listProfileModalitiesForAdmin(userId: UserId, appRole: Role, profileId: number) {
   await requireDoctorAdmin(userId, appRole);
+  const target = await pool.query<{ userId: number; role: Role }>(
+    `select u.id as "userId", u.role
+       from doctor_portal.doctor_profiles dp
+       join users u on u.id = dp.user_id
+      where dp.id = $1
+      limit 1`,
+    [profileId]
+  );
+  const user = target.rows[0];
+  if (!user) throw new HttpError(404, "Doctor profile not found.");
+  assertCanManageProtectedAccount(appRole, user.role, userId, user.userId);
   return listDoctorModalityPermissions(profileId, true);
 }
 
@@ -539,5 +593,28 @@ export async function updateProfileModalitiesForAdmin(
   }>
 ) {
   await requireDoctorAdmin(actorUserId, appRole);
-  return replaceDoctorModalityPermissions(profileId, permissions, actorUserId);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const target = await client.query<{ userId: number; role: Role; profileActive: boolean }>(
+      `select u.id as "userId", u.role, dp.active as "profileActive"
+         from doctor_portal.doctor_profiles dp
+         join users u on u.id = dp.user_id
+        where dp.id = $1
+        for update of u`,
+      [profileId]
+    );
+    const user = target.rows[0];
+    if (!user) throw new HttpError(404, "Doctor profile not found.");
+    assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.userId);
+    if (user.profileActive) assertDoctorWorkspaceRole(user.role);
+    const result = await replaceDoctorModalityPermissions(profileId, permissions, actorUserId, client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

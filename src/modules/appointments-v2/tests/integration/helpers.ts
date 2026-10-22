@@ -30,8 +30,8 @@ export async function canReachDatabase(): Promise<boolean> {
   }
 }
 
-export function createTestAuthCookie(userId: number, role: string = "supervisor"): string {
-  const payload = { sub: userId, role, username: "test_user", fullName: "Test User" };
+export function createTestAuthCookie(userId: number, role: string = "supervisor", authVersion?: number): string {
+  const payload = { sub: userId, role, username: "test_user", fullName: "Test User", ...(authVersion === undefined ? {} : { authVersion }) };
   const token = jwt.sign(payload, env.jwtSecret, { expiresIn: "1h" });
   return `${env.cookieName}=${token}`;
 }

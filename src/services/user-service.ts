@@ -11,6 +11,7 @@ import { findDoctorProfileByUserId, listDoctorModalityPermissions } from "../mod
 import { canRoleAccessPage, PAGE_VISIBILITY_ROUTE_KEYS, readPageVisibilityMatrix } from "./page-visibility-settings-service.js";
 import { normalizeUsername, requireExactPassword } from "../utils/credentials.js";
 import { normalizeOptionalEmail } from "../utils/email-address.js";
+import { assertCanManageProtectedAccount, isProtectedAdministrativeRole } from "./protected-account-authorization.js";
 
 export interface UserRow {
   id: number;
@@ -67,7 +68,7 @@ async function auditSuperAdminAttempt(input: {
   actorUserId: NullableUserId;
   targetUserId?: NullableUserId;
   details: Record<string, unknown>;
-}): Promise<void> {
+}, client?: PoolClient): Promise<void> {
   await logSecurityAuditEntry({
     entityType: "user",
     entityId: input.targetUserId ?? null,
@@ -75,20 +76,20 @@ async function auditSuperAdminAttempt(input: {
     oldValues: null,
     newValues: input.details,
     changedByUserId: input.actorUserId
-  });
+  }, client);
 }
 
-export async function listUsers(actorRole: Role = "supervisor"): Promise<UserListRow[]> {
+export async function listUsers(actorRole: Role = "supervisor", actorUserId: NullableUserId = null): Promise<UserListRow[]> {
   const { rows } = await pool.query(`
     select id, username, email, full_name, english_name, role, is_active,
-           case when role = 'super_admin' and $1 <> 'super_admin' then null
+           case when role in ('supervisor', 'super_admin') and $1 <> 'super_admin' and id is distinct from $2 then null
                 else coalesce(must_change_password, false) end as must_change_password,
            coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-           case when role = 'super_admin' and $1 <> 'super_admin' then null else last_login_at end as last_login_at,
+           case when role in ('supervisor', 'super_admin') and $1 <> 'super_admin' and id is distinct from $2 then null else last_login_at end as last_login_at,
            created_at, updated_at
     from users
     order by created_at asc
-  `, [actorRole]);
+  `, [actorRole, actorUserId]);
 
   return rows as UserListRow[];
 }
@@ -111,25 +112,17 @@ export async function createUser(
     );
   }
 
-  if (role === "super_admin" && actor.role !== "super_admin") {
+  if (isProtectedAdministrativeRole(role) && actor.role !== "super_admin") {
     await auditSuperAdminAttempt({
-      actionType: "create_super_admin_denied",
+      actionType: role === "super_admin" ? "create_super_admin_denied" : "create_supervisor_denied",
       actorUserId: actor.userId,
       details: {
-        reason: "only_super_admin_can_create_super_admin",
+        reason: role === "super_admin" ? "only_super_admin_can_create_super_admin" : "only_super_admin_can_grant_supervisor",
         attemptedRole: role,
         username: String(username)
       }
     });
-    throw new HttpError(403, "Only super_admin can create a super_admin user.");
-  }
-  if (role === "supervisor" && actor.role !== "super_admin") {
-    await auditSuperAdminAttempt({
-      actionType: "create_supervisor_denied",
-      actorUserId: actor.userId,
-      details: { reason: "only_super_admin_can_grant_supervisor", username: String(username) }
-    });
-    throw new HttpError(403, "Only super_admin can grant the supervisor role.");
+    assertCanManageProtectedAccount(actor.role, role, actor.userId);
   }
 
   const exactPassword = requireExactPassword(password);
@@ -206,36 +199,47 @@ export async function updateUserIdentity(
   if (!canonicalUsername) throw new HttpError(400, "username is required.");
   if (!cleanFullName) throw new HttpError(400, "fullName is required.");
 
-  const currentResult = await pool.query<UserRow>(
-    `
-      select id, username, email, full_name, english_name, role, is_active,
-             coalesce(must_change_password, false) as must_change_password,
-             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-             created_at, updated_at
-      from users
-      where id = $1
-      limit 1
-    `,
-    [cleanUserId]
-  );
-  const previousUser = currentResult.rows[0];
-  if (!previousUser) throw new HttpError(404, "User not found.");
-
-  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
-    await auditSuperAdminAttempt({
-      actionType: "update_super_admin_identity_denied",
-      actorUserId: actor.userId,
-      targetUserId: previousUser.id,
-      details: {
-        reason: "only_super_admin_can_update_super_admin",
-        targetUsername: previousUser.username
-      }
-    });
-    throw new HttpError(403, "Only super_admin can update a super_admin user.");
-  }
-
+  const client = await pool.connect();
+  let committed = false;
   try {
-    const updatedResult = await pool.query<UserRow>(
+    await client.query("begin");
+    const currentResult = await client.query<UserRow>(
+      `
+        select id, username, email, full_name, english_name, role, is_active,
+               coalesce(must_change_password, false) as must_change_password,
+               coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+               created_at, updated_at
+        from users
+        where id = $1
+        for update
+      `,
+      [cleanUserId]
+    );
+    const previousUser = currentResult.rows[0];
+    if (!previousUser) throw new HttpError(404, "User not found.");
+
+    if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+      await auditSuperAdminAttempt({
+        actionType: "update_super_admin_identity_denied",
+        actorUserId: actor.userId,
+        targetUserId: previousUser.id,
+        details: {
+          reason: "only_super_admin_can_update_super_admin",
+          targetUsername: previousUser.username
+        }
+      });
+    }
+    try {
+      assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
+    } catch (error) {
+      if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+        await client.query("commit");
+        committed = true;
+      }
+      throw error;
+    }
+
+    const updatedResult = await client.query<UserRow>(
       `
         update users
         set username = $2, email = $3, full_name = $4, english_name = $5, updated_at = now()
@@ -257,7 +261,7 @@ export async function updateUserIdentity(
       oldValues: { username: previousUser.username, email: previousUser.email, fullName: previousUser.full_name, englishName: previousUser.english_name },
       newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name, englishName: updatedUser.english_name },
       changedByUserId: actor.userId
-    });
+    }, client);
 
     if (updatedUser.role === "super_admin") {
       await auditSuperAdminAttempt({
@@ -268,11 +272,14 @@ export async function updateUserIdentity(
           reason: "super_admin_identity_updated",
           targetUsername: updatedUser.username
         }
-      });
+      }, client);
     }
 
+    await client.query("commit");
+    committed = true;
     return updatedUser;
   } catch (error) {
+    if (!committed) await client.query("rollback").catch(() => undefined);
     if (
       typeof error === "object" &&
       error !== null &&
@@ -282,6 +289,8 @@ export async function updateUserIdentity(
       throw new HttpError(409, "A user with that username already exists.");
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -319,12 +328,8 @@ export async function updateUserRole(
     const previous = currentResult.rows[0];
     if (!previous) throw new HttpError(404, "User not found.");
 
-    if ((previous.role === "super_admin" || role === "super_admin") && actor.role !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can assign or modify a super_admin user.");
-    }
-    if (role === "supervisor" && previous.role !== "supervisor" && actor.role !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can grant the supervisor role.");
-    }
+    assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
+    if (role !== previous.role) assertCanManageProtectedAccount(actor.role, role);
     if (role === previous.role) {
       await client.query("commit");
       return previous;
@@ -431,8 +436,8 @@ export async function deleteUser(
         targetUserId: target.id,
         details: { reason: "only_super_admin_can_delete_super_admin", targetUsername: target.username }
       });
-      throw new HttpError(403, "Only super_admin can delete a super_admin user.");
     }
+    assertCanManageProtectedAccount(actor.role, target.role, actor.userId, target.id);
 
     if (target.role === "super_admin" && target.is_active) {
       const countResult = await client.query<{ count: string }>(
@@ -501,18 +506,17 @@ export async function updateUserSchedulingOverridePermission(
       update users
       set can_request_scheduling_override = case when role = 'receptionist' then $2 else false end,
           updated_at = now()
-      where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
+      where id = $1
+        and ($3 = 'super_admin' or role not in ('supervisor', 'super_admin') or id = $4)
       returning id, username, email, full_name, english_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
     `,
-    [cleanUserId, canRequestSchedulingOverride, actor.role]
+    [cleanUserId, canRequestSchedulingOverride, actor.role, actor.userId]
   );
   const updated = rows[0] as UserRow | undefined;
   if (!updated) {
     const target = await pool.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
     if (!target.rows[0]) throw new HttpError(404, "User not found.");
-    if (target.rows[0].role === "super_admin" && actor.role !== "super_admin") {
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
-    }
+    assertCanManageProtectedAccount(actor.role, target.rows[0].role, actor.userId, cleanUserId);
     throw new HttpError(409, "User changed during the update. Please retry.");
   }
 
@@ -559,15 +563,14 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
   );
   const user = result.rows[0];
   if (!user) throw new HttpError(404, "User not found.");
-  if (user.role === "super_admin" && actor.role !== "super_admin") {
-    throw new HttpError(403, "Only super_admin can view super_admin security details.");
-  }
+  assertCanManageProtectedAccount(actor.role, user.role, actor.userId, user.id);
 
   const [profile, visibility] = await Promise.all([
     findDoctorProfileByUserId(cleanUserId),
     readPageVisibilityMatrix()
   ]);
   const modalityPermissions = profile ? await listDoctorModalityPermissions(profile.id) : [];
+  const profileRoleEligible = Boolean(profile?.coreRole && DOCTOR_WORKSPACE_ROLES.has(profile.coreRole as Role));
   return {
     userId: user.id,
     role: user.role,
@@ -579,7 +582,7 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
       configured: Boolean(profile),
       profile: profile ? {
         active: profile.active,
-        effective: user.is_active && profile.active,
+        effective: user.is_active && profile.active && profileRoleEligible,
         doctorRole: profile.doctorRole,
         canFinalizeReports: profile.canFinalizeReports,
         canAssignProtocols: profile.canAssignProtocols,
@@ -592,7 +595,7 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
         canProtocol: permission.canProtocol,
         canReport: permission.canReport,
         canSupervise: permission.canSupervise,
-        effective: user.is_active && Boolean(profile?.active) && permission.active
+        effective: user.is_active && Boolean(profile?.active) && profileRoleEligible && permission.active
       }))
     },
     navigationVisibility: {
@@ -632,8 +635,9 @@ export async function revokeUserSessions(userId: string, actor: UserActorContext
         changedByUserId: actor.userId
       }, client);
       await client.query("commit");
-      throw new HttpError(403, "Only super_admin can revoke super_admin sessions.");
+      assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
     }
+    assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
 
     const updated = await client.query<UserRow & { auth_version: number }>(
       `update users set auth_version = auth_version + 1, updated_at = now()
@@ -700,18 +704,19 @@ export async function updateUserPassword(
       }, client);
       await client.query("commit");
       committed = true;
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+      assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
     }
+    assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
     const updatedResult = await client.query<UserRow>(
       `update users
           set password_hash = $2, must_change_password = false,
               auth_version = auth_version + 1, updated_at = now()
-        where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
+        where id = $1 and ($3 = 'super_admin' or role not in ('supervisor', 'super_admin') or id = $4)
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                   created_at, updated_at`,
-      [cleanUserId, passwordHash, actor.role]
+      [cleanUserId, passwordHash, actor.role, actor.userId]
     );
     const updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(409, "User changed during the update. Please retry.");
@@ -768,18 +773,19 @@ export async function resetUserTemporaryPassword(
       }, client);
       await client.query("commit");
       committed = true;
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+      assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
     }
+    assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
     const updatedResult = await client.query<UserRow>(
       `update users
           set password_hash = $2, must_change_password = true,
               auth_version = auth_version + 1, updated_at = now()
-        where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
+        where id = $1 and ($3 = 'super_admin' or role not in ('supervisor', 'super_admin') or id = $4)
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                   created_at, updated_at`,
-      [cleanUserId, passwordHash, actor.role]
+      [cleanUserId, passwordHash, actor.role, actor.userId]
     );
     const updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(409, "User changed during the update. Please retry.");
@@ -829,18 +835,19 @@ export async function setUserMustChangePassword(
       }, client);
       await client.query("commit");
       committed = true;
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+      assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
     }
+    assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
     const updatedResult = await client.query<UserRow>(
       `update users
           set must_change_password = true,
               auth_version = auth_version + 1, updated_at = now()
-        where id = $1 and (role <> 'super_admin' or $2 = 'super_admin')
+        where id = $1 and ($2 = 'super_admin' or role not in ('supervisor', 'super_admin') or id = $3)
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                   created_at, updated_at`,
-      [cleanUserId, actor.role]
+      [cleanUserId, actor.role, actor.userId]
     );
     const updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(409, "User changed during the update. Please retry.");
@@ -901,8 +908,8 @@ export async function updateUserActiveState(
           attemptedIsActive: isActive
         }
       });
-      throw new HttpError(403, "Only super_admin can update a super_admin user.");
     }
+    assertCanManageProtectedAccount(actor.role, previousUser.role, actor.userId, previousUser.id);
 
     if (previousUser.role === "super_admin" && previousUser.is_active && !isActive) {
       const countResult = await client.query<{ count: string }>(

@@ -93,7 +93,11 @@ export default function UsersSection({
   const users = usersQuery.data?.users ?? [];
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
   const canModifySelectedUser = Boolean(
-    selectedUser && (actorUser?.role === "super_admin" || selectedUser.role !== "super_admin"),
+    selectedUser && (
+      actorUser?.role === "super_admin" ||
+      !["supervisor", "super_admin"].includes(selectedUser.role) ||
+      Number(selectedUser.id) === Number(actorUser?.id)
+    ),
   );
   const effectiveAccessQuery = useQuery<UserEffectiveAccess>({
     queryKey: ["users", selectedUserId, "effective-access"],

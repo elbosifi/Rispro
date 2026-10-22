@@ -1626,7 +1626,7 @@ export const en = {
   "settings.users.notAvailable": "—",
   "settings.users.lastLogin": "Last login",
   "settings.users.neverRecorded": "Never recorded",
-  "settings.users.privilegedDetailsRestricted": "Security details for Super Admin accounts are restricted.",
+  "settings.users.privilegedDetailsRestricted": "Protected administrative account details are restricted.",
   "settings.users.effectiveAccessLoading": "Loading effective access…",
   "settings.users.effectiveAccessError": "Unable to load effective access.",
   "settings.users.schedulingOverrideEffective": "Scheduling override requests",

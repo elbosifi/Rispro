@@ -163,7 +163,8 @@ async function loadDoctorFacts(assignments: RosterAssignmentRow[], db: Db): Prom
 
   const profileRows = await db.query<{ id: number; display_name: string; doctor_role: string; active: boolean }>(
     `
-      select dp.id, dp.display_name, dp.doctor_role, (dp.active and u.is_active) as active
+      select dp.id, dp.display_name, dp.doctor_role,
+        (dp.active and u.is_active and u.role in ('doctor', 'supervisor', 'super_admin')) as active
       from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id
       where dp.id = any($1::bigint[])
     `,

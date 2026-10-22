@@ -9,9 +9,10 @@ describe("user-service super_admin guardrails", () => {
     source = await fs.readFile("src/services/user-service.ts", "utf-8");
   });
 
-  it("enforces only super_admin can create super_admin", () => {
-    assert.ok(source.includes("Only super_admin can create a super_admin user."));
+  it("uses the shared protected-account guard when creating administrative accounts", () => {
+    assert.ok(source.includes("assertCanManageProtectedAccount(actor.role, role, actor.userId)"));
     assert.ok(source.includes("create_super_admin_denied"));
+    assert.ok(source.includes("create_supervisor_denied"));
     assert.ok(source.includes("create_super_admin_allowed"));
   });
 

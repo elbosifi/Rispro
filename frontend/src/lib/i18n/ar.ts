@@ -1668,7 +1668,7 @@ export const ar = {
   "settings.users.notAvailable": "—",
   "settings.users.lastLogin": "آخر تسجيل دخول",
   "settings.users.neverRecorded": "لم يسجل بعد",
-  "settings.users.privilegedDetailsRestricted": "تفاصيل الأمان لحسابات مدير النظام مقيدة.",
+  "settings.users.privilegedDetailsRestricted": "تفاصيل الحسابات الإدارية المحمية مقيدة.",
   "settings.users.effectiveAccessLoading": "جار تحميل الصلاحيات الفعلية…",
   "settings.users.effectiveAccessError": "تعذر تحميل الصلاحيات الفعلية.",
   "settings.users.schedulingOverrideEffective": "طلبات تجاوز الجدولة",

@@ -40,7 +40,7 @@ function currentUser(request: PasskeyRequest): PasskeyUser {
     id: request.user.sub,
     username: request.user.username,
     fullName: request.user.fullName || request.user.username,
-    englishName: null,
+    englishName: request.user.englishName ?? null,
     role: request.user.role,
     mustChangePassword: request.user.mustChangePassword === true,
     authVersion: Number(request.user.authVersion ?? 0)

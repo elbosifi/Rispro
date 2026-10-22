@@ -40,6 +40,9 @@ interface CurrentAuthState {
   isActive: boolean;
   role: Role;
   mustChangePassword: boolean;
+  username: string;
+  fullName: string;
+  englishName: string | null;
 }
 
 async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null> {
@@ -48,8 +51,11 @@ async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null
     is_active: boolean;
     role: string;
     must_change_password: boolean;
+    username: string;
+    full_name: string;
+    english_name: string | null;
   }>(
-    `select auth_version, is_active, role,
+    `select auth_version, is_active, role, username, full_name, english_name,
             coalesce(must_change_password, false) as must_change_password
        from users where id = $1 limit 1`,
     [Number(userId)]
@@ -59,7 +65,10 @@ async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null
     authVersion: Number(row.auth_version),
     isActive: row.is_active,
     role: parseRole(row.role),
-    mustChangePassword: row.must_change_password
+    mustChangePassword: row.must_change_password,
+    username: row.username,
+    fullName: row.full_name,
+    englishName: row.english_name
   } : null;
 }
 
@@ -82,8 +91,9 @@ async function currentSessionUser(payload: Record<string, unknown>): Promise<Aut
     sub: userId,
     role: current.role,
     authVersion: current.authVersion,
-    username: payload.username ? String(payload.username) : undefined,
-    fullName: payload.fullName ? String(payload.fullName) : undefined,
+    username: current.username,
+    fullName: current.fullName,
+    englishName: current.englishName ?? undefined,
     mustChangePassword: current.mustChangePassword
   };
 }

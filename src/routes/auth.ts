@@ -6,7 +6,6 @@ import {
   buildSessionToken,
   buildSupervisorReauthToken,
   recordSuccessfulLogin,
-  findCurrentSessionUser,
   clearSupervisorReauthCookie,
   clearSessionCookie,
   writeSessionCookie,
@@ -31,6 +30,8 @@ interface AuthenticatedUser {
   sub: UserId;
   role: Role;
   username: string;
+  fullName?: string;
+  englishName?: string;
   mustChangePassword?: boolean;
   authVersion: number;
 }
@@ -56,7 +57,9 @@ function requireCurrentUser(request: AuthSessionRequest): AuthenticatedUser {
   return {
     sub: request.user.sub,
     role: request.user.role,
-    username: request.user.username as string,
+    username: request.user.username!,
+    fullName: request.user.fullName,
+    englishName: request.user.englishName,
     mustChangePassword: request.user.mustChangePassword,
     authVersion: Number(request.user.authVersion ?? 0)
   };
@@ -116,14 +119,12 @@ authRouter.post("/logout", (_req: Request, res: Response) => {
 authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response) => {
   const request = req as AuthSessionRequest;
   const currentUser = requireCurrentUser(request);
-  const sessionUser = await findCurrentSessionUser(currentUser.sub);
-  if (!sessionUser || !sessionUser.is_active) throw new HttpError(401, "Authentication required.");
   res.json({
     user: {
-      id: sessionUser.id,
+      id: currentUser.sub,
       username: currentUser.username,
-      fullName: sessionUser.full_name,
-      englishName: sessionUser.english_name,
+      fullName: currentUser.fullName,
+      englishName: currentUser.englishName ?? null,
       role: currentUser.role,
       recentSupervisorReauth: hasRecentSupervisorReauth(request),
       mustChangePassword: currentUser.mustChangePassword

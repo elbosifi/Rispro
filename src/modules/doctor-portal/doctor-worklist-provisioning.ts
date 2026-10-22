@@ -13,13 +13,15 @@ export async function syncDoctorWorklistLifecycle(
     display_name: string;
     doctor_active: boolean;
     user_active: boolean;
+    role: string;
   }>(
     `
       select
         dp.id,
         dp.display_name,
         dp.active as doctor_active,
-        u.is_active as user_active
+        u.is_active as user_active,
+        u.role
       from doctor_portal.doctor_profiles dp
       join users u on u.id = dp.user_id
       where dp.id = $1
@@ -41,7 +43,8 @@ export async function syncDoctorWorklistLifecycle(
     `,
     [doctorId]
   );
-  const shouldBeActive = profile.doctor_active && profile.user_active;
+  const shouldBeActive = profile.doctor_active && profile.user_active &&
+    (profile.role === "doctor" || profile.role === "supervisor" || profile.role === "super_admin");
 
   if (!existing.rows[0]) {
     const inserted = await db.query<{ id: number }>(
@@ -111,7 +114,7 @@ export async function reconcileDoctorWorklists(db: Queryable = pool): Promise<vo
       )
       select null, null, dp.display_name || ' Worklist',
         encode(gen_random_bytes(32), 'hex'), '{}'::jsonb, '{}'::jsonb,
-        dp.active and u.is_active, 'doctor_worklist', true, dp.id
+        dp.active and u.is_active and u.role in ('doctor', 'supervisor', 'super_admin'), 'doctor_worklist', true, dp.id
       from doctor_portal.doctor_profiles dp
       join users u on u.id = dp.user_id
       on conflict (target_doctor_id)
@@ -122,13 +125,13 @@ export async function reconcileDoctorWorklists(db: Queryable = pool): Promise<vo
   await db.query(
     `
       update doctor_portal.reporting_board_saved_views sv
-      set active = dp.active and u.is_active
+      set active = dp.active and u.is_active and u.role in ('doctor', 'supervisor', 'super_admin')
           and sv.admin_disabled_at is null
           and sv.revoked_at is null
           and (sv.expires_at is null or sv.expires_at > now()),
           name = dp.display_name || ' Worklist',
           updated_at = case
-            when sv.active is distinct from (dp.active and u.is_active
+            when sv.active is distinct from (dp.active and u.is_active and u.role in ('doctor', 'supervisor', 'super_admin')
               and sv.admin_disabled_at is null and sv.revoked_at is null
               and (sv.expires_at is null or sv.expires_at > now()))
               or sv.name is distinct from dp.display_name || ' Worklist'

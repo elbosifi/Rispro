@@ -85,6 +85,7 @@ export async function findActiveDoctorProfileByUserId(userId: UserId): Promise<D
       ${profileSelect()}
       where dp.user_id = $1
         and dp.active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
       limit 1
     `,
     [userId]
@@ -115,6 +116,7 @@ export async function canDoctorProtocolModality(userId: UserId, modalityId: numb
         join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
         where u.id = $1
           and u.is_active = true
+          and u.role in ('doctor', 'supervisor', 'super_admin')
           and dp.active = true
           and dp.can_assign_protocols = true
           and dmp.modality_id = $2
@@ -137,6 +139,7 @@ export async function canDoctorSuperviseModality(userId: UserId, modalityId: num
         join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
         where u.id = $1
           and u.is_active = true
+          and u.role in ('doctor', 'supervisor', 'super_admin')
           and dp.active = true
           and dp.can_supervise = true
           and dmp.modality_id = $2
@@ -168,6 +171,7 @@ export async function listEligibleDoctorSupervisorsForModality(modalityId: numbe
       join doctor_portal.doctor_profiles dp on dp.user_id = u.id
       join doctor_portal.doctor_modality_permissions dmp on dmp.doctor_id = dp.id
       where u.is_active = true
+        and u.role in ('doctor', 'supervisor', 'super_admin')
         and dp.active = true
         and dp.can_supervise = true
         and dmp.modality_id = $1
@@ -190,9 +194,10 @@ export async function listDoctorProfiles(includeEmail = false): Promise<DoctorPr
 
 export async function createDoctorProfile(
   input: CreateDoctorProfileInput,
-  actorUserId: UserId
+  actorUserId: UserId,
+  db: Db = pool
 ): Promise<DoctorProfileRow> {
-  const result = await pool.query<DoctorProfileRow>(
+  const result = await db.query<DoctorProfileRow>(
     `
       insert into doctor_portal.doctor_profiles (
         user_id,
@@ -233,7 +238,7 @@ export async function createDoctorProfile(
   );
 
   const profile = result.rows[0];
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId,
     actorDoctorId: null,
     eventType: "doctor_profile_created",
@@ -248,9 +253,10 @@ export async function createDoctorProfile(
 export async function updateDoctorProfile(
   profileId: number,
   input: UpdateDoctorProfileInput,
-  actorUserId: UserId
+  actorUserId: UserId,
+  db: Db = pool
 ): Promise<DoctorProfileRow | null> {
-  const result = await pool.query<DoctorProfileRow>(
+  const result = await db.query<DoctorProfileRow>(
     `
       update doctor_portal.doctor_profiles
       set
@@ -293,7 +299,7 @@ export async function updateDoctorProfile(
   const profile = result.rows[0] ?? null;
   if (!profile) return null;
 
-  await insertDoctorAuditEvent(pool, {
+  await insertDoctorAuditEvent(db, {
     actorUserId,
     actorDoctorId: null,
     eventType: "doctor_profile_updated",
@@ -306,8 +312,8 @@ export async function updateDoctorProfile(
   return profile;
 }
 
-export async function listDoctorModalityPermissions(doctorId: number, includeInactive = false): Promise<DoctorModalityPermissionRow[]> {
-  const result = await pool.query<DoctorModalityPermissionRow>(
+export async function listDoctorModalityPermissions(doctorId: number, includeInactive = false, db: Db = pool): Promise<DoctorModalityPermissionRow[]> {
+  const result = await db.query<DoctorModalityPermissionRow>(
     `
       select
         dmp.id,
@@ -340,11 +346,13 @@ export async function replaceDoctorModalityPermissions(
     canSupervise: boolean;
     active: boolean;
   }>,
-  actorUserId: UserId
+  actorUserId: UserId,
+  transactionClient?: PoolClient
 ): Promise<DoctorModalityPermissionRow[]> {
-  const client = await pool.connect();
+  const ownsClient = transactionClient === undefined;
+  const client = transactionClient ?? await pool.connect();
   try {
-    await client.query("begin");
+    if (ownsClient) await client.query("begin");
     for (const permission of permissions) {
       await client.query(
         `
@@ -379,14 +387,15 @@ export async function replaceDoctorModalityPermissions(
       metadata: { modalityIds: permissions.map((permission) => permission.modalityId) },
       reason: null,
     });
-    await client.query("commit");
+    const result = await listDoctorModalityPermissions(doctorId, true, client);
+    if (ownsClient) await client.query("commit");
+    return result;
   } catch (error) {
-    await client.query("rollback");
+    if (ownsClient) await client.query("rollback");
     throw error;
   } finally {
-    client.release();
+    if (ownsClient) client.release();
   }
-  return listDoctorModalityPermissions(doctorId, true);
 }
 
 export async function insertDoctorAuditEvent(

@@ -92,7 +92,7 @@ export async function uploadIrReferralDocument(actor: IrReferralActor, caseIdInp
 async function queueIrReferralReadyEmail(referral: IrReferralRow, actor: IrReferralActor, client: PoolClient): Promise<void> {
   if (!referral.notifyAssignedDoctor || !referral.assignedDoctorId) return;
   const recipient = await client.query<{ user_id: number; email: string | null; is_active: boolean }>(
-    `select u.id as user_id,u.email,u.is_active from doctor_portal.doctor_profiles dp join users u on u.id=dp.user_id where dp.id=$1 and dp.active=true limit 1`,
+    `select u.id as user_id,u.email,u.is_active from doctor_portal.doctor_profiles dp join users u on u.id=dp.user_id where dp.id=$1 and dp.active=true and u.role in ('doctor','supervisor','super_admin') limit 1`,
     [referral.assignedDoctorId]
   );
   const user = recipient.rows[0];
@@ -116,7 +116,7 @@ async function queueIrReferralReadyEmail(referral: IrReferralRow, actor: IrRefer
 }
 async function queueIrReferralReadyNotification(referral: IrReferralRow, actor: IrReferralActor, client: PoolClient): Promise<void> {
   if (!referral.assignedDoctorId) return;
-  const recipient = await client.query<{ user_id: number }>(`select u.id as user_id from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id where dp.id = $1 and dp.active = true and u.is_active = true limit 1`, [referral.assignedDoctorId]);
+  const recipient = await client.query<{ user_id: number }>(`select u.id as user_id from doctor_portal.doctor_profiles dp join users u on u.id = dp.user_id where dp.id = $1 and dp.active = true and u.role in ('doctor','supervisor','super_admin') limit 1`, [referral.assignedDoctorId]);
   const user = recipient.rows[0];
   if (!user) return;
   const created = await createIrReferralReadyNotification({ referralId: referral.id, recipientDoctorId: referral.assignedDoctorId, recipientUserId: user.user_id }, client);
