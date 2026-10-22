@@ -181,22 +181,22 @@ function CatalogManagement({
 
       {canEdit && (
         <div className="grid gap-2 md:grid-cols-4">
-          <select value={draft.modalityId} onChange={(event) => setDraft((current) => ({ ...current, modalityId: event.target.value, examTypeId: "" }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.modality")}</span><select value={draft.modalityId} onChange={(event) => setDraft((current) => ({ ...current, modalityId: event.target.value, examTypeId: "" }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">{t(language, "doctor.workload.modality")}</option>
             {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn || modality.code || modality.id}</option>)}
-          </select>
-          <select value={draft.examTypeId} onChange={(event) => setDraft((current) => ({ ...current, examTypeId: event.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
+          </select></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.exam")}</span><select value={draft.examTypeId} onChange={(event) => setDraft((current) => ({ ...current, examTypeId: event.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">{t(language, "doctor.workload.anyExam")}</option>
             {examTypes.filter((exam) => !draft.modalityId || exam.modalityId === Number(draft.modalityId)).map((exam) => <option key={exam.id} value={exam.id}>{exam.nameEn}</option>)}
-          </select>
-          <select value={draft.assignmentType} onChange={(event) => setDraft((current) => ({ ...current, assignmentType: event.target.value as CaseAssignmentType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
+          </select></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.workType")}</span><select value={draft.assignmentType} onChange={(event) => setDraft((current) => ({ ...current, assignmentType: event.target.value as CaseAssignmentType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             {ASSIGNMENT_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
-          </select>
-          <Input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder={t(language, "doctor.workload.categoryOrBlank")} className="rounded-lg border px-3 py-2 text-sm" />
-          <Input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder={t(language, "doctor.workload.points")} className="rounded-lg border px-3 py-2 text-sm" />
-          <Input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder={t(language, "doctor.workload.reportRequiredMultiplier")} className="rounded-lg border px-3 py-2 text-sm" />
-          <Input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-          <Input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          </select></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.category")}</span><Input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder={t(language, "doctor.workload.categoryOrBlank")} className="rounded-lg border px-3 py-2 text-sm" /></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.points")}</span><Input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder={t(language, "doctor.workload.points")} className="rounded-lg border px-3 py-2 text-sm" /></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.reportRequiredMultiplier")}</span><Input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder={t(language, "doctor.workload.reportRequiredMultiplier")} className="rounded-lg border px-3 py-2 text-sm" /></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.effective")} · {t(language, "doctor.protocols.from")}</span><Input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+          <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>{t(language, "doctor.workload.effective")} · {t(language, "doctor.protocols.to")}</span><Input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
           <div className="flex gap-2 md:col-span-3">
             <Button variant="primary" size="sm" type="button" disabled={!draft.modalityId || !draft.baseUnits || !draft.effectiveFrom} onClick={() => {
               if (selected) onUpdate(selected.id, payload());

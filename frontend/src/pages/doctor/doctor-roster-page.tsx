@@ -1,3 +1,4 @@
+import { Button, Input } from "@/components/shared";
 import { DoctorRosterBoard } from "./roster/doctor-roster-board";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -143,7 +144,7 @@ function DraggableDoctor({
       type="button"
       {...listeners}
       {...attributes}
-      className="rounded-lg border px-3 py-2 text-left text-xs"
+      className="rounded-lg border px-3 py-2 text-start text-xs"
       style={{
         borderColor: "var(--border)",
         opacity: dimmed ? 0.55 : 1,
@@ -194,14 +195,14 @@ function DroppableRosterSlot({
           </p>
         </div>
         {editable && onDeleteAssignment && (
-          <button
+          <Button variant="secondary" size="sm"
             type="button"
             onClick={() => onDeleteAssignment(assignment.id)}
             className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
             style={{ borderColor: "var(--border)" }}
           >
             Delete
-          </button>
+          </Button>
         )}
       </div>
       {assignmentConflicts.length > 0 && (
@@ -277,14 +278,14 @@ function AssignmentList({
               </p>
             </div>
             {canManage && onDeleteAssignment && (
-              <button
+              <Button variant="secondary" size="sm"
                 type="button"
                 onClick={() => onDeleteAssignment(assignment.id)}
                 className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
                 style={{ borderColor: "var(--border)" }}
               >
                 Delete
-              </button>
+              </Button>
             )}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -584,7 +585,7 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
   const goToNextWeek = () => selectWeek(addDays(weekStart, 7));
 
   return (
-    <div className="space-y-4">
+    <div className="doctor-roster-page space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
@@ -594,7 +595,7 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
         </div>
         <label className="text-sm font-medium">
           Week start
-          <input
+          <Input
             type="date"
             value={weekStart}
             onChange={(event) => selectWeek(event.target.value)}
@@ -605,24 +606,24 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+        <Button variant="secondary" size="sm" type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
           Previous week
-        </button>
-        <button type="button" onClick={goToCurrentWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+        </Button>
+        <Button variant="secondary" size="sm" type="button" onClick={goToCurrentWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
           Current week
-        </button>
-        <button type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+        </Button>
+        <Button variant="secondary" size="sm" type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
           Next week
-        </button>
+        </Button>
       </div>
 
       {canManage && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <div className="flex flex-wrap items-center gap-2">
             {!roster?.week && (
-              <button type="button" onClick={() => createWeekMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+              <Button variant="primary" size="sm" type="button" onClick={() => createWeekMutation.mutate()} className="rounded-lg px-3 py-2 text-sm font-semibold">
                 Create draft week
-              </button>
+              </Button>
             )}
             {roster?.week && (
               <>
@@ -631,18 +632,18 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 </span>
                 {editable && (
                   <>
-                    <button type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                    <Button variant="secondary" size="sm" type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                       Copy previous week
-                    </button>
-                    <button type="button" onClick={() => publishMutation.mutate(roster.week!.id)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+                    </Button>
+                    <Button variant="primary" size="sm" type="button" onClick={() => publishMutation.mutate(roster.week!.id)} className="rounded-lg px-3 py-2 text-sm font-semibold">
                       Publish week
-                    </button>
+                    </Button>
                   </>
                 )}
                 {advanced && roster.week.status === "published" && (
-                  <button type="button" onClick={() => notifyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                  <Button variant="secondary" size="sm" type="button" onClick={() => notifyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                     Notify assigned doctors
-                  </button>
+                  </Button>
                 )}
                 {advanced && (
                   <>
@@ -675,9 +676,9 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
           title="No roster week exists for selected week."
           body="Create a draft roster week before adding shifts and assigning doctors."
         >
-          <button type="button" onClick={() => createWeekMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+          <Button variant="primary" size="sm" type="button" onClick={() => createWeekMutation.mutate()} className="rounded-lg px-3 py-2 text-sm font-semibold">
             Create draft week
-          </button>
+          </Button>
         </RosterStatePanel>
       )}
 
@@ -686,12 +687,12 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
           title="No assignments yet"
           body="Create an assignment, then drag doctors into it."
         >
-          <button type="button" onClick={() => setShowAssignmentForm(true)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+          <Button variant="primary" size="sm" type="button" onClick={() => setShowAssignmentForm(true)} className="rounded-lg px-3 py-2 text-sm font-semibold">
             Create assignment
-          </button>
-          <button type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          </Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Copy previous week
-          </button>
+          </Button>
           {!advanced && <SecondaryLink to="/doctor/advanced-setup">Open Advanced Setup</SecondaryLink>}
         </RosterStatePanel>
       )}
@@ -703,12 +704,12 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
           tone="warning"
         >
           {!advanced && <SecondaryLink to="/doctor/advanced-setup">Open Advanced Setup</SecondaryLink>}
-          <button type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          <Button variant="secondary" size="sm" type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Previous week
-          </button>
-          <button type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          </Button>
+          <Button variant="secondary" size="sm" type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Next week
-          </button>
+          </Button>
         </RosterStatePanel>
       )}
 
@@ -739,19 +740,19 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 });
               }}
             >
-              <input placeholder="Code" value={dutyTypeDraft.code} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, code: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Label" value={dutyTypeDraft.label} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, label: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input type="number" placeholder="Sort order" value={dutyTypeDraft.sortOrder} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, sortOrder: Number(e.target.value) }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Code</span><Input placeholder="Code" value={dutyTypeDraft.code} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, code: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Label</span><Input placeholder="Label" value={dutyTypeDraft.label} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, label: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Sort order</span><Input type="number" placeholder="Sort order" value={dutyTypeDraft.sortOrder} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, sortOrder: Number(e.target.value) }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={dutyTypeDraft.active} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={dutyTypeDraft.requiresSpecialist} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, requiresSpecialist: e.target.checked }))} /> Requires specialist</label>
-              <button type="submit" disabled={!dutyTypeDraft.code.trim() || !dutyTypeDraft.label.trim() || saveDutyTypeMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save duty type</button>
+              <Button variant="primary" size="sm" type="submit" disabled={!dutyTypeDraft.code.trim() || !dutyTypeDraft.label.trim() || saveDutyTypeMutation.isPending} className="rounded-lg px-3 py-2 text-sm font-semibold">Save duty type</Button>
             </form>
             <div className="space-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
               {(dutyTypesQuery.data ?? []).map((dutyType) => (
                 <button
                   key={dutyType.code}
                   type="button"
-                  className="block text-left"
+                  className="block text-start"
                   onClick={() => setDutyTypeDraft({
                     code: dutyType.code,
                     label: dutyType.label,
@@ -785,20 +786,20 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 });
               }}
             >
-              <input placeholder="Shift name" value={effectiveShiftMappingDraft.sourceShiftName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Shift type" value={effectiveShiftMappingDraft.sourceShiftType} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftType: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Abbreviation" value={effectiveShiftMappingDraft.sourceShiftAbbreviation} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftAbbreviation: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <select value={effectiveShiftMappingDraft.dutyTypeCode} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, dutyTypeCode: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Shift name</span><Input placeholder="Shift name" value={effectiveShiftMappingDraft.sourceShiftName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Shift type</span><Input placeholder="Shift type" value={effectiveShiftMappingDraft.sourceShiftType} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftType: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Abbreviation</span><Input placeholder="Abbreviation" value={effectiveShiftMappingDraft.sourceShiftAbbreviation} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftAbbreviation: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Duty type</span><select value={effectiveShiftMappingDraft.dutyTypeCode} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, dutyTypeCode: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Duty type</option>
                 {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
-              </select>
-              <select value={effectiveShiftMappingDraft.modalityId} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Modality</span><select value={effectiveShiftMappingDraft.modalityId} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, modalityId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">No modality</option>
                 {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}
-              </select>
-              <input placeholder="Team name" value={effectiveShiftMappingDraft.teamName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Team name</span><Input placeholder="Team name" value={effectiveShiftMappingDraft.teamName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={effectiveShiftMappingDraft.active} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
-              <button type="submit" disabled={!effectiveShiftMappingDraft.dutyTypeCode || saveShiftMappingMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save mapping</button>
+              <Button variant="primary" size="sm" type="submit" disabled={!effectiveShiftMappingDraft.dutyTypeCode || saveShiftMappingMutation.isPending} className="rounded-lg px-3 py-2 text-sm font-semibold">Save mapping</Button>
             </form>
             <div className="space-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
               {(shiftMappingsQuery.data ?? []).map((mapping) => (
@@ -816,7 +817,7 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
             <input
               type="file"
               accept=".xml,text/xml,application/xml"
-              className="rounded-lg border px-3 py-2 text-sm md:col-span-2"
+              className="rounded-lg border border-border px-3 py-2 text-sm md:col-span-2"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (!file) return;
@@ -828,28 +829,28 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 reader.readAsDataURL(file);
               }}
             />
-            <select value={xmlImportDraft.defaultDoctorRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultDoctorRole: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Default doctor role</span><select value={xmlImportDraft.defaultDoctorRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultDoctorRole: event.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
               <option value="consultant">Consultant</option>
               <option value="specialist">Specialist</option>
               <option value="senior_house_officer">Senior house officer</option>
               <option value="resident">Resident</option>
-            </select>
-            <select value={xmlImportDraft.defaultCoreRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultCoreRole: event.target.value as "doctor" | "supervisor" }))} className="rounded-lg border px-3 py-2 text-sm">
+            </select></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Default RISpro role</span><select value={xmlImportDraft.defaultCoreRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultCoreRole: event.target.value as "doctor" | "supervisor" }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
               <option value="doctor">RISpro doctor user</option>
               <option value="supervisor">RISpro supervisor user</option>
-            </select>
-            <select value={xmlImportDraft.defaultTeamRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultTeamRole: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+            </select></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Default team role</span><select value={xmlImportDraft.defaultTeamRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultTeamRole: event.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
               {TEAM_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-            </select>
-            <input type="password" placeholder="Temporary password" value={xmlImportDraft.temporaryPassword} onChange={(event) => setXmlImportDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+            </select></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Temporary password</span><Input type="password" placeholder="Temporary password" value={xmlImportDraft.temporaryPassword} onChange={(event) => setXmlImportDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={xmlImportDraft.createMissingDoctors} onChange={(event) => setXmlImportDraft((current) => ({ ...current, createMissingDoctors: event.target.checked }))} />
             Create RISpro users and doctor profiles for unmatched doctors
           </label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!xmlImportDraft.fileContentBase64 || previewXmlImportMutation.isPending} onClick={() => previewXmlImportMutation.mutate({ fileContentBase64: xmlImportDraft.fileContentBase64 })} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview XML</button>
-            <button type="button" disabled={!xmlImportPreview?.canConfirm || !xmlImportDraft.temporaryPassword || confirmXmlImportMutation.isPending} onClick={() => confirmXmlImportMutation.mutate(xmlImportDraft)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
+            <Button variant="secondary" size="sm" type="button" disabled={!xmlImportDraft.fileContentBase64 || previewXmlImportMutation.isPending} onClick={() => previewXmlImportMutation.mutate({ fileContentBase64: xmlImportDraft.fileContentBase64 })} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview XML</Button>
+            <Button variant="primary" size="sm" type="button" disabled={!xmlImportPreview?.canConfirm || !xmlImportDraft.temporaryPassword || confirmXmlImportMutation.isPending} onClick={() => confirmXmlImportMutation.mutate(xmlImportDraft)} className="rounded-lg px-3 py-2 text-sm font-semibold">Confirm import</Button>
           </div>
           {xmlImportPreview && (
             <div className="grid gap-3 text-sm md:grid-cols-4">
@@ -906,9 +907,9 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                   </p>
                 </div>
                 {editable && (
-                  <button type="button" onClick={() => setShowAssignmentForm((current) => !current)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+                  <Button variant="primary" size="sm" type="button" onClick={() => setShowAssignmentForm((current) => !current)} className="rounded-lg px-3 py-2 text-sm font-semibold">
                     Create assignment
-                  </button>
+                  </Button>
                 )}
               </div>
               {(roster.assignments ?? []).length === 0 ? (
@@ -916,9 +917,9 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                   <p className="font-semibold text-foreground">No assignments yet</p>
                   <p className="mt-1">Create an assignment, then drag doctors into it.</p>
                   {editable && (
-                    <button type="button" onClick={() => setShowAssignmentForm(true)} className="mt-3 rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+                    <Button variant="primary" size="sm" type="button" onClick={() => setShowAssignmentForm(true)} className="mt-3 rounded-lg px-3 py-2 text-sm font-semibold">
                       Create assignment
-                    </button>
+                    </Button>
                   )}
                 </div>
               ) : (
@@ -967,42 +968,42 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 <h3 className="font-semibold">Create assignment</h3>
                 <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>This creates the card doctors can be dragged into.</p>
               </div>
-              <button type="button" onClick={() => setShowAssignmentForm(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+              <Button variant="secondary" size="sm" type="button" onClick={() => setShowAssignmentForm(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                 Close
-              </button>
+              </Button>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="text-sm font-medium">
                 Assignment date
-                <input type="date" min={weekStart} max={weekEnd} value={effectiveAssignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="mt-1 block w-full rounded-lg border px-3 py-2 text-sm" />
+                <Input type="date" min={weekStart} max={weekEnd} value={effectiveAssignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="mt-1 block w-full rounded-lg border px-3 py-2 text-sm" />
               </label>
-              <select value={effectiveAssignmentForm.modalityId} onChange={(e) => setAssignmentForm((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Modality</span><select value={effectiveAssignmentForm.modalityId} onChange={(e) => setAssignmentForm((c) => ({ ...c, modalityId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">No modality</option>
                 {(lookupsQuery.data?.modalities ?? []).map((modality) => (
                   <option key={modality.id} value={modality.id}>{modality.nameEn}</option>
                 ))}
-              </select>
-              <select value={effectiveAssignmentForm.dutyType} onChange={(e) => setAssignmentForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Duty type</span><select value={effectiveAssignmentForm.dutyType} onChange={(e) => setAssignmentForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Duty type</option>
                 {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
-              </select>
-              <input placeholder="Team name" value={effectiveAssignmentForm.teamName} onChange={(e) => setAssignmentForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Session" value={effectiveAssignmentForm.sessionName} onChange={(e) => setAssignmentForm((c) => ({ ...c, sessionName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Team name</span><Input placeholder="Team name" value={effectiveAssignmentForm.teamName} onChange={(e) => setAssignmentForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Session</span><Input placeholder="Session" value={effectiveAssignmentForm.sessionName} onChange={(e) => setAssignmentForm((c) => ({ ...c, sessionName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
               <div className="grid grid-cols-2 gap-2">
-                <input type="time" value={effectiveAssignmentForm.startTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <input type="time" value={effectiveAssignmentForm.endTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Start time</span><Input type="time" value={effectiveAssignmentForm.startTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>End time</span><Input type="time" value={effectiveAssignmentForm.endTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
               </div>
             </div>
-            <button type="submit" disabled={!effectiveAssignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Add assignment</button>
+            <Button variant="primary" size="sm" type="submit" disabled={!effectiveAssignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg px-3 py-2 text-sm font-semibold">Add assignment</Button>
           </form>
         </section>
       )}
 
       {canManage && editable && (roster?.assignments ?? []).length > 0 && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-          <button type="button" onClick={() => setShowManualAddMember((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          <Button variant="secondary" size="sm" type="button" onClick={() => setShowManualAddMember((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Manual add
-          </button>
+          </Button>
           {showManualAddMember && (
           <form
             className="mt-4 space-y-3"
@@ -1018,23 +1019,23 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
           >
             <h3 className="font-semibold">Add team member</h3>
             <div className="grid gap-2 sm:grid-cols-3">
-              <select value={memberForm.assignmentId} onChange={(e) => setMemberForm((c) => ({ ...c, assignmentId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Assignment</span><select value={memberForm.assignmentId} onChange={(e) => setMemberForm((c) => ({ ...c, assignmentId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Assignment</option>
                 {(roster.assignments ?? []).map((assignment) => (
                   <option key={assignment.id} value={assignment.id}>{assignment.teamName} · {assignment.date}</option>
                 ))}
-              </select>
-              <select value={memberForm.doctorId} onChange={(e) => setMemberForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Doctor</span><select value={memberForm.doctorId} onChange={(e) => setMemberForm((c) => ({ ...c, doctorId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Doctor</option>
                 {(doctorsQuery.data ?? []).map((doctor) => (
                   <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}{conflictedDoctorIds.has(doctor.id) ? " · conflict" : ""}</option>
                 ))}
-              </select>
-              <select value={memberForm.teamRole} onChange={(e) => setMemberForm((c) => ({ ...c, teamRole: e.target.value as RosterTeamRole }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Team role</span><select value={memberForm.teamRole} onChange={(e) => setMemberForm((c) => ({ ...c, teamRole: e.target.value as RosterTeamRole }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 {TEAM_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-              </select>
+              </select></label>
             </div>
-            <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Add member</button>
+            <Button variant="primary" size="sm" type="submit" className="rounded-lg px-3 py-2 text-sm font-semibold">Add member</Button>
           </form>
           )}
         </section>
@@ -1067,19 +1068,19 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
                 });
               }}
             >
-              <select value={effectiveTemplateApplyForm.templateId} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Template</span><select value={effectiveTemplateApplyForm.templateId} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, templateId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Select template</option>
                 {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-              </select>
-              <select value={effectiveTemplateApplyForm.copyMode} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, copyMode: e.target.value as RosterTemplateCopyMode }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Copy mode</span><select value={effectiveTemplateApplyForm.copyMode} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, copyMode: e.target.value as RosterTemplateCopyMode }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="structure_only">Structure only</option>
                 <option value="structure_with_named_doctors">Structure with named doctors</option>
-              </select>
+              </select></label>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={effectiveTemplateApplyForm.overwriteExisting} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, overwriteExisting: e.target.checked }))} />
                 Overwrite existing draft duties
               </label>
-              <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Apply template</button>
+              <Button variant="primary" size="sm" type="submit" className="rounded-lg px-3 py-2 text-sm font-semibold">Apply template</Button>
             </form>
             {templateApplyResult && (
               <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)" }}>
@@ -1107,20 +1108,20 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
               }}
             >
               <h3 className="sm:col-span-2 font-semibold">Generate draft roster</h3>
-              <select value={generateForm.templateId} onChange={(e) => setGenerateForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Template</span><select value={generateForm.templateId} onChange={(e) => setGenerateForm((c) => ({ ...c, templateId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">No template</option>
                 {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-              </select>
-              <select value={generateForm.balanceStrategy} onChange={(e) => setGenerateForm((c) => ({ ...c, balanceStrategy: e.target.value as RosterBalanceStrategy }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Balance strategy</span><select value={generateForm.balanceStrategy} onChange={(e) => setGenerateForm((c) => ({ ...c, balanceStrategy: e.target.value as RosterBalanceStrategy }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="simple">Simple</option>
                 <option value="preserve_previous">Preserve previous</option>
                 <option value="least_assigned">Least assigned</option>
-              </select>
+              </select></label>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={generateForm.includeDoctors} onChange={(e) => setGenerateForm((c) => ({ ...c, includeDoctors: e.target.checked }))} />
                 Auto-fill doctors
               </label>
-              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Generate draft roster</button>
+              <Button variant="secondary" size="sm" type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Generate draft roster</Button>
             </form>
             {generateResult && (
               <div className="mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)" }}>
@@ -1164,21 +1165,21 @@ function LegacyDoctorRosterPage({ me, management = false, advanced = false }: { 
             >
               <h3 className="font-semibold">Create template</h3>
               <div className="grid gap-2 sm:grid-cols-2">
-                <input placeholder="Template name" value={effectiveTemplateForm.name} onChange={(e) => setTemplateForm((c) => ({ ...c, name: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <select value={effectiveTemplateForm.templateType} onChange={(e) => setTemplateForm((c) => ({ ...c, templateType: e.target.value as RosterTemplateType }))} className="rounded-lg border px-3 py-2 text-sm">
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Template name</span><Input placeholder="Template name" value={effectiveTemplateForm.name} onChange={(e) => setTemplateForm((c) => ({ ...c, name: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Template type</span><select value={effectiveTemplateForm.templateType} onChange={(e) => setTemplateForm((c) => ({ ...c, templateType: e.target.value as RosterTemplateType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                   {TEMPLATE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                </select>
-                <select value={effectiveTemplateForm.dayOfWeek} onChange={(e) => setTemplateForm((c) => ({ ...c, dayOfWeek: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                </select></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Day</span><select value={effectiveTemplateForm.dayOfWeek} onChange={(e) => setTemplateForm((c) => ({ ...c, dayOfWeek: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>Day {day}</option>)}
-                </select>
-                <select value={effectiveTemplateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
+                </select></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Duty type</span><select value={effectiveTemplateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                   <option value="">Duty type</option>
                   {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
-                </select>
-                <input placeholder="Team name" value={effectiveTemplateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <input placeholder="Placeholder" value={effectiveTemplateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                </select></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Team name</span><Input placeholder="Team name" value={effectiveTemplateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+                <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Placeholder</span><Input placeholder="Placeholder" value={effectiveTemplateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
               </div>
-              <button type="submit" disabled={!effectiveTemplateForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Create template</button>
+              <Button variant="secondary" size="sm" type="submit" disabled={!effectiveTemplateForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Create template</Button>
             </form>
           )}
         </section>

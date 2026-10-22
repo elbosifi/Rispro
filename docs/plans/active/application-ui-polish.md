@@ -73,12 +73,12 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Doctor | `/doctor/reporting-board` | `DoctorReportingBoardPage` | P1 | Regression reference |
 | Doctor | `/doctor/doctor-worklists` | `DoctorWorklistsPage` | P1 | Complete — batch 1 |
 | Doctor | `/doctor/reporting-board/saved/:token` | `DoctorReportingBoardPage (saved view)` | P1 | Discovered |
-| Doctor | `/doctor/roster-planner` | `DoctorRosterPage (management)` | P1 | Discovered |
-| Doctor | `/doctor/doctors-directory` | `DoctorAdminDoctorsPage` | P1 | Discovered |
-| Doctor | `/doctor/advanced-setup` | `DoctorAdvancedSetupPage` | P1 | Discovered |
-| Doctor | `/doctor/advanced-setup?section=roster` | `DoctorRosterPage (advanced)` | P1 | Discovered |
-| Doctor | `/doctor/advanced-setup?section=doctors` | `DoctorAdminDoctorsPage (advanced)` | P1 | Discovered |
-| Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Discovered |
+| Doctor | `/doctor/roster-planner` | `DoctorRosterPage (management)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/doctors-directory` | `DoctorAdminDoctorsPage` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup` | `DoctorAdvancedSetupPage` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup?section=roster` | `DoctorRosterPage (advanced)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup?section=doctors` | `DoctorAdminDoctorsPage (advanced)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/availability` | `DoctorAvailabilityPage` | P1 | Complete — batch 1 |
 | Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Discovered |
 | Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Discovered |
@@ -148,7 +148,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Preflight: complete.
 - Inventory: routed screens and Settings/protocol/setup views discovered; reachability audit pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
-- Screens assessed: 5. Screens completed: 5. Remaining non-reference entries: 108.
+- Screens assessed: 11. Screens completed/accepted: 11 (9 polished, 2 assessed with no further visual change). Remaining non-reference entries: 102.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
 - Decisions requiring approval: none identified yet.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
@@ -163,3 +163,13 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Correction during development: introduced JSX self-closing syntax error detected by focused tests/typecheck/build and first two after captures; corrected, rejected invalid captures, and reran to passing.
 - Next-batch baseline: 2 existing roster browser tests pass, including populated synthetic roster, phone alternatives, theme and simulated direction checks.
 - Open batch limits: workload populated summary and editable scoring-rule form still need representative fixture coverage; Availability/leave successful and error states need further browser characterization. These remain explicit follow-up validation, not claimed passed.
+
+### Batch 2 — Roster, directory and advanced setup
+
+- Assessed/completed: Roster Planner, My Roster, Advanced Setup menu, Roster setup, Doctors Directory, Doctor import/export. Planner and menu already meet the reference style and are accepted without further restructuring.
+- Fixed: legacy active roster/admin controls and directory actions using teal or default dark borders; directory row dividers; drawer tabs and separators; inconsistent form sizing. Added persistent labels to 32 roster setup/template/assignment controls and 8 workload admin fields. Preserved native drag handles, tab/disclosure controls, permission checkboxes, file uploads, drawer geometry, and all handlers.
+- Synthetic fixtures: linked the existing disposable super-admin account to a synthetic doctor profile through existing APIs, plus a current-week draft roster/assignment, availability, study leave, and workload catalog rule. This enabled admin-only views without changing application permissions or auth implementation. The extra synthetic profile increases directory rows from 4 to 5 across some captures; screenshot comparisons must not attribute this data change to UI code.
+- Browser: desktop/mobile normal pages; populated planner/personal/advanced roster; admin setup/import; all directory drawer tabs and creation; labeled workload catalog form. Original planner workflow baseline passed 2 existing E2E tests. Directory responsive drawer E2E passes; before/after capture cases and drawer case pass. Doctor Workspace remains English/LTR; the planner has its own local Arabic/direction support and requires final targeted regression.
+- Checks on final batch tree: 118 focused tests pass; frontend typecheck/build pass; targeted lint passes; harness:ui passes; whitespace check passes. Existing bundle warning retained.
+- Development correction: the label text-edit helper produced invalid JSX; rejected those renders, replaced the edit with syntax-aware insertion, and reran typecheck, build, focused tests, and captures successfully.
+- Rollback: batch 1 checkpoint `62688641`; batch 2 local checkpoint follows after final capture comparison. No push.
