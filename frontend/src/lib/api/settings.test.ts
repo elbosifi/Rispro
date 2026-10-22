@@ -3,6 +3,9 @@ import { api } from "@/lib/api-client";
 import {
   createUser,
   deleteUser,
+  fetchUserEffectiveAccess,
+  fetchUserSecurityActivity,
+  forceUserPasswordChange,
   fetchPageVisibilityMatrix,
   fetchSchedulingEngineConfig,
   fetchSettings,
@@ -10,6 +13,7 @@ import {
   saveSchedulingEngineConfig,
   saveSettings,
   resetUserTemporaryPassword,
+  revokeUserSessions,
   updateUserActiveState,
   updateUserIdentity,
   updateUserPassword,
@@ -100,5 +104,23 @@ describe("settings API contracts", () => {
       body: JSON.stringify({ password: "temporary" }),
     });
     expect(api).toHaveBeenNthCalledWith(8, "/users/7", { method: "DELETE" });
+  });
+
+  it("uses the account access, activity, password-change, and session-revocation endpoints", async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({ access: { role: "doctor" } })
+      .mockResolvedValueOnce({ entries: [], pagination: { page: 2, pageSize: 50 } })
+      .mockResolvedValueOnce({ user: { id: 7, username: "doctor", full_name: "Doctor", role: "doctor" }, selfRevoked: false })
+      .mockResolvedValueOnce({ user: { id: 7, username: "doctor", full_name: "Doctor", role: "doctor" }, selfRevoked: true });
+
+    await fetchUserEffectiveAccess(7);
+    await fetchUserSecurityActivity(7, 2, 50);
+    await forceUserPasswordChange(7);
+    await revokeUserSessions(7);
+
+    expect(api).toHaveBeenNthCalledWith(1, "/users/7/effective-access");
+    expect(api).toHaveBeenNthCalledWith(2, "/users/7/security-activity?page=2&pageSize=50");
+    expect(api).toHaveBeenNthCalledWith(3, "/users/7/force-password-change", { method: "POST" });
+    expect(api).toHaveBeenNthCalledWith(4, "/users/7/revoke-sessions", { method: "POST" });
   });
 });

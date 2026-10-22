@@ -661,6 +661,7 @@ export function mapUser(raw: RawRecord): User {
     isActive: bool(raw, 'is_active', bool(raw, 'isActive', true)),
     createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt'),
     updatedAt: strOrUndefined(raw, 'updated_at') ?? strOrUndefined(raw, 'updatedAt'),
+    lastLoginAt: strOrNull(raw, 'last_login_at') ?? strOrNull(raw, 'lastLoginAt'),
     recentSupervisorReauth: bool(raw, 'recent_supervisor_reauth', bool(raw, 'recentSupervisorReauth', false)),
     mustChangePassword: bool(raw, 'must_change_password', bool(raw, 'mustChangePassword', false)),
     canRequestSchedulingOverride: bool(raw, 'can_request_scheduling_override', bool(raw, 'canRequestSchedulingOverride', false))

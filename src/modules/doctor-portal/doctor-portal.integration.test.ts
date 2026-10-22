@@ -1772,7 +1772,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((await api(cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 403);
   });
 
-  it("keeps /auth/me session claims aligned with the JWT while refreshing names from the database", async () => {
+  it("uses the current database role in /auth/me while refreshing names from the database", async () => {
     guard();
     const original = (await pool.query<{ username: string; full_name: string; english_name: string | null; role: string }>(
       "select username, full_name, english_name, role from users where id = $1",
@@ -1790,7 +1790,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       const user = (refreshed.data as { user: { username: string; role: string; mustChangePassword: boolean; fullName: string; englishName: string | null } }).user;
       assert.equal(refreshed.status, 200, JSON.stringify(refreshed.data));
       assert.equal(user.username, original.username);
-      assert.equal(user.role, "supervisor");
+      assert.equal(user.role, "doctor");
       assert.equal(user.mustChangePassword, false);
       assert.equal(user.fullName, `${TEST_PREFIX} Supervisor Renamed Arabic`);
       assert.equal(user.englishName, `${TEST_PREFIX} Supervisor Renamed English`);
@@ -1900,7 +1900,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((sharedCreated.data as { user: { email: string | null } }).user.email, "doctor@nccb.ly", "departmental email addresses may be shared");
     assert.equal((await authRequest("/api/auth/login", { username: sharedIpDoctor, password: body.temporaryPassword })).status, 200, "one username's failures must not block another doctor on the same IP");
 
-    const userCookie = createTestAuthCookie(createdData.user.id, "doctor");
+    const userCookie = changed.cookie!;
     assert.equal((await api(userCookie, "/api/doctor/me")).status, 200);
     const updated = await api(admin.cookie, `/api/doctor/profiles/${createdData.profile.id}`, {
       method: "PATCH",

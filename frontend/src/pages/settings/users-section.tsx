@@ -12,9 +12,13 @@ import {
 import {
   createUser,
   deleteUser,
+  fetchUserEffectiveAccess,
+  fetchUserSecurityActivity,
   fetchDoctorProfilesForAdmin,
   fetchUsers,
+  forceUserPasswordChange,
   resetUserTemporaryPassword,
+  revokeUserSessions,
   updateUserActiveState,
   updateUserIdentity,
   updateUserPassword,
@@ -24,7 +28,7 @@ import {
 import { getUserDisplayName } from "@/lib/user-display-name";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
-import type { DoctorProfile, Role, User } from "@/types/api";
+import type { DoctorProfile, Role, User, UserEffectiveAccess, UserSecurityActivityEntry, UserSecurityActivityPage } from "@/types/api";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
 
 type RoleFilter = "all" | Role;
@@ -35,7 +39,7 @@ const safeError = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 
 function formatDate(
-  value: string | undefined,
+  value: string | null | undefined,
   language: string,
   empty: string,
 ) {
@@ -52,7 +56,7 @@ export default function UsersSection({
   onReAuthRequired: (key: string[]) => void;
 }) {
   const { language, t } = useLanguage();
-  const { user: actorUser } = useAuth();
+  const { user: actorUser, logout } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const usersQuery = useQuery<{ users: User[] }>({
@@ -66,6 +70,7 @@ export default function UsersSection({
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [activityPage, setActivityPage] = useState(1);
   const [roleDraft, setRoleDraft] = useState<Role | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
@@ -90,6 +95,18 @@ export default function UsersSection({
   const canModifySelectedUser = Boolean(
     selectedUser && (actorUser?.role === "super_admin" || selectedUser.role !== "super_admin"),
   );
+  const effectiveAccessQuery = useQuery<UserEffectiveAccess>({
+    queryKey: ["users", selectedUserId, "effective-access"],
+    queryFn: () => fetchUserEffectiveAccess(selectedUserId!),
+    enabled: selectedUserId !== null && canModifySelectedUser,
+    retry: false,
+  });
+  const securityActivityQuery = useQuery<UserSecurityActivityPage>({
+    queryKey: ["users", selectedUserId, "security-activity", activityPage],
+    queryFn: () => fetchUserSecurityActivity(selectedUserId!, activityPage),
+    enabled: selectedUserId !== null && canModifySelectedUser,
+    retry: false,
+  });
   const doctorProfilesByUserId = useMemo(
     () =>
       new Map(
@@ -129,6 +146,7 @@ export default function UsersSection({
   };
   const closeManage = () => {
     setSelectedUserId(null);
+    setActivityPage(1);
     setRoleDraft(null);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
@@ -138,6 +156,7 @@ export default function UsersSection({
   };
   const openManage = (user: User) => {
     setSelectedUserId(user.id);
+    setActivityPage(1);
     setRoleDraft(user.role);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
@@ -156,6 +175,11 @@ export default function UsersSection({
   };
   const invalidateUsers = () =>
     queryClient.invalidateQueries({ queryKey: ["users"] });
+  const invalidateUserDetails = (userId: number) => Promise.all([
+    invalidateUsers(),
+    queryClient.invalidateQueries({ queryKey: ["users", userId, "effective-access"] }),
+    queryClient.invalidateQueries({ queryKey: ["users", userId, "security-activity"] }),
+  ]);
   const mutationErrorMessage = (error: unknown) =>
     safeError(error, t("settings.users.errorFallback"));
   const createMutation = useMutation({
@@ -175,8 +199,8 @@ export default function UsersSection({
         payload.userId,
         payload.canRequestSchedulingOverride,
       ),
-    onSuccess: () => {
-      invalidateUsers();
+    onSuccess: async (updatedUser) => {
+      await invalidateUserDetails(updatedUser.id);
       setManageError(null);
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
@@ -184,8 +208,8 @@ export default function UsersSection({
   const directPasswordMutation = useMutation({
     mutationFn: ({ userId, password }: { userId: number; password: string }) =>
       updateUserPassword(userId, password),
-    onSuccess: () => {
-      invalidateUsers();
+    onSuccess: async (_user, variables) => {
+      await invalidateUserDetails(variables.userId);
       setPasswordDraft("");
       setManageError(null);
     },
@@ -194,8 +218,8 @@ export default function UsersSection({
   const temporaryPasswordMutation = useMutation({
     mutationFn: ({ userId, password }: { userId: number; password: string }) =>
       resetUserTemporaryPassword(userId, password),
-    onSuccess: () => {
-      invalidateUsers();
+    onSuccess: async (_user, variables) => {
+      await invalidateUserDetails(variables.userId);
       setTemporaryPasswordDraft("");
       setManageError(null);
     },
@@ -204,8 +228,8 @@ export default function UsersSection({
   const activeStateMutation = useMutation({
     mutationFn: (payload: { userId: number; isActive: boolean }) =>
       updateUserActiveState(payload.userId, payload.isActive),
-    onSuccess: () => {
-      invalidateUsers();
+    onSuccess: async (updatedUser) => {
+      await invalidateUserDetails(updatedUser.id);
       setManageError(null);
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
@@ -239,13 +263,51 @@ export default function UsersSection({
     onSuccess: async (updatedUser) => {
       setRoleDraft(updatedUser.role);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["users"] }),
+        invalidateUserDetails(updatedUser.id),
         queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] }),
       ]);
       setManageError(null);
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
+  const forcePasswordChangeMutation = useMutation({
+    mutationFn: forceUserPasswordChange,
+    onSuccess: async (result) => {
+      setManageError(null);
+      if (result.selfRevoked) {
+        await logout("/login");
+        return;
+      }
+      await invalidateUserDetails(result.user.id);
+    },
+    onError: (error) => setManageError(mutationErrorMessage(error)),
+  });
+  const revokeSessionsMutation = useMutation({
+    mutationFn: revokeUserSessions,
+    onSuccess: async (result) => {
+      setManageError(null);
+      if (result.selfRevoked) {
+        await logout("/login");
+        return;
+      }
+      await invalidateUserDetails(result.user.id);
+    },
+    onError: (error) => setManageError(mutationErrorMessage(error)),
+  });
+  const roleTransition = (entry: UserSecurityActivityEntry) => {
+    if (entry.actionType !== "user_role_changed") return null;
+    const oldValues = entry.oldValues && typeof entry.oldValues === "object"
+      ? entry.oldValues as Record<string, unknown>
+      : null;
+    const newValues = entry.newValues && typeof entry.newValues === "object"
+      ? entry.newValues as Record<string, unknown>
+      : null;
+    const previousRole = auditRoleLabel(oldValues?.role);
+    const nextRole = auditRoleLabel(newValues?.role);
+    return previousRole && nextRole
+      ? `${t("settings.users.activity.from")}: ${previousRole} · ${t("settings.users.activity.to")}: ${nextRole}`
+      : null;
+  };
   const roleLabel = (role: Role) =>
     t(
       (
@@ -300,6 +362,48 @@ export default function UsersSection({
     "doctor",
     "administrative",
   ];
+  const auditRoleLabel = (value: unknown) => {
+    if (typeof value !== "string") return null;
+    const role = roleOptions.find((option) => option === value);
+    return role ? roleLabel(role) : null;
+  };
+  const auditActionLabel = (entry: UserSecurityActivityEntry) => {
+    const labels: Record<string, Parameters<typeof t>[0]> = {
+      user_created: "settings.users.activity.userCreated",
+      create: "settings.users.activity.userCreated",
+      user_role_changed: "settings.users.activity.roleChanged",
+      activate: "settings.users.activity.activated",
+      deactivate: "settings.users.activity.deactivated",
+      update_identity: "settings.users.activity.identityUpdated",
+      update: "settings.users.activity.passwordChanged",
+      reset_temporary_password: "settings.users.activity.temporaryPasswordIssued",
+      force_password_change: "settings.users.activity.passwordChangeRequired",
+      revoke_sessions: "settings.users.activity.sessionsRevoked",
+      update_scheduling_override_permission: "settings.users.activity.permissionChanged",
+      doctor_linked_user_updated: "settings.users.activity.identityUpdated",
+      login: "settings.users.activity.passwordLogin",
+      passkey_login: "settings.users.activity.passkeyLogin",
+      supervisor_reauth: "settings.users.activity.reauthenticated",
+      passkey_supervisor_reauth: "settings.users.activity.reauthenticated",
+      change_own_password: "settings.users.activity.passwordChanged",
+      delete: "settings.users.activity.deleted",
+    };
+    const key = labels[entry.actionType];
+    return key ? t(key) : entry.actionType.replaceAll("_", " ");
+  };
+  const auditOutcomeLabel = (outcome: string) => {
+    const labels: Record<string, Parameters<typeof t>[0]> = {
+      successful: "settings.users.activity.outcome.successful",
+      failed: "settings.users.activity.outcome.failed",
+      rejected: "settings.users.activity.outcome.rejected",
+      cancelled: "settings.users.activity.outcome.cancelled",
+      pending: "settings.users.activity.outcome.pending",
+      informational: "settings.users.activity.outcome.informational",
+      unknown: "settings.users.activity.outcome.unknown",
+    };
+    const key = labels[outcome];
+    return key ? t(key) : outcome;
+  };
   const createRoleOptions = actorUser?.role === "super_admin"
     ? roleOptions
     : roleOptions.filter((role) => role !== "super_admin" && role !== "supervisor");
@@ -707,13 +811,25 @@ export default function UsersSection({
                     </dd>
                   </div>
                   <div>
+                    <dt className="description-center">{t("settings.users.lastLogin")}</dt>
+                    <dd>
+                      {!canModifySelectedUser
+                        ? t("settings.users.privilegedDetailsRestricted")
+                        : selectedUser.lastLoginAt
+                          ? formatDate(selectedUser.lastLoginAt, language, t("settings.users.neverRecorded"))
+                          : t("settings.users.neverRecorded")}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="description-center">
                       {t("settings.users.security")}
                     </dt>
                     <dd>
-                      {selectedUser.mustChangePassword
-                        ? t("settings.users.passwordChangeRequired")
-                        : t("settings.users.passwordChangeNotRequired")}
+                      {!canModifySelectedUser
+                        ? t("settings.users.privilegedDetailsRestricted")
+                        : selectedUser.mustChangePassword
+                          ? t("settings.users.passwordChangeRequired")
+                          : t("settings.users.passwordChangeNotRequired")}
                     </dd>
                   </div>
                 </dl>
@@ -803,29 +919,67 @@ export default function UsersSection({
                   )}
                 </section>
               )}
-              {selectedUser.role === "receptionist" && (
-                <section>
-                  <h4 className="font-semibold">
-                    {t("settings.users.permissions")}
-                  </h4>
-                  <label className="mt-2 flex items-center gap-2">
+              <section>
+                <h4 className="font-semibold">{t("settings.users.permissions")}</h4>
+                {!canModifySelectedUser ? (
+                  <p className="mt-2 text-sm description-center">{t("settings.users.privilegedDetailsRestricted")}</p>
+                ) : effectiveAccessQuery.isLoading ? (
+                  <p className="mt-2 text-sm description-center">{t("settings.users.effectiveAccessLoading")}</p>
+                ) : effectiveAccessQuery.isError ? (
+                  <div role="alert" className="mt-2 space-y-2">
+                    <p className="text-sm text-red-700 dark:text-red-300">{safeError(effectiveAccessQuery.error, t("settings.users.effectiveAccessError"))}</p>
+                    <Button variant="outline" size="sm" onClick={() => void effectiveAccessQuery.refetch()}>{t("settings.users.retry")}</Button>
+                  </div>
+                ) : effectiveAccessQuery.data ? (
+                  <div className="mt-2 space-y-3">
+                    <dl className="grid gap-2 sm:grid-cols-2">
+                      <div><dt className="description-center">{t("settings.users.role")}</dt><dd>{roleLabel(effectiveAccessQuery.data.role)}</dd></div>
+                      <div><dt className="description-center">{t("settings.users.status")}</dt><dd>{effectiveAccessQuery.data.isActive ? t("settings.active") : t("settings.inactive")}</dd></div>
+                      <div><dt className="description-center">{t("settings.users.passwordChangeRequired")}</dt><dd>{effectiveAccessQuery.data.passwordChangeRequired ? t("settings.yes") : t("settings.no")}</dd></div>
+                      <div><dt className="description-center">{t("settings.users.schedulingOverrideEffective")}</dt><dd>{effectiveAccessQuery.data.canRequestSchedulingOverride ? t("settings.yes") : t("settings.no")}</dd></div>
+                    </dl>
+                    <div>
+                      <h5 className="font-medium">{t("settings.users.doctorPortalAccess")}</h5>
+                      {effectiveAccessQuery.data.doctorPortal.profile ? (
+                        <div className="mt-1 space-y-1 text-sm">
+                          <p>{t("settings.users.doctorProfile")}: {effectiveAccessQuery.data.doctorPortal.profile.effective ? t("settings.users.doctorProfileActive") : t("settings.users.doctorProfileInactive")} · {effectiveAccessQuery.data.doctorPortal.profile.doctorRole.replaceAll("_", " ")}</p>
+                          <p>{t("settings.users.canFinalizeReports")}: {effectiveAccessQuery.data.doctorPortal.profile.canFinalizeReports ? t("settings.yes") : t("settings.no")} · {t("settings.users.canAssignProtocols")}: {effectiveAccessQuery.data.doctorPortal.profile.canAssignProtocols ? t("settings.yes") : t("settings.no")} · {t("settings.users.canSupervise")}: {effectiveAccessQuery.data.doctorPortal.profile.canSupervise ? t("settings.yes") : t("settings.no")}</p>
+                        </div>
+                      ) : <p className="mt-1 text-sm description-center">{t("settings.users.noDoctorProfile")}</p>}
+                      {effectiveAccessQuery.data.doctorPortal.modalityPermissions.length > 0 && (
+                        <ul className="mt-2 space-y-1 text-sm">
+                          {effectiveAccessQuery.data.doctorPortal.modalityPermissions.map((permission) => (
+                            <li key={`${permission.modalityCode}-${permission.modalityNameEn}`}>
+                              {language === "ar" ? permission.modalityNameAr || permission.modalityCode : permission.modalityNameEn || permission.modalityCode}
+                              {": "}{permission.canProtocol ? t("settings.users.canProtocol") : ""}{permission.canReport ? ` · ${t("settings.users.canReport")}` : ""}{permission.canSupervise ? ` · ${t("settings.users.canSupervise")}` : ""}
+                              {!permission.effective && ` · ${t("settings.users.notEffective")}`}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <details className="rounded-lg border border-stone-200 p-3 dark:border-stone-700">
+                      <summary className="cursor-pointer font-medium">{t("settings.users.navigationVisibility")}</summary>
+                      <p className="mt-2 text-xs description-center">{t("settings.users.navigationDisclaimer")}</p>
+                      <p className="mt-2 text-xs font-medium">{t("settings.users.visiblePages")}</p>
+                      <ul className="mt-1 grid max-h-32 grid-cols-1 gap-1 overflow-auto text-xs sm:grid-cols-2">
+                        {effectiveAccessQuery.data.navigationVisibility.pages.filter((page) => page.visible).map((page) => <li key={page.routeKey} className="break-words">{page.routeKey}</li>)}
+                      </ul>
+                    </details>
+                  </div>
+                ) : null}
+                {canModifySelectedUser && selectedUser.role === "receptionist" && (
+                  <label className="mt-3 flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={Boolean(
-                        selectedUser.canRequestSchedulingOverride,
-                      )}
+                      checked={Boolean(selectedUser.canRequestSchedulingOverride)}
                       disabled={permissionMutation.isPending}
-                      onChange={(event) =>
-                        permissionMutation.mutate({
-                          userId: selectedUser.id,
-                          canRequestSchedulingOverride: event.target.checked,
-                        })
-                      }
+                      onChange={(event) => permissionMutation.mutate({ userId: selectedUser.id, canRequestSchedulingOverride: event.target.checked })}
                     />
                     {t("overrideRequests.permissionLabel")}
                   </label>
-                </section>
-              )}
+                )}
+              </section>
               {isDoctorRole(selectedUser.role) && (
                 <section>
                   <h4 className="font-semibold">
@@ -927,6 +1081,80 @@ export default function UsersSection({
                     </Button>
                   </label>
                 </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={forcePasswordChangeMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(t("settings.users.confirmForcePasswordChange", {
+                        name: getUserDisplayName(selectedUser, language),
+                        username: selectedUser.username,
+                      }))) forcePasswordChangeMutation.mutate(selectedUser.id);
+                    }}
+                  >
+                    {forcePasswordChangeMutation.isPending ? t("settings.loading") : t("settings.users.forcePasswordChange")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={revokeSessionsMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(t("settings.users.confirmRevokeSessions", {
+                        name: getUserDisplayName(selectedUser, language),
+                        username: selectedUser.username,
+                      }))) revokeSessionsMutation.mutate(selectedUser.id);
+                    }}
+                  >
+                    {revokeSessionsMutation.isPending ? t("settings.loading") : t("settings.users.revokeSessions")}
+                  </Button>
+                </div>
+              </section>}
+              {canModifySelectedUser && <section>
+                <h4 className="font-semibold">{t("settings.users.activity.title")}</h4>
+                {securityActivityQuery.isLoading ? (
+                  <p className="mt-2 text-sm description-center">{t("settings.users.activity.loading")}</p>
+                ) : securityActivityQuery.isError ? (
+                  <div role="alert" className="mt-2 space-y-2">
+                    <p className="text-sm text-red-700 dark:text-red-300">{safeError(securityActivityQuery.error, t("settings.users.activity.error"))}</p>
+                    <Button variant="outline" size="sm" onClick={() => void securityActivityQuery.refetch()}>{t("settings.users.retry")}</Button>
+                  </div>
+                ) : securityActivityQuery.data ? (
+                  <>
+                    {securityActivityQuery.data.entries.length === 0 ? (
+                      <p className="mt-2 text-sm description-center">{t("settings.users.activity.empty")}</p>
+                    ) : (
+                      <ol className="mt-2 space-y-2">
+                        {securityActivityQuery.data.entries.map((entry) => (
+                          <li key={entry.id} className="rounded-lg border border-stone-200 p-3 dark:border-stone-700">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <p className="font-medium">{auditActionLabel(entry)}</p>
+                              <span className="text-xs description-center">{auditOutcomeLabel(entry.outcome)}</span>
+                            </div>
+                            <p className="mt-1 text-xs description-center">
+                              {t("settings.users.activity.actor")}: {entry.changedByName || entry.changedByUsername || t("settings.users.activity.system")}
+                              {entry.changedByUsername && entry.changedByName && ` (@${entry.changedByUsername})`}
+                            </p>
+                            <p className="text-xs description-center">{formatDate(entry.createdAt, language, t("settings.users.notAvailable"))}</p>
+                            {roleTransition(entry) && <p className="mt-1 text-xs">{roleTransition(entry)}</p>}
+                            {entry.summary && <p className="mt-1 text-xs description-center">{entry.summary}</p>}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span>{t("settings.users.activity.range", {
+                        start: securityActivityQuery.data.pagination.rangeStart,
+                        end: securityActivityQuery.data.pagination.rangeEnd,
+                        total: securityActivityQuery.data.pagination.totalItems,
+                      })}</span>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" disabled={!securityActivityQuery.data.pagination.hasPreviousPage} onClick={() => setActivityPage((page) => Math.max(1, page - 1))}>{t("settings.users.activity.previous")}</Button>
+                        <Button variant="outline" size="sm" disabled={!securityActivityQuery.data.pagination.hasNextPage} onClick={() => setActivityPage((page) => page + 1)}>{t("settings.users.activity.next")}</Button>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
               </section>}
               {canModifySelectedUser && <section>
                 <h4 className="font-semibold">{t("settings.users.status")}</h4>

@@ -3,11 +3,16 @@ import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from ".
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
+import { clearSessionCookie, clearSupervisorReauthCookie } from "../services/auth-service.js";
+import { listUserSecurityActivity } from "../services/audit-service.js";
 import {
   createUser,
   deleteUser,
+  getUserEffectiveAccess,
   listUsers,
   resetUserTemporaryPassword,
+  revokeUserSessions,
+  setUserMustChangePassword,
   updateUserIdentity,
   updateUserRole,
   updateUserActiveState,
@@ -22,8 +27,63 @@ usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 usersRouter.get(
   "/",
   asyncRoute(async (_req: Request, res: Response) => {
-    const users = await listUsers();
+    const users = await listUsers(_req.user!.role);
     res.json({ users });
+  })
+);
+
+usersRouter.get(
+  "/:userId/effective-access",
+  asyncRoute(async (req: Request, res: Response) => {
+    const access = await getUserEffectiveAccess(asString(req.params.userId), {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
+    res.json({ access });
+  })
+);
+
+usersRouter.get(
+  "/:userId/security-activity",
+  asyncRoute(async (req: Request, res: Response) => {
+    res.json(await listUserSecurityActivity(asString(req.params.userId), req.user!.role, {
+      page: asString(req.query.page),
+      pageSize: asString(req.query.pageSize)
+    }));
+  })
+);
+
+usersRouter.post(
+  "/:userId/force-password-change",
+  asyncRoute(async (req: Request, res: Response) => {
+    const targetId = asString(req.params.userId);
+    const user = await setUserMustChangePassword(targetId, {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
+    const selfRevoked = Number(targetId) === Number(req.user!.sub);
+    if (selfRevoked) {
+      clearSupervisorReauthCookie(res);
+      clearSessionCookie(res);
+    }
+    res.json({ user, selfRevoked });
+  })
+);
+
+usersRouter.post(
+  "/:userId/revoke-sessions",
+  asyncRoute(async (req: Request, res: Response) => {
+    const targetId = asString(req.params.userId);
+    const user = await revokeUserSessions(targetId, {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
+    const selfRevoked = Number(targetId) === Number(req.user!.sub);
+    if (selfRevoked) {
+      clearSupervisorReauthCookie(res);
+      clearSessionCookie(res);
+    }
+    res.json({ user, selfRevoked });
   })
 );
 

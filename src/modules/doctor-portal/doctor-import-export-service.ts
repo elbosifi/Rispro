@@ -10,7 +10,7 @@ import type { DoctorRole } from "./profile-repository.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import { emailFromUsername } from "../../utils/email-address.js";
 import { lockActiveSuperAdminSet } from "../../services/user-service.js";
-import { logAuditEntry } from "../../services/audit-service.js";
+import { logSecurityAuditEntry } from "../../services/audit-service.js";
 
 const EXPORT_COLUMNS = [
   "username",
@@ -303,8 +303,9 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
       const values = row.values;
       const username = normalizeUsername(values.username);
       const hasEnglishName = Object.prototype.hasOwnProperty.call(values, "english_name");
-      const existing = await client.query<{ id: number; role: Role; is_active: boolean }>(
-        `select id, role, is_active from users where lower(btrim(username)) = $1 limit 1 for update`,
+      const existing = await client.query<{ id: number; role: Role; is_active: boolean; must_change_password: boolean }>(
+        `select id, role, is_active, coalesce(must_change_password, false) as must_change_password
+           from users where lower(btrim(username)) = $1 limit 1 for update`,
         [username]
       );
       let userId = existing.rows[0]?.id;
@@ -338,24 +339,40 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         );
         userId = inserted.rows[0].id;
         summary.createdUsers += 1;
+        await logSecurityAuditEntry({
+          entityType: "user",
+          entityId: userId,
+          actionType: "user_created",
+          oldValues: null,
+          newValues: { role: nextRole, is_active: nextIsActive, must_change_password: true },
+          changedByUserId: actorUserId
+        }, client);
       } else {
         if (resetPassword) {
           const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
           if (hasEnglishName) {
             await client.query(
               `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, password_hash = $6, must_change_password = true,
-                      auth_version = auth_version + case when role is distinct from $4 or is_active is distinct from $5 then 1 else 0 end,
+                      auth_version = auth_version + 1,
                       updated_at = now() where id = $1`,
               [userId, values.full_name, values.english_name || null, values.core_role, nextIsActive, passwordHash]
             );
           } else {
             await client.query(
               `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true,
-                      auth_version = auth_version + case when role is distinct from $3 or is_active is distinct from $4 then 1 else 0 end,
+                      auth_version = auth_version + 1,
                       updated_at = now() where id = $1`,
               [userId, values.full_name, values.core_role, nextIsActive, passwordHash]
             );
           }
+          await logSecurityAuditEntry({
+            entityType: "user",
+            entityId: userId,
+            actionType: "reset_temporary_password",
+            oldValues: { must_change_password: previousUser?.must_change_password ?? false },
+            newValues: { must_change_password: true },
+            changedByUserId: actorUserId
+          }, client);
         } else {
           if (hasEnglishName) {
             await client.query(
@@ -423,7 +440,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
       }
 
       if (previousUser && (previousUser.role !== nextRole || previousUser.is_active !== nextIsActive)) {
-        await logAuditEntry({
+        await logSecurityAuditEntry({
           entityType: "user",
           entityId: userId,
           actionType: "user_role_changed",

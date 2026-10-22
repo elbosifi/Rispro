@@ -70,6 +70,17 @@ export async function authenticateUser(
   return authenticatedUser;
 }
 
+export async function recordSuccessfulLogin(userId: UserId, authVersion: number): Promise<void> {
+  const result = await pool.query(
+    `update users
+        set last_login_at = now()
+      where id = $1 and is_active = true and auth_version = $2
+      returning id`,
+    [Number(userId), authVersion]
+  );
+  if (!result.rowCount) throw new HttpError(401, "Session expired. Please sign in again.");
+}
+
 export interface CurrentSessionUser {
   id: UserId;
   username: string;

@@ -5,13 +5,14 @@ import {
   authenticateUser,
   buildSessionToken,
   buildSupervisorReauthToken,
+  recordSuccessfulLogin,
   findCurrentSessionUser,
   clearSupervisorReauthCookie,
   clearSessionCookie,
   writeSessionCookie,
   writeSupervisorReauthCookie
 } from "../services/auth-service.js";
-import { logAuditEntry } from "../services/audit-service.js";
+import { logSecurityAuditEntry } from "../services/audit-service.js";
 import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../utils/http-error.js";
 import { asString } from "../utils/request-coercion.js";
@@ -31,6 +32,7 @@ interface AuthenticatedUser {
   role: Role;
   username: string;
   mustChangePassword?: boolean;
+  authVersion: number;
 }
 
 export const authRouter: Router = express.Router();
@@ -55,7 +57,8 @@ function requireCurrentUser(request: AuthSessionRequest): AuthenticatedUser {
     sub: request.user.sub,
     role: request.user.role,
     username: request.user.username as string,
-    mustChangePassword: request.user.mustChangePassword
+    mustChangePassword: request.user.mustChangePassword,
+    authVersion: Number(request.user.authVersion ?? 0)
   };
 }
 
@@ -77,11 +80,12 @@ authRouter.post(
       throw error;
     }
     usernameFailureLimiter.reset(username || "unknown");
+    await recordSuccessfulLogin(user.id, user.auth_version);
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
     clearSupervisorReauthCookie(res);
 
-    await logAuditEntry({
+    await logSecurityAuditEntry({
       entityType: "auth",
       entityId: user.id,
       actionType: "login",
@@ -137,7 +141,8 @@ authRouter.post(
     const user = await updateOwnPassword(
       currentUser.sub,
       asString(body.currentPassword),
-      asString(body.newPassword)
+      asString(body.newPassword),
+      currentUser.authVersion
     );
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
@@ -167,7 +172,7 @@ authRouter.post(
     const reauthToken = buildSupervisorReauthToken(user);
     writeSupervisorReauthCookie(res, reauthToken);
 
-    await logAuditEntry({
+    await logSecurityAuditEntry({
       entityType: "auth",
       entityId: user.id,
       actionType: "supervisor_reauth",

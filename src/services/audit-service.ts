@@ -14,6 +14,7 @@ import {
   type AuditOutcome
 } from "./audit-event-classifier.js";
 import type { AuditEvent } from "../types/domain.js";
+import type { Role } from "../types/domain.js";
 import type { DbExecutor } from "../types/db.js";
 import type { UserId, NullableUserId } from "../types/http.js";
 
@@ -152,10 +153,24 @@ async function isAuditEnabled(executor: DbExecutor = pool): Promise<boolean> {
 }
 
 export async function logAuditEntry(
-  { entityType, entityId = null, actionType, oldValues = null, newValues = null, changedByUserId = null }: AuditEntryInput & Partial<AuditEvent>,
+  input: AuditEntryInput & Partial<AuditEvent>,
   executor: DbExecutor = pool
 ): Promise<AuditLogRow | null> {
   if (!(await isAuditEnabled(executor))) return null;
+  return writeAuditEntry(input, executor);
+}
+
+export async function logSecurityAuditEntry(
+  input: AuditEntryInput & Partial<AuditEvent>,
+  executor: DbExecutor = pool
+): Promise<AuditLogRow> {
+  return writeAuditEntry(input, executor);
+}
+
+async function writeAuditEntry(
+  { entityType, entityId = null, actionType, oldValues = null, newValues = null, changedByUserId = null }: AuditEntryInput & Partial<AuditEvent>,
+  executor: DbExecutor
+): Promise<AuditLogRow> {
   let actor: { full_name: string | null; english_name: string | null; username: string | null } | undefined;
   if (changedByUserId != null) {
     const actorResult = await executor.query<{ full_name: string | null; english_name: string | null; username: string | null }>(
@@ -380,6 +395,60 @@ export async function listAuditPage(filters: AuditFilters = {}): Promise<AuditPa
     },
     meta: { ...meta, categories: AUDIT_CATEGORIES, outcomes: AUDIT_OUTCOMES }
   };
+}
+
+export async function listUserSecurityActivity(
+  userId: UserId,
+  actorRole: Role,
+  options: { page?: unknown; pageSize?: unknown } = {}
+): Promise<{ entries: AuditApiEntry[]; pagination: AuditPagination }> {
+  const cleanUserId = normalizePositiveInteger(userId, "userId", { required: true });
+  const page = normalizePage(options.page);
+  const pageSize = normalizePageSize(options.pageSize);
+  const whereClause = `where ((audit_log.entity_type = 'user' and audit_log.entity_id = $1)
+    or (audit_log.entity_type = 'auth' and audit_log.entity_id = $1))`;
+  const client = await pool.connect();
+  try {
+    await client.query("begin isolation level repeatable read read only");
+    const target = await client.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
+    if (!target.rows[0]) throw new HttpError(404, "User not found.");
+    if (target.rows[0].role === "super_admin" && actorRole !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can view super_admin security details.");
+    }
+
+    const countResult = await client.query<{ total: string }>(
+      `select count(*)::text as total from audit_log ${whereClause}`,
+      [cleanUserId]
+    );
+    const total = Number(countResult.rows[0]?.total ?? 0);
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+    const effectivePage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+    const pageResult = await client.query<AuditLogRow>(
+      `with filtered as (${auditRowSelect()} ${whereClause})
+       select * from filtered order by created_at desc, id desc limit $2 offset $3`,
+      [cleanUserId, pageSize, (effectivePage - 1) * pageSize]
+    );
+    await client.query("commit");
+
+    return {
+      entries: pageResult.rows.map(auditRowToApi),
+      pagination: {
+        page: effectivePage,
+        pageSize,
+        totalItems: total,
+        totalPages,
+        hasPreviousPage: effectivePage > 1,
+        hasNextPage: totalPages > 0 && effectivePage < totalPages,
+        rangeStart: total === 0 ? 0 : (effectivePage - 1) * pageSize + 1,
+        rangeEnd: total === 0 ? 0 : Math.min(effectivePage * pageSize, total)
+      }
+    };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function escapeCsvValue(value: unknown): string {

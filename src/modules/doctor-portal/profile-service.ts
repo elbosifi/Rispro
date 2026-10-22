@@ -11,6 +11,7 @@ import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import { emailFromUsername, normalizeOptionalEmail } from "../../utils/email-address.js";
 import { lockActiveSuperAdminSet } from "../../services/user-service.js";
+import { logSecurityAuditEntry } from "../../services/audit-service.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -283,6 +284,14 @@ export async function createDoctorWithUserForAdmin(
       },
       reason: null,
     });
+    await logSecurityAuditEntry({
+      entityType: "user",
+      entityId: user.id,
+      actionType: "user_created",
+      oldValues: null,
+      newValues: { role: user.role, is_active: user.is_active, must_change_password: user.must_change_password },
+      changedByUserId: actorUserId
+    }, client);
     await syncDoctorWorklistLifecycle(profile.id, client);
     await client.query("commit");
 
@@ -419,6 +428,19 @@ export async function updateLinkedDoctorUserForAdmin(
       },
       reason: null,
     });
+    const roleOrActiveChanged = previous.role !== updatedUser.role || previous.is_active !== updatedUser.is_active;
+    const identityChanged = previous.username !== updatedUser.username || previous.email !== updatedUser.email ||
+      previous.full_name !== updatedUser.full_name || previous.english_name !== updatedUser.english_name;
+    if (roleOrActiveChanged || identityChanged) {
+      await logSecurityAuditEntry({
+        entityType: "user",
+        entityId: targetUserId,
+        actionType: roleOrActiveChanged ? "user_role_changed" : "update_identity",
+        oldValues: { username: previous.username, email: previous.email, fullName: previous.full_name, englishName: previous.english_name, role: previous.role, is_active: previous.is_active },
+        newValues: { username: updatedUser.username, email: updatedUser.email, fullName: updatedUser.full_name, englishName: updatedUser.english_name, role: updatedUser.role, is_active: updatedUser.is_active },
+        changedByUserId: actorUserId
+      }, client);
+    }
     await client.query("commit");
     return { user: updatedUser, profile: await findDoctorProfileByUserId(targetUserId) };
   } catch (error) {
@@ -480,6 +502,14 @@ export async function setDoctorIdentityActiveForAdmin(
       metadata: { userId: targetUserId, oldValues: { userActive: previous.is_active, profileActive: previous.profile_active }, newValues: { userActive: active, profileActive: active } },
       reason: null,
     });
+    await logSecurityAuditEntry({
+      entityType: "user",
+      entityId: targetUserId,
+      actionType: active ? "activate" : "deactivate",
+      oldValues: { is_active: previous.is_active },
+      newValues: { is_active: active },
+      changedByUserId: actorUserId
+    }, client);
     await syncDoctorWorklistLifecycle(previous.profile_id, client);
     await client.query("commit");
     return { user: userResult.rows[0], profile: profileResult.rows[0] };

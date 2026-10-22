@@ -9,10 +9,11 @@ import { LanguageProvider } from "@/providers/language-provider-component";
 import UsersSection from "./users-section";
 
 const users = [
-  { id: 1, username: "frontdesk", full_name: "مكتب الاستقبال", english_name: "Front Desk", email: "frontdesk@example.test", role: "receptionist", is_active: true, can_request_scheduling_override: true, updated_at: "2026-08-01T10:00:00.000Z" },
+  { id: 1, username: "frontdesk", full_name: "مكتب الاستقبال", english_name: "Front Desk", email: "frontdesk@example.test", role: "receptionist", is_active: true, can_request_scheduling_override: true, last_login_at: "2026-08-01T10:00:00.000Z", updated_at: "2026-08-01T10:00:00.000Z" },
   { id: 2, username: "drstone", full_name: "Dr Stone", role: "doctor", is_active: false, must_change_password: true },
   { id: 3, username: "supervisor", full_name: "Supervisor", role: "supervisor", is_active: true },
   { id: 4, username: "bilingual", full_name: "Arabic Search Name", english_name: "English Search Name", role: "doctor", is_active: true },
+  { id: 5, username: "rootadmin", full_name: "Root Admin", role: "super_admin", is_active: true, last_login_at: "2026-08-01T10:00:00.000Z" },
 ];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 let routeFailures: Record<string, string> = {};
@@ -61,6 +62,20 @@ describe("UsersSection", () => {
       if (failure) return json({ message: failure }, 400);
       if (url === "/api/users" && !init?.method) return json({ users });
       if (url === "/api/doctor/profiles") return json({ profiles: doctorProfiles });
+      if (url.match(/\/api\/users\/\d+\/effective-access$/)) return json({ access: {
+        userId: 1, role: "receptionist", isActive: true, passwordChangeRequired: false,
+        canRequestSchedulingOverride: true,
+        doctorPortal: { configured: false, profile: null, modalityPermissions: [] },
+        navigationVisibility: { source: "role_page_access", note: "Navigation only", pages: [{ routeKey: "dashboard", visible: true }] },
+      } });
+      if (url.match(/\/api\/users\/\d+\/security-activity/)) {
+        const page = new URL(url, window.location.origin).searchParams.get("page") === "2" ? 2 : 1;
+        const entry = page === 1
+          ? { id: 20, changedByName: "Supervisor", changedByNameAr: null, changedByNameEn: "Supervisor", changedByUsername: "supervisor", changedByUserId: 3, entityType: "user", entityId: 1, actionType: "user_role_changed", oldValues: { role: "receptionist" }, newValues: { role: "supervisor" }, createdAt: "2026-08-01T10:00:00.000Z", outcome: "successful", title: "Role changed", summary: "Account role changed." }
+          : { id: 19, changedByName: "Supervisor", changedByNameAr: null, changedByNameEn: "Supervisor", changedByUsername: "supervisor", changedByUserId: 3, entityType: "auth", entityId: 1, actionType: "login", oldValues: null, newValues: null, createdAt: "2026-07-30T10:00:00.000Z", outcome: "successful", title: "Login", summary: "Password sign-in." };
+        return json({ entries: [entry], pagination: { page, pageSize: 25, totalItems: 26, totalPages: 2, hasPreviousPage: page > 1, hasNextPage: page < 2, rangeStart: page === 1 ? 1 : 26, rangeEnd: page === 1 ? 25 : 26 } });
+      }
+      if (url.match(/\/api\/users\/\d+\/(force-password-change|revoke-sessions)$/) && init?.method === "POST") return json({ user: users[0], selfRevoked: false });
       if (url.includes("/identity")) return json({ user: users[0] });
       if (url.match(/\/api\/users\/\d+\/role$/) && init?.method === "PUT") {
         const body = JSON.parse(String(init.body ?? "{}")) as { role?: Role };
@@ -118,6 +133,46 @@ describe("UsersSection", () => {
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/active" && (init as RequestInit).method === "PUT")).toBe(true));
     expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url) === "/api/users/1/temporary-password")).toBe(true);
     expect(confirm).toHaveBeenCalled();
+  });
+
+  it("shows effective access and paginates account security activity with actor and role transition", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText("Navigation visibility")).toBeTruthy();
+    expect(await within(dialog).findByText("Account security history")).toBeTruthy();
+    expect(await within(dialog).findByText("Role changed")).toBeTruthy();
+    expect(within(dialog).getByText("Actor: Supervisor (@supervisor)")).toBeTruthy();
+    expect(within(dialog).getByText("From: Receptionist · To: Supervisor")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/1/security-activity?page=2"))).toBe(true));
+    expect(await within(dialog).findByText("Password sign-in")).toBeTruthy();
+  });
+
+  it("confirms forced password change and session revocation actions", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Require password change" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/force-password-change" && (init as RequestInit).method === "POST")).toBe(true));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revoke all sessions" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/revoke-sessions" && (init as RequestInit).method === "POST")).toBe(true));
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("restricts Super Admin account security details for supervisors", async () => {
+    renderSection("supervisor");
+    await screen.findAllByText("Root Admin");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[4]!);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getAllByText("Security details for Super Admin accounts are restricted.").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText("Password change required", { exact: true })).toBeNull();
+    expect(within(dialog).queryByText("Password change not required", { exact: true })).toBeNull();
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/5/effective-access"))).toBe(false);
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).includes("/api/users/5/security-activity"))).toBe(false);
   });
 
   it("edits an existing role and limits Supervisor grants to non-administrative roles", async () => {

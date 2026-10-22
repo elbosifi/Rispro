@@ -9,6 +9,11 @@ describe("user bilingual name mapping and display", () => {
     expect(mapUser({ id: 3, username: "camel", fullName: "الاسم", englishName: "English Name", role: "doctor" }).englishName).toBe("English Name");
   });
 
+  it("maps last successful login timestamps without inventing null history", () => {
+    expect(mapUser({ id: 1, username: "current", full_name: "Name", role: "doctor", last_login_at: "2026-10-20T10:30:00.000Z" }).lastLoginAt).toBe("2026-10-20T10:30:00.000Z");
+    expect(mapUser({ id: 2, username: "never", full_name: "Name", role: "doctor", last_login_at: null }).lastLoginAt).toBeNull();
+  });
+
   it("uses the current locale and username fallback", () => {
     const user = { username: "login", fullName: "الاسم", englishName: "English Name" };
     expect(getUserDisplayName(user, "ar")).toBe("الاسم");

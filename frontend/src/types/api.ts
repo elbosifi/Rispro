@@ -45,9 +45,75 @@ export interface User {
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  lastLoginAt?: string | null;
   recentSupervisorReauth?: boolean;
   mustChangePassword?: boolean;
   canRequestSchedulingOverride?: boolean;
+}
+
+export interface UserEffectiveAccess {
+  userId: number;
+  role: Role;
+  isActive: boolean;
+  passwordChangeRequired: boolean;
+  canRequestSchedulingOverride: boolean;
+  doctorPortal: {
+    configured: boolean;
+    profile: null | {
+      active: boolean;
+      effective: boolean;
+      doctorRole: DoctorProfileRole;
+      canFinalizeReports: boolean;
+      canAssignProtocols: boolean;
+      canSupervise: boolean;
+    };
+    modalityPermissions: Array<{
+      modalityCode: string | null;
+      modalityNameEn: string | null;
+      modalityNameAr: string | null;
+      canProtocol: boolean;
+      canReport: boolean;
+      canSupervise: boolean;
+      effective: boolean;
+    }>;
+  };
+  navigationVisibility: {
+    source: string;
+    note: string;
+    pages: Array<{ routeKey: string; visible: boolean }>;
+  };
+}
+
+export interface UserSecurityActivityEntry {
+  id: number;
+  changedByName: string | null;
+  changedByNameAr: string | null;
+  changedByNameEn: string | null;
+  changedByUsername: string | null;
+  changedByUserId: number | null;
+  entityType: string;
+  entityId: number | null;
+  actionType: string;
+  oldValues: unknown;
+  newValues: unknown;
+  createdAt: string;
+  outcome: string;
+  title: string;
+  summary: string;
+}
+
+export interface UserSecurityActivityPage {
+  entries: UserSecurityActivityEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+    hasPreviousPage: boolean;
+    hasNextPage: boolean;
+    rangeStart: number;
+    rangeEnd: number;
+  };
 }
 
 export interface AuthSession {

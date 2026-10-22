@@ -2,7 +2,13 @@ import { api } from "@/lib/api-client";
 import { normalizeActionPinPolicy, type ActionPinPolicy } from "@/lib/action-pin-policy";
 import { mapSettings, mapUser } from "@/lib/mappers";
 import { normalizePageVisibilityMatrix, type PageVisibilityMatrix } from "@/lib/page-visibility";
-import type { Role, SchedulingEngineConfig, User } from "@/types/api";
+import type {
+  Role,
+  SchedulingEngineConfig,
+  User,
+  UserEffectiveAccess,
+  UserSecurityActivityPage
+} from "@/types/api";
 
 type RawRecord = Record<string, unknown>;
 
@@ -160,6 +166,20 @@ export async function fetchUsers(): Promise<{ users: User[] }> {
   };
 }
 
+export async function fetchUserEffectiveAccess(userId: number): Promise<UserEffectiveAccess> {
+  const raw = await api<{ access: UserEffectiveAccess }>(`/users/${userId}/effective-access`);
+  return raw.access;
+}
+
+export async function fetchUserSecurityActivity(
+  userId: number,
+  page = 1,
+  pageSize = 25
+): Promise<UserSecurityActivityPage> {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  return api<UserSecurityActivityPage>(`/users/${userId}/security-activity?${query.toString()}`);
+}
+
 export async function createUser(payload: { username: string; email?: string; fullName: string; englishName?: string | null; password: string; role: string }) {
   return api<{ user: RawRecord }>("/users", {
     method: "POST",
@@ -219,4 +239,14 @@ export async function resetUserTemporaryPassword(userId: number, password: strin
     body: JSON.stringify({ password })
   });
   return mapUser(raw.user);
+}
+
+export async function forceUserPasswordChange(userId: number): Promise<{ user: User; selfRevoked: boolean }> {
+  const raw = await api<{ user: RawRecord; selfRevoked: boolean }>(`/users/${userId}/force-password-change`, { method: "POST" });
+  return { user: mapUser(raw.user), selfRevoked: raw.selfRevoked };
+}
+
+export async function revokeUserSessions(userId: number): Promise<{ user: User; selfRevoked: boolean }> {
+  const raw = await api<{ user: RawRecord; selfRevoked: boolean }>(`/users/${userId}/revoke-sessions`, { method: "POST" });
+  return { user: mapUser(raw.user), selfRevoked: raw.selfRevoked };
 }

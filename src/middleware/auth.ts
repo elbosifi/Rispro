@@ -35,41 +35,69 @@ function parseAuthVersion(value: unknown): number {
   return version;
 }
 
-async function currentAuthVersion(userId: UserId): Promise<{ authVersion: number; isActive: boolean } | null> {
-  const result = await pool.query<{ auth_version: number; is_active: boolean }>(
-    "select auth_version, is_active from users where id = $1 limit 1",
+interface CurrentAuthState {
+  authVersion: number;
+  isActive: boolean;
+  role: Role;
+  mustChangePassword: boolean;
+}
+
+async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null> {
+  const result = await pool.query<{
+    auth_version: number;
+    is_active: boolean;
+    role: string;
+    must_change_password: boolean;
+  }>(
+    `select auth_version, is_active, role,
+            coalesce(must_change_password, false) as must_change_password
+       from users where id = $1 limit 1`,
     [Number(userId)]
   );
   const row = result.rows[0];
-  return row ? { authVersion: Number(row.auth_version), isActive: row.is_active } : null;
+  return row ? {
+    authVersion: Number(row.auth_version),
+    isActive: row.is_active,
+    role: parseRole(row.role),
+    mustChangePassword: row.must_change_password
+  } : null;
+}
+
+function decodeSessionToken(token: string): Record<string, unknown> {
+  const decoded = jwt.verify(token, env.jwtSecret);
+  const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
+  if (!payload || !payload.sub || !payload.role || payload.purpose !== undefined) {
+    throw new HttpError(401, "Invalid session.");
+  }
+  return payload;
+}
+
+async function currentSessionUser(payload: Record<string, unknown>): Promise<AuthenticatedUserContext | null> {
+  const userId = payload.sub as UserId;
+  const authVersion = parseAuthVersion(payload.authVersion);
+  const current = await currentAuthState(userId);
+  if (!current?.isActive || current.authVersion !== authVersion) return null;
+
+  return {
+    sub: userId,
+    role: current.role,
+    authVersion: current.authVersion,
+    username: payload.username ? String(payload.username) : undefined,
+    fullName: payload.fullName ? String(payload.fullName) : undefined,
+    mustChangePassword: current.mustChangePassword
+  };
 }
 
 export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
   void (async () => {
     try {
+      if (req.user) return next();
       const token = readToken(req);
       if (!token) throw new HttpError(401, "Authentication required.");
 
-      const decoded = jwt.verify(token, env.jwtSecret);
-      const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
-      if (!payload || !payload.sub || !payload.role) throw new HttpError(401, "Invalid session.");
-
-      const userId = payload.sub as UserId;
-      const authVersion = parseAuthVersion(payload.authVersion);
-      const current = await currentAuthVersion(userId);
-      if (!current?.isActive || current.authVersion !== authVersion) {
-        throw new HttpError(401, "Session expired. Please sign in again.");
-      }
-
-      req.user = {
-        sub: userId,
-        role: parseRole(payload.role),
-        authVersion,
-        purpose: payload.purpose ? String(payload.purpose) : undefined,
-        username: payload.username ? String(payload.username) : undefined,
-        fullName: payload.fullName ? String(payload.fullName) : undefined,
-        mustChangePassword: payload.mustChangePassword === true
-      };
+      const payload = decodeSessionToken(token);
+      req.user = await currentSessionUser(payload) ?? undefined;
+      if (!req.user) throw new HttpError(401, "Session expired. Please sign in again.");
       next();
     } catch (error) {
       const isJwtError =
@@ -84,52 +112,39 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
 
 export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
   let payload: Record<string, unknown>;
-  let role: Role;
   try {
     const token = readToken(req);
     if (!token) return next();
-
-    const decoded = jwt.verify(token, env.jwtSecret);
-    const decodedPayload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
-    if (!decodedPayload) return next();
-    payload = decodedPayload;
-    if (!payload || !payload.sub || !payload.role) return next();
-    role = parseRole(payload.role);
+    payload = decodeSessionToken(token);
   } catch {
     return next();
   }
-  void currentAuthVersion(payload.sub as UserId).then((current) => {
-    if (!current?.isActive || current.authVersion !== parseAuthVersion(payload.authVersion)) return next();
-    req.user = {
-      sub: payload.sub as UserId,
-      role,
-      authVersion: current.authVersion,
-      purpose: payload.purpose ? String(payload.purpose) : undefined,
-      username: payload.username ? String(payload.username) : undefined,
-      fullName: payload.fullName ? String(payload.fullName) : undefined,
-      mustChangePassword: payload.mustChangePassword === true
-    };
+  void currentSessionUser(payload).then((user) => {
+    if (user) req.user = user;
     next();
   }).catch(next);
 }
 
 export function blockForcedPasswordChange(req: AuthRequest, _res: Response, next: NextFunction): void {
-  try {
-    const token = readToken(req);
-    if (!token) {
+  const token = readToken(req);
+  if (!token) return next();
+
+  void (async () => {
+    try {
+      const payload = decodeSessionToken(token);
+      const user = await currentSessionUser(payload);
+      if (!user) return next();
+      req.user = user;
+      if (user.mustChangePassword) {
+        return next(new HttpError(403, "Password change is required before accessing this area."));
+      }
       return next();
+    } catch (error) {
+      const isJwtError = typeof error === "object" && error !== null && "name" in error &&
+        ["JsonWebTokenError", "TokenExpiredError"].includes(String((error as Error).name));
+      return next(isJwtError ? undefined : error);
     }
-
-    const decoded = jwt.verify(token, env.jwtSecret);
-    const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
-    if (payload?.mustChangePassword === true) {
-      return next(new HttpError(403, "Password change is required before accessing this area."));
-    }
-
-    return next();
-  } catch {
-    return next();
-  }
+  })();
 }
 
 export function requireSupervisor(req: AuthRequest, _res: Response, next: NextFunction): void {

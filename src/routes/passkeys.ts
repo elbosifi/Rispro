@@ -9,9 +9,10 @@ import {
   readPasskeyChallengeCookie,
   writePasskeyChallengeCookie,
   writeSessionCookie,
-  writeSupervisorReauthCookie
+  writeSupervisorReauthCookie,
+  recordSuccessfulLogin
 } from "../services/auth-service.js";
-import { logAuditEntry } from "../services/audit-service.js";
+import { logSecurityAuditEntry } from "../services/audit-service.js";
 import { requirePasskeyConfiguration } from "../services/passkey-settings-service.js";
 import {
   authenticationOptions,
@@ -41,7 +42,8 @@ function currentUser(request: PasskeyRequest): PasskeyUser {
     fullName: request.user.fullName || request.user.username,
     englishName: null,
     role: request.user.role,
-    mustChangePassword: request.user.mustChangePassword === true
+    mustChangePassword: request.user.mustChangePassword === true,
+    authVersion: Number(request.user.authVersion ?? 0)
   };
 }
 
@@ -120,17 +122,19 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
       const challenge = readChallenge(request, "authentication");
       const configuration = await requirePasskeyConfiguration();
       const user = await verifyPasskeyLogin(request.body?.response, challenge, configuration, webauthn);
+      await recordSuccessfulLogin(user.id, user.authVersion);
       const token = buildSessionToken({
         id: user.id,
         username: user.username,
         full_name: user.fullName,
         role: user.role,
-        must_change_password: user.mustChangePassword
+        must_change_password: user.mustChangePassword,
+        auth_version: user.authVersion
       });
       writeSessionCookie(res, token);
       clearSupervisorReauthCookie(res);
       clearPasskeyChallengeCookie(res);
-      await logAuditEntry({
+      await logSecurityAuditEntry({
         entityType: "auth",
         entityId: user.id,
         actionType: "passkey_login",
@@ -175,10 +179,11 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
       writeSupervisorReauthCookie(res, buildSupervisorReauthToken({
         id: verified.id,
         username: verified.username,
-        role: verified.role
+        role: verified.role,
+        auth_version: verified.authVersion
       }));
       clearPasskeyChallengeCookie(res);
-      await logAuditEntry({
+      await logSecurityAuditEntry({
         entityType: "auth",
         entityId: verified.id,
         actionType: "passkey_supervisor_reauth",

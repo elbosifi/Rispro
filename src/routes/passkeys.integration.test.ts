@@ -194,12 +194,7 @@ test("passkey routes require auth for registration options, store registrations,
     assert.equal(receptionistReauthOptions.status, 403, "receptionists cannot request supervisor passkey re-authentication");
 
     const disabledReauthOptions = await request<{ challenge: string }>(server.baseUrl, "/re-auth/options", { cookie: disabledCookie });
-    assert.equal(disabledReauthOptions.status, 200);
-    const disabledReauth = await request<{ error: { message: string } }>(server.baseUrl, "/re-auth/verify", {
-      cookie: `${disabledCookie}; ${cookieHeader(disabledReauthOptions.cookies)}`,
-      body: { response: { id: disabledCredential } }
-    });
-    assert.equal(disabledReauth.status, 401, "disabled users cannot complete passkey supervisor re-authentication");
+    assert.equal(disabledReauthOptions.status, 401, "an inactive account's old session cannot request passkey re-authentication");
 
     const invalidChallenge = await request<{ error: { message: string } }>(server.baseUrl, "/login/verify", {
       body: { response: { id: registeredCredential } }
