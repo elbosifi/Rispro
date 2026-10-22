@@ -508,7 +508,7 @@ export function PolicyDraftEditor({
   }
 
   return (
-    <Card>
+    <Card className="policy-draft-editor" style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>
       <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Scheduling Policy Draft</h2>
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
         Edit policy rules using structured sections, then save snapshot changes to the active draft.
@@ -540,7 +540,9 @@ export function PolicyDraftEditor({
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Daily category limits</summary>
           <div style={{ display: "grid", gap: 8 }}>
             {draft.categoryDailyLimits.map((row, index) => (
-              <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-5">
+              <div key={`${row.id}-${index}`} className="grid grid-cols-1 items-end gap-2 rounded-lg border border-border bg-muted/30 p-3 md:grid-cols-5">
+                <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+                {language === "ar" ? "الجهاز" : "Modality"}
                 <select
                   className={inputBase}
                   value={row.modalityId}
@@ -560,6 +562,9 @@ export function PolicyDraftEditor({
                     </option>
                   ))}
                 </select>
+                </label>
+                <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+                {language === "ar" ? "التصنيف" : "Category"}
                 <select
                   className={inputBase}
                   value={row.caseCategory}
@@ -577,6 +582,9 @@ export function PolicyDraftEditor({
                   <option value="non_oncology">Non-oncology</option>
                   <option value="oncology">Oncology</option>
                 </select>
+                </label>
+                <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+                {language === "ar" ? "الحد اليومي" : "Daily limit"}
                 <input
                   className={inputBase}
                   type="number"
@@ -605,6 +613,7 @@ export function PolicyDraftEditor({
                     })
                   }
                 />
+                </label>
                 <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
                   <input
                     type="checkbox"
@@ -2039,7 +2048,7 @@ export function PolicyDraftEditor({
         />
                 <Button
                   onClick={handleSave}
-                  disabled={isSaving || !canSave}
+                  disabled={isSaving || !canSave || !hasDraftSnapshot}
                   style={{
                     backgroundColor: canSave ? "var(--blue)" : "var(--border)",
                     color: canSave ? "#fff" : "var(--text-muted)",

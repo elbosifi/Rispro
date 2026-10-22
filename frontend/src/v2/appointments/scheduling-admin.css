@@ -1,0 +1,50 @@
+.scheduling-policy-page {
+  min-width: 0;
+}
+
+.policy-draft-editor details {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.policy-draft-editor summary {
+  padding: 0.25rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+.policy-draft-editor summary:focus-visible,
+.policy-draft-editor button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.policy-draft-editor .input-premium {
+  min-width: 0;
+  min-height: var(--control-height-sm);
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+}
+
+.policy-draft-editor .input-premium:not(:focus-visible) {
+  box-shadow: none;
+}
+
+.policy-draft-editor .input-premium:not(textarea) {
+  height: var(--control-height-sm);
+}
+
+.policy-draft-editor button:not([class*="btn-"]) {
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border-color: var(--border);
+}
+
+.policy-draft-editor button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

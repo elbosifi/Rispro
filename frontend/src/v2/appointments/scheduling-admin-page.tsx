@@ -22,6 +22,8 @@ import { PolicyValidationSummary } from "./components/policy-validation-summary"
 import { getPolicyDiffRiskSummary } from "./utils/policy-diff-risk";
 import { validatePolicyDraftForAdmin } from "./utils/policy-admin-validation";
 import type { PolicySnapshotDto } from "./types";
+import { Button } from "@/components/shared";
+import "./scheduling-admin.css";
 
 function SectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -61,20 +63,20 @@ export function SchedulingAdminPage() {
   const draftVersionId = status.data?.draft?.id ?? null;
   const preview = useV2PolicyPreview(draftVersionId);
   const draftSnapshot = useMemo<PolicySnapshotDto | null>(
-    () => status.data?.draftSnapshot ?? null,
-    [status.data?.draftSnapshot]
+    () => status.data?.draft ? status.data.draftSnapshot : null,
+    [status.data?.draft, status.data?.draftSnapshot]
   );
   const validation = useMemo(
     () => validatePolicyDraftForAdmin(draftSnapshot, status.data?.displayLookups),
     [draftSnapshot, status.data?.displayLookups]
   );
   const riskSummary = useMemo(
-    () => getPolicyDiffRiskSummary(status.data?.publishedSnapshot, status.data?.draftSnapshot, status.data?.displayLookups),
-    [status.data?.displayLookups, status.data?.draftSnapshot, status.data?.publishedSnapshot]
+    () => getPolicyDiffRiskSummary(status.data?.publishedSnapshot, draftSnapshot ?? undefined, status.data?.displayLookups),
+    [status.data?.displayLookups, draftSnapshot, status.data?.publishedSnapshot]
   );
   const hasBlockingValidationErrors = validation.errors.length > 0;
   const hasValidationWarnings = validation.warnings.length > 0;
-  const hasUnpublishedChanges = snapshotsDiffer(status.data?.publishedSnapshot, status.data?.draftSnapshot);
+  const hasUnpublishedChanges = snapshotsDiffer(status.data?.publishedSnapshot, draftSnapshot ?? undefined);
   const publishDisabledReason = !draftVersionId
     ? t("schedulingAdmin.createDraftBeforePublishing")
     : hasBlockingValidationErrors
@@ -93,7 +95,7 @@ export function SchedulingAdminPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto", display: "grid", gap: 16 }}>
+    <div className="scheduling-policy-page mx-auto grid w-full max-w-[1100px] gap-4">
       <h1 style={{ fontSize: 22, fontWeight: 700 }}>{t("schedulingAdmin.title")}</h1>
 
       {status.isError && (
@@ -107,8 +109,8 @@ export function SchedulingAdminPage() {
           style={{
             padding: 16,
             borderRadius: 8,
-            border: "1px solid var(--border-color, #e2e8f0)",
-            backgroundColor: "var(--bg-surface, #f8fafc)",
+            border: "1px solid var(--border)",
+            backgroundColor: "var(--card)",
             display: "grid",
             gap: 12,
           }}
@@ -128,7 +130,7 @@ export function SchedulingAdminPage() {
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={async () => {
                 try {
@@ -143,20 +145,20 @@ export function SchedulingAdminPage() {
                 }
               }}
               disabled={createDraft.isPending || Boolean(status.data?.draft)}
-              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #e2e8f0" }}
+              style={{ minHeight: "var(--control-height-sm)", height: "auto", padding: "0.5rem 0.75rem" }}
             >
               {t("schedulingAdmin.createDraft")}
-            </button>
+            </Button>
 
-            <button
+            <Button size="sm"
               type="button"
               onClick={() => setShowPublish(true)}
               disabled={Boolean(publishDisabledReason)}
-              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #e2e8f0" }}
+              style={{ minHeight: "var(--control-height-sm)", height: "auto", padding: "0.5rem 0.75rem" }}
               title={publishDisabledReason ?? t("schedulingAdmin.publishDraftTitle")}
             >
               {t("schedulingAdmin.publishDraft")}
-            </button>
+            </Button>
             <span style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>{t("schedulingAdmin.saveDraftHint")}</span>
           </div>
           {publishDisabledReason && (
@@ -181,8 +183,8 @@ export function SchedulingAdminPage() {
             style={{
               padding: 16,
               borderRadius: 8,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              backgroundColor: "var(--bg-surface, #f8fafc)",
+              border: "1px solid var(--border)",
+              backgroundColor: "var(--card)",
               textAlign: "center",
               color: "var(--text-muted, #64748b)",
             }}
@@ -225,8 +227,8 @@ export function SchedulingAdminPage() {
             style={{
               padding: 12,
               borderRadius: 8,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              backgroundColor: "var(--bg-surface, #f8fafc)",
+              border: "1px solid var(--border)",
+              backgroundColor: "var(--card)",
               fontSize: 13,
               display: "grid",
               gap: 6,
@@ -266,8 +268,8 @@ export function SchedulingAdminPage() {
           style={{
             padding: 12,
             borderRadius: 8,
-            border: "1px solid var(--border-color, #e2e8f0)",
-            backgroundColor: "var(--bg-surface, #f8fafc)",
+            border: "1px solid var(--border)",
+            backgroundColor: "var(--card)",
             fontSize: 13,
             color: "var(--text-muted, #64748b)",
           }}

@@ -24,6 +24,18 @@ describe("SupervisorOverrideModal", () => {
     authState.reAuthWithPasskey.mockResolvedValue(undefined);
   });
 
+  it("names the dialog and keeps keyboard focus inside before authorization", async () => {
+    const onClose = vi.fn();
+    render(<SupervisorOverrideModal open mode="current_user" onClose={onClose} onConfirm={vi.fn()} loading={false} />);
+
+    const dialog = screen.getByRole("dialog", { name: "Supervisor Override Required" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Continue" }));
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("uses same-user passkey re-authentication for current-user overrides without credential fields", async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     render(

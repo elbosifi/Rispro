@@ -141,13 +141,15 @@ describe("SchedulingAdminPage", () => {
     expect(await screen.findByText("Patient identifier types are not part of the current policy snapshot contract. Manage identifier types in Settings until the scheduling administration DTO includes this section.")).toBeTruthy();
   });
 
-  it("disables publish when no draft exists and shows a reason", () => {
+  it("disables publish and save when no draft exists even if the API supplies a snapshot", () => {
     policyStatus = { ...baseStatus(), draft: null };
 
     renderPage();
 
     const publish = screen.getByRole("button", { name: "Publish Draft" }) as HTMLButtonElement;
     expect(publish.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save Draft" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Draft state: No unpublished changes")).toBeTruthy();
     expect(screen.getByText("Create a draft before publishing.")).toBeTruthy();
   });
 

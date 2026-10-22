@@ -180,14 +180,6 @@ export function AvailabilityDateRow({
     (status === "full" && allowNonAvailableSelection && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
   const isBlockedLike = status === "blocked" && !requestableOverride;
 
-  const statusColor =
-    status === "available"
-      ? "var(--green)"
-      : status === "restricted"
-      ? "var(--amber)"
-      : status === "full" || requestableOverride
-      ? "var(--amber)"
-      : "var(--accent)";
   const slotSegments = buildSlotSegments({
     bucketMode,
     dailyCapacity,
@@ -207,13 +199,16 @@ export function AvailabilityDateRow({
         if (isClickable) onClick();
       }}
       disabled={!isClickable}
+      aria-pressed={selected}
+      className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
        style={{
          width: "100%",
-         textAlign: "left",
+         textAlign: "start",
          padding: 10,
          borderRadius: 8,
-         border: selected ? "2px solid var(--blue)" : "1px solid var(--border)",
-         background: selected ? "rgba(59, 130, 246, 0.1)" : "var(--background)",
+         border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
+         boxShadow: selected ? "inset 0 0 0 1px var(--accent)" : "none",
+         background: selected ? "var(--state-live-bg)" : "var(--card)",
          cursor: isClickable ? "pointer" : "not-allowed",
          opacity: isClickable ? 1 : 0.9,
       }}
@@ -224,7 +219,7 @@ export function AvailabilityDateRow({
           <div style={{ fontWeight: 600 }}>{dayLabel}</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{date}</div>
         </div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: statusColor, textTransform: "capitalize" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: status === "available" ? "var(--state-available-text)" : status === "restricted" || requestableOverride ? "var(--state-restricted-text)" : status === "full" ? "var(--state-full-text)" : "var(--state-blocked-text)", textTransform: "capitalize" }}>
           {specialQuotaPath
             ? (language === "ar" ? "الحصة الخاصة متاحة" : "Special quota available")
             : status === "blocked" && requestableOverride

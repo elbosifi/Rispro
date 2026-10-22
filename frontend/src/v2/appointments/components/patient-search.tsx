@@ -329,6 +329,7 @@ export function PatientSearch({
     <>
     <div style={{ position: "relative" }}>
       <SearchInput
+        lang={language}
         value={query}
         onChange={(e) => handleSearch(e.target.value)}
         placeholder={t(language, "appointments.create.searchPatientPlaceholder")}

@@ -460,8 +460,8 @@ function DoctorWorkloadPanel({
 function Field({ label, children, compact = false }: { label: string; children: React.ReactNode; compact?: boolean }) {
   return (
     <label className={compact ? "block min-w-0 text-sm font-medium" : "text-sm font-medium"}>
-      <span className={compact ? "sr-only" : "text-foreground"}>{label}</span>
-      <div className={compact ? "" : "mt-1"}>{children}</div>
+      <span className={compact ? "text-xs font-medium text-muted-foreground" : "text-foreground"}>{label}</span>
+      <div className="mt-1">{children}</div>
     </label>
   );
 }
@@ -495,7 +495,7 @@ function ActiveFilterStrip({
   );
 }
 function inputClass() {
-  return "h-10 w-full rounded-lg border px-3 text-sm";
+  return "h-10 w-full min-w-0 rounded-lg border border-border bg-card px-3 text-sm text-foreground outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20 disabled:opacity-50";
 }
 
 function abnormalPriorityLabel(row: ReportingBoardCaseRow): string | null {
@@ -652,7 +652,7 @@ function categoryLabel(category: string): string {
 
 function IdsCell({ row }: { row: ReportingBoardCaseRow }) {
   return (
-    <div className="leading-tight" title={`MRN ${row.patientMrn ?? "-"}; Accession ${row.accessionNumber}`}>
+    <div className="whitespace-nowrap leading-tight tabular-nums" title={`MRN ${row.patientMrn ?? "-"}; Accession ${row.accessionNumber}`}>
       <div className="font-medium text-foreground">{row.patientMrn ?? "-"}</div>
       <div className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{row.accessionNumber}</div>
     </div>
@@ -2547,7 +2547,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       )}
 
       <section className="space-y-2 rounded-lg border p-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(14rem,1.5fr)_repeat(5,minmax(0,1fr))_auto]">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-[minmax(14rem,1.5fr)_repeat(5,minmax(0,1fr))]">
+          <div className="col-span-2 lg:col-span-1">
           <Field label="Search" compact>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-3" style={{ color: "var(--text-muted)" }} />
@@ -2558,6 +2559,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   if (event.key === "Enter") applySearch();
                 }}
                 placeholder="Search MRN / National ID / accession / patient / exam"
+                aria-label="Search"
                 className={`${inputClass()} pl-9 pr-9`}
               />
               {filters.q && (
@@ -2567,6 +2569,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               )}
             </div>
           </Field>
+          </div>
           <Field label="Modality" compact>
             <select
               value={filters.modalityId ?? ""}
@@ -2758,10 +2761,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedHoldMutation.error && <p className="mt-2 text-sm text-red-600">{selectedHoldMutation.error instanceof Error ? selectedHoldMutation.error.message : "Selected Reporting Hold action failed."}</p>}
           </div>
           )}
-          <div className="rounded-lg border lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" style={{ borderColor: "var(--border)" }}>
+          <div className="overflow-hidden rounded-lg border bg-card lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" style={{ borderColor: "var(--border)" }}>
             <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-auto">
-              <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-                <thead className="sticky top-0 z-20 shadow-sm" style={{ backgroundColor: "var(--card)" }}>
+              <table className="w-full min-w-[1040px] text-sm [&_tbody_tr]:border-b [&_tbody_tr]:border-border [&_tbody_tr:last-child]:border-b-0" style={{ borderColor: "var(--border)" }}>
+                <thead className="sticky top-0 z-20 border-b border-border bg-muted shadow-sm">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
                       <input
@@ -2808,9 +2811,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                           </div>
                         </td>
                         <td className="px-3 py-1.5"><IdsCell row={row} /></td>
-                        <td className="px-3 py-1.5">{row.bookingDate} {row.bookingTime ?? ""}</td>
+                        <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">{row.bookingDate} {row.bookingTime ?? ""}</td>
                         <td className="px-3 py-1.5"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
-                        {showAssignedDoctorColumn && <td className="px-3 py-1.5"><span className="block text-[10px] uppercase text-slate-500">Assigned</span><AssignedDoctorDisplay row={row} /></td>}
+                        {showAssignedDoctorColumn && <td className="px-3 py-1.5"><AssignedDoctorDisplay row={row} /></td>}
                         <td className="px-3 py-1.5"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-1.5"><CompactStatusCell row={row} /></td>
                         <td className="px-2 py-1.5 text-right">

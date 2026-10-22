@@ -37,7 +37,7 @@ test("Reporting Board normal filter deep link survives reload", async ({ page })
 
 test("Reporting Board search remains private to the browser URL", async ({ page }) => {
   await openSupervisorReportingBoard(page);
-  const search = page.getByPlaceholder("Search MRN / accession / patient / exam");
+  const search = page.getByRole("textbox", { name: "Search", exact: true });
   await search.fill("PRIVATE-PATIENT-SEARCH");
   await search.press("Enter");
 

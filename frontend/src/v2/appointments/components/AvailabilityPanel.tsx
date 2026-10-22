@@ -57,17 +57,17 @@ export function AvailabilityPanel({
   });
 
   if (loading) {
-    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
+    return <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
   }
 
   if (rows.length === 0) {
     if (!emptyMessage) return null;
-    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
+    return <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
   }
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-2">
         <div className="flex gap-2 items-center">
           <Button type="button" variant="ghost" size="sm" onClick={onPreviousPage} disabled={!canGoPrevious} className="text-xs h-8 px-2">
             {t(language, "appointments.create.previousSlots")}
@@ -76,7 +76,7 @@ export function AvailabilityPanel({
             {t(language, "appointments.create.nextSlots")}
           </Button>
         </div>
-        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-xs sm:text-sm font-medium" style={{ color: "var(--text-muted)" }}>
             {t(language, "appointments.create.startDate")}
           </label>
@@ -85,7 +85,8 @@ export function AvailabilityPanel({
             type="date"
             value={startDate}
             onChange={(event) => onChangeStartDate(event.target.value)}
-            className="text-xs py-2 h-8 w-full sm:w-40"
+            className="text-xs"
+            style={{ width: "10rem", minHeight: "var(--control-height-sm)", padding: "0.35rem 0.5rem", borderRadius: "var(--radius-sm)" }}
           />
           <Button type="button" variant="ghost" size="sm" onClick={onToggleShowFullDays} className="text-xs h-8 px-2">
             {showFullDays ? t(language, "appointments.create.hideFullDays") : t(language, "appointments.create.showFullDays")}

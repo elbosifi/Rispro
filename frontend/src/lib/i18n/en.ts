@@ -1,4 +1,5 @@
 export const en = {
+  "common.clearSearch": "Clear search",
   "settings.section.mobile_widget": "Mobile Widget Access",
   "mobileWidget.description": "Read-only operational counts for your iPhone. Patient details are never included.",
   "mobileWidget.preview": "Today's operations",

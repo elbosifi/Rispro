@@ -27,6 +27,11 @@ const noShowSummary = {
 vi.mock("@/lib/api-hooks", () => ({
   fetchPatientDirectory: (...args: unknown[]) => fetchPatientDirectoryMock(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
+  fetchIntegrationStatus: vi.fn().mockResolvedValue({ scanner: { naps2WebScanEnabled: false } }),
+}));
+
+vi.mock("@/lib/api/patient-identity-documents", () => ({
+  fetchPatientIdentityDocument: vi.fn().mockResolvedValue({ status: "not_uploaded", document: null }),
 }));
 
 vi.mock("@/components/patients/patient-form", () => ({

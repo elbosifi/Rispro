@@ -72,8 +72,8 @@ function Card({ children }: { children: ReactNode }) {
       style={{
         padding: 10,
         borderRadius: 6,
-        border: "1px solid var(--border-color, #e2e8f0)",
-        backgroundColor: "var(--bg-card, #fff)",
+        border: "1px solid var(--border)",
+        backgroundColor: "var(--card)",
         display: "grid",
         gap: 8,
       }}
@@ -87,7 +87,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <span style={{ fontSize: 10, color: "var(--text-muted, #64748b)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ fontSize: 13, color: "var(--text-primary, #1e293b)", fontWeight: 500 }}>{value}</span>
+      <span style={{ fontSize: 13, color: "var(--foreground)", fontWeight: 500 }}>{value}</span>
     </div>
   );
 }
@@ -98,7 +98,7 @@ function Badge({ active }: { active: boolean }) {
       style={{
         width: "fit-content",
         borderRadius: 999,
-        border: "1px solid var(--border-color, #e2e8f0)",
+        border: "1px solid var(--border)",
         padding: "2px 8px",
         fontSize: 11,
         fontWeight: 700,
@@ -169,7 +169,7 @@ function ExamChips({
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {examTypeIds.map((examTypeId) => (
-            <span key={examTypeId} style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 4, padding: "3px 6px", fontSize: 12 }}>
+            <span key={examTypeId} style={{ border: "1px solid var(--border)", borderRadius: 4, padding: "3px 6px", fontSize: 12 }}>
               {formatExamType(examTypeId, examTypes)}
             </span>
           ))}
@@ -255,13 +255,13 @@ export function LivePolicyPanel({
   };
 
   return (
-    <div style={{ padding: 16, borderRadius: 8, border: "1px solid var(--border-color, #e2e8f0)", backgroundColor: "var(--bg-surface, #f8fafc)" }}>
+    <div style={{ padding: 16, borderRadius: 8, border: "1px solid var(--border)", backgroundColor: "var(--card)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Live Policy</h2>
         <button
           type="button"
           onClick={handleCopyJson}
-          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border-color, #e2e8f0)", background: "var(--bg-card, #fff)", fontSize: 12, cursor: "pointer" }}
+          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--card)", fontSize: 12, cursor: "pointer" }}
           title="Copy live policy snapshot as JSON"
         >
           {copied ? "Copied" : "Copy JSON"}

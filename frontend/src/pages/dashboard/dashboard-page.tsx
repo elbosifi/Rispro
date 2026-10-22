@@ -38,24 +38,24 @@ function StatCard({
 }) {
   const toneColors: Record<DashboardTone, { color: string }> = {
     default: { color: "var(--foreground)" },
-    good: { color: "var(--green)" },
-    warn: { color: "var(--amber)" },
-    alert: { color: "#ef4444" }
+    good: { color: "var(--state-success-text)" },
+    warn: { color: "var(--state-restricted-text)" },
+    alert: { color: "var(--state-error-text)" }
   };
 
   const { color } = toneColors[tone];
 
   return (
-    <Card className="p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-1">{label}</p>
-          <p className="text-3xl font-bold" style={{ color }}>{value}</p>
+    <Card style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-xs font-medium leading-relaxed text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold tabular-nums" style={{ color }}>{value}</p>
           {subValue && (
             <p className="mt-2 text-sm text-muted-foreground">{subValue}</p>
           )}
         </div>
-        <div className="icon-housing icon-housing--md">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent" aria-hidden="true">
           {icon}
         </div>
       </div>
@@ -76,16 +76,16 @@ function WidgetShell({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden">
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-[0.15em] font-mono text-muted-foreground">{title}</h3>
+    <Card className="overflow-hidden" style={{ padding: 0, boxShadow: "var(--shadow-sm)" }}>
+      <div className="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {stale && (
           <Badge variant="warning" size="sm">
             {staleLabel}
           </Badge>
         )}
       </div>
-      <div className="p-6">{children}</div>
+      <div className="p-4">{children}</div>
     </Card>
   );
 }
@@ -114,7 +114,7 @@ function ActionLink({
   const Icon = iconMap[tone];
   const accentBorder = tone === "good" ? "rgba(34,197,94,0.3)" : tone === "warn" ? "rgba(245,158,11,0.3)" : tone === "alert" ? "rgba(239,68,68,0.3)" : "var(--border)";
   const accentBg = tone === "good" ? "rgba(34,197,94,0.05)" : tone === "warn" ? "rgba(245,158,11,0.05)" : tone === "alert" ? "rgba(239,68,68,0.05)" : "transparent";
-  const textColor = tone === "good" ? "var(--green)" : tone === "warn" ? "var(--amber)" : tone === "alert" ? "#ef4444" : "var(--foreground)";
+  const textColor = tone === "good" ? "var(--state-success-text)" : tone === "warn" ? "var(--state-restricted-text)" : tone === "alert" ? "var(--state-error-text)" : "var(--foreground)";
 
   return (
     <Link
@@ -127,7 +127,7 @@ function ActionLink({
       }}
     >
       <span>{label}</span>
-      <Icon className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1 text-muted-foreground" />
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground rtl:rotate-180" />
     </Link>
   );
 }
@@ -204,10 +204,10 @@ export function DashboardPage() {
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-4">
-                <SectionLabel pulsing>DASHBOARD</SectionLabel>
+                <SectionLabel pulsing>{t("nav.dashboard")}</SectionLabel>
               </div>
               <h1 className="text-2xl sm:text-3xl font-display mt-2" style={{ color: "var(--foreground)" }}>
-                Welcome, <span className="gradient-text">{user?.fullName ?? ""}</span>
+                {t("dashboard.welcome", { name: user?.fullName ?? "" })}
               </h1>
               <p className="mt-2 text-muted-foreground">{t("dashboard.subtitle")}</p>
             </div>
@@ -261,15 +261,15 @@ export function DashboardPage() {
             { label: t("dashboard.statsUpdated"), updatedAt: statisticsQuery.dataUpdatedAt },
             { label: t("dashboard.lookupsUpdated"), updatedAt: lookupsQuery.dataUpdatedAt }
           ].map((item, i) => (
-             <Card key={i} className="p-4 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{item.label}</span>
-               <span className="font-medium">{item.updatedAt ? formatDateTimeLy(new Date(item.updatedAt)) : t("common.na")}</span>
+             <Card key={i} className="flex flex-wrap items-center justify-between gap-1" style={{ padding: "0.65rem 0.75rem", boxShadow: "none" }}>
+              <span className="text-xs text-muted-foreground">{item.label}</span>
+               <span className="text-xs font-medium tabular-nums">{item.updatedAt ? formatDateTimeLy(new Date(item.updatedAt)) : t("common.na")}</span>
              </Card>
           ))}
         </div>
 
         {/* Stat Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <StatCard
             label={t("dashboard.registeredPatients")}
             value={statisticsQuery.isLoading && !statisticsQuery.data ? "..." : viewModel.kpis.totalRegisteredPatients}
@@ -327,7 +327,7 @@ export function DashboardPage() {
         )}
 
         {/* Widget Row */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           {/* Status Distribution */}
           <WidgetShell title={t("dashboard.statusDistribution")} stale={statisticsStale} staleLabel={t("common.staleData")}>
             {statisticsQuery.isLoading && !statisticsQuery.data ? (
@@ -339,9 +339,9 @@ export function DashboardPage() {
             ) : statisticsQuery.isError && !statisticsQuery.data ? (
               <p className="text-sm text-center text-red-500">{t("dashboard.unableStatus")}</p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="divide-y divide-border">
                 {viewModel.statuses.map((row) => (
-                  <li key={row.status} className="flex items-center justify-between text-sm">
+                  <li key={row.status} className="flex items-center justify-between gap-2 py-2 text-sm first:pt-0 last:pb-0">
                     <span className="text-muted-foreground">{statusLabel(language, row.status)}</span>
                     <span className="font-bold text-lg">{row.count}</span>
                   </li>
@@ -368,7 +368,7 @@ export function DashboardPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">{t("dashboard.noShow")}</span>
-                  <span className={`font-bold text-lg ${viewModel.queueHealth.reviewActive ? "text-green-600" : "text-amber-600"}`}>
+                  <span className={`text-sm font-semibold ${viewModel.queueHealth.reviewActive ? "text-green-700" : "text-amber-800"}`}>
                     {viewModel.queueHealth.reviewActive ? t("dashboard.reviewActive") : t("dashboard.reviewOpens", { time: viewModel.queueHealth.reviewTime })}
                   </span>
                 </div>
@@ -417,7 +417,7 @@ export function DashboardPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[520px] text-sm [&_th]:px-3 [&_th]:text-xs [&_th]:tracking-normal [&_td]:px-3 [&_td]:tabular-nums">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-start py-3 font-semibold uppercase tracking-[0.15em] font-mono text-muted-foreground">{t("dashboard.modality")}</th>

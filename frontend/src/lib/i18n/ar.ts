@@ -1,4 +1,5 @@
 export const ar = {
+  "common.clearSearch": "مسح البحث",
   "settings.section.mobile_widget": "الوصول إلى أداة الهاتف",
   "mobileWidget.description": "أعداد تشغيلية للقراءة فقط على هاتفك. لا تتضمن أي تفاصيل عن المرضى.",
   "mobileWidget.preview": "عمليات اليوم",

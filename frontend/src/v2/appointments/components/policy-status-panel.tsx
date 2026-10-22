@@ -42,8 +42,8 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
       style={{
         padding: 16,
         borderRadius: 8,
-        border: "1px solid var(--border-color, #e2e8f0)",
-        backgroundColor: "var(--bg-surface, #f8fafc)",
+        border: "1px solid var(--border)",
+        backgroundColor: "var(--card)",
       }}
     >
       <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{language === "ar" ? "حالة السياسة" : "Policy Status"}</h2>
@@ -62,24 +62,24 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
             style={{
               padding: 8,
               borderRadius: 6,
-              backgroundColor: "var(--bg-card, #ffffff)",
-              border: "1px solid var(--border-color, #e2e8f0)",
+              backgroundColor: "var(--card)",
+              border: "1px solid var(--border)",
             }}
           >
-            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>{language === "ar" ? "القواعد المباشرة" : "Live rules"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>{language === "ar" ? "القواعد المباشرة" : "Live rules"}</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{publishedRuleCount}</div>
           </div>
           <div
             style={{
               padding: 8,
               borderRadius: 6,
-              backgroundColor: "var(--bg-card, #ffffff)",
+              backgroundColor: "var(--card)",
               border: hasUnpublishedChanges
                 ? "2px solid var(--color-warning, #f59e0b)"
-                : "1px solid var(--border-color, #e2e8f0)",
+                : "1px solid var(--border)",
             }}
           >
-            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>{language === "ar" ? "المسودة الحالية" : "Working draft"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>{language === "ar" ? "المسودة الحالية" : "Working draft"}</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{draftRuleCount}</div>
           </div>
         </div>
@@ -89,8 +89,9 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
             style={{
               padding: 10,
               borderRadius: 6,
-              backgroundColor: "var(--color-warning, #f59e0b)",
-              color: "#ffffff",
+              backgroundColor: "var(--state-warning-bg)",
+              color: "var(--state-restricted-text)",
+              border: "1px solid var(--state-warning-border)",
               fontWeight: 600,
               fontSize: 13,
               display: "flex",
@@ -108,8 +109,8 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
             style={{
               padding: 10,
               borderRadius: 6,
-              backgroundColor: "var(--color-muted, #64748b)",
-              color: "#ffffff",
+              backgroundColor: "var(--muted)",
+              color: "var(--foreground)",
               fontWeight: 500,
               fontSize: 13,
               textAlign: "center",

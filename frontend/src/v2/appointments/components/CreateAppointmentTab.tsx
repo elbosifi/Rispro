@@ -900,7 +900,7 @@ export function CreateAppointmentTab({
       <div data-testid="appointment-create-grid" className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
         <div data-testid="appointment-form-region" className="space-y-3 sm:space-y-4 order-1 xl:order-2">
-          <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
+          <Card className="h-fit" style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>
             <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
@@ -1314,7 +1314,7 @@ export function CreateAppointmentTab({
               )}
 
               {form.overrideRequired && (
-                <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
+                <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "var(--state-warning-bg)", color: "var(--state-restricted-text)" }}>
                   <div>{t(language, "appointments.create.overrideRequired")}</div>
                   {isReceptionist && selectedRowSupportedOverrideTypes.length ? (
                     <div className="mt-1 text-xs">
@@ -1372,8 +1372,8 @@ export function CreateAppointmentTab({
 
         {/* Availability Panel */}
         <div data-testid="appointment-availability-region" className="space-y-3 sm:space-y-4 order-2 xl:order-1">
-          <Card className="p-4 sm:p-5">
-            <div className="mb-4 sm:mb-5 flex items-start justify-between gap-3">
+          <Card style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--foreground)" }}>
                 {t(language, "appointments.create.evaluatedAvailability")}
               </h3>
@@ -1409,7 +1409,7 @@ export function CreateAppointmentTab({
                 emptyMessage={
                   availability.enabled
                     ? t(language, "appointments.create.noAvailabilityRows")
-                    : ""
+                    : availabilityStatusLabel
                 }
               />
             ) : (

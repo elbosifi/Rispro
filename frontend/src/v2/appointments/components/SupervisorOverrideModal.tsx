@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { Button, Input } from "@/components/shared";
+import { Button, Dialog, DialogContent, Input } from "@/components/shared";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import type { SchedulingOverrideType } from "../types";
 import { formatOverrideType } from "../utils/scheduling-override-requests";
@@ -77,17 +77,12 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) handleClose();
-      }}
-    >
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-4 sm:p-5 shadow-lg">
-        <h3 className="text-lg font-semibold text-foreground">{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
-        <p className="mt-1.5 text-sm text-muted-foreground">{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
+    <Dialog open={open} onClose={handleClose}>
+      <DialogContent maxWidth="448px" aria-labelledby="supervisor-override-title" aria-describedby="supervisor-override-description">
+        <h3 id="supervisor-override-title" className="text-lg font-semibold text-foreground">{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
+        <p id="supervisor-override-description" className="mt-1.5 text-sm text-muted-foreground">{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
         {overrideTypes.length ? (
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-foreground">
+          <ul className="mt-3 list-disc space-y-1 ps-5 text-sm text-foreground">
             {overrideTypes.map((overrideType) => <li key={overrideType}>{formatOverrideType(overrideType)}</li>)}
           </ul>
         ) : null}
@@ -95,11 +90,11 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
         <div className="grid gap-3 mt-4">
           {mode === "delegated_supervisor" ? (
             <>
-              <Input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
-              <Input type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
+              <Input aria-label={t(language, "appointments.create.supervisorUsername")} value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
+              <Input aria-label={t(language, "appointments.create.password")} type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
             </>
           ) : null}
-          <Input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
+          <Input aria-label={t(language, "appointments.create.overrideReason")} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
         </div>
 
         {(localError || authError) && (
@@ -114,7 +109,7 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
             {loading ? t(language, "appointments.create.validating") : mode === "current_user" ? t(language, "common.continue") : t(language, "appointments.create.approveBook")}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

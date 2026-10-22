@@ -37,11 +37,11 @@ export function AppointmentSuccessState({
   const { language } = useLanguage();
   const publicAppointmentUrl = String(appointmentSummary.publicAppointmentUrl || "").trim();
   return (
-    <div className="card-shell p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
-      <h3 className="text-lg font-bold mb-4" style={{ color: "var(--green)" }}>
+    <div className="card-shell p-6" style={{ borderColor: "var(--state-success-border)", boxShadow: "var(--shadow-sm)" }}>
+      <h3 className="text-lg font-bold mb-4" style={{ color: "var(--state-success-text)" }}>
         {t(language, "appointments.create.successTitle")}
       </h3>
-      <div className="space-y-2 mb-6">
+      <div className="space-y-2 mb-6 rounded-lg border border-border bg-muted/30 p-4">
         <div className="text-sm" style={{ color: "var(--text)" }}>
           <span className="font-bold">{t(language, "appointments.create.patient")}:</span> {appointmentSummary.patientName}
         </div>
@@ -59,7 +59,7 @@ export function AppointmentSuccessState({
         </div>
       </div>
       {appointmentSummary.mriPrimaryScreeningResult ? <div className="mb-6"><MriPrimaryScreeningBadges result={appointmentSummary.mriPrimaryScreeningResult} /></div> : null}
-      <div className="flex flex-wrap gap-4 mb-6">
+      <div className="grid grid-cols-1 gap-2 mb-6 sm:grid-cols-2">
         <Button type="button" variant="secondary" className="px-6" onClick={onPrintView}>{t(language, "appointments.create.printView")}</Button>
         <Button type="button" variant="secondary" className="px-6" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</Button>
         {publicAppointmentUrl ? (

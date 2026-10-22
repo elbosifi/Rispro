@@ -23,7 +23,7 @@ import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { UserPlus, Search, Pencil, CalendarPlus, Printer, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User } from "lucide-react";
-import { Button, Card, Badge } from "@/components/shared";
+import { Button, Card, Badge, SearchInput } from "@/components/shared";
 import type { PatientDirectoryRow } from "@/types/api";
 
 const PATIENT_DIRECTORY_SCROLL_ANCHOR_KEY = "rispro-patient-directory-scroll-anchor";
@@ -181,11 +181,9 @@ export default function PatientsPage() {
             <UserPlus size={16} />
             <span className="leading-none">{t(language, "patients.registerTitle")}</span>
           </Button>
-          <div className="relative flex-1">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center text-muted-foreground">
-              <Search size={18} strokeWidth={1.5} />
-            </div>
-            <input
+          <div className="flex-1">
+            <SearchInput
+              lang={language}
               type="text"
               value={searchQuery}
               onChange={(e) => {
@@ -194,12 +192,12 @@ export default function PatientsPage() {
                 updateNavigation({ page: 1 });
               }}
               placeholder={t(language, "patients.searchPlaceholder")}
-              className="input-premium pl-12 h-11 sm:h-12"
+              aria-label={t(language, "patients.searchPlaceholder")}
             />
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 lg:grid-cols-6">
           <label className="space-y-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.directory.filter.category")}:</span>
             <select
@@ -243,7 +241,7 @@ export default function PatientsPage() {
               <option value="female">Female</option>
             </select>
           </label>
-          <label className="space-y-1">
+          <label className="col-span-2 space-y-1 lg:col-span-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.age")}:</span>
             <div className="flex items-center gap-2">
               <input

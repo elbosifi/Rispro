@@ -195,7 +195,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const addressRef = useRef<HTMLSelectElement>(null);
   const categoryRef = useRef<HTMLSelectElement>(null);
   const navigate = useNavigate();
-  const sectionTitleClass = "text-xl sm:text-2xl font-bold text-foreground";
+  const sectionTitleClass = "text-base sm:text-lg font-semibold text-foreground";
   const fieldLabelClass = "block text-sm font-semibold mb-2 text-foreground";
   const helperTextClass = "mt-2 text-sm text-muted-foreground";
   const requiredMark = " *";
@@ -756,7 +756,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     <form id="patient-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} noValidate className="space-y-5">
       {/* Identity */}
       <div className="space-y-4">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className={sectionTitleClass}>{language === "ar" ? "الهوية" : "Identity"}</h3>
           {form.category ? (
             <PatientCategoryBadge category={form.category} />
@@ -854,7 +854,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </Card>
         )}
 
-        <Card className="p-3 sm:p-4">
+        <Card style={{ padding: "var(--panel-padding)", background: "var(--muted)", boxShadow: "none" }}>
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">
@@ -873,7 +873,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             </div>
             <button
               type="button"
-              className="text-sm text-accent underline"
+              className="shrink-0 rounded px-1 py-1 text-sm text-accent underline focus-visible:outline-2 focus-visible:outline-accent"
               onClick={() =>
                 setForm((f) => ({
                   ...f,
@@ -1037,8 +1037,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       </div>
 
       {/* Demographics */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-4">
+      <div className="space-y-4 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className={sectionTitleClass}>{language === "ar" ? "البيانات الديموغرافية" : "Demographics"}</h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1106,14 +1106,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             </select>
           </div>
         </div>
-        <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
+        <label className="flex items-start gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
           <input
             type="checkbox"
             checked={form.demographicsEstimated}
             onChange={(event) => setForm((f) => ({ ...f, demographicsEstimated: event.target.checked }))}
-            className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
+            className="mt-0.5 w-5 h-5 shrink-0 cursor-pointer accent-[var(--accent)]"
           />
-          <span className="text-base font-semibold">{language === "ar" ? "تقديري (تاريخ/عمر غير مؤكد)" : "Estimated (uncertain DOB/age)"}</span>
+          <span className="text-sm font-medium">{language === "ar" ? "تقديري (تاريخ/عمر غير مؤكد)" : "Estimated (uncertain DOB/age)"}</span>
         </label>
         {isNationalId && isValidNationalId(form.identifierValue) && (
           <p className="text-sm font-semibold text-accent">{language === "ar" ? "تم استنتاج البيانات تلقائياً من الرقم الوطني. يمكنك تعديلها يدوياً." : "Demographics auto-derived from National ID. You can override them manually."}</p>
@@ -1121,8 +1121,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       </div>
 
       {/* Contact */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-4">
+      <div className="space-y-4 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className={sectionTitleClass}>{language === "ar" ? "التواصل" : "Contact"}</h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1204,7 +1204,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <Button
           type="submit"
           disabled={mutation.isPending}
-          className="ml-auto"
+          className="w-full sm:w-auto sm:ms-auto"
         >
           {submitLabel}
         </Button>
@@ -1223,11 +1223,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   if (!isEdit) {
     return (
       <div className={hasPotentialDuplicates ? "grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)] gap-4 xl:gap-5" : "grid grid-cols-1 gap-4"}>
-        <Card className="p-4 sm:p-5">{formFields}</Card>
+        <Card style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>{formFields}</Card>
         <div className="space-y-4">
           {hasPotentialDuplicates && (
           <Card className="p-4" style={{ background: "rgba(245, 158, 11, 0.05)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
-            <h3 className="text-sm font-semibold text-amber-600 mb-4">
+            <h3 className="text-sm font-semibold text-amber-800 mb-4">
               {language === "ar" ? "التطابقات المحتملة" : "Possible Duplicates"} {dupQuery.length > 1 ? `(${duplicates.length})` : ""}
             </h3>
             {dupQuery.length <= 1 ? (
@@ -1388,7 +1388,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Edit mode: form only (toast handles success)
   return (
     <div className="max-w-4xl mx-auto">
-      <Card className="p-4 sm:p-5">{formFields}</Card>
+      <Card style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>{formFields}</Card>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
