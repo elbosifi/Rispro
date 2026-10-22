@@ -1,0 +1,20 @@
+/* Compact operational controls for the assessed Doctor Workspace screens. */
+:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page) .input-premium {
+  min-width: 0;
+  min-height: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0.4rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border-color: var(--border);
+  background: var(--card);
+  font-size: 0.8125rem;
+  box-shadow: none;
+}
+
+:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page, .doctor-worklists-page) :is(.btn-primary, .btn-secondary) {
+  min-height: var(--control-height-sm);
+  height: auto;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}

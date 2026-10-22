@@ -1,3 +1,4 @@
+import { Button, Input } from "@/components/shared";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -52,16 +53,16 @@ function SummaryTable({ rows }: { rows: TeamWorkloadSummaryRow[] }) {
     t(language, "doctor.workload.overdue"),
   ];
   return (
-    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-      <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-        <thead style={{ backgroundColor: "var(--card)" }}>
+    <div className="overflow-x-auto rounded-lg border border-border bg-card" style={{ borderColor: "var(--border)" }}>
+      <table className="min-w-full divide-y divide-border text-sm" style={{ borderColor: "var(--border)" }}>
+        <thead className="bg-muted">
           <tr>
             {headers.map((header) => (
-              <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>
+              <th key={header} className="px-3 py-2 text-start text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+        <tbody className="divide-y divide-border" style={{ borderColor: "var(--border)" }}>
           {rows.map((row) => (
             <tr key={`${row.rosterAssignmentId}-${row.modalityId}-${row.caseCategory ?? "all"}`}>
               <td className="px-3 py-2 font-medium text-foreground">{row.teamName}</td>
@@ -180,38 +181,38 @@ function CatalogManagement({
 
       {canEdit && (
         <div className="grid gap-2 md:grid-cols-4">
-          <select value={draft.modalityId} onChange={(event) => setDraft((current) => ({ ...current, modalityId: event.target.value, examTypeId: "" }))} className="rounded-lg border px-3 py-2 text-sm">
+          <select value={draft.modalityId} onChange={(event) => setDraft((current) => ({ ...current, modalityId: event.target.value, examTypeId: "" }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">{t(language, "doctor.workload.modality")}</option>
             {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn || modality.code || modality.id}</option>)}
           </select>
-          <select value={draft.examTypeId} onChange={(event) => setDraft((current) => ({ ...current, examTypeId: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+          <select value={draft.examTypeId} onChange={(event) => setDraft((current) => ({ ...current, examTypeId: event.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">{t(language, "doctor.workload.anyExam")}</option>
             {examTypes.filter((exam) => !draft.modalityId || exam.modalityId === Number(draft.modalityId)).map((exam) => <option key={exam.id} value={exam.id}>{exam.nameEn}</option>)}
           </select>
-          <select value={draft.assignmentType} onChange={(event) => setDraft((current) => ({ ...current, assignmentType: event.target.value as CaseAssignmentType }))} className="rounded-lg border px-3 py-2 text-sm">
+          <select value={draft.assignmentType} onChange={(event) => setDraft((current) => ({ ...current, assignmentType: event.target.value as CaseAssignmentType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
             {ASSIGNMENT_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
           </select>
-          <input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder={t(language, "doctor.workload.categoryOrBlank")} className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder={t(language, "doctor.workload.points")} className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder={t(language, "doctor.workload.reportRequiredMultiplier")} className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          <Input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder={t(language, "doctor.workload.categoryOrBlank")} className="rounded-lg border px-3 py-2 text-sm" />
+          <Input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder={t(language, "doctor.workload.points")} className="rounded-lg border px-3 py-2 text-sm" />
+          <Input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder={t(language, "doctor.workload.reportRequiredMultiplier")} className="rounded-lg border px-3 py-2 text-sm" />
+          <Input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          <Input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
           <div className="flex gap-2 md:col-span-3">
-            <button type="button" disabled={!draft.modalityId || !draft.baseUnits || !draft.effectiveFrom} onClick={() => {
+            <Button variant="primary" size="sm" type="button" disabled={!draft.modalityId || !draft.baseUnits || !draft.effectiveFrom} onClick={() => {
               if (selected) onUpdate(selected.id, payload());
               else onCreate(payload());
               reset();
-            }} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+            }} className="rounded-lg px-3 py-2 text-sm font-semibold">
               {selected ? t(language, "doctor.workload.saveRule") : t(language, "doctor.workload.createRule")}
-            </button>
-            {selected && <button type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{t(language, "doctor.workload.cancelEdit")}</button>}
+            </Button>
+            {selected && <Button variant="secondary" size="sm" type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{t(language, "doctor.workload.cancelEdit")}</Button>}
           </div>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-        <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-          <thead><tr>{[
+      <div className="overflow-x-auto rounded-lg border border-border bg-card" style={{ borderColor: "var(--border)" }}>
+        <table className="min-w-full divide-y divide-border text-sm" style={{ borderColor: "var(--border)" }}>
+          <thead className="bg-muted"><tr>{[
             t(language, "doctor.workload.status"),
             t(language, "doctor.workload.modality"),
             t(language, "doctor.workload.exam"),
@@ -221,8 +222,8 @@ function CatalogManagement({
             t(language, "doctor.workload.rulePreview"),
             t(language, "doctor.workload.effective"),
             t(language, "common.actions"),
-          ].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
-          <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+          ].map((header) => <th key={header} className="px-3 py-2 text-start text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+          <tbody className="divide-y divide-border" style={{ borderColor: "var(--border)" }}>
             {rules.map((rule) => (
               <tr key={rule.id}>
                 <td className="px-3 py-2">{rule.active ? t(language, "doctor.workload.active") : t(language, "settings.pacs.inactive")}</td>
@@ -240,8 +241,8 @@ function CatalogManagement({
                 <td className="px-3 py-2">
                   {canEdit && (
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => loadRule(rule)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>{t(language, "common.edit")}</button>
-                      {rule.active && <button type="button" onClick={() => onDeactivate(rule.id)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>{t(language, "doctor.workload.deactivate")}</button>}
+                      <Button variant="secondary" size="sm" type="button" onClick={() => loadRule(rule)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>{t(language, "common.edit")}</Button>
+                      {rule.active && <Button variant="secondary" size="sm" type="button" onClick={() => onDeactivate(rule.id)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>{t(language, "doctor.workload.deactivate")}</Button>}
                     </div>
                   )}
                 </td>
@@ -312,7 +313,7 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="doctor-team-workload-page space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
@@ -321,18 +322,18 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
           <h2 className="mt-1 text-2xl font-semibold text-foreground">{canManage ? t(language, "doctor.workload.departmentTeamWorkload") : t(language, "doctor.workload.myTeamWorkload")}</h2>
         </div>
         {canManage && (
-          <button type="button" onClick={() => calculateMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+          <Button variant="primary" size="sm" type="button" onClick={() => calculateMutation.mutate()} className="rounded-lg px-3 py-2 text-sm font-semibold">
             {t(language, "doctor.workload.calculate")}
-          </button>
+          </Button>
         )}
       </div>
 
       <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <label className="text-sm font-medium">{t(language, "doctor.protocols.from")}<input type="date" value={startDate} onChange={(event) => updateNavigation({ startDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
-        <label className="text-sm font-medium">{t(language, "doctor.protocols.to")}<input type="date" value={endDate} onChange={(event) => updateNavigation({ endDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.modality")}<select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option>{(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}</select></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.report")}<select value={requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as "" | "true" | "false" })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="true">{t(language, "doctor.protocols.required")}</option><option value="false">{t(language, "doctor.protocols.noReport")}</option></select></label>
-        <label className="text-sm font-medium">{t(language, "doctor.workload.category")}<select value={caseCategory} onChange={(event) => updateNavigation({ category: event.target.value as "" | "oncology" | "non_oncology" })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="oncology">{t(language, "appointments.create.oncology")}</option><option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option></select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.protocols.from")}<Input type="date" value={startDate} onChange={(event) => updateNavigation({ startDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
+        <label className="text-sm font-medium">{t(language, "doctor.protocols.to")}<Input type="date" value={endDate} onChange={(event) => updateNavigation({ endDate: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.modality")}<select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option>{(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}</select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.report")}<select value={requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as "" | "true" | "false" })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="true">{t(language, "doctor.protocols.required")}</option><option value="false">{t(language, "doctor.protocols.noReport")}</option></select></label>
+        <label className="text-sm font-medium">{t(language, "doctor.workload.category")}<select value={caseCategory} onChange={(event) => updateNavigation({ category: event.target.value as "" | "oncology" | "non_oncology" })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">{t(language, "doctor.all")}</option><option value="oncology">{t(language, "appointments.create.oncology")}</option><option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option></select></label>
       </section>
 
       <CalculationSummary summary={summary} />

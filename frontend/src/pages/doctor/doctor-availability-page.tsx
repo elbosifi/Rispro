@@ -1,3 +1,4 @@
+import { Button, Input } from "@/components/shared";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -128,7 +129,7 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
   const myLeave = myLeaveQuery.data ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="doctor-availability-page space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
@@ -138,7 +139,7 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
         </div>
         <label className="text-sm font-medium">
           From
-          <input
+          <Input
             type="date"
             value={dateFrom}
             onChange={(event) => {
@@ -169,15 +170,15 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
         >
           <h3 className="font-semibold">Add availability</h3>
           <div className="grid gap-2 sm:grid-cols-2">
-            <input type="date" value={availabilityForm.date} onChange={(e) => setAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-            <select value={availabilityForm.availabilityStatus} onChange={(e) => setAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="rounded-lg border px-3 py-2 text-sm">
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Date</span><Input type="date" value={availabilityForm.date} onChange={(e) => setAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Availability status</span><select value={availabilityForm.availabilityStatus} onChange={(e) => setAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
               {AVAILABILITY_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
-            </select>
-            <input type="time" value={availabilityForm.startTime} onChange={(e) => setAvailabilityForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-            <input type="time" value={availabilityForm.endTime} onChange={(e) => setAvailabilityForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-            <input placeholder="Note" value={availabilityForm.note} onChange={(e) => setAvailabilityForm((c) => ({ ...c, note: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm sm:col-span-2" />
+            </select></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Start time</span><Input type="time" value={availabilityForm.startTime} onChange={(e) => setAvailabilityForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>End time</span><Input type="time" value={availabilityForm.endTime} onChange={(e) => setAvailabilityForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground sm:col-span-2"><span>Note</span><Input placeholder="Note" value={availabilityForm.note} onChange={(e) => setAvailabilityForm((c) => ({ ...c, note: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
           </div>
-          <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Add unavailable day</button>
+          <Button variant="primary" size="sm" type="submit" className="rounded-lg px-3 py-2 text-sm font-semibold">Add unavailable day</Button>
         </form>
 
         <form
@@ -194,14 +195,14 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
         >
           <h3 className="font-semibold">Request leave</h3>
           <div className="grid gap-2 sm:grid-cols-2">
-            <input type="date" value={leaveForm.startDate} onChange={(e) => setLeaveForm((c) => ({ ...c, startDate: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-            <input type="date" value={leaveForm.endDate} onChange={(e) => setLeaveForm((c) => ({ ...c, endDate: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-            <select value={leaveForm.leaveType} onChange={(e) => setLeaveForm((c) => ({ ...c, leaveType: e.target.value as LeaveType }))} className="rounded-lg border px-3 py-2 text-sm">
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Start date</span><Input type="date" value={leaveForm.startDate} onChange={(e) => setLeaveForm((c) => ({ ...c, startDate: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>End date</span><Input type="date" value={leaveForm.endDate} onChange={(e) => setLeaveForm((c) => ({ ...c, endDate: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Leave type</span><select value={leaveForm.leaveType} onChange={(e) => setLeaveForm((c) => ({ ...c, leaveType: e.target.value as LeaveType }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
               {LEAVE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-            </select>
-            <input placeholder="Reason" value={leaveForm.reason} onChange={(e) => setLeaveForm((c) => ({ ...c, reason: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+            </select></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Reason</span><Input placeholder="Reason" value={leaveForm.reason} onChange={(e) => setLeaveForm((c) => ({ ...c, reason: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
           </div>
-          <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Submit leave</button>
+          <Button variant="secondary" size="sm" type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Submit leave</Button>
         </form>
       </section>
 
@@ -243,16 +244,16 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
                 });
               }}
             >
-              <select value={teamAvailabilityForm.doctorId} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Doctor</span><select value={teamAvailabilityForm.doctorId} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, doctorId: e.target.value }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 <option value="">Doctor</option>
                 {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
-              </select>
-              <input type="date" value={teamAvailabilityForm.date} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <select value={teamAvailabilityForm.availabilityStatus} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="rounded-lg border px-3 py-2 text-sm">
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Date</span><Input type="date" value={teamAvailabilityForm.date} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Availability status</span><select value={teamAvailabilityForm.availabilityStatus} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="input-premium rounded-lg border px-3 py-2 text-sm">
                 {AVAILABILITY_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
-              </select>
-              <input placeholder="Note" value={teamAvailabilityForm.note} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, note: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add team availability</button>
+              </select></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"><span>Note</span><Input placeholder="Note" value={teamAvailabilityForm.note} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, note: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" /></label>
+              <Button variant="secondary" size="sm" type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add team availability</Button>
             </form>
             <div className="mt-3 space-y-2 text-sm">
               {teamAvailability.length === 0 ? <p style={{ color: "var(--text-muted)" }}>No team availability entries.</p> : teamAvailability.map((row) => (
@@ -266,8 +267,8 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
               {teamLeave.filter((row) => row.status === "pending").map((row) => (
                 <div key={`actions-${row.id}`} className="flex flex-wrap items-center gap-2 text-sm">
                   <span>{row.doctorName ?? "Doctor"} leave action</span>
-                  <button type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "approved" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Approve</button>
-                  <button type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "rejected" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Reject</button>
+                  <Button variant="secondary" size="sm" type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "approved" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Approve</Button>
+                  <Button variant="secondary" size="sm" type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "rejected" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Reject</Button>
                 </div>
               ))}
             </div>

@@ -1,0 +1,165 @@
+# Complete application UI polish — progress
+
+## Baseline and safety
+
+- Starting main/origin/main: `50514e038eaf1e8792b89864b3b2854fc27dfccd`, clean, fetched and aligned.
+- Local rollback branch: `codex/application-ui-polish-goal`; no push, PR, or deployment.
+- The committed five-screen polish is present in `50514e03`. References: Appointment Creation, Reporting Board, Patient Registration, Scheduling Settings, Dashboard.
+- Read AGENTS, CURRENT_TASK (stale prior security goal), UI normalization guidance, shared README, tokens, routes and navigation.
+- Baseline checks outside sandbox: agent contract PASS; preflight PASS/DOCKER_OK; frontend typecheck PASS; production build PASS; focused reference tests 143/143 PASS; Chromium foundation 1/1 PASS; frontend lint PASS with 9 existing hook warnings.
+- Existing warning-only output: large production bundle; jsdom scrollTo stubs; 9 lint hook warnings. No failed baseline check.
+- Only guarded disposable E2E database, synthetic seed, localhost backend 3100/frontend 5173. External integrations disabled/unconfigured in this environment.
+- Browser tooling: in-app browser unavailable; native Safari connection timed out. Repository Chromium E2E harness works.
+- Screenshot artifacts and capture runner live outside tracked application source in the system temporary directory.
+
+## Counting and exclusions
+
+Each canonical routed page or separately navigable Settings/protocol/setup section is one inventory entry. Parameterized detail/editor routes count once each; aliases and redirects do not count again. Shared subpanels and dialogs are assessed with their owning screen.
+
+Redirect-only aliases excluded: `/`, `/appointments/legacy`, `/v2/appointments`, `/doctor`, `/doctor/dashboard`, `/doctor/cases`, `/doctor/admin/roster`, `/doctor/admin/doctors`, `/mobile/reporting-view/:token`, `/public/cancel-appointment`, `/teaching`, wildcard fallbacks. The five reference entries are regression-only. Despite its name, Legacy Access Viewer is actively routed and remains in scope. Teaching is actively routed and remains in scope. Internal print renderers are active output surfaces and remain in scope.
+
+## Inventory
+
+Total discovered composed screen entries: **118**, including **5** regression references; **113** remaining entries. Inventory completeness will be checked against reachable nested views during browser assessment.
+
+| Module | Route / view | Component | Priority | Status |
+| --- | --- | --- | --- | --- |
+| Access | `/login` | `LoginPage` | P2 | Discovered |
+| Reference | `/dashboard` | `DashboardPage` | P2 | Regression reference |
+| Patients | `/patients` | `PatientsPage` | P2 | Discovered |
+| Reference | `/patients/new` | `PatientsPage / PatientForm` | P2 | Regression reference |
+| Patients | `/patients/:id/edit` | `EditPatientPage` | P2 | Discovered |
+| Patients | `/patients/merge` | `PatientMergePage` | P2 | Discovered |
+| Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Discovered |
+| Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
+| Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Discovered |
+| Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Discovered |
+| Operations | `/calendar` | `CalendarPage` | P1 | Discovered |
+| Operations | `/registrations` | `RegistrationsPage` | P1 | Discovered |
+| Documents | `/request-scans` | `RequestScansPage` | P1 | Discovered |
+| Operations | `/queue` | `QueuePage` | P1 | Discovered |
+| Operations | `/queue/check-in` | `QueueCheckInPage` | P1 | Discovered |
+| Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Discovered |
+| Modality | `/modality` | `ModalityPage` | P1 | Discovered |
+| Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Discovered |
+| Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Discovered |
+| Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Discovered |
+| Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Discovered |
+| Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Discovered |
+| Printing | `/print` | `PrintPage` | P2 | Discovered |
+| Printing | `/print/day-list` | `DayListPrintPage` | P2 | Discovered |
+| Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Discovered |
+| Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Discovered |
+| Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Discovered |
+| Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
+| Patients | `/search` | `SearchPage` | P2 | Discovered |
+| PACS | `/pacs` | `PacsPage` | P2 | Discovered |
+| PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Discovered |
+| PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Discovered |
+| Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Discovered |
+| Settings | `/settings` | `SettingsPage` | P2 | Discovered |
+| Monitoring | `/incidents` | `IncidentsPage` | P2 | Discovered |
+| SOP | `/sops` | `SopsPage (library)` | P2 | Discovered |
+| SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Discovered |
+| SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Discovered |
+| Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Discovered |
+| Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Discovered |
+| Reference | `/v2/appointments/admin` | `SchedulingAdminPage` | P2 | Regression reference |
+| Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Discovered |
+| Reporting | `/reporting/worklist/:token` | `ReportingBoardMobilePage` | P2 | Discovered |
+| Documents | `/reporting/worklist/:token/cases/:caseId/documents` | `ReportingWorklistDocumentsPage` | P1 | Discovered |
+| Doctor | `/doctor/my-work` | `DoctorPortalHome` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/today-cases` | `DoctorCasesPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/reporting-board` | `DoctorReportingBoardPage` | P1 | Regression reference |
+| Doctor | `/doctor/doctor-worklists` | `DoctorWorklistsPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/reporting-board/saved/:token` | `DoctorReportingBoardPage (saved view)` | P1 | Discovered |
+| Doctor | `/doctor/roster-planner` | `DoctorRosterPage (management)` | P1 | Discovered |
+| Doctor | `/doctor/doctors-directory` | `DoctorAdminDoctorsPage` | P1 | Discovered |
+| Doctor | `/doctor/advanced-setup` | `DoctorAdvancedSetupPage` | P1 | Discovered |
+| Doctor | `/doctor/advanced-setup?section=roster` | `DoctorRosterPage (advanced)` | P1 | Discovered |
+| Doctor | `/doctor/advanced-setup?section=doctors` | `DoctorAdminDoctorsPage (advanced)` | P1 | Discovered |
+| Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Discovered |
+| Doctor | `/doctor/availability` | `DoctorAvailabilityPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Discovered |
+| Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Discovered |
+| Doctor | `/doctor/ir-consultations` | `DoctorIrReferralsPage` | P1 | Discovered |
+| Doctor | `/doctor/ir-consultations/:id` | `IrReferralDetailPage (doctor)` | P1 | Discovered |
+| Doctor | `/doctor/team-workload` | `DoctorTeamWorkloadPage` | P1 | Complete — batch 1 |
+| Protocols | `/doctor/protocols?area=library&section=protocols` | `DoctorProtocolsPage / protocols` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=importExport` | `DoctorProtocolsPage / importExport` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=anatomy` | `DoctorProtocolsPage / anatomy` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=scanners` | `DoctorProtocolsPage / scanners` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=ctPhases` | `DoctorProtocolsPage / ctPhases` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=mriSequences` | `DoctorProtocolsPage / mriSequences` | P1 | Discovered |
+| Settings | `/settings?section=mobile_widget` | `MobileWidgetAccessSection` | P2 | Discovered |
+| Settings | `/settings?section=patient_registration` | `SimpleSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=patient_import` | `PatientImportSection` | P2 | Discovered |
+| Settings | `/settings?section=patient_duplicate_resolver` | `PatientDuplicateResolverSection` | P2 | Discovered |
+| Settings | `/settings?section=scheduling_and_capacity` | `SimpleSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=queue_and_arrival` | `SimpleSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=scheduling_engine_config` | `SchedulingEngineConfigSection` | P2 | Discovered |
+| Settings | `/settings?section=pacs_connection` | `PacsSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=dicom_gateway_config` | `DicomGatewaySettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=dicom_gateway_monitoring` | `DicomMonitoringSection` | P2 | Discovered |
+| Settings | `/settings?section=mwl_policy` | `MwlPolicySection` | P2 | Discovered |
+| Settings | `/settings?section=orthanc_mwl_sync` | `OrthancMwlSection` | P2 | Discovered |
+| Settings | `/settings?section=users` | `UsersSection` | P2 | Discovered |
+| Settings | `/settings?section=action_pin_policy` | `ActionPinPolicySection` | P2 | Discovered |
+| Settings | `/settings?section=role_page_access` | `RolePageAccessSection` | P2 | Discovered |
+| Settings | `/settings?section=audit_log` | `AuditLogSection` | P2 | Discovered |
+| Settings | `/settings?section=exam_types` | `ExamTypesSection` | P2 | Discovered |
+| Settings | `/settings?section=modalities` | `ModalitiesSection` | P2 | Discovered |
+| Settings | `/settings?section=equipment` | `EquipmentSection` | P2 | Discovered |
+| Settings | `/settings?section=name_dictionary` | `NameDictionarySection` | P2 | Discovered |
+| Settings | `/settings?section=not_allowed_name_words` | `NotAllowedNameWordsSection` | P2 | Discovered |
+| Settings | `/settings?section=appointment_slip` | `AppointmentSlipSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=qz_tray` | `QzTrayPrintingSection` | P2 | Discovered |
+| Settings | `/settings?section=deployment_identity` | `DeploymentIdentitySection` | P2 | Discovered |
+| Settings | `/settings?section=patient_qr_self_service` | `PatientQrSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=passkey_configuration` | `PasskeyConfigurationSection` | P2 | Discovered |
+| Settings | `/settings?section=sonicdicom_reports` | `SonicDicomReportsSection` | P2 | Discovered |
+| Settings | `/settings?section=ohif_viewer` | `OhifViewerSection` | P2 | Discovered |
+| Settings | `/settings?section=documents_and_uploads` | `DocumentsStorageSection` | P2 | Discovered |
+| Settings | `/settings?section=backup_restore` | `BackupRestoreSection` | P2 | Discovered |
+| Settings | `/settings?section=system_diagnostics` | `SystemDiagnosticsSection` | P2 | Discovered |
+| Settings | `/settings?section=request_scan_automation` | `RequestScanAutomationSection` | P2 | Discovered |
+| Settings | `/settings?section=email_notifications` | `EmailNotificationsSection` | P2 | Discovered |
+| Settings | `/settings?section=authoritative_orthanc` | `AuthoritativeOrthancSection` | P2 | Discovered |
+| Teaching | `/teaching/login` | `TeachingLoginPage` | P3 | Discovered |
+| Teaching | `/teaching/dashboard` | `TeachingDashboardPage` | P3 | Discovered |
+| Teaching | `/teaching/anatomy` | `TeachingAnatomyIndexPage` | P3 | Discovered |
+| Teaching | `/teaching/anatomy/sources` | `TeachingAnatomySourcesPage` | P3 | Discovered |
+| Teaching | `/teaching/anatomy/atlas/:atlasId` | `TeachingAnatomyAtlasPage` | P3 | Discovered |
+| Teaching | `/teaching/anatomy/liver` | `TeachingLiverAnatomyPage` | P3 | Discovered |
+| Teaching | `/teaching/qbank` | `TeachingQbankPage` | P3 | Discovered |
+| Teaching | `/teaching/qbank/session/:sessionId` | `TeachingSessionPage` | P3 | Discovered |
+| Teaching | `/teaching/history` | `TeachingHistoryPage` | P3 | Discovered |
+| Teaching | `/teaching/progress` | `TeachingProgressPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/import` | `TeachingImportPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/import/history` | `TeachingImportHistoryPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/import/batches/:batchId` | `TeachingImportBatchPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/questions` | `TeachingQuestionListPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/questions/maintenance` | `TeachingQuestionMaintenancePage` | P3 | Discovered |
+| Teaching | `/teaching/admin/questions/new` | `TeachingQuestionEditorPage` | P3 | Discovered |
+| Teaching | `/teaching/admin/questions/:id` | `TeachingQuestionEditorPage` | P3 | Discovered |
+
+## Milestone ledger
+
+- Preflight: complete.
+- Inventory: routed screens and Settings/protocol/setup views discovered; reachability audit pending.
+- Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
+- Screens assessed: 5. Screens completed: 5. Remaining non-reference entries: 108.
+- Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
+- Decisions requiring approval: none identified yet.
+- Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
+
+### Batch 1 — Doctor Workspace core
+
+- Assessed/completed: My Work, Today’s Cases, Doctor Worklists, Availability, Team Workload.
+- Fixed: teal primary actions inconsistent with the blue reference screens; dark default control/table borders; unlabelled Availability date/time/status inputs; inconsistent control heights; worklist header alignment; manual QR overlay without Escape/focus handling.
+- Reused shared Button/Input and Dialog; native selects retain their label/layout semantics. Dense domain tables and segmented view controls stay local. Scoped compact styling applies only to assessed pages; shared primitives and theme tokens are unchanged.
+- Browser: before/after 1440x960 and 390x844; populated cases/worklists, empty availability/leave/workload, and QR modal. QR Tab containment, Escape, and focus restoration pass. Five Arabic-preference captures confirm the existing explicit English/LTR Doctor Workspace boundary (not an Arabic translation or RTL-compliance claim).
+- Checks: 104 focused tests pass; 8 existing Doctor navigation E2E pass; 5 before + 5 final after capture cases pass; 5 Arabic-preference capture cases pass; QR keyboard case passes; frontend typecheck/build pass on final batch tree; targeted lint retains one pre-existing hook warning; harness:all passes with existing warning-only findings; diff whitespace clean.
+- Correction during development: introduced JSX self-closing syntax error detected by focused tests/typecheck/build and first two after captures; corrected, rejected invalid captures, and reran to passing.
+- Next-batch baseline: 2 existing roster browser tests pass, including populated synthetic roster, phone alternatives, theme and simulated direction checks.
+- Open batch limits: workload populated summary and editable scoring-rule form still need representative fixture coverage; Availability/leave successful and error states need further browser characterization. These remain explicit follow-up validation, not claimed passed.
