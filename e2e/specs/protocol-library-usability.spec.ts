@@ -58,7 +58,7 @@ test("protocol library prioritizes clinical finding and safe secondary actions",
   await expect(page.getByText("Import protocols XLSX", { exact: true })).toBeVisible();
   await screenshot("protocol-library-import-export.png");
 
-  await page.getByRole("button", { name: "Protocols", exact: true }).click();
+  await page.getByLabel("Protocol library navigation", { exact: true }).getByRole("button", { name: "Protocols", exact: true }).click();
   const acuteRow = page.getByRole("row", { name: /CT Brain - Acute/ });
   const moreActions = acuteRow.getByRole("button", { name: "More actions for CT Brain - Acute" });
   await moreActions.click();

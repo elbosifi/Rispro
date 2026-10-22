@@ -1,5 +1,7 @@
 # Complete application UI polish — progress
 
+Status: active after the user-authorized baseline locator repair.
+
 ## Baseline and safety
 
 - Starting main/origin/main: `50514e038eaf1e8792b89864b3b2854fc27dfccd`, clean, fetched and aligned.
@@ -146,11 +148,11 @@ Total discovered composed screen entries: **118**, including **5** regression re
 ## Milestone ledger
 
 - Preflight: complete.
-- Inventory: routed screens and Settings/protocol/setup views discovered; reachability audit pending.
+- Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
 - Screens assessed: 11. Screens completed/accepted: 11 (9 polished, 2 assessed with no further visual change). Remaining non-reference entries: 102.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
-- Decisions requiring approval: none identified yet.
+- Decisions requiring approval: no product decision identified. Work stopped at the first unrelated baseline browser-test failure; repairing that test is outside the completed UI batches.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
 
 ### Batch 1 — Doctor Workspace core
@@ -173,3 +175,22 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Checks on final batch tree: 118 focused tests pass; frontend typecheck/build pass; targeted lint passes; harness:ui passes; whitespace check passes. Existing bundle warning retained.
 - Development correction: the label text-edit helper produced invalid JSX; rejected those renders, replaced the edit with syntax-aware insertion, and reran typecheck, build, focused tests, and captures successfully.
 - Rollback: batch 1 checkpoint `62688641`; batch 2 local checkpoint follows after final capture comparison. No push.
+
+## Stop checkpoint — required validation failure
+
+- Goal incomplete. Do not squash-apply to main.
+- Completed checkpoints: batch 1 `62688641`; batch 2 `fe63fc29`, both local-only on `codex/application-ui-polish-goal`. Starting main remains `50514e038eaf1e8792b89864b3b2854fc27dfccd`.
+- Next-batch baseline command: `npx playwright test e2e/specs/protocol-library-usability.spec.ts --reporter=line --output=<temporary-artifact-directory>/protocol-baseline`. Failed before any Protocol Management source edit.
+- Exact failure: `e2e/specs/protocol-library-usability.spec.ts:61`, `getByRole("button", { name: "Protocols", exact: true }).click()` resolves to two valid controls: the Doctor navigation button and the button inside `aria-label="Protocol library navigation"`. Playwright strict-mode violation.
+- Diagnostic evidence: the test file, Protocols page, and Doctor navigation component have no diff from starting main. Existing navigation and in-page labels are both intentional in source; this is an unscoped test locator. No test patch, test relaxation, UI rename, threshold change, or retry was made.
+- Required operating rule: stop at the first unrelated failure. This blocks further implementation and final main squash-apply. The next task should scope the in-page locator and rerun this baseline before resuming; do not treat the current run as passing.
+- Protocol baseline screenshots captured for all 7 top-level views at 1440x960/390x844. These are partial assessment, not completed polish or verified full interaction. The failed baseline run also captured the library desktop view, new-protocol dialog, import/export panel, and failure state.
+- Counts at stop: 11 completed/accepted remaining entries (9 polished, 2 already adequate), 7 protocol entries partially assessed, 95 remaining entries unassessed, plus 5 original reference entries awaiting final regression verification. No application-wide completion claim.
+- Still pending: most modules, full dynamic-detail/dialog coverage, final five-screen regression, application-wide checks, final exact-tree validation after all future edits, and squash-apply to unchanged main.
+- No backend, schema, integration, authorization, audit, identity, scheduling or reporting-calculation implementation changes. Synthetic fixtures only in the disposable E2E environment.
+
+## Resume authorization
+
+- User explicitly authorized the one-line Protocol Library locator repair and resumption of the full goal.
+- Scoped only the test's in-page Protocols click to the existing `Protocol library navigation` container. No assertion, UI label, workflow, or application code changed for this repair.
+- Repaired baseline passed (1/1 Chromium test) against a newly migrated/seeded disposable E2E database. The prior stop checkpoint remains historical evidence, not the current decision to abandon remaining scope.
