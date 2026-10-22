@@ -14,7 +14,7 @@ test("a protocol-authorized doctor changes a same-modality examination without r
   const row = page.getByRole("row", { name: /E2E Protocoling Exam Patient/ });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Assign" }).click();
-  const workspace = page.getByRole("dialog", { name: /assign protocol/i });
+  const workspace = page.getByRole("dialog", { name: /assign protocol|change assigned protocol/i });
   await expect(workspace).toBeVisible();
   await workspace.getByRole("radio", { name: "Free-text protocol" }).click();
   await workspace.getByLabel("Free-text protocol").fill("Preserve this entered clinical protocol content during examination change.");
@@ -65,5 +65,6 @@ test("a protocol-authorized doctor changes a same-modality examination without r
   expect((await clearResponsePromise).status()).toBe(200);
   await expect(workspace.getByText("E2E CT Head", { exact: true })).toBeVisible();
   await expect(workspace.getByText("Current assignment", { exact: true })).toHaveCount(0);
+  await workspace.getByRole("radio", { name: "Free-text protocol" }).click();
   await expect(workspace.getByLabel("Free-text protocol")).toHaveValue("");
 });

@@ -1,5 +1,5 @@
 /* Compact operational controls for the assessed Doctor Workspace screens. */
-:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page, .doctor-roster-page, .doctor-directory-page) .input-premium {
+:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page, .doctor-roster-page, .doctor-directory-page, .doctor-protocols-page) .input-premium:not(textarea) {
   min-width: 0;
   min-height: var(--control-height-sm);
   height: var(--control-height-sm);
@@ -11,7 +11,7 @@
   box-shadow: none;
 }
 
-:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page, .doctor-worklists-page, .doctor-roster-page, .doctor-directory-page) :is(.btn-primary, .btn-secondary) {
+:is(.doctor-availability-page, .doctor-cases-page, .doctor-team-workload-page, .doctor-worklists-page, .doctor-roster-page, .doctor-directory-page, .doctor-protocols-page) :is(.btn-primary, .btn-secondary) {
   min-height: var(--control-height-sm);
   height: auto;
   padding: 0.4rem 0.75rem;

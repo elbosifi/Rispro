@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active after the user-authorized baseline locator repair.
+Status: active; protocol batch complete, review-workflow batch underway.
 
 ## Baseline and safety
 
@@ -82,17 +82,17 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Doctor | `/doctor/advanced-setup?section=doctors` | `DoctorAdminDoctorsPage (advanced)` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/availability` | `DoctorAvailabilityPage` | P1 | Complete — batch 1 |
-| Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Discovered |
+| Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Complete — batch 3 |
 | Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Discovered |
 | Doctor | `/doctor/ir-consultations` | `DoctorIrReferralsPage` | P1 | Discovered |
 | Doctor | `/doctor/ir-consultations/:id` | `IrReferralDetailPage (doctor)` | P1 | Discovered |
 | Doctor | `/doctor/team-workload` | `DoctorTeamWorkloadPage` | P1 | Complete — batch 1 |
-| Protocols | `/doctor/protocols?area=library&section=protocols` | `DoctorProtocolsPage / protocols` | P1 | Discovered |
-| Protocols | `/doctor/protocols?area=library&section=importExport` | `DoctorProtocolsPage / importExport` | P1 | Discovered |
-| Protocols | `/doctor/protocols?area=library&section=anatomy` | `DoctorProtocolsPage / anatomy` | P1 | Discovered |
-| Protocols | `/doctor/protocols?area=library&section=scanners` | `DoctorProtocolsPage / scanners` | P1 | Discovered |
-| Protocols | `/doctor/protocols?area=library&section=ctPhases` | `DoctorProtocolsPage / ctPhases` | P1 | Discovered |
-| Protocols | `/doctor/protocols?area=library&section=mriSequences` | `DoctorProtocolsPage / mriSequences` | P1 | Discovered |
+| Protocols | `/doctor/protocols?area=library&section=protocols` | `DoctorProtocolsPage / protocols` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=importExport` | `DoctorProtocolsPage / importExport` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=anatomy` | `DoctorProtocolsPage / anatomy` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=scanners` | `DoctorProtocolsPage / scanners` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=ctPhases` | `DoctorProtocolsPage / ctPhases` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=mriSequences` | `DoctorProtocolsPage / mriSequences` | P1 | Complete — batch 3 |
 | Settings | `/settings?section=mobile_widget` | `MobileWidgetAccessSection` | P2 | Discovered |
 | Settings | `/settings?section=patient_registration` | `SimpleSettingsSection` | P2 | Discovered |
 | Settings | `/settings?section=patient_import` | `PatientImportSection` | P2 | Discovered |
@@ -150,9 +150,9 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Preflight: complete.
 - Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
-- Screens assessed: 11. Screens completed/accepted: 11 (9 polished, 2 assessed with no further visual change). Remaining non-reference entries: 102.
+- Screens assessed/completed: 18 (15 polished, 3 accepted without further visual change). Four review-workflow entries have initial browser assessment; 91 non-reference entries remain unassessed. Five original reference regressions remain pending.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
-- Decisions requiring approval: no product decision identified. Work stopped at the first unrelated baseline browser-test failure; repairing that test is outside the completed UI batches.
+- Decisions requiring approval: none pending. Both encountered test-locator/interaction repairs were explicitly authorized and now pass.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
 
 ### Batch 1 — Doctor Workspace core
@@ -194,3 +194,22 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - User explicitly authorized the one-line Protocol Library locator repair and resumption of the full goal.
 - Scoped only the test's in-page Protocols click to the existing `Protocol library navigation` container. No assertion, UI label, workflow, or application code changed for this repair.
 - Repaired baseline passed (1/1 Chromium test) against a newly migrated/seeded disposable E2E database. The prior stop checkpoint remains historical evidence, not the current decision to abandon remaining scope.
+
+## Protocol batch — current validation checkpoint
+
+- Seven top-level protocol views captured before/after at desktop and phone sizes. Controls reuse shared Button/Input; native selects retain semantics. Scoped compact styling excludes textareas. Tables use muted headers, normal tracking and row dividers. Blue primary actions match the reference screens. Clinical handlers, action placement, columns and dialog geometry are preserved.
+- Focused Protocols/Doctor tests: 169 passed after implementation, before the final small hover/keyboard-token cleanup. Targeted Protocols lint passed. Required frontend typecheck and build passed after the final frontend edit (existing bundle warning only).
+- Seven after-capture cases passed, and the repaired Protocol Library browser test passed after implementation. Browser screenshots inspected for the library and anatomy desktop/phone comparisons; full editor/state inspection remains pending. This batch is not yet counted complete.
+- Existing exam-type browser test exposed an unchanged dynamic-dialog-title mismatch: reopened assigned dialog is “Change assigned protocol.” User authorized widening the dialog locator to the two existing titles. The rerun proceeded through successful keep/clear mutation assertions, then failed at its final assertion because clearing returns the unchanged UI to Saved protocol mode, hiding the free-text field. Main has the same clearing/reset logic. No application behavior or assertion has been weakened.
+- Additional proposed test interaction: select Free-text protocol after clearing, then retain the existing empty-value assertion. Awaiting explicit user scope authorization for that addition.
+- Preserved local checkpoints: `62688641`, `fe63fc29`, `5c0ac145`. Protocol application changes and exam-test locator remain uncommitted. Main/origin tracking ref remains `50514e038eaf1e8792b89864b3b2854fc27dfccd`; no final squash-apply while validation/scope remain incomplete.
+
+### Batch 3 — Protocol Management complete
+
+- Completed/accepted seven entries: Protocoling, Protocol Library, Import/Export, Anatomy, Scanners, CT phase presets and MRI sequence presets. Scanners informational panel accepted unchanged.
+- Fixed inconsistent teal actions, oversized mixed controls, widely tracked table headers, missing row separators, and mobile inline editors wider than the viewport. Reused 31 generic Buttons and 31 Inputs; native selects remain native; textareas retain their height. Six inline table editors now fit the phone viewport while the underlying tables still scroll horizontally. No clinical handlers, columns, critical action positions or permissions changed.
+- Browser: seven before/after top-level capture cases at desktop/phone; three preset forms with disabled/enabled save and cancel states; CT/MRI builders at desktop/phone; existing library test verifies dialog focus/Escape, action menu, CT/MRI create entry, navigation and 1024/390 responsive bounds. Real exam-change test verifies saved free text preserved on keep, cleared on clear, and empty after selecting free-text mode. External PACS and request-document content remain synthetic/unconfigured and are not integration verification.
+- User authorized both exam-test repairs: dynamic dialog title locator and selecting Free-text protocol before retaining its existing empty-value assertion. Both protocol E2E tests passed 2/2. Final component tests passed 88/88; final frontend typecheck/build passed; lint passed from frontend cwd; harness:ui passed. Existing bundle/jsdom warning output retained. An initial lint invocation from root lacked the frontend config; corrected invocation passed. Temporary MRI capture helper used the wrong Name label; stopped that obsolete run and corrected it to Sequence name; all three final form cases passed.
+- Screenshot evidence: `/tmp/rispro-ui-polish-20261022/{before,after,comparisons}/protocol-*`, `after/builder-*`, `protocol-resume-e2e`. Before left/after right in comparisons. No patient-identifiable data.
+- Counts: 18 non-reference entries complete (15 polished, 3 accepted), 95 remaining non-reference entries; four of those have initial review-workflow captures. Full goal remains incomplete. Original five regressions and final main squash-apply remain pending.
+- Next: populated recall, IR worklist/detail and comparison views, followed by reception operations. Existing real IR baseline passed 1/1 and focused Recall/IR baseline tests passed 35/35. One synthetic recall created through existing disposable APIs.
