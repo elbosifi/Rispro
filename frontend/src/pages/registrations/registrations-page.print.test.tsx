@@ -904,7 +904,7 @@ describe("RegistrationsPage print actions", () => {
       expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    expect(screen.getAllByText(/Protocol: Not protocolled/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No protocol assigned/i).length).toBeGreaterThan(0);
   });
 
   it("shows the authoritative missing-request blocker only for applicable CT/MRI rows and opens request documents", async () => {
@@ -920,7 +920,7 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     expect(await screen.findAllByRole("button", { name: "Missing request" })).toHaveLength(4);
-    expect(within(getAppointmentRow("CT-READY")).getByText("Protocol: Not protocolled")).toBeTruthy();
+    expect(within(getAppointmentRow("CT-READY")).getByText("No protocol assigned")).toBeTruthy();
     expect(within(getAppointmentRow("CT-ASSIGNED")).getByText("Protocol assigned")).toBeTruthy();
     expect(within(getAppointmentRow("MAMMO")).queryByRole("button", { name: "Missing request" })).toBeNull();
     expect(within(getAppointmentRow("US")).queryByRole("button", { name: "Missing request" })).toBeNull();
@@ -945,7 +945,7 @@ describe("RegistrationsPage print actions", () => {
       expect(uploadAppointmentDocumentMock).toHaveBeenCalled();
       expect(fetchAppointmentsMock).toHaveBeenCalledTimes(2);
       expect(screen.queryByRole("button", { name: "Missing request" })).toBeNull();
-      expect(screen.getAllByText("Protocol: Not protocolled").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("No protocol assigned").length).toBeGreaterThan(0);
     });
   });
 

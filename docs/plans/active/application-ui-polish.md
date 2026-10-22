@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; protocol batch complete, review-workflow batch underway.
+Status: active; review-workflow batch complete, reception operations underway.
 
 ## Baseline and safety
 
@@ -35,7 +35,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Discovered |
 | Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
 | Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Discovered |
-| Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Discovered |
+| Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Complete — batch 4 |
 | Operations | `/calendar` | `CalendarPage` | P1 | Discovered |
 | Operations | `/registrations` | `RegistrationsPage` | P1 | Discovered |
 | Documents | `/request-scans` | `RequestScansPage` | P1 | Discovered |
@@ -44,9 +44,9 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Discovered |
 | Modality | `/modality` | `ModalityPage` | P1 | Discovered |
 | Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Discovered |
-| Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Discovered |
-| Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Discovered |
-| Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Discovered |
+| Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Complete — batch 4 |
+| Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Complete — batch 4 |
+| Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Discovered |
 | Printing | `/print` | `PrintPage` | P2 | Discovered |
 | Printing | `/print/day-list` | `DayListPrintPage` | P2 | Discovered |
@@ -83,9 +83,9 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/availability` | `DoctorAvailabilityPage` | P1 | Complete — batch 1 |
 | Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Complete — batch 3 |
-| Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Discovered |
-| Doctor | `/doctor/ir-consultations` | `DoctorIrReferralsPage` | P1 | Discovered |
-| Doctor | `/doctor/ir-consultations/:id` | `IrReferralDetailPage (doctor)` | P1 | Discovered |
+| Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Complete — batch 4 |
+| Doctor | `/doctor/ir-consultations` | `DoctorIrReferralsPage` | P1 | Complete — batch 4 |
+| Doctor | `/doctor/ir-consultations/:id` | `IrReferralDetailPage (doctor)` | P1 | Complete — batch 4 |
 | Doctor | `/doctor/team-workload` | `DoctorTeamWorkloadPage` | P1 | Complete — batch 1 |
 | Protocols | `/doctor/protocols?area=library&section=protocols` | `DoctorProtocolsPage / protocols` | P1 | Complete — batch 3 |
 | Protocols | `/doctor/protocols?area=library&section=importExport` | `DoctorProtocolsPage / importExport` | P1 | Complete — batch 3 |
@@ -150,7 +150,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Preflight: complete.
 - Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
-- Screens assessed/completed: 18 (15 polished, 3 accepted without further visual change). Four review-workflow entries have initial browser assessment; 91 non-reference entries remain unassessed. Five original reference regressions remain pending.
+- Screens completed: 25 (19 polished, 6 accepted without further visual change). Five operations entries initially assessed; 83 non-reference entries remain unassessed. Five original reference regressions remain pending.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
 - Decisions requiring approval: none pending. Both encountered test-locator/interaction repairs were explicitly authorized and now pass.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
@@ -213,3 +213,15 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Screenshot evidence: `/tmp/rispro-ui-polish-20261022/{before,after,comparisons}/protocol-*`, `after/builder-*`, `protocol-resume-e2e`. Before left/after right in comparisons. No patient-identifiable data.
 - Counts: 18 non-reference entries complete (15 polished, 3 accepted), 95 remaining non-reference entries; four of those have initial review-workflow captures. Full goal remains incomplete. Original five regressions and final main squash-apply remain pending.
 - Next: populated recall, IR worklist/detail and comparison views, followed by reception operations. Existing real IR baseline passed 1/1 and focused Recall/IR baseline tests passed 35/35. One synthetic recall created through existing disposable APIs.
+
+### Batch 4 — Recall, comparison and IR review complete
+
+- Completed seven entries: core/doctor Additional Imaging Requests; Review Requests list/comparison detail; Doctor IR worklist; core/doctor IR detail. The three IR entries already use the established style and are accepted unchanged after populated, empty and form-state assessment.
+- Fixed: recall actions consuming most of the desktop row width and squeezing clinical information; oversized status/filter actions; one-column phone attention filters; inconsistent comparison text fields, selects and textareas. Local compact CSS reuses existing control-height/radius/theme tokens. Native clinical confirmation controls remain unchanged.
+- Automatic viewed-status updates produced generic success toasts over patient information. Suppressed only this background mutation's global toast, preserving all calls and seen/audit semantics; its error now appears as an explicit bilingual inline alert. User-triggered action feedback remains unchanged.
+- Consequential decision approved: comparison Edit request Save/Cancel rendered outside DialogContent, behind the overlay and outside the focus trap. Moved the existing footer into DialogContent without changing handlers. Browser DOM reports `inDialog: false` before and `true` after; desktop/phone screenshots show reachable actions. New component regression test verifies containment and identical save payload. A preserved baseline was reproduced from unchanged checkpoint source, then the exact current file restored before final validation.
+- Browser: initial empty and populated lists; core/doctor IR details; IR preparation, clinical review and eligible appointment-request forms; recall contact/edit/withdraw dialogs and Escape; comparison edit desktop/phone; core Arabic RTL recall/comparison/detail and IR detail. External PACS opening/integration not claimed. Synthetic data only.
+- Checks: focused Recall/Comparison/IR tests 45 passed before final footer fix; final affected tests 77 passed including all 44 Registrations tests, plus the new Comparison test file 11/11 passed. Existing real IR workflow baseline 1/1 passed; operation navigation/queue baseline 5/5 passed. Capture cases passed: populated review 5, dialogs 3 plus final comparison rerun 1, Arabic core review 3, Arabic IR 1, and IR state scenario 1. Final typecheck/build, targeted lint, harness:ui, whitespace checks passed.
+- Authorized baseline maintenance: operations baseline exposed three unchanged Registrations assertions expecting “Protocol: Not protocolled,” while source/catalog/Modality consistently use “No protocol assigned.” User authorized three assertion text updates; all missing-request and upload assertions retained; repaired file passes 44/44. No Registrations application edit made in this batch.
+- Development capture-helper correction: explicitly initialized English for modal tests after the initial helper used the application's default Arabic locale. Corrected helper passes; obsolete waiting run terminated. No application labels renamed to satisfy it.
+- Rollback checkpoint follows locally. No push/PR/deploy; main remains unchanged. Counts: 25 remaining-scope entries complete, 88 still to complete (5 initially assessed, 83 unassessed), plus the original five final regressions. No decisions pending.

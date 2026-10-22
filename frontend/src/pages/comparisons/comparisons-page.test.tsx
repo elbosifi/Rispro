@@ -15,6 +15,9 @@ const apiMocks = vi.hoisted(() => ({
   fetchMany: vi.fn(),
   searchPatients: vi.fn(),
   fetchIrReferrals: vi.fn(),
+  fetchPreviousStudies: vi.fn(),
+  fetchDoctors: vi.fn(),
+  update: vi.fn(),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
@@ -26,6 +29,9 @@ vi.mock("@/lib/api-hooks", () => ({
   confirmComparisonMaterials: apiMocks.confirm,
   fetchComparisonRequest: apiMocks.fetchOne,
   fetchComparisonRequests: apiMocks.fetchMany,
+  fetchPreviousCompletedStudies: apiMocks.fetchPreviousStudies,
+  fetchComparisonReportingDoctors: apiMocks.fetchDoctors,
+  updateComparisonRequest: apiMocks.update,
 }));
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/api/patients", () => ({ searchPatients: apiMocks.searchPatients }));
@@ -144,6 +150,24 @@ beforeEach(() => {
 });
 
 describe("comparison preparation worklist behavior", () => {
+  it("keeps edit actions inside the dialog and saves the existing request payload", async () => {
+    const row = comparison();
+    apiMocks.fetchMany.mockResolvedValue([row]);
+    apiMocks.fetchPreviousStudies.mockResolvedValue([]);
+    apiMocks.update.mockResolvedValue(row);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit request" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(row.id, {
+      reason: row.reason,
+      linkedPreviousBookingId: row.linkedPreviousBookingId,
+      plannedReportingDoctorId: null,
+    }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("uses canonical patient search and offers both review-request actions", async () => {
     apiMocks.fetchMany.mockResolvedValue([]);
     apiMocks.fetchIrReferrals.mockResolvedValue([]);

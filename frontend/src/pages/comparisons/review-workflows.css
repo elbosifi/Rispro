@@ -1,0 +1,19 @@
+/* Compact controls keep review queues readable without changing action order. */
+.review-workflow :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-destructive) {
+  min-height: var(--control-height-sm);
+  height: auto;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.review-workflow .input-premium:not(textarea) {
+  min-height: var(--control-height-sm);
+  height: var(--control-height-sm);
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.65rem;
+  background: var(--card);
+  box-shadow: none;
+  font-size: 0.875rem;
+}
