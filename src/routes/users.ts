@@ -9,6 +9,7 @@ import {
   listUsers,
   resetUserTemporaryPassword,
   updateUserIdentity,
+  updateUserRole,
   updateUserActiveState,
   updateUserPassword,
   updateUserSchedulingOverridePermission
@@ -82,10 +83,26 @@ usersRouter.put(
 );
 
 usersRouter.put(
+  "/:userId/role",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const user = await updateUserRole(
+      asString(req.params.userId),
+      asString(body.role),
+      { userId: req.user!.sub, role: req.user!.role }
+    );
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
   "/:userId/password",
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
-    const user = await updateUserPassword(asString(req.params.userId), asString(body.password), req.user!.sub);
+    const user = await updateUserPassword(asString(req.params.userId), asString(body.password), {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
     res.json({ user });
   })
 );
@@ -94,7 +111,10 @@ usersRouter.post(
   "/:userId/temporary-password",
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
-    const user = await resetUserTemporaryPassword(asString(req.params.userId), asString(body.password), req.user!.sub);
+    const user = await resetUserTemporaryPassword(asString(req.params.userId), asString(body.password), {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
     res.json({ user });
   })
 );

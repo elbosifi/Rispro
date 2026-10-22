@@ -18,9 +18,11 @@ import {
   updateUserActiveState,
   updateUserIdentity,
   updateUserPassword,
+  updateUserRole,
   updateUserSchedulingOverridePermission,
 } from "@/lib/api-hooks";
 import { getUserDisplayName } from "@/lib/user-display-name";
+import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorProfile, Role, User } from "@/types/api";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
@@ -50,6 +52,7 @@ export default function UsersSection({
   onReAuthRequired: (key: string[]) => void;
 }) {
   const { language, t } = useLanguage();
+  const { user: actorUser } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const usersQuery = useQuery<{ users: User[] }>({
@@ -63,6 +66,7 @@ export default function UsersSection({
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [roleDraft, setRoleDraft] = useState<Role | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -83,6 +87,9 @@ export default function UsersSection({
   });
   const users = usersQuery.data?.users ?? [];
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
+  const canModifySelectedUser = Boolean(
+    selectedUser && (actorUser?.role === "super_admin" || selectedUser.role !== "super_admin"),
+  );
   const doctorProfilesByUserId = useMemo(
     () =>
       new Map(
@@ -122,6 +129,7 @@ export default function UsersSection({
   };
   const closeManage = () => {
     setSelectedUserId(null);
+    setRoleDraft(null);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
@@ -130,6 +138,7 @@ export default function UsersSection({
   };
   const openManage = (user: User) => {
     setSelectedUserId(user.id);
+    setRoleDraft(user.role);
     setPasswordDraft("");
     setTemporaryPasswordDraft("");
     setIdentityEditing(false);
@@ -224,6 +233,19 @@ export default function UsersSection({
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
+  const roleMutation = useMutation({
+    mutationFn: (payload: { userId: number; role: Role }) =>
+      updateUserRole(payload.userId, payload.role),
+    onSuccess: async (updatedUser) => {
+      setRoleDraft(updatedUser.role);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["users"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] }),
+      ]);
+      setManageError(null);
+    },
+    onError: (error) => setManageError(mutationErrorMessage(error)),
+  });
   const roleLabel = (role: Role) =>
     t(
       (
@@ -278,6 +300,12 @@ export default function UsersSection({
     "doctor",
     "administrative",
   ];
+  const createRoleOptions = actorUser?.role === "super_admin"
+    ? roleOptions
+    : roleOptions.filter((role) => role !== "super_admin" && role !== "supervisor");
+  const editRoleOptions = selectedUser && actorUser?.role !== "super_admin"
+    ? roleOptions.filter((role) => role !== "super_admin" && (role !== "supervisor" || role === selectedUser.role))
+    : roleOptions;
 
   if (usersQuery.error) {
     const message = safeError(
@@ -535,7 +563,7 @@ export default function UsersSection({
                 }
                 className="w-full rounded border px-3 py-2 dark:bg-stone-900"
               >
-                {roleOptions.map((role) => (
+                {createRoleOptions.map((role) => (
                   <option key={role} value={role}>
                     {roleLabel(role)}
                   </option>
@@ -689,7 +717,7 @@ export default function UsersSection({
                     </dd>
                   </div>
                 </dl>
-                <div className="mt-3 flex flex-wrap gap-2">
+                {canModifySelectedUser && <div className="mt-3 flex flex-wrap gap-2">
                   {identityEditing ? (
                     <>
                       <Button
@@ -733,8 +761,48 @@ export default function UsersSection({
                       {t("settings.users.editDetails")}
                     </Button>
                   )}
-                </div>
+                </div>}
               </section>
+              {canModifySelectedUser && (
+                <section>
+                  <h4 className="font-semibold">{t("settings.users.editRole")}</h4>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <label className="space-y-1">
+                      <span>{t("settings.users.role")}</span>
+                      <select
+                        aria-label={t("settings.users.editRole")}
+                        value={roleDraft ?? selectedUser.role}
+                        disabled={roleMutation.isPending}
+                        onChange={(event) => setRoleDraft(event.target.value as Role)}
+                        className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                      >
+                        {editRoleOptions.map((role) => (
+                          <option key={role} value={role}>
+                            {roleLabel(role)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button
+                      size="sm"
+                      disabled={roleMutation.isPending || !roleDraft || roleDraft === selectedUser.role}
+                      onClick={() => roleDraft && roleMutation.mutate({ userId: selectedUser.id, role: roleDraft })}
+                    >
+                      {roleMutation.isPending ? t("settings.loading") : t("settings.users.saveRole")}
+                    </Button>
+                  </div>
+                  {roleDraft === "doctor" && !doctorProfilesByUserId.get(selectedUser.id)?.active && !doctorProfilesQuery.isLoading && !doctorProfilesQuery.isError && (
+                    <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+                      {t("settings.users.roleDoctorProfileNotice")}
+                    </p>
+                  )}
+                  {roleDraft && !["doctor", "supervisor", "super_admin"].includes(roleDraft) && doctorProfilesByUserId.get(selectedUser.id)?.active && (
+                    <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+                      {t("settings.users.roleDoctorProfileDeactivationNotice")}
+                    </p>
+                  )}
+                </section>
+              )}
               {selectedUser.role === "receptionist" && (
                 <section>
                   <h4 className="font-semibold">
@@ -792,7 +860,7 @@ export default function UsersSection({
                   </p>
                 </section>
               )}
-              <section>
+              {canModifySelectedUser && <section>
                 <h4 className="font-semibold">
                   {t("settings.users.security")}
                 </h4>
@@ -859,8 +927,8 @@ export default function UsersSection({
                     </Button>
                   </label>
                 </div>
-              </section>
-              <section>
+              </section>}
+              {canModifySelectedUser && <section>
                 <h4 className="font-semibold">{t("settings.users.status")}</h4>
                 <Button
                   className="mt-2"
@@ -892,8 +960,8 @@ export default function UsersSection({
                     ? t("settings.users.deactivate")
                     : t("settings.users.activate")}
                 </Button>
-              </section>
-              <section className="border-t border-red-200 pt-4 dark:border-red-900">
+              </section>}
+              {canModifySelectedUser && <section className="border-t border-red-200 pt-4 dark:border-red-900">
                 <h4 className="font-semibold text-red-700 dark:text-red-300">
                   {t("settings.users.deleteUser")}
                 </h4>
@@ -918,7 +986,7 @@ export default function UsersSection({
                     ? t("settings.loading")
                     : t("settings.users.deleteUser")}
                 </Button>
-              </section>
+              </section>}
             </div>
           </DialogContent>
         )}

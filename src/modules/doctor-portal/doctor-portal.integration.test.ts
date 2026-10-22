@@ -1944,7 +1944,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(normalDenied.status, 403);
   });
 
-  it("allows supervisors to create doctors and rolls back user creation when profile setup fails", async () => {
+  it("allows supervisors to create doctor accounts but not grant supervisor role", async () => {
     guard();
     const supervisorUsername = `${TEST_PREFIX.toLowerCase()}supercreated_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const supervisorCreate = await api(supervisor.cookie, "/api/doctor/admin/doctors", {
@@ -1953,7 +1953,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         username: supervisorUsername,
         fullName: `${TEST_PREFIX} Supervisor Created Doctor`,
         temporaryPassword: "TempPass123",
-        coreRole: "supervisor",
+        coreRole: "doctor",
         userActive: true,
         doctorDisplayName: `${TEST_PREFIX} Supervisor Created Doctor`,
         doctorRole: "specialist",
@@ -1968,6 +1968,29 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).user.must_change_password, true);
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).profile.active, true);
     const supervisorCreatedUserId = (supervisorCreate.data as { user: { id: number } }).user.id;
+    const deniedSupervisorGrant = await api(supervisor.cookie, "/api/doctor/admin/doctors", {
+      method: "POST",
+      body: {
+        username: `${supervisorUsername}_privileged`,
+        fullName: `${TEST_PREFIX} Supervisor Role Denied`,
+        temporaryPassword: "TempPass123",
+        coreRole: "supervisor",
+        userActive: true,
+        doctorDisplayName: `${TEST_PREFIX} Supervisor Role Denied`,
+        doctorRole: "specialist",
+        doctorProfileActive: true,
+        canFinalizeReports: true,
+        canAssignProtocols: true,
+        canSupervise: true,
+        modalityPermissions: [],
+      },
+    });
+    assert.equal(deniedSupervisorGrant.status, 403, JSON.stringify(deniedSupervisorGrant.data));
+    const deniedSupervisorPromotion = await api(supervisor.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
+      method: "PATCH",
+      body: { username: `${supervisorUsername}_updated`, fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "supervisor", active: true },
+    });
+    assert.equal(deniedSupervisorPromotion.status, 403, JSON.stringify(deniedSupervisorPromotion.data));
     const originalSecurity = await pool.query<{ password_hash: string; must_change_password: boolean }>("select password_hash, must_change_password from users where id = $1", [supervisorCreatedUserId]);
     const updatedUsername = `${supervisorUsername}_updated`;
     const accountUpdated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
@@ -2143,6 +2166,23 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(preserve.status, 200, JSON.stringify(preserve.data));
     assert.equal((await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username])).rows[0].password_hash, resetUser.rows[0].password_hash);
     assert.equal((await pool.query<{ english_name: string | null }>(`select english_name from users where username = $1`, [username])).rows[0].english_name, `${TEST_PREFIX} Imported Doctor EN`);
+
+    const deniedUsername = `${TEST_PREFIX.toLowerCase()}supervisor_import_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const deniedCsv = [
+      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${deniedUsername},${TEST_PREFIX} Supervisor Import Denied,TempPass123,supervisor,true,consultant,true,true,true,false,${modalityCode},,,false`,
+    ].join("\n");
+    const deniedPreview = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST",
+      body: { fileContentBase64: Buffer.from(deniedCsv, "utf8").toString("base64") },
+    });
+    assert.equal((deniedPreview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, true);
+    const deniedConfirm = await api(supervisor.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST",
+      body: { fileContentBase64: Buffer.from(deniedCsv, "utf8").toString("base64") },
+    });
+    assert.equal(deniedConfirm.status, 403, JSON.stringify(deniedConfirm.data));
+    assert.equal(Number((await pool.query<{ count: string }>("select count(*)::text as count from users where username = $1", [deniedUsername])).rows[0].count), 0);
   });
 
   it("supports XLSX doctor import/export with row errors and password reset guardrails", async () => {

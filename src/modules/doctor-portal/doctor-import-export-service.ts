@@ -9,6 +9,8 @@ import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type { DoctorRole } from "./profile-repository.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import { emailFromUsername } from "../../utils/email-address.js";
+import { lockActiveSuperAdminSet } from "../../services/user-service.js";
+import { logAuditEntry } from "../../services/audit-service.js";
 
 const EXPORT_COLUMNS = [
   "username",
@@ -47,6 +49,7 @@ const IMPORT_COLUMNS = [
 const REQUIRED_IMPORT_COLUMNS = IMPORT_COLUMNS.filter((column) => column !== "english_name" && column !== "reset_password");
 
 const DOCTOR_ROLES = new Set<DoctorRole>(["consultant", "specialist", "senior_house_officer", "resident"]);
+const DOCTOR_WORKSPACE_ROLES = new Set<Role>(["doctor", "supervisor", "super_admin"]);
 type DoctorImportFormat = "csv" | "xlsx";
 
 interface ImportRow {
@@ -281,17 +284,47 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
     modalityPermissionsUpdated: 0,
     skippedRows: 0,
     failedRows: [] as Array<{ rowNumber: number; reason: string }>,
+    roleChanges: [] as Array<{ userId: number; oldRole: Role; newRole: Role; oldIsActive: boolean; newIsActive: boolean }>,
   };
 
   const client = await pool.connect();
   try {
     await client.query("begin");
+    await lockActiveSuperAdminSet(client);
+    const actorResult = await client.query<{ role: Role; is_active: boolean }>(
+      "select role, is_active from users where id = $1 for share",
+      [Number(actorUserId)]
+    );
+    const actor = actorResult.rows[0];
+    if (!actor?.is_active || (actor.role !== "supervisor" && actor.role !== "super_admin")) {
+      throw new HttpError(403, "Doctor admin access is required.");
+    }
     for (const row of preview.rows) {
       const values = row.values;
       const username = normalizeUsername(values.username);
       const hasEnglishName = Object.prototype.hasOwnProperty.call(values, "english_name");
-      const existing = await client.query<{ id: number }>(`select id from users where lower(btrim(username)) = $1 limit 1`, [username]);
+      const existing = await client.query<{ id: number; role: Role; is_active: boolean }>(
+        `select id, role, is_active from users where lower(btrim(username)) = $1 limit 1 for update`,
+        [username]
+      );
       let userId = existing.rows[0]?.id;
+      const previousUser = existing.rows[0];
+      const nextRole = values.core_role as Role;
+      const nextIsActive = boolValue(values.user_active, true);
+      if (actor.role === "supervisor" && (nextRole === "super_admin" || previousUser?.role === "super_admin")) {
+        throw new HttpError(403, "Only super_admin can assign or modify a super_admin user.");
+      }
+      if (actor.role === "supervisor" && nextRole === "supervisor" && previousUser?.role !== "supervisor") {
+        throw new HttpError(403, "Only super_admin can grant the supervisor role.");
+      }
+      if (previousUser?.role === "super_admin" && previousUser.is_active && (nextRole !== "super_admin" || !nextIsActive)) {
+        const activeAdmins = await client.query<{ count: string }>(
+          "select count(*)::text as count from users where role = 'super_admin' and is_active = true"
+        );
+        if (Number(activeAdmins.rows[0]?.count ?? "0") <= 1) {
+          throw new HttpError(409, "Cannot remove the last active super_admin user.");
+        }
+      }
       const resetPassword = boolValue(values.reset_password, false);
       if (!userId) {
         const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
@@ -310,25 +343,33 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
           const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
           if (hasEnglishName) {
             await client.query(
-              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, password_hash = $6, must_change_password = true, updated_at = now() where id = $1`,
-              [userId, values.full_name, values.english_name || null, values.core_role, boolValue(values.user_active, true), passwordHash]
+              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, password_hash = $6, must_change_password = true,
+                      auth_version = auth_version + case when role is distinct from $4 or is_active is distinct from $5 then 1 else 0 end,
+                      updated_at = now() where id = $1`,
+              [userId, values.full_name, values.english_name || null, values.core_role, nextIsActive, passwordHash]
             );
           } else {
             await client.query(
-              `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true, updated_at = now() where id = $1`,
-              [userId, values.full_name, values.core_role, boolValue(values.user_active, true), passwordHash]
+              `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true,
+                      auth_version = auth_version + case when role is distinct from $3 or is_active is distinct from $4 then 1 else 0 end,
+                      updated_at = now() where id = $1`,
+              [userId, values.full_name, values.core_role, nextIsActive, passwordHash]
             );
           }
         } else {
           if (hasEnglishName) {
             await client.query(
-              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5, updated_at = now() where id = $1`,
-              [userId, values.full_name, values.english_name || null, values.core_role, boolValue(values.user_active, true)]
+              `update users set full_name = $2, english_name = $3, role = $4, is_active = $5,
+                      auth_version = auth_version + case when role is distinct from $4 or is_active is distinct from $5 then 1 else 0 end,
+                      updated_at = now() where id = $1`,
+              [userId, values.full_name, values.english_name || null, values.core_role, nextIsActive]
             );
           } else {
             await client.query(
-              `update users set full_name = $2, role = $3, is_active = $4, updated_at = now() where id = $1`,
-              [userId, values.full_name, values.core_role, boolValue(values.user_active, true)]
+              `update users set full_name = $2, role = $3, is_active = $4,
+                      auth_version = auth_version + case when role is distinct from $3 or is_active is distinct from $4 then 1 else 0 end,
+                      updated_at = now() where id = $1`,
+              [userId, values.full_name, values.core_role, nextIsActive]
             );
           }
         }
@@ -337,7 +378,8 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
 
       const profile = await client.query<{ id: number; active: boolean }>(`select id, active from doctor_portal.doctor_profiles where user_id = $1`, [userId]);
       let profileId = profile.rows[0]?.id;
-      const profileActive = boolValue(values.doctor_profile_active, true);
+      const previousProfileActive = profile.rows[0]?.active ?? null;
+      const profileActive = boolValue(values.doctor_profile_active, true) && DOCTOR_WORKSPACE_ROLES.has(nextRole);
       if (!profileId) {
         const inserted = await client.query<{ id: number }>(
           `
@@ -378,6 +420,24 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         );
         summary.updatedProfiles += 1;
         if (!profileActive && profile.rows[0].active) summary.disabledProfiles += 1;
+      }
+
+      if (previousUser && (previousUser.role !== nextRole || previousUser.is_active !== nextIsActive)) {
+        await logAuditEntry({
+          entityType: "user",
+          entityId: userId,
+          actionType: "user_role_changed",
+          oldValues: { role: previousUser.role, is_active: previousUser.is_active, doctorProfileActive: previousProfileActive },
+          newValues: { role: nextRole, is_active: nextIsActive, doctorProfileActive: profileActive },
+          changedByUserId: actorUserId
+        }, client);
+        summary.roleChanges.push({
+          userId: Number(userId),
+          oldRole: previousUser.role,
+          newRole: nextRole,
+          oldIsActive: previousUser.is_active,
+          newIsActive: nextIsActive
+        });
       }
 
       const modalityPermissions = new Map<number, { canProtocol: boolean; canReport: boolean; canSupervise: boolean }>();

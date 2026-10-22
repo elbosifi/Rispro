@@ -2,7 +2,7 @@ import { api } from "@/lib/api-client";
 import { normalizeActionPinPolicy, type ActionPinPolicy } from "@/lib/action-pin-policy";
 import { mapSettings, mapUser } from "@/lib/mappers";
 import { normalizePageVisibilityMatrix, type PageVisibilityMatrix } from "@/lib/page-visibility";
-import type { SchedulingEngineConfig, User } from "@/types/api";
+import type { Role, SchedulingEngineConfig, User } from "@/types/api";
 
 type RawRecord = Record<string, unknown>;
 
@@ -193,6 +193,14 @@ export async function updateUserIdentity(
   const raw = await api<{ user: RawRecord }>(`/users/${userId}/identity`, {
     method: "PUT",
     body: JSON.stringify(payload)
+  });
+  return mapUser(raw.user);
+}
+
+export async function updateUserRole(userId: number, role: Role): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role })
   });
   return mapUser(raw.user);
 }

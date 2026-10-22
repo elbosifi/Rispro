@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthContext, type AuthContextValue } from "@/providers/auth-provider";
+import type { Role, User } from "@/types/api";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import UsersSection from "./users-section";
 
@@ -21,15 +23,28 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderSection() {
+function renderSection(actorRole: Role = "supervisor") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const actor: User = { id: 99, username: "admin", fullName: "Admin", role: actorRole, isActive: true };
+  const authValue = {
+    user: actor,
+    isLoading: false,
+    login: vi.fn(),
+    loginWithPasskey: vi.fn(),
+    logout: vi.fn(),
+    reAuth: vi.fn(),
+    reAuthWithPasskey: vi.fn(),
+    changePassword: vi.fn(),
+  } satisfies AuthContextValue;
   return render(
     <MemoryRouter>
       <LanguageProvider>
-        <QueryClientProvider client={client}>
-          <UsersSection onReAuthRequired={vi.fn()} />
-          <LocationProbe />
-        </QueryClientProvider>
+        <AuthContext.Provider value={authValue}>
+          <QueryClientProvider client={client}>
+            <UsersSection onReAuthRequired={vi.fn()} />
+            <LocationProbe />
+          </QueryClientProvider>
+        </AuthContext.Provider>
       </LanguageProvider>
     </MemoryRouter>,
   );
@@ -47,6 +62,10 @@ describe("UsersSection", () => {
       if (url === "/api/users" && !init?.method) return json({ users });
       if (url === "/api/doctor/profiles") return json({ profiles: doctorProfiles });
       if (url.includes("/identity")) return json({ user: users[0] });
+      if (url.match(/\/api\/users\/\d+\/role$/) && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { role?: Role };
+        return json({ user: { ...users[0], role: body.role ?? users[0]!.role } });
+      }
       if (url.includes("/temporary-password")) return json({ user: users[0] });
       if (url.includes("/active")) return json({ user: users[0] });
       if (url.includes("/password")) return json({ user: users[0] });
@@ -99,6 +118,49 @@ describe("UsersSection", () => {
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url) === "/api/users/1/active" && (init as RequestInit).method === "PUT")).toBe(true));
     expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url) === "/api/users/1/temporary-password")).toBe(true);
     expect(confirm).toHaveBeenCalled();
+  });
+
+  it("edits an existing role and limits Supervisor grants to non-administrative roles", async () => {
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    const roleSelect = within(dialog).getByRole("combobox", { name: "Edit role" }) as HTMLSelectElement;
+    expect(Array.from(roleSelect.options).map((option) => option.value)).not.toContain("super_admin");
+    expect(Array.from(roleSelect.options).map((option) => option.value)).not.toContain("supervisor");
+    await userEvent.selectOptions(roleSelect, "doctor");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) =>
+      String(url) === "/api/users/1/role" &&
+      (init as RequestInit).method === "PUT" &&
+      String((init as RequestInit).body) === JSON.stringify({ role: "doctor" }),
+    )).toBe(true));
+    expect(within(dialog).getByText("Clinical Doctor Workspace access also requires an active profile. Save this role, then configure the profile in Doctors Directory.")).toBeTruthy();
+  });
+
+  it("shows every role to Super Admin and displays role update failures in Manage", async () => {
+    routeFailures["PUT /api/users/1/role"] = "Only super_admin can grant the supervisor role.";
+    renderSection("super_admin");
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    const roleSelect = within(dialog).getByRole("combobox", { name: "Edit role" }) as HTMLSelectElement;
+    expect(Array.from(roleSelect.options).map((option) => option.value)).toEqual([
+      "receptionist", "supervisor", "super_admin", "modality_staff", "doctor", "administrative",
+    ]);
+    await userEvent.selectOptions(roleSelect, "supervisor");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save role" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Only super_admin can grant the supervisor role.");
+  });
+
+  it("warns before a role change deactivates an active Doctor Workspace profile", async () => {
+    doctorProfiles = [{ userId: 2, active: true }];
+    renderSection();
+    await screen.findAllByText("Front Desk");
+    await userEvent.click(screen.getAllByRole("button", { name: "Manage" })[1]!);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "Edit role" }), "administrative");
+    expect(within(dialog).getByText("Saving this role will preserve the Doctor Workspace profile and history, but deactivate its access.")).toBeTruthy();
   });
 
   it("keeps create-user workflow available in English", async () => {

@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -21,6 +22,7 @@ export interface UserRow {
   can_request_scheduling_override: boolean;
   created_at: string;
   updated_at: string;
+  auth_version?: number;
 }
 
 export interface UserCreatePayload {
@@ -45,6 +47,12 @@ export interface UserIdentityPayload {
 interface UserActorContext {
   userId: NullableUserId;
   role: Role;
+}
+
+const DOCTOR_WORKSPACE_ROLES = new Set<Role>(["doctor", "supervisor", "super_admin"]);
+
+export async function lockActiveSuperAdminSet(client: PoolClient): Promise<void> {
+  await client.query("select pg_advisory_xact_lock(24181, 1)");
 }
 
 async function auditSuperAdminAttempt(input: {
@@ -105,6 +113,14 @@ export async function createUser(
       }
     });
     throw new HttpError(403, "Only super_admin can create a super_admin user.");
+  }
+  if (role === "supervisor" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "create_supervisor_denied",
+      actorUserId: actor.userId,
+      details: { reason: "only_super_admin_can_grant_supervisor", username: String(username) }
+    });
+    throw new HttpError(403, "Only super_admin can grant the supervisor role.");
   }
 
   const exactPassword = requireExactPassword(password);
@@ -260,6 +276,120 @@ export async function updateUserIdentity(
   }
 }
 
+export async function updateUserRole(
+  userId: UserId,
+  role: string,
+  actor: UserActorContext
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+  if (!isRole(role)) {
+    throw new HttpError(400, "role must be receptionist, supervisor, super_admin, modality_staff, doctor, or administrative.");
+  }
+  if (actor.role !== "supervisor" && actor.role !== "super_admin") {
+    throw new HttpError(403, "Supervisor access required.");
+  }
+
+  const client = await pool.connect();
+  let changedRole = false;
+  let deactivateDoctorProfile = false;
+  let updatedUser: UserRow | undefined;
+  try {
+    await client.query("begin");
+    await lockActiveSuperAdminSet(client);
+    const currentResult = await client.query<UserRow>(
+      `select id, username, email, full_name, english_name, role, is_active,
+              coalesce(must_change_password, false) as must_change_password,
+              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+              created_at, updated_at
+         from users where id = $1 for update`,
+      [cleanUserId]
+    );
+    const previous = currentResult.rows[0];
+    if (!previous) throw new HttpError(404, "User not found.");
+
+    if ((previous.role === "super_admin" || role === "super_admin") && actor.role !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can assign or modify a super_admin user.");
+    }
+    if (role === "supervisor" && previous.role !== "supervisor" && actor.role !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can grant the supervisor role.");
+    }
+    if (role === previous.role) {
+      await client.query("commit");
+      return previous;
+    }
+
+    if (previous.role === "super_admin" && previous.is_active) {
+      const countResult = await client.query<{ count: string }>(
+        `select count(*)::text as count from users where role = 'super_admin' and is_active = true`
+      );
+      if (Number(countResult.rows[0]?.count ?? "0") <= 1) {
+        throw new HttpError(409, "Cannot remove the last active super_admin user.");
+      }
+    }
+
+    const profileResult = await client.query<{ id: number; active: boolean }>(
+      "select id, active from doctor_portal.doctor_profiles where user_id = $1 for update",
+      [cleanUserId]
+    );
+    const profile = profileResult.rows[0];
+    deactivateDoctorProfile = Boolean(profile?.active && !DOCTOR_WORKSPACE_ROLES.has(role as Role));
+    if (deactivateDoctorProfile && profile) {
+      await client.query(
+        "update doctor_portal.doctor_profiles set active = false, updated_at = now() where id = $1",
+        [profile.id]
+      );
+    }
+
+    const updatedResult = await client.query<UserRow>(
+      `update users
+          set role = $2,
+              can_request_scheduling_override = false,
+              auth_version = auth_version + 1,
+              updated_at = now()
+        where id = $1
+        returning id, username, email, full_name, english_name, role, is_active,
+                  coalesce(must_change_password, false) as must_change_password,
+                  coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  created_at, updated_at`,
+      [cleanUserId, role]
+    );
+    updatedUser = updatedResult.rows[0];
+    if (!updatedUser) throw new HttpError(500, "Failed to update user role.");
+
+    await logAuditEntry({
+      entityType: "user",
+      entityId: updatedUser.id,
+      actionType: "user_role_changed",
+      oldValues: {
+        role: previous.role,
+        canRequestSchedulingOverride: previous.can_request_scheduling_override,
+        doctorProfileActive: profile?.active ?? null
+      },
+      newValues: {
+        role: updatedUser.role,
+        canRequestSchedulingOverride: updatedUser.can_request_scheduling_override,
+        doctorProfileActive: deactivateDoctorProfile ? false : profile?.active ?? null
+      },
+      changedByUserId: actor.userId
+    }, client);
+
+    await client.query("commit");
+    changedRole = true;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (changedRole && deactivateDoctorProfile) await syncDoctorWorklistForUser(cleanUserId);
+  if (!updatedUser) throw new HttpError(500, "Failed to update user role.");
+  return updatedUser;
+}
+
 export async function deleteUser(
   userId: UserId,
   actor: UserActorContext = { userId: null, role: "supervisor" }
@@ -274,98 +404,77 @@ export async function deleteUser(
     throw new HttpError(400, "You cannot delete your own account.");
   }
 
-  const targetResult = await pool.query<{
-    id: number;
-    username: string;
-    role: Role;
-  }>(
-    `
-      select id, username, role
-      from users
-      where id = $1
-      limit 1
-    `,
-    [cleanUserId]
-  );
-  const target = targetResult.rows[0];
-  if (!target) {
-    throw new HttpError(404, "User not found.");
-  }
-
-  if (target.role === "super_admin" && actor.role !== "super_admin") {
-    await auditSuperAdminAttempt({
-      actionType: "delete_super_admin_denied",
-      actorUserId: actor.userId,
-      targetUserId: target.id,
-      details: {
-        reason: "only_super_admin_can_delete_super_admin",
-        targetUsername: target.username
-      }
-    });
-    throw new HttpError(403, "Only super_admin can delete a super_admin user.");
-  }
-
-  if (target.role === "super_admin") {
-    const countResult = await pool.query<{ count: string }>(
-      `
-        select count(*)::text as count
-        from users
-        where role = 'super_admin'
-          and is_active = true
-      `
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await lockActiveSuperAdminSet(client);
+    const targetResult = await client.query<{ id: number; username: string; role: Role; is_active: boolean }>(
+      "select id, username, role, is_active from users where id = $1 for update",
+      [cleanUserId]
     );
-    const activeSuperAdminCount = Number(countResult.rows[0]?.count ?? "0");
-    if (activeSuperAdminCount <= 1) {
+    const target = targetResult.rows[0];
+    if (!target) throw new HttpError(404, "User not found.");
+
+    if (target.role === "super_admin" && actor.role !== "super_admin") {
       await auditSuperAdminAttempt({
         actionType: "delete_super_admin_denied",
         actorUserId: actor.userId,
         targetUserId: target.id,
-        details: {
-          reason: "cannot_delete_last_super_admin",
-          targetUsername: target.username
-        }
+        details: { reason: "only_super_admin_can_delete_super_admin", targetUsername: target.username }
       });
-      throw new HttpError(409, "Cannot delete the last active super_admin user.");
+      throw new HttpError(403, "Only super_admin can delete a super_admin user.");
     }
-  }
 
-  const { rows } = await pool.query(
-    `
-      delete from users
-      where id = $1
-      returning id, username, email, full_name, english_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
-    `,
-    [cleanUserId]
-  );
-
-  const removed = rows[0] as UserRow | undefined;
-
-  if (!removed) {
-    throw new HttpError(404, "User not found.");
-  }
-
-  await logAuditEntry({
-    entityType: "user",
-    entityId: removed.id,
-    actionType: "delete",
-    oldValues: removed,
-    newValues: null,
-    changedByUserId: actor.userId
-  });
-
-  if (removed.role === "super_admin") {
-    await auditSuperAdminAttempt({
-      actionType: "delete_super_admin_allowed",
-      actorUserId: actor.userId,
-      targetUserId: removed.id,
-      details: {
-        reason: "super_admin_deleted",
-        targetUsername: removed.username
+    if (target.role === "super_admin" && target.is_active) {
+      const countResult = await client.query<{ count: string }>(
+        "select count(*)::text as count from users where role = 'super_admin' and is_active = true"
+      );
+      if (Number(countResult.rows[0]?.count ?? "0") <= 1) {
+        await auditSuperAdminAttempt({
+          actionType: "delete_super_admin_denied",
+          actorUserId: actor.userId,
+          targetUserId: target.id,
+          details: { reason: "cannot_delete_last_super_admin", targetUsername: target.username }
+        });
+        throw new HttpError(409, "Cannot delete the last active super_admin user.");
       }
-    });
-  }
+    }
 
-  return removed;
+    const result = await client.query<UserRow>(
+      `delete from users where id = $1
+       returning id, username, email, full_name, english_name, role, is_active,
+                 must_change_password, can_request_scheduling_override, created_at, updated_at`,
+      [cleanUserId]
+    );
+    const removed = result.rows[0];
+    if (!removed) throw new HttpError(404, "User not found.");
+
+    await logAuditEntry({
+      entityType: "user",
+      entityId: removed.id,
+      actionType: "delete",
+      oldValues: removed,
+      newValues: null,
+      changedByUserId: actor.userId
+    }, client);
+    if (removed.role === "super_admin") {
+      await logAuditEntry({
+        entityType: "user",
+        entityId: removed.id,
+        actionType: "delete_super_admin_allowed",
+        oldValues: null,
+        newValues: { reason: "super_admin_deleted", targetUsername: removed.username },
+        changedByUserId: actor.userId
+      }, client);
+    }
+    await client.query("commit");
+    return removed;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateUserSchedulingOverridePermission(
@@ -383,13 +492,20 @@ export async function updateUserSchedulingOverridePermission(
       update users
       set can_request_scheduling_override = case when role = 'receptionist' then $2 else false end,
           updated_at = now()
-      where id = $1
+      where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
       returning id, username, email, full_name, english_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
     `,
-    [cleanUserId, canRequestSchedulingOverride]
+    [cleanUserId, canRequestSchedulingOverride, actor.role]
   );
   const updated = rows[0] as UserRow | undefined;
-  if (!updated) throw new HttpError(404, "User not found.");
+  if (!updated) {
+    const target = await pool.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
+    if (!target.rows[0]) throw new HttpError(404, "User not found.");
+    if (target.rows[0].role === "super_admin" && actor.role !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+    }
+    throw new HttpError(409, "User changed during the update. Please retry.");
+  }
 
   await logAuditEntry({
     entityType: "user",
@@ -419,7 +535,7 @@ export async function getUserSchedulingOverridePermission(userId: UserId): Promi
 export async function updateUserPassword(
   userId: UserId,
   password: string,
-  changedByUserId: NullableUserId = null
+  actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
   const cleanPassword = requireExactPassword(password);
@@ -445,24 +561,38 @@ export async function updateUserPassword(
   if (!previousUser) {
     throw new HttpError(404, "User not found.");
   }
+  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "update_super_admin_password_denied",
+      actorUserId: actor.userId,
+      targetUserId: previousUser.id,
+      details: { reason: "only_super_admin_can_update_super_admin", targetUsername: previousUser.username }
+    });
+    throw new HttpError(403, "Only super_admin can update a super_admin user.");
+  }
 
   const passwordHash = await bcrypt.hash(cleanPassword, 10);
   const updatedResult = await pool.query(
     `
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
-      where id = $1
+      where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
       returning id, username, email, full_name, english_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
     `,
-    [cleanUserId, passwordHash]
+    [cleanUserId, passwordHash, actor.role]
   );
 
   const updatedUser = updatedResult.rows[0] as UserRow | undefined;
   if (!updatedUser) {
-    throw new HttpError(500, "Failed to update user password.");
+    const latest = await pool.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
+    if (!latest.rows[0]) throw new HttpError(404, "User not found.");
+    if (latest.rows[0].role === "super_admin" && actor.role !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+    }
+    throw new HttpError(409, "User changed during the update. Please retry.");
   }
 
   await logAuditEntry({
@@ -471,7 +601,7 @@ export async function updateUserPassword(
     actionType: "update",
     oldValues: previousUser,
     newValues: updatedUser,
-    changedByUserId
+    changedByUserId: actor.userId
   });
 
   return updatedUser;
@@ -480,7 +610,7 @@ export async function updateUserPassword(
 export async function resetUserTemporaryPassword(
   userId: UserId,
   password: string,
-  changedByUserId: NullableUserId = null
+  actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
   const cleanPassword = requireExactPassword(password, "temporaryPassword");
@@ -505,24 +635,38 @@ export async function resetUserTemporaryPassword(
   if (!previousUser) {
     throw new HttpError(404, "User not found.");
   }
+  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "reset_super_admin_password_denied",
+      actorUserId: actor.userId,
+      targetUserId: previousUser.id,
+      details: { reason: "only_super_admin_can_update_super_admin", targetUsername: previousUser.username }
+    });
+    throw new HttpError(403, "Only super_admin can update a super_admin user.");
+  }
 
   const passwordHash = await bcrypt.hash(cleanPassword, 10);
   const updatedResult = await pool.query(
     `
       update users
       set password_hash = $2, must_change_password = true, updated_at = now()
-      where id = $1
+      where id = $1 and (role <> 'super_admin' or $3 = 'super_admin')
       returning id, username, email, full_name, english_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
     `,
-    [cleanUserId, passwordHash]
+    [cleanUserId, passwordHash, actor.role]
   );
 
   const updatedUser = updatedResult.rows[0] as UserRow | undefined;
   if (!updatedUser) {
-    throw new HttpError(500, "Failed to reset user password.");
+    const latest = await pool.query<{ role: Role }>("select role from users where id = $1", [cleanUserId]);
+    if (!latest.rows[0]) throw new HttpError(404, "User not found.");
+    if (latest.rows[0].role === "super_admin" && actor.role !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+    }
+    throw new HttpError(409, "User changed during the update. Please retry.");
   }
 
   await logAuditEntry({
@@ -531,7 +675,7 @@ export async function resetUserTemporaryPassword(
     actionType: "reset_temporary_password",
     oldValues: { must_change_password: previousUser.must_change_password },
     newValues: { must_change_password: updatedUser.must_change_password },
-    changedByUserId
+    changedByUserId: actor.userId
   });
 
   return updatedUser;
@@ -539,24 +683,36 @@ export async function resetUserTemporaryPassword(
 
 export async function setUserMustChangePassword(
   userId: UserId,
-  changedByUserId: NullableUserId = null
+  actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
   if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
     throw new HttpError(400, "userId must be a positive whole number.");
   }
 
+  const target = await pool.query<{ role: Role; username: string }>("select role, username from users where id = $1", [cleanUserId]);
+  if (!target.rows[0]) throw new HttpError(404, "User not found.");
+  if (target.rows[0].role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "force_super_admin_password_change_denied",
+      actorUserId: actor.userId,
+      targetUserId: cleanUserId,
+      details: { reason: "only_super_admin_can_update_super_admin", targetUsername: target.rows[0].username }
+    });
+    throw new HttpError(403, "Only super_admin can update a super_admin user.");
+  }
+
   const updatedResult = await pool.query(
     `
       update users
       set must_change_password = true, updated_at = now()
-      where id = $1
+      where id = $1 and (role <> 'super_admin' or $2 = 'super_admin')
       returning id, username, email, full_name, english_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
                 created_at, updated_at
     `,
-    [cleanUserId]
+    [cleanUserId, actor.role]
   );
 
   const updatedUser = updatedResult.rows[0] as UserRow | undefined;
@@ -570,7 +726,7 @@ export async function setUserMustChangePassword(
     actionType: "force_password_change",
     oldValues: null,
     newValues: { must_change_password: true },
-    changedByUserId
+    changedByUserId: actor.userId
   });
 
   return updatedUser;
@@ -589,88 +745,84 @@ export async function updateUserActiveState(
     throw new HttpError(400, "You cannot deactivate your own account.");
   }
 
-  const currentResult = await pool.query<UserRow>(
-    `
-      select id, username, email, full_name, english_name, role, is_active,
-             coalesce(must_change_password, false) as must_change_password,
-             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-             created_at, updated_at
-      from users
-      where id = $1
-      limit 1
-    `,
-    [cleanUserId]
-  );
-  const previousUser = currentResult.rows[0];
-  if (!previousUser) {
-    throw new HttpError(404, "User not found.");
-  }
-
-  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
-    await auditSuperAdminAttempt({
-      actionType: "update_super_admin_active_denied",
-      actorUserId: actor.userId,
-      targetUserId: previousUser.id,
-      details: {
-        reason: "only_super_admin_can_update_super_admin",
-        targetUsername: previousUser.username,
-        attemptedIsActive: isActive
-      }
-    });
-    throw new HttpError(403, "Only super_admin can update a super_admin user.");
-  }
-
-  if (previousUser.role === "super_admin" && previousUser.is_active && !isActive) {
-    const countResult = await pool.query<{ count: string }>(
-      `
-        select count(*)::text as count
-        from users
-        where role = 'super_admin'
-          and is_active = true
-      `
+  const client = await pool.connect();
+  let updatedUser: UserRow | undefined;
+  try {
+    await client.query("begin");
+    await lockActiveSuperAdminSet(client);
+    const currentResult = await client.query<UserRow>(
+      `select id, username, email, full_name, english_name, role, is_active,
+              coalesce(must_change_password, false) as must_change_password,
+              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+              created_at, updated_at
+         from users where id = $1 for update`,
+      [cleanUserId]
     );
-    if (Number(countResult.rows[0]?.count ?? "0") <= 1) {
+    const previousUser = currentResult.rows[0];
+    if (!previousUser) throw new HttpError(404, "User not found.");
+
+    if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
       await auditSuperAdminAttempt({
         actionType: "update_super_admin_active_denied",
         actorUserId: actor.userId,
         targetUserId: previousUser.id,
         details: {
-          reason: "cannot_deactivate_last_super_admin",
-          targetUsername: previousUser.username
+          reason: "only_super_admin_can_update_super_admin",
+          targetUsername: previousUser.username,
+          attemptedIsActive: isActive
         }
       });
-      throw new HttpError(409, "Cannot deactivate the last active super_admin user.");
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
     }
-  }
 
-  const updatedResult = await pool.query<UserRow>(
-    `
-      update users
-      set is_active = $2, updated_at = now()
-      where id = $1
-      returning id, username, email, full_name, english_name, role, is_active,
-                coalesce(must_change_password, false) as must_change_password,
-                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-                created_at, updated_at
-    `,
-    [cleanUserId, isActive]
-  );
-  const updatedUser = updatedResult.rows[0];
-  if (!updatedUser) {
-    throw new HttpError(500, "Failed to update user active state.");
-  }
+    if (previousUser.role === "super_admin" && previousUser.is_active && !isActive) {
+      const countResult = await client.query<{ count: string }>(
+        "select count(*)::text as count from users where role = 'super_admin' and is_active = true"
+      );
+      if (Number(countResult.rows[0]?.count ?? "0") <= 1) {
+        await auditSuperAdminAttempt({
+          actionType: "update_super_admin_active_denied",
+          actorUserId: actor.userId,
+          targetUserId: previousUser.id,
+          details: { reason: "cannot_deactivate_last_super_admin", targetUsername: previousUser.username }
+        });
+        throw new HttpError(409, "Cannot deactivate the last active super_admin user.");
+      }
+    }
 
-  await logAuditEntry({
-    entityType: "user",
-    entityId: updatedUser.id,
-    actionType: isActive ? "activate" : "deactivate",
-    oldValues: { is_active: previousUser.is_active },
-    newValues: { is_active: updatedUser.is_active },
-    changedByUserId: actor.userId
-  });
+    const updatedResult = await client.query<UserRow>(
+      `update users
+          set is_active = $2,
+              auth_version = auth_version + case when is_active is distinct from $2 then 1 else 0 end,
+              updated_at = now()
+        where id = $1
+        returning id, username, email, full_name, english_name, role, is_active,
+                  coalesce(must_change_password, false) as must_change_password,
+                  coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  created_at, updated_at`,
+      [cleanUserId, isActive]
+    );
+    updatedUser = updatedResult.rows[0];
+    if (!updatedUser) throw new HttpError(500, "Failed to update user active state.");
+
+    await logAuditEntry({
+      entityType: "user",
+      entityId: updatedUser.id,
+      actionType: isActive ? "activate" : "deactivate",
+      oldValues: { is_active: previousUser.is_active },
+      newValues: { is_active: updatedUser.is_active },
+      changedByUserId: actor.userId
+    }, client);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 
   await syncDoctorWorklistForUser(cleanUserId);
-
+  if (!updatedUser) throw new HttpError(500, "Failed to update user active state.");
   return updatedUser;
 }
 
@@ -709,7 +861,7 @@ export async function updateOwnPassword(
   if (!valid) throw new HttpError(401, "Invalid username or password.");
 
   const passwordHash = await bcrypt.hash(cleanNewPassword, 10);
-  const updatedResult = await pool.query<UserRow>(
+  const updatedResult = await pool.query<UserRow & { auth_version: number }>(
     `
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
@@ -717,7 +869,7 @@ export async function updateOwnPassword(
       returning id, username, email, full_name, english_name, role, is_active,
                 coalesce(must_change_password, false) as must_change_password,
                 coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-                created_at, updated_at
+                created_at, updated_at, auth_version
     `,
     [cleanUserId, passwordHash]
   );

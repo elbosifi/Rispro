@@ -13,6 +13,7 @@ import {
   updateUserActiveState,
   updateUserIdentity,
   updateUserPassword,
+  updateUserRole,
   updateUserSchedulingOverridePermission,
 } from "./settings";
 
@@ -65,6 +66,7 @@ describe("settings API contracts", () => {
     await updateUserSchedulingOverridePermission(7, true);
     await updateUserPassword(7, "replacement");
     await updateUserIdentity(7, { username: "updated", fullName: "Updated User", englishName: "Updated User" });
+    await updateUserRole(7, "administrative");
     await updateUserActiveState(7, false);
     await resetUserTemporaryPassword(7, "temporary");
     await deleteUser(7);
@@ -85,14 +87,18 @@ describe("settings API contracts", () => {
       method: "PUT",
       body: JSON.stringify({ username: "updated", fullName: "Updated User", englishName: "Updated User" }),
     });
-    expect(api).toHaveBeenNthCalledWith(5, "/users/7/active", {
+    expect(api).toHaveBeenNthCalledWith(5, "/users/7/role", {
+      method: "PUT",
+      body: JSON.stringify({ role: "administrative" }),
+    });
+    expect(api).toHaveBeenNthCalledWith(6, "/users/7/active", {
       method: "PUT",
       body: JSON.stringify({ isActive: false }),
     });
-    expect(api).toHaveBeenNthCalledWith(6, "/users/7/temporary-password", {
+    expect(api).toHaveBeenNthCalledWith(7, "/users/7/temporary-password", {
       method: "POST",
       body: JSON.stringify({ password: "temporary" }),
     });
-    expect(api).toHaveBeenNthCalledWith(7, "/users/7", { method: "DELETE" });
+    expect(api).toHaveBeenNthCalledWith(8, "/users/7", { method: "DELETE" });
   });
 });

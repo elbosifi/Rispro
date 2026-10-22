@@ -10,6 +10,7 @@ import { deriveDoctorCapabilities } from "./capabilities.js";
 import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import { emailFromUsername, normalizeOptionalEmail } from "../../utils/email-address.js";
+import { lockActiveSuperAdminSet } from "../../services/user-service.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -162,6 +163,9 @@ export async function createDoctorWithUserForAdmin(
   }
   if (!isRole(input.coreRole)) {
     throw new HttpError(400, "coreRole is invalid.");
+  }
+  if (input.coreRole === "supervisor" && appRole !== "super_admin") {
+    throw new HttpError(403, "Only super_admin can grant the supervisor role.");
   }
   if (!input.userActive) {
     throw new HttpError(400, "New doctor users must be active.");
@@ -391,9 +395,14 @@ export async function updateLinkedDoctorUserForAdmin(
     if (previous.role !== "doctor" && previous.role !== "supervisor") {
       throw new HttpError(409, "Only doctor or supervisor accounts can be edited through Doctor Directory.");
     }
+    if (input.coreRole === "supervisor" && previous.role !== "supervisor" && appRole !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can grant the supervisor role.");
+    }
     const result = await client.query<DoctorAdminUserRow>(
       `update users
-          set username = $2, email = $3, full_name = $4, english_name = $5, role = $6, is_active = $7, updated_at = now()
+          set username = $2, email = $3, full_name = $4, english_name = $5, role = $6, is_active = $7,
+              auth_version = auth_version + case when role is distinct from $6 or is_active is distinct from $7 then 1 else 0 end,
+              updated_at = now()
         where id = $1
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
@@ -433,6 +442,7 @@ export async function setDoctorIdentityActiveForAdmin(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    await lockActiveSuperAdminSet(client);
     const previous = await lockLinkedDoctorUser(client, targetUserId);
     if (Number(actorUserId) === targetUserId && !active) {
       throw new HttpError(400, "You cannot deactivate your own account.");
@@ -447,7 +457,11 @@ export async function setDoctorIdentityActiveForAdmin(
       }
     }
     const userResult = await client.query<DoctorAdminUserRow>(
-      `update users set is_active = $2, updated_at = now() where id = $1
+      `update users
+          set is_active = $2,
+              auth_version = auth_version + case when is_active is distinct from $2 then 1 else 0 end,
+              updated_at = now()
+        where id = $1
        returning id, username, email, full_name, english_name, role, is_active,
                  coalesce(must_change_password, false) as must_change_password, created_at, updated_at`,
       [targetUserId, active]

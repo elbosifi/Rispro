@@ -202,7 +202,10 @@ router.post(
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const body = asUnknownRecord(req.body);
-    const updatedUser = await resetUserTemporaryPassword(targetUserId, asString(body.temporaryPassword), user.sub);
+    const updatedUser = await resetUserTemporaryPassword(targetUserId, asString(body.temporaryPassword), {
+      userId: user.sub,
+      role: user.role
+    });
     res.json({ user: updatedUser });
   })
 );
@@ -216,7 +219,10 @@ router.post(
     if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
-    const updatedUser = await setUserMustChangePassword(targetUserId, user.sub);
+    const updatedUser = await setUserMustChangePassword(targetUserId, {
+      userId: user.sub,
+      role: user.role
+    });
     res.json({ user: updatedUser });
   })
 );

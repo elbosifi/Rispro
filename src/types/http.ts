@@ -10,6 +10,7 @@ export type RequestCookies = Record<string, string | undefined>;
 export interface AuthenticatedUserContext {
   sub: UserId;
   role: Role;
+  authVersion?: number;
   purpose?: string;
   username?: string;
   fullName?: string;

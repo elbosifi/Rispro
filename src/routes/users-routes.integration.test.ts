@@ -156,8 +156,62 @@ test("users identity, active-state, and temporary-password routes preserve middl
 
     const missingPassword = await request(`/${targetId}/temporary-password`, "POST", {});
     assert.equal(missingPassword.status, 400);
+
+    const reactivateForRoleChange = await request(`/${targetId}/active`, "PUT", { isActive: true });
+    assert.equal(reactivateForRoleChange.status, 200);
+    const authVersionBeforeRole = (await pool.query<{ auth_version: number }>("select auth_version from users where id = $1", [targetId])).rows[0]!.auth_version;
+    const grantSuperAdmin = await request(`/${targetId}/role`, "PUT", { role: "super_admin" });
+    assert.equal(grantSuperAdmin.status, 403);
+    const grantSupervisor = await request(`/${targetId}/role`, "PUT", { role: "supervisor" });
+    assert.equal(grantSupervisor.status, 403);
+    const modifySuperAdminRole = await request(`/${superAdminId}/role`, "PUT", { role: "doctor" });
+    assert.equal(modifySuperAdminRole.status, 403);
+    const invalidRole = await request(`/${targetId}/role`, "PUT", { role: "not-a-role" });
+    assert.equal(invalidRole.status, 400);
+
+    const toDoctor = await request(`/${targetId}/role`, "PUT", { role: "doctor" });
+    assert.equal(toDoctor.status, 200);
+    assert.equal(toDoctor.data.user?.role, "doctor");
+    assert.equal(toDoctor.data.user?.can_request_scheduling_override, false);
+    const doctorProfile = await pool.query<{ id: number }>(
+      `insert into doctor_portal.doctor_profiles (user_id, display_name, doctor_role, active)
+       values ($1, 'Role Transition Profile', 'consultant', true) returning id`,
+      [targetId],
+    );
+    const toAdministrative = await request(`/${targetId}/role`, "PUT", { role: "administrative" });
+    assert.equal(toAdministrative.status, 200);
+    assert.equal(toAdministrative.data.user?.role, "administrative");
+    const preservedProfile = await pool.query<{ id: number; active: boolean }>(
+      "select id, active from doctor_portal.doctor_profiles where user_id = $1",
+      [targetId],
+    );
+    assert.deepEqual(preservedProfile.rows[0], { id: doctorProfile.rows[0]!.id, active: false });
+
+    const roleAudit = await pool.query<{ old_values: Record<string, unknown>; new_values: Record<string, unknown>; changed_by_user_id: number }>(
+      `select old_values, new_values, changed_by_user_id from audit_log
+        where entity_type = 'user' and entity_id = $1 and action_type = 'user_role_changed'
+        order by id desc limit 1`,
+      [targetId],
+    );
+    assert.equal(roleAudit.rows[0]?.old_values.role, "doctor");
+    assert.equal(roleAudit.rows[0]?.new_values.role, "administrative");
+    assert.equal(roleAudit.rows[0]?.changed_by_user_id, actorId);
+    assert.equal((await pool.query<{ auth_version: number }>("select auth_version from users where id = $1", [targetId])).rows[0]?.auth_version, authVersionBeforeRole + 2);
+
+    const staleTargetToken = jwt.sign({ sub: targetId, role: "receptionist", authVersion: authVersionBeforeRole }, env.jwtSecret);
+    const staleSession = await fetch(`${server.baseUrl}/api/users`, {
+      headers: { Cookie: `${env.cookieName}=${staleTargetToken}` },
+    });
+    assert.equal(staleSession.status, 401);
   } finally {
     await server.close();
+    await pool.query(
+      `delete from doctor_portal.reporting_board_saved_views
+        where target_doctor_id in (select id from doctor_portal.doctor_profiles where user_id = any($1::bigint[]))
+          and link_kind = 'doctor_worklist' and system_managed = true`,
+      [createdIds],
+    ).catch(() => undefined);
+    await pool.query("delete from doctor_portal.doctor_profiles where user_id = any($1::bigint[])", [createdIds]).catch(() => undefined);
     await pool.query(
       "delete from audit_log where entity_type = 'user' and (entity_id = any($1::int[]) or changed_by_user_id = any($1::int[]))",
       [createdIds],

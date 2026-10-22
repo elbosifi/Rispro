@@ -18,6 +18,7 @@ interface AuthUserRow {
   password_hash: string;
   is_active: boolean;
   must_change_password: boolean;
+  auth_version: number;
 }
 
 interface CookieResponse {
@@ -47,7 +48,7 @@ export async function authenticateUser(
 ): Promise<AuthUserRow> {
   const normalizedUsername = normalizeUsername(username);
   const query = `
-    select id, username, full_name, english_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password
+    select id, username, full_name, english_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password, auth_version
     from users
     where lower(btrim(username)) = $1
     limit 1
@@ -89,13 +90,14 @@ export async function findCurrentSessionUser(userId: UserId): Promise<CurrentSes
   return rows[0] ?? null;
 }
 
-export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password">): string {
+export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password"> & { auth_version?: number }): string {
   return jwt.sign(
     {
       sub: user.id,
       username: user.username,
       fullName: user.full_name,
       role: user.role,
+      authVersion: user.auth_version ?? 0,
       mustChangePassword: user.must_change_password
     },
     env.jwtSecret,
@@ -103,12 +105,13 @@ export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "f
   );
 }
 
-export function buildSupervisorReauthToken(user: Pick<AuthUserRow, "id" | "username" | "role">): string {
+export function buildSupervisorReauthToken(user: Pick<AuthUserRow, "id" | "username" | "role"> & { auth_version?: number }): string {
   return jwt.sign(
     {
       sub: user.id,
       username: user.username,
       role: user.role,
+      authVersion: user.auth_version ?? 0,
       purpose: "supervisor-reauth"
     },
     env.jwtSecret,
