@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; review-workflow batch complete, reception operations underway.
+Status: active; reception operations complete, patient management/search underway.
 
 ## Baseline and safety
 
@@ -36,12 +36,12 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
 | Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Discovered |
 | Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Complete — batch 4 |
-| Operations | `/calendar` | `CalendarPage` | P1 | Discovered |
-| Operations | `/registrations` | `RegistrationsPage` | P1 | Discovered |
+| Operations | `/calendar` | `CalendarPage` | P1 | Complete — batch 5 |
+| Operations | `/registrations` | `RegistrationsPage` | P1 | Complete — batch 5 |
 | Documents | `/request-scans` | `RequestScansPage` | P1 | Discovered |
-| Operations | `/queue` | `QueuePage` | P1 | Discovered |
-| Operations | `/queue/check-in` | `QueueCheckInPage` | P1 | Discovered |
-| Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Discovered |
+| Operations | `/queue` | `QueuePage` | P1 | Complete — batch 5 |
+| Operations | `/queue/check-in` | `QueueCheckInPage` | P1 | Complete — batch 5 |
+| Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Complete — batch 5 |
 | Modality | `/modality` | `ModalityPage` | P1 | Discovered |
 | Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Discovered |
 | Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Complete — batch 4 |
@@ -150,7 +150,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Preflight: complete.
 - Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
-- Screens completed: 25 (19 polished, 6 accepted without further visual change). Five operations entries initially assessed; 83 non-reference entries remain unassessed. Five original reference regressions remain pending.
+- Screens completed: 30 (24 polished, 6 accepted without further visual change). Five patient/search entries initially assessed; 78 non-reference entries remain unassessed. Five original reference regressions passed at batch 5; final regression remains required after later edits.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
 - Decisions requiring approval: none pending. Both encountered test-locator/interaction repairs were explicitly authorized and now pass.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
@@ -225,3 +225,15 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Authorized baseline maintenance: operations baseline exposed three unchanged Registrations assertions expecting “Protocol: Not protocolled,” while source/catalog/Modality consistently use “No protocol assigned.” User authorized three assertion text updates; all missing-request and upload assertions retained; repaired file passes 44/44. No Registrations application edit made in this batch.
 - Development capture-helper correction: explicitly initialized English for modal tests after the initial helper used the application's default Arabic locale. Corrected helper passes; obsolete waiting run terminated. No application labels renamed to satisfy it.
 - Rollback checkpoint follows locally. No push/PR/deploy; main remains unchanged. Counts: 25 remaining-scope entries complete, 88 still to complete (5 initially assessed, 83 unassessed), plus the original five final regressions. No decisions pending.
+
+### Batch 5 — Reception operations complete
+
+- Completed/polished Calendar, Registrations, Queue, Check-in kiosk and No-show Review. Fixed oversized mixed controls, gradient page headings, search-icon overlap, crowded calendar summary labels, queue actions squeezing patient details, kiosk reset contrast and teal gradient inconsistency. Calendar's existing summary column is modestly wider and long modality names wrap fully; existing localized short category labels have full tooltip expansions. No clinical labels are truncated.
+- Reused shared Input/SearchInput; consolidated the preceding review stylesheet into opt-in `components/shared/compact-controls.css` for assessed operational workspaces. This stylesheet uses existing tokens and does not change base primitives or apply to the five reference screens. Native calendar cells, range/checkbox controls, forms, scan handlers, action order and booking/no-show authority are preserved.
+- No-show Review retains its existing English-only copy. Set LTR content and dialog direction inside an Arabic shell to prevent reversed English punctuation; localized patient names remain supported. This is not a claim of full Arabic translation. Removed implementation jargon from its subtitle while retaining the Action PIN requirement.
+- Browser: five before/after desktop/phone cases; five Arabic-preference cases; final English/Arabic calendar capture reruns; no-show reason validation, Escape/focus restoration and zero mutation assertion. Initial no-show dialog check passed with the earlier historical fixture. After the disposable reset removed that extra fixture, two temporary helper runs timed out on the correctly disabled cleanup control; final dialog rendering used an explicitly UI-only synthetic historical candidate via a read-response fixture. It validates UI, not backend eligibility or cleanup execution.
+- Test-data isolation correction: the existing Queue journey changes E2E Queue Patient from scheduled to arrived. Rerunning Calendar's scheduled-filter scenario on that reused DB failed twice. Diagnosed the data mismatch, reset only the guarded disposable seed, and reran all five existing Calendar/Queue/Registrations browser journeys in established order: 5/5 passed. No assertion or application workaround was made. Prior review/roster fixture IDs are stale after that reset; historical screenshots/results remain valid evidence from their runs.
+- Checks: 137 focused operations/review tests passed; final Calendar delta tests 41/41 passed. Original reference workflow tests 144/144 passed. Exact final frontend typecheck/build passed; lint passed with the two existing Calendar hook warnings; harness:ui passed; whitespace clean. Existing bundle/jsdom warnings retained.
+- Five-screen regression: separate detached main worktree at starting SHA, with a separate Vite cache and shared installed dependencies. Captured all five references at desktop/phone against the same synthetic backend. Appointment/Registration pairs are pixel-identical; remaining pairs differ only by tiny dynamic timestamp/aging text (0.007–0.057% of pixels), with matching layout inspected. Evidence: `reference-diff.json`, before/after/comparisons `reference-*`. Main is unchanged. Final reference verification remains required after future changes.
+- Source-only existing issue outside this UI task: the historical candidate list's per-row Confirm callback is a no-op; preserved because altering no-show workflow is prohibited. Cleanup and bulk/clinical mutation behavior are not claimed browser-validated. Full No-show Arabic localization also remains a pre-existing limitation.
+- Counts: 30 remaining-scope entries complete (24 polished, 6 accepted unchanged), 83 to complete (5 initially assessed, 78 unassessed), plus final verification of the original five. No product decision pending. Next patient-management/search baseline: 24 focused tests passed; merge/dictionary re-authentication and populated states captured safely without patient mutations.

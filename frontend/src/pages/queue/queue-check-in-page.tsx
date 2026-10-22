@@ -357,7 +357,7 @@ export default function QueueCheckInPage() {
               </div>
 
               <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-[0.26em] text-muted-foreground">{t("queue.checkInLabel")}</p>
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t("queue.checkInLabel")}</p>
                 <h1 className="font-display text-xl font-semibold tracking-tight text-foreground sm:text-[1.6rem]">
                   {hospitalName}
                 </h1>
@@ -397,7 +397,7 @@ export default function QueueCheckInPage() {
             <Card className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)] sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInMetrics")}</p>
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t("queue.checkInMetrics")}</p>
                   <h3 className="mt-0.5 text-lg font-semibold text-foreground">{t("queue.checkInTodayOverview")}</h3>
                 </div>
                 <Activity className="h-4 w-4 text-[var(--accent)]" />
@@ -425,7 +425,7 @@ export default function QueueCheckInPage() {
           </section>
 
           <section className="flex min-h-0 flex-col gap-4 xl:col-span-4">
-            <section className="relative overflow-hidden rounded-[1.75rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-4 text-white shadow-[0_20px_50px_rgba(0,82,255,0.22)] sm:p-5">
+            <section className="relative overflow-hidden rounded-[1.75rem] border border-white/20 bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] p-4 text-white shadow-[0_20px_50px_rgba(0,82,255,0.22)] sm:p-5">
               <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.1),transparent_28%)]" />
               <div className="relative z-10 space-y-3">
                 <div className={`flex items-center gap-3 text-white/[0.92] ${isArabic ? "flex-row-reverse" : ""}`}>
@@ -433,7 +433,7 @@ export default function QueueCheckInPage() {
                     <ScanLine size={24} />
                   </span>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.28em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight sm:text-[1.4rem]">
                       {state.mode === "loading" ? t("queue.checkInScanning") : t("queue.checkInReady")}
                     </h2>
@@ -458,7 +458,7 @@ export default function QueueCheckInPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] uppercase tracking-[0.22em] text-white/[0.72]">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-white/[0.72]">
                         {state.mode === "error" ? t("queue.checkInErrorTitle") : t("queue.checkInLiveStatus")}
                       </p>
                       <p className="mt-1 text-sm font-semibold">
@@ -522,7 +522,7 @@ export default function QueueCheckInPage() {
                     variant="ghost"
                     size="sm"
                     onClick={handleResetNow}
-                    className="rounded-full border border-white/[0.18] bg-white/[0.10] px-5 text-white hover:bg-white/[0.18]"
+                    className="rounded-full border border-white/[0.18] bg-white/[0.10] px-5 !text-white hover:bg-white/[0.18] focus-visible:ring-2 focus-visible:ring-white/80"
                   >
                     <RefreshCw className="h-4 w-4" />
                     <span>{t("queue.checkInResetNow")}</span>
@@ -534,7 +534,7 @@ export default function QueueCheckInPage() {
             <Card className="rounded-[1.5rem] border border-slate-200/80 bg-white/92 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)]">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInInstructionsTitle")}</p>
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t("queue.checkInInstructionsTitle")}</p>
                   <h3 className="mt-0.5 text-lg font-semibold text-foreground">{t("queue.checkInInstructionsHeading")}</h3>
                 </div>
                 <ScanLine className="h-4 w-4 text-[var(--accent)]" />
@@ -552,7 +552,7 @@ export default function QueueCheckInPage() {
             <Card className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)]">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("queue.modalityStatus")}</p>
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t("queue.modalityStatus")}</p>
                   <h3 className="mt-0.5 text-lg font-semibold text-foreground">{t("queue.modalityStatusHeading")}</h3>
                 </div>
                 <Building2 className="h-4 w-4 text-[var(--accent)]" />
@@ -580,7 +580,7 @@ export default function QueueCheckInPage() {
                         </div>
 
                         <div className="min-w-14 rounded-2xl bg-[linear-gradient(135deg,rgba(0,82,255,0.12),rgba(14,165,233,0.12))] px-3 py-2 text-center">
-                          <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("queue.inQueue")}</p>
+                          <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t("queue.inQueue")}</p>
                           <p className="text-xl font-semibold text-[var(--accent)]">{row.inQueueCount}</p>
                         </div>
                       </div>

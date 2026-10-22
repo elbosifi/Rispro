@@ -1,5 +1,5 @@
-/* Compact controls keep review queues readable without changing action order. */
-.review-workflow :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-destructive) {
+/* Compact controls keep operational workspaces readable without changing action order. */
+.compact-controls :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-destructive) {
   min-height: var(--control-height-sm);
   height: auto;
   padding: 0.4rem 0.75rem;
@@ -7,7 +7,7 @@
   box-shadow: none;
 }
 
-.review-workflow .input-premium:not(textarea) {
+.compact-controls .input-premium:not(textarea) {
   min-height: var(--control-height-sm);
   height: var(--control-height-sm);
   min-width: 0;
