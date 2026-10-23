@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; reception operations complete, patient management/search underway.
+Status: active; patient management/search complete, execution/documents/override batch underway.
 
 ## Baseline and safety
 
@@ -28,11 +28,11 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | --- | --- | --- | --- | --- |
 | Access | `/login` | `LoginPage` | P2 | Discovered |
 | Reference | `/dashboard` | `DashboardPage` | P2 | Regression reference |
-| Patients | `/patients` | `PatientsPage` | P2 | Discovered |
+| Patients | `/patients` | `PatientsPage` | P2 | Complete — batch 6 |
 | Reference | `/patients/new` | `PatientsPage / PatientForm` | P2 | Regression reference |
-| Patients | `/patients/:id/edit` | `EditPatientPage` | P2 | Discovered |
-| Patients | `/patients/merge` | `PatientMergePage` | P2 | Discovered |
-| Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Discovered |
+| Patients | `/patients/:id/edit` | `EditPatientPage` | P2 | Complete — batch 6 |
+| Patients | `/patients/merge` | `PatientMergePage` | P2 | Complete — batch 6 |
+| Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Complete — batch 6 |
 | Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
 | Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Discovered |
 | Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Complete — batch 4 |
@@ -54,7 +54,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Discovered |
 | Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Discovered |
 | Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
-| Patients | `/search` | `SearchPage` | P2 | Discovered |
+| Patients | `/search` | `SearchPage` | P2 | Complete — batch 6 |
 | PACS | `/pacs` | `PacsPage` | P2 | Discovered |
 | PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Discovered |
 | PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Discovered |
@@ -150,7 +150,7 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Preflight: complete.
 - Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
 - Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
-- Screens completed: 30 (24 polished, 6 accepted without further visual change). Five patient/search entries initially assessed; 78 non-reference entries remain unassessed. Five original reference regressions passed at batch 5; final regression remains required after later edits.
+- Screens completed: 35 (28 polished, 7 accepted without further visual change). Four execution/document/override entries initially assessed; 74 non-reference entries remain unassessed. Five original reference regressions passed at batch 5; final regression remains required after later edits.
 - Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
 - Decisions requiring approval: none pending. Both encountered test-locator/interaction repairs were explicitly authorized and now pass.
 - Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
@@ -237,3 +237,13 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Five-screen regression: separate detached main worktree at starting SHA, with a separate Vite cache and shared installed dependencies. Captured all five references at desktop/phone against the same synthetic backend. Appointment/Registration pairs are pixel-identical; remaining pairs differ only by tiny dynamic timestamp/aging text (0.007–0.057% of pixels), with matching layout inspected. Evidence: `reference-diff.json`, before/after/comparisons `reference-*`. Main is unchanged. Final reference verification remains required after future changes.
 - Source-only existing issue outside this UI task: the historical candidate list's per-row Confirm callback is a no-op; preserved because altering no-show workflow is prohibited. Cleanup and bulk/clinical mutation behavior are not claimed browser-validated. Full No-show Arabic localization also remains a pre-existing limitation.
 - Counts: 30 remaining-scope entries complete (24 polished, 6 accepted unchanged), 83 to complete (5 initially assessed, 78 unassessed), plus final verification of the original five. No product decision pending. Next patient-management/search baseline: 24 focused tests passed; merge/dictionary re-authentication and populated states captured safely without patient mutations.
+
+### Batch 6 — Patient management and search complete
+
+- Completed five entries: Patients list (accepted unchanged), Edit Patient header, Patient Merge, Name Dictionary and Patient Search. Shared registration form is unchanged.
+- Fixed Search's unreadable dark header/selection, low-contrast identifiers, oversized phone results area and clipped edit actions. Reused Button/Card/Input, preserved selection and all update/delete handlers, and styled the existing destructive action consistently. Save bounds are verified inside desktop/phone viewports. Edit Patient's duplicated Back wording is removed; its route/return behavior is unchanged.
+- Merge/Dictionary reuse SearchInput to prevent icon overlap in either direction. Dictionary fields have persistent localized labels; compact styling reuses existing tokens. Merge controls, conflict warnings, identity calculations and confirmation behavior remain untouched. The reused Settings resolver receives only the SearchInput presentation correction and will be assessed in Settings later.
+- Browser: five before/after desktop/phone screens; populated Search details/edit/cancel; actual Arabic RTL across five screens; Merge/Dictionary beyond unchanged password re-authentication in English and Arabic; populated dictionary row/edit/cancel using one synthetic token. Apply spellings to patients was never invoked; no real patient mutation or merge occurred.
+- Checks: 59 focused tests including shared registration workflow pass; existing patient navigation E2E 2/2 pass; top-level captures 5/5, Arabic 5/5, authorized views 2/2 each language, Search case 1/1 and dictionary row case 1/1 pass. Exact final frontend typecheck/build, targeted lint, harness:ui and whitespace checks pass. Existing build warning retained.
+- Temporary capture-helper corrections: used the existing Edit Patient/Save Changes labels; kept row selection stable while editing; prevented reload initialization from resetting Arabic to English. Corrected runs and actual screenshots were inspected; no UI text changed to satisfy a helper.
+- Counts: 35 complete (28 polished, 7 accepted unchanged), 78 remain (4 initially assessed, 74 unassessed). Original five passed the prior milestone; final regression remains required. No decisions pending. Next baseline: 66 focused execution/document/override UI tests and 2 Modality navigation E2E tests pass.

@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GitMerge } from "lucide-react";
@@ -32,7 +33,7 @@ export default function PatientMergePage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="compact-controls mx-auto max-w-7xl space-y-4">
       <div className="flex items-center gap-2">
         <GitMerge size={22} className="text-accent" />
         <div>

@@ -1,3 +1,5 @@
+import "@/components/shared/compact-controls.css";
+import { Button, Card, Input } from "@/components/shared";
 import { useId, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchPatients, deletePatient } from "@/lib/api-hooks";
@@ -58,14 +60,14 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="compact-controls max-w-7xl mx-auto space-y-4">
       {/* Page Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
           <Search className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+          <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--foreground)" }}>
             {t(language, "search.title")}
           </h2>
           <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
@@ -75,20 +77,20 @@ export default function SearchPage() {
       </div>
 
       {/* Search Input */}
-      <div className="card-shell relative p-4">
+      <Card className="relative p-4">
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
             setSearchQuery(inputValue);
           }}
-          className="flex gap-4"
+          className="flex gap-2"
         >
-          <input
+          <Input
             type="text"
             placeholder={t(language, "search.placeholder")}
             className="input-premium flex-1 px-4 py-3 rounded-lg outline-none font-mono-data"
-            style={{ color: "var(--text)" }}
+            style={{ color: "var(--foreground)" }}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -98,21 +100,21 @@ export default function SearchPage() {
               }
             }}
           />
-          <button
+          <Button variant="primary" size="sm"
             type="submit"
-            className="btn-primary px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-all"
+            className="px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-all"
           >
             <Search className="w-4 h-4" />
             {t(language, "search.searchBtn")}
-          </button>
+          </Button>
         </form>
-      </div>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Results List */}
-        <div className="lg:col-span-1 card-shell overflow-hidden h-[600px] flex flex-col">
-          <div className="p-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)", background: "var(--foreground)" }}>
-            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
+        <Card className="lg:col-span-1  overflow-hidden max-h-[360px] lg:h-[600px] lg:max-h-[600px] flex flex-col">
+          <div className="p-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)", background: "var(--muted)" }}>
+            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--foreground)" }}>
               {t(language, "search.results", { count: isLoading ? "..." : patients.length })}
             </h3>
             {searchQuery && (
@@ -127,40 +129,23 @@ export default function SearchPage() {
             ) : patients.length === 0 ? (
               <div className="p-4 text-center font-mono-data" style={{ color: "var(--text-muted)" }}>{t(language, "search.empty")}</div>
             ) : (
-              <ul className="divide-y" >
+              <ul className="divide-y divide-border" >
                 {patients.map((p) => (
                   <li key={p.id}>
-                    <button
+                    <button aria-pressed={selectedPatient?.id === p.id}
                       onClick={() => handleSelect(p)}
-                      className={`w-full text-right p-4 transition-colors ${
-                        selectedPatient?.id === p.id
-                          ? ""
-                          : ""
-                      }`}
-                      style={{
-                        background: selectedPatient?.id === p.id ? "var(--foreground)" : "transparent",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (selectedPatient?.id !== p.id) {
-                          (e.currentTarget as HTMLElement).style.background = "var(--foreground)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (selectedPatient?.id !== p.id) {
-                          (e.currentTarget as HTMLElement).style.background = "transparent";
-                        }
-                      }}
+                      className={`w-full p-4 text-start transition-colors ${selectedPatient?.id === p.id ? "bg-accent/10" : "hover:bg-muted"}`}
                     >
-                      <p className="font-medium" style={{ color: "var(--text)" }}>
+                      <p className="font-medium" style={{ color: "var(--foreground)" }}>
                         {p.arabicFullName}
                       </p>
                       <div className="mt-1">
                         <PatientCategoryBadge category={p.category} showWhenUnset={false} />
                       </div>
-                      <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
+                      <p className="text-sm font-mono-data mt-1" style={{ color: "var(--foreground)" }}>
                         {p.englishFullName || "—"}
                       </p>
-                      <div className="flex items-center gap-2 mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)", opacity: 0.7 }}>
+                      <div className="flex items-center gap-2 mt-2 text-xs font-mono-data" style={{ color: "var(--foreground)" }}>
                         <span>ID: {p.nationalId || "—"}</span>
                         <span>•</span>
                         <span>MRN: {p.mrn || "—"}</span>
@@ -171,7 +156,7 @@ export default function SearchPage() {
               </ul>
             )}
           </div>
-        </div>
+        </Card>
 
         {/* Right: Details / Edit */}
         <div className="lg:col-span-2">
@@ -192,19 +177,19 @@ export default function SearchPage() {
               />
             )
           ) : (
-            <div className="h-full card-shell flex items-center justify-center p-8">
+            <Card className="h-full  flex items-center justify-center p-8">
               <div className="text-center">
                 <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: "var(--shadow-recessed)" }}>
                   <User className="w-8 h-8" style={{ color: "var(--text-muted)" }} />
                 </div>
-                <h3 className="text-lg font-semibold text-embossed" style={{ color: "var(--text)" }}>
+                <h3 className="text-lg font-semibold text-embossed" style={{ color: "var(--foreground)" }}>
                   {t(language, "search.selectPatient")}
                 </h3>
                 <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
                   {t(language, "search.selectPrompt")}
                 </p>
               </div>
-            </div>
+            </Card>
           )}
         </div>
       </div>
@@ -215,19 +200,19 @@ export default function SearchPage() {
 function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void }) {
   const { language } = useLanguage();
   return (
-    <div className="card-shell">
-      <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
+    <Card className="">
+      <div className="p-4 sm:p-6 flex flex-wrap justify-between items-center gap-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <div className="flex items-center gap-2">
-          <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "search.detailsHeading")}</h3>
+          <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--foreground)" }}>{t(language, "search.detailsHeading")}</h3>
           <PatientCategoryBadge category={patient.category} showWhenUnset />
         </div>
-        <button
+        <Button variant="secondary" size="sm"
           onClick={onEdit}
-          className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
+          className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
         >
           <Pencil className="w-3.5 h-3.5" />
           {t(language, "search.editBtn")}
-        </button>
+        </Button>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         <Field label={t(language, "search.fieldArabicName")} value={patient.arabicFullName} />
@@ -255,7 +240,7 @@ function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void
           <Field label={t(language, "search.fieldAddress")} value={patient.address} />
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -329,10 +314,10 @@ function EditPatientForm({
       onSubmit={handleSubmit}
       className="card-shell"
     >
-      <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
-        <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "patients.editTitle")}</h3>
-        <div className="flex gap-2">
-          <button
+      <div className="p-4 sm:p-6 flex flex-wrap justify-between items-center gap-3" style={{ borderBottom: "1px solid var(--border)" }}>
+        <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--foreground)" }}>{t(language, "patients.editTitle")}</h3>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="destructive" size="sm"
             type="button"
             onClick={() => {
               if (window.confirm(t(language, "search.deleteConfirm"))) {
@@ -341,27 +326,26 @@ function EditPatientForm({
             }}
             disabled={isDeleting}
             className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
-            style={{ background: "var(--accent)", color: "#fff" }}
           >
             <Trash2 className="w-3.5 h-3.5" />
             {isDeleting ? t(language, "search.deleting") : t(language, "search.deleteBtn")}
-          </button>
-          <button
+          </Button>
+          <Button variant="ghost" size="sm"
             type="button"
             onClick={onCancel}
-            className="btn-ghost px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all"
+            className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all"
           >
             <X className="w-3.5 h-3.5" />
             {t(language, "common.cancel")}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="submit"
             disabled={isSaving}
-            className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             {isSaving ? t(language, "search.saving") : t(language, "search.saveBtn")}
-          </button>
+          </Button>
         </div>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -451,7 +435,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <p className="text-xs font-mono-data uppercase tracking-[0.06em]" style={{ color: "var(--text-muted)" }}>{label}</p>
-      <p className="mt-1 font-mono-data" style={{ color: "var(--text)" }}>
+      <p className="mt-1 font-mono-data" style={{ color: "var(--foreground)" }}>
         {value ?? "—"}
       </p>
     </div>
@@ -485,7 +469,7 @@ function InputField({
       <label htmlFor={inputId} className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
         {label}
       </label>
-      <input
+      <Input
         id={inputId}
         type={type}
         value={value}
@@ -495,7 +479,7 @@ function InputField({
         maxLength={maxLength}
         dir={dir}
         className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
-        style={{ color: "var(--text)" }}
+        style={{ color: "var(--foreground)" }}
       />
     </div>
   );
@@ -526,7 +510,7 @@ function SelectField({
         onChange={(e) => onChange(e.target.value)}
         required={required}
         className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
-        style={{ color: "var(--text)" }}
+        style={{ color: "var(--foreground)" }}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
