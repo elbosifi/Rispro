@@ -921,68 +921,6 @@ body::before {
 }
 
 @media (max-width: 640px) {
-  section[aria-labelledby="sop-register-heading"] table {
-    min-width: 0 !important;
-    table-layout: fixed;
-  }
-
-  section[aria-labelledby="sop-register-heading"] th:nth-child(3),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(3),
-  section[aria-labelledby="sop-register-heading"] th:nth-child(6),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(6),
-  section[aria-labelledby="sop-register-heading"] th:nth-child(7),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(7) {
-    display: none;
-  }
-
-  section[aria-labelledby="sop-register-heading"] th:nth-child(1),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(1) { width: 25%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(2),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(2) { width: 32%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(4),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(4) { width: 12%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(5),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(5) { width: 15%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(8),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(8) { width: 16%; }
-
-  section[aria-labelledby="sop-register-heading"] th,
-  section[aria-labelledby="sop-register-heading"] td {
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    font-size: 0.75rem;
-  }
-
-  section[aria-labelledby="sop-register-heading"] th:nth-child(1),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(1) { width: 24%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(2),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(2) { width: 31%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(4),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(4) { width: 11%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(5),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(5) { width: 14%; }
-  section[aria-labelledby="sop-register-heading"] th:nth-child(8),
-  section[aria-labelledby="sop-register-heading"] td:nth-child(8) { width: 20%; }
-
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(4),
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(5),
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(8) {
-    font-size: 0;
-    white-space: nowrap;
-  }
-
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(4)::after { content: "Ver"; font-size: 0.65rem; }
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(5)::after { content: "State"; font-size: 0.65rem; }
-  section[aria-labelledby="sop-register-heading"] thead th:nth-child(8)::after { content: "Open"; font-size: 0.65rem; }
-
-  section[aria-labelledby="sop-register-heading"] tbody td:nth-child(8) button {
-    min-width: 2rem;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
-    font-size: 0;
-    justify-content: center;
-  }
-
   section[aria-labelledby="sop-history-heading"] table {
     min-width: 0 !important;
     table-layout: fixed;

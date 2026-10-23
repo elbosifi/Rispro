@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -252,7 +253,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
   const { language } = useLanguage();
   return (
     <div
-      className="mx-auto flex w-full max-w-[1400px] flex-col gap-4"
+      className="compact-controls mx-auto flex w-full min-w-0 max-w-[1400px] flex-col gap-4"
       dir={language === "ar" ? "rtl" : "ltr"}
     >
       {children}
@@ -342,7 +343,7 @@ function LibraryPage() {
             {t("sops.library.category")}
             <select
               aria-label={t("sops.library.category")}
-              className="input-premium h-10"
+              className="input-premium h-10 !py-1 leading-normal"
               value={category}
               onChange={(event) => setCategory(event.target.value)}
             >
@@ -358,7 +359,7 @@ function LibraryPage() {
             {t("sops.library.status")}
             <select
               aria-label={t("sops.library.status")}
-              className="input-premium h-10"
+              className="input-premium h-10 !py-1 leading-normal"
               value={management ? status : "published"}
               disabled={!management}
               onChange={(event) => setStatus(event.target.value)}
@@ -378,7 +379,7 @@ function LibraryPage() {
               {t("sops.library.reviewStatus")}
               <select
                 aria-label={t("sops.library.reviewStatus")}
-                className="input-premium h-10"
+                className="input-premium h-10 !py-1 leading-normal"
                 value={reviewStatusFilter}
                 onChange={(event) =>
                   setReviewStatusFilter(
@@ -433,7 +434,7 @@ function LibraryPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[840px] text-start text-sm">
-              <thead className="bg-muted/20 text-xs uppercase tracking-wide text-muted-foreground">
+              <thead className="bg-muted/20 text-xs font-medium text-muted-foreground">
                 <tr>
                   <th className="p-3 text-start">{t("sops.library.code")}</th>
                   <th className="p-3 text-start">{t("sops.library.documentTitle")}</th>
@@ -646,7 +647,7 @@ function MetadataFields({
         {t("sops.library.category")}
         <select
           aria-label={t("sops.library.category")}
-          className="input-premium h-10"
+          className="input-premium h-10 !py-1 leading-normal"
           value={category}
           disabled={categoryReadOnly}
           onChange={(event) => setCategory(event.target.value)}
@@ -662,7 +663,7 @@ function MetadataFields({
         {t("sops.editor.ownerField")}
         <select
           aria-label={t("sops.editor.ownerField")}
-          className="input-premium h-10"
+          className="input-premium h-10 !py-1 leading-normal"
           value={ownerUserId ?? ""}
           onChange={(event) =>
             setOwnerUserId(event.target.value ? Number(event.target.value) : null)
@@ -1120,7 +1121,7 @@ function EditorForm({
           if (!publishing && !publishBusy && !save.isPending) setPublishOpen(false);
         }}
       >
-        <DialogContent maxWidth="520px">
+        <DialogContent maxWidth="520px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>
               {t("sops.editor.publishConfirm", { title: title || t("sops.editor.thisSop"), version })}
@@ -1154,7 +1155,7 @@ function EditorForm({
           if (!publishBusy && !save.isPending) setDiscardOpen(false);
         }}
       >
-        <DialogContent maxWidth="460px">
+        <DialogContent maxWidth="460px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.editor.discardTitle")}</DialogTitle>
             <DialogDescription>{t("sops.editor.discardDescription")}</DialogDescription>
@@ -1212,7 +1213,7 @@ function VersionHistory({
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] text-sm">
-          <thead className="bg-muted/20 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="bg-muted/20 text-xs font-medium text-muted-foreground">
             <tr>
               <th className="p-3 text-start">{t("sops.editor.versionField")}</th>
               <th className="p-3 text-start">{t("sops.detail.publishedEffective")}</th>
@@ -1654,7 +1655,7 @@ function DetailPage({ id }: { id: number }) {
           if (!revision.isPending) setRevisionOpen(false);
         }}
       >
-        <DialogContent maxWidth="520px">
+        <DialogContent maxWidth="520px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.detail.revisionDialogTitle")}</DialogTitle>
             <DialogDescription>
@@ -1726,7 +1727,7 @@ function DetailPage({ id }: { id: number }) {
           if (!archive.isPending) setArchiveOpen(false);
         }}
       >
-        <DialogContent maxWidth="520px">
+        <DialogContent maxWidth="520px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.detail.archiveConfirmTitle")}</DialogTitle>
             <DialogDescription>
@@ -1759,7 +1760,7 @@ function DetailPage({ id }: { id: number }) {
           if (!changeOwner.isPending) setOwnerOpen(false);
         }}
       >
-        <DialogContent maxWidth="480px">
+        <DialogContent maxWidth="480px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.detail.changeOwner")}</DialogTitle>
             <DialogDescription>
@@ -1771,7 +1772,7 @@ function DetailPage({ id }: { id: number }) {
               {t("sops.editor.ownerField")}
               <select
                 aria-label={t("sops.detail.changeOwner")}
-                className="input-premium h-10"
+                className="input-premium h-10 !py-1 leading-normal"
                 value={selectedOwnerUserId ?? ""}
                 onChange={(event) =>
                   setSelectedOwnerUserId(
@@ -1820,7 +1821,7 @@ function DetailPage({ id }: { id: number }) {
           if (!reviewNoChanges.isPending) setReviewNoChangesOpen(false);
         }}
       >
-        <DialogContent maxWidth="520px">
+        <DialogContent maxWidth="520px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.detail.reviewedNoChanges")}</DialogTitle>
             <DialogDescription>

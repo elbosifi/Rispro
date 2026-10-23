@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; primary printing batch complete. Reporting/document delivery batch underway.
+Status: active; reporting delivery and four SOP screens validated; monitoring/access batch next.
 
 ## Baseline and safety
 
@@ -22,7 +22,7 @@ Redirect-only aliases excluded: `/`, `/appointments/legacy`, `/v2/appointments`,
 
 ## Inventory
 
-Total discovered composed screen entries: **119**, including **5** regression references; **114** remaining entries. Inventory completeness will be checked against reachable nested views during browser assessment.
+Total discovered composed screen entries: **120**, including **5** regression references; **115** remaining entries. Inventory completeness will be checked against reachable nested views during browser assessment.
 
 | Module | Route / view | Component | Priority | Status |
 | --- | --- | --- | --- | --- |
@@ -52,8 +52,8 @@ Total discovered composed screen entries: **119**, including **5** regression re
 | Printing | `/print?appointmentId=:id` | `DirectAppointmentPrintPage` | P2 | Complete — batch 9 |
 | Printing | `/print/day-list` | `DayListPrintPage` | P2 | Complete — batch 9 |
 | Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Complete — batch 9 |
-| Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Discovered |
-| Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Discovered |
+| Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Complete — batch 10 |
+| Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Complete — batch 10 |
 | Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
 | Patients | `/search` | `SearchPage` | P2 | Complete — batch 6 |
 | PACS | `/pacs` | `PacsPage` | P2 | Complete — batch 8 |
@@ -62,20 +62,21 @@ Total discovered composed screen entries: **119**, including **5** regression re
 | Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Complete — batch 8 |
 | Settings | `/settings` | `SettingsPage` | P2 | Discovered |
 | Monitoring | `/incidents` | `IncidentsPage` | P2 | Discovered |
-| SOP | `/sops` | `SopsPage (library)` | P2 | Discovered |
-| SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Discovered |
-| SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Discovered |
+| SOP | `/sops` | `SopsPage (library)` | P2 | Complete — batch 11 |
+| SOP | `/sops/json-example` | `SopJsonExamplePage` | P2 | Complete — batch 11 |
+| SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Complete — batch 11 |
+| SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Complete — batch 11 |
 | Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Complete — batch 9 |
 | Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Discovered |
 | Reference | `/v2/appointments/admin` | `SchedulingAdminPage` | P2 | Regression reference |
 | Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Discovered |
-| Reporting | `/reporting/worklist/:token` | `ReportingBoardMobilePage` | P2 | Discovered |
-| Documents | `/reporting/worklist/:token/cases/:caseId/documents` | `ReportingWorklistDocumentsPage` | P1 | Discovered |
+| Reporting | `/reporting/worklist/:token` | `ReportingBoardMobilePage` | P2 | Complete — batch 10 |
+| Documents | `/reporting/worklist/:token/cases/:caseId/documents` | `ReportingWorklistDocumentsPage` | P1 | Complete — batch 10 |
 | Doctor | `/doctor/my-work` | `DoctorPortalHome` | P1 | Complete — batch 1 |
 | Doctor | `/doctor/today-cases` | `DoctorCasesPage` | P1 | Complete — batch 1 |
 | Doctor | `/doctor/reporting-board` | `DoctorReportingBoardPage` | P1 | Regression reference |
 | Doctor | `/doctor/doctor-worklists` | `DoctorWorklistsPage` | P1 | Complete — batch 1 |
-| Doctor | `/doctor/reporting-board/saved/:token` | `DoctorReportingBoardPage (saved view)` | P1 | Discovered |
+| Doctor | `/doctor/reporting-board/saved/:token` | `DoctorReportingBoardPage (saved view)` | P1 | Complete — batch 10 |
 | Doctor | `/doctor/roster-planner` | `DoctorRosterPage (management)` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/doctors-directory` | `DoctorAdminDoctorsPage` | P1 | Complete — batch 2 |
 | Doctor | `/doctor/advanced-setup` | `DoctorAdvancedSetupPage` | P1 | Complete — batch 2 |
@@ -305,3 +306,42 @@ Total discovered composed screen entries: **119**, including **5** regression re
 - Development corrections: localized audit label occurs in multiple places, so scoped the authorized expectation to its actual table cell; removed unsupported Testing Library `exact` option caught by TypeScript. Corrected uppercase paper-size comparison to the existing lowercase type. Corrected the A4 read fixture to the existing nested setting-value shape; final A4/A5 browser geometry checks pass. Capture comparison helper now tolerates changed full-page dimensions. None of these failures was hidden or reported as passing before correction.
 - Counts: 49 complete (42 polished, 7 accepted unchanged) of 114 remaining-scope entries, 65 remain (3 reporting/document entries initially assessed, 62 unassessed), plus final five-reference verification. PACS rollback checkpoint `0ca06b02`; printing checkpoint follows locally. No decisions pending, no push/PR/deploy or main squash-apply.
 - Next: saved reporting view, Personal Reporting Desk, its case documents and the two internal print renderers. Next component baseline: 90/90 mobile/reporting-document tests pass; initial three route captures pass with real synthetic saved token and assigned case.
+
+### Batch 10 — Reporting delivery assessment and required stop
+
+- Assessed saved Reporting Board, Personal Reporting Desk, case documents, internal appointment-slip renderer and internal registration-list renderer. Saved Board and internal slip renderer meet the existing reference and require no changes. Personal Desk has small uncommitted theme/search normalization; case-document page gains explicit existing English/LTR direction and theme focus ring; internal registration brand aligns to blue. No batch completion credit yet.
+- Passing checks so far: 117 focused component/print-helper tests; 4 existing read-only public/authenticated Personal Desk browser journeys before/after; 3 top-level before/after desktop/phone routes, 3 Arabic-preference captures (existing explicit English/LTR), 2 internal-render cases before/after with synthetic read fixtures; case and filter dialogs. Exact current frontend typecheck/build, targeted lint and harness:ui pass. Five original references recaptured successfully; final comparison still required.
+- Browser evidence correction: the first populated-document helper checked file-list/control rendering and zero writes but did not assert successful image decoding. Visual inspection found its image error, so it is NOT accepted as passing document-preview verification. The strengthened helper now fails on unchanged starting main.
+- Existing root cause: `listReportingBoardAppointmentDocuments` returns a view URL without `/api`; native image/open links consume it directly, receiving Vite HTML (HTTP 200, `text/html`) instead of image bytes. Three workspace thumbnail/open anchors also hardcode the unscoped `/api/documents/:id/view` route. The relevant API module and shared panel have no diff from starting main. Backend mounts the scoped view under `/api/reporting`; no backend/auth change is needed.
+- Evidence: `before`/`after/personal-reporting-document-390.png`, `reporting-document-network-before.json` (unscoped 404 plus scoped-looking non-API HTML 200), and `reporting-document-main-failure.log`. Proposed four-URL presentation repair is reviewable in `reporting-url-repair.patch` outside tracked source. It has not been applied. User approval requested under AGENTS rule 6; preserve token/case encoding, read-only mode and all existing permissions. Add focused API/helper/panel/browser regressions after authorization.
+- Goal remains incomplete: 49/114 completed, 65 remain (five current entries assessed, 60 unassessed), plus final original-five verification. Current uncommitted source: Personal Desk, case documents and registration-list brand. Rollback `b31fcdb7` on retained goal branch; main unchanged. No push/PR/deploy or squash-apply.
+
+### Batch 10 — Reporting delivery complete; scoped URL repair authorized
+
+- User authorized the four-URL repair. Reporting document API results now include `/api`; the shared panel's three thumbnail/open links reuse the existing document URL helper. Token/case encoding, generic fallback, permissions, read-only controls and backend scope are unchanged.
+- Chromium desktop/phone preview and thumbnail images now decode the synthetic PNG. Network assertions require HTTP 200 image/png from the scoped `/api/reporting/.../documents/:id/view` endpoint, with zero workflow writes; the strengthened test reproduces the old failure on starting main. No backend or external integration changes.
+- Completed five entries: Personal Reporting Desk, case documents and internal registration-list brand polished; saved Reporting Board and fixed-paper internal appointment slip accepted unchanged. Desk search reuses SearchInput, theme accents match blue tokens, native filter borders are muted and text stays visible. Original mobile control/touch geometry preserved. Rejected a compact select variant that clipped text before accepting the final native styling.
+- Checks: 117 initial focused tests; final affected reporting pages 90/90; URL/helper/panel regressions 62/62; original reference component workflows 144/144; read-only Personal Desk E2E 4/4. Exact final frontend typecheck/build PASS after the final filter edit. Targeted lint PASS with one existing hook warning; harness:ui PASS; whitespace clean. Initial baseline and final corrected screenshot cases, dialogs, internal renderers and Arabic-preference captures inspected. Existing English-only reporting content is explicitly LTR, not claimed translated.
+- Fresh original-five reference captures have matching dimensions: Appointment and Registration identical; Scheduling 0–0.002%, Dashboard 0.008–0.018%, Reporting 0.003–0.007% pixel differences from clocks/aging. No shared-base regression found. Comparison metadata: external `reference-diff.json`.
+- Counts before the next route discovery: 54/114 complete (45 polished, 9 accepted unchanged). This validated batch remains uncommitted because the next baseline failed before checkpointing; rollback branch retains `b31fcdb7`. No push/PR/deploy or squash-apply.
+
+### SOP baseline — required stop before application edits
+
+- Before any SOP application edit, focused SOP page/editor run: 14 FAIL, 19 PASS across two files. Same exact result reproduced on unchanged starting main. Logs: external `sop-baseline-vitest.log` and `sop-main-baseline-vitest.log`. SOP source, tests and language catalogs have zero diff from starting main.
+- Root cause: old test labels differ from the existing English catalog, including file extensions, sentence case, revision/owner/review labels and the superseded-version wording. Downstream assertions also retain the previous import-success wording. Review-status badges now read “Due soon” and “Overdue”; tests must scope these to their synthetic SOP rows to avoid matching filter options.
+- Prepared an external reviewable patch only: `sop-label-repair-proposed.patch`. It updates 20 stale string values plus two row-scoped review-status assertions; no application behavior or assertion removed. User authorization requested under AGENTS rule 6. No test repair applied yet; further implementation stopped.
+- Baseline library and authoring desktop/phone screenshots captured, but not complete. Source inspection also confirmed separately navigable `/sops/json-example` (library button and pathname dispatch), so it is explicitly added rather than hidden inside library coverage. Inventory now 120 entries: 5 references, 115 remaining scope. 54 complete, 61 remain (2 SOP entries initially assessed, 59 unassessed).
+- Goal is incomplete. Current eight modified files belong to the validated reporting batch and progress record. Last committed rollback `b31fcdb7`, local-only `codex/application-ui-polish-goal`; main remains at starting SHA. No main squash-apply or final approval recommendation while scope remains.
+
+### SOP baseline repair authorized
+
+- User approved the prepared test-only patch. Applied exactly the scoped label updates and row-scoped review-status checks; all 33 SOP page/editor tests PASS. No application behavior changed for the repair. Previous stop is resolved.
+- Populated English/Arabic desktop/phone baseline captures pass. Concrete mobile register defect: positional CSS displays owner under “Ver,” version under “State,” and review date under “Open.” Removing those register-only overrides restores real localized headers and all columns inside the existing horizontal scroll wrapper. Existing history-specific responsive rules are retained. Metadata/buttons/dialogs use the existing compact-control stylesheet; domain toolbar heading selector fits its 32px toolbar. SOP action order/handlers remain unchanged.
+
+### Batch 11 — SOP library, authoring, details and example configuration complete
+
+- Four entries polished. Reused existing shared controls/compact tokens; reduced oversized metadata/button controls and aligned domain toolbar heading selector to its 32px controls. Dialog shells retain existing geometry, action order and handlers. Native select vertical padding was adjusted after Arabic screenshot inspection; text now fits without clipping. Table headings use normal readable case.
+- Removed only obsolete mobile register positional overrides from index.css. They relabeled owner/version/review columns incorrectly and hid status. Existing horizontally scrollable table now preserves every real localized column and the unchanged Open action. Browser asserts all nine management headers present with no synthetic pseudo-labels, no document overflow, and Open reachable in the viewport through keyboard focus. History-specific mobile layout remains unchanged.
+- Browser: two populated synthetic read-fixture scenarios (English/Arabic, each desktop/phone) before/after; library register, published content/history, owner/review/revision/archive dialogs, JSON import, toolbar and JSON example/reset. Escape closes dialogs. No SOP create/save/review/publish/archive/import/reset writes executed in these browser fixtures. Six final real route captures (three routes, two languages), plus five original references, pass at desktop/phone. Safe synthetic bilingual content only.
+- Checks: authorized baseline repair 33/33 PASS; final SOP focused tests 33/33 PASS. Exact final frontend typecheck/build PASS; targeted lint PASS; harness:ui PASS; whitespace clean. Existing build/jsdom warnings retained. Original-five image dimensions match; tiny dynamic text differences recorded in reference-diff.json, no layout regression. Before/after pairs in external comparisons/sop-*; 11 final route/reference capture cases and 2 populated-state cases PASS.
+- Counts: 58/115 remaining-scope entries complete (49 polished, 9 accepted unchanged), 57 remain unassessed. Inventory 120 including five reference screens. No pending product decisions. Next batch: Statistics, Incidents, Login, Public Appointment and active Legacy Access Viewer. No push, PR, deployment or main squash-apply.
