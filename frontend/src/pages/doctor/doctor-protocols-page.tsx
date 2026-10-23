@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreVertical, Pencil, Plus, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Mic, MoreVertical, Pencil, Plus, TriangleAlert, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -80,6 +80,7 @@ import { AnchoredMenu, Badge, Button, Checkbox, Dialog, DialogContent, DialogDes
 import { DateInput } from "@/components/common/date-input";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { useV2ExamTypes } from "@/v2/appointments/api";
+import { ProtocolDictationDialog } from "./protocol-dictation-dialog";
 
 const PROTOCOLING_WORKLIST_REFRESH_MS = 10_000;
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
@@ -2045,6 +2046,14 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
 
 const PROTOCOL_SUGGESTION_STOP_WORDS = new Set(["with", "without", "contrast", "left", "right", "bilateral", "and", "or", "the", "a", "an", "ct", "mri", "scan", "exam", "routine", "non", "con"]);
 
+const PROTOCOL_DICTATION_FIELDS = {
+  freeTextProtocol: "Free-text protocol",
+  protocolNotes: "Patient-specific instructions",
+  contrastNotes: "Contrast/preparation instructions",
+};
+type ProtocolDictationField = keyof typeof PROTOCOL_DICTATION_FIELDS;
+type DictationSelection = { start: number; end: number; value: string };
+
 function ProtocolAssignmentModal({
   appointment,
   detail,
@@ -2096,6 +2105,45 @@ function ProtocolAssignmentModal({
   const [freeTextProtocol, setFreeTextProtocol] = useState(existing?.freeTextProtocol ?? "");
   const [protocolModeOverride, setProtocolModeOverride] = useState<"saved" | "free-text" | null>(existing ? (existing.freeTextProtocol ? "free-text" : "saved") : null);
   const [modeTouched, setModeTouched] = useState(false);
+  const [dictationTarget, setDictationTarget] = useState<{ field: ProtocolDictationField; appointmentId: number; selection: DictationSelection | null } | null>(null);
+  const dictationFieldsRef = useRef<Record<ProtocolDictationField, HTMLTextAreaElement | null>>({ freeTextProtocol: null, protocolNotes: null, contrastNotes: null });
+  const dictationSelectionsRef = useRef<Partial<Record<ProtocolDictationField, DictationSelection>>>({});
+  const rememberDictationSelection = (field: ProtocolDictationField) => {
+    const element = dictationFieldsRef.current[field];
+    if (element) dictationSelectionsRef.current[field] = { start: element.selectionStart, end: element.selectionEnd, value: element.value };
+  };
+  const dictationButton = (field: ProtocolDictationField) => <Button
+    type="button" variant="ghost" size="sm" className="absolute end-0 -top-1" style={{ minHeight: 24, height: 24, width: 24, padding: 0 }} disabled={saving}
+    aria-label={`Dictate ${PROTOCOL_DICTATION_FIELDS[field].toLowerCase()}`} title={`Dictate ${PROTOCOL_DICTATION_FIELDS[field].toLowerCase()}`}
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={() => {
+      if (document.activeElement === dictationFieldsRef.current[field]) rememberDictationSelection(field);
+      setDictationTarget({ field, appointmentId: appointment.appointmentId, selection: dictationSelectionsRef.current[field] ?? null });
+    }}
+  ><Mic size={14} aria-hidden="true" /></Button>;
+  const insertDictation = (reviewed: string) => {
+    if (!dictationTarget || saving || dictationTarget.appointmentId !== appointment.appointmentId || !reviewed.trim()) return;
+    const element = dictationFieldsRef.current[dictationTarget.field];
+    if (!element?.isConnected || element.disabled || element.readOnly) return;
+    const current = element.value;
+    const selection = dictationTarget.selection;
+    const validSelection = selection && selection.value === current && selection.start >= 0 && selection.end >= selection.start && selection.end <= current.length;
+    const start = validSelection ? selection.start : current.length;
+    const end = validSelection ? selection.end : current.length;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const leading = before && !/[\s([{]$/.test(before) && !/^[\s,.;:!?)}\]]/.test(reviewed) ? " " : "";
+    const trailing = after && !/^[\s,.;:!?)}\]]/.test(after) && !/\s$/.test(reviewed) ? " " : "";
+    const inserted = leading + reviewed + trailing;
+    const value = before + inserted + after;
+    if (dictationTarget.field === "freeTextProtocol") { setModeTouched(true); setFreeTextProtocol(value); }
+    else if (dictationTarget.field === "protocolNotes") setProtocolNotes(value);
+    else setContrastNotes(value);
+    setDictationTarget(null);
+    requestAnimationFrame(() => {
+      if (element.isConnected) { element.focus(); element.setSelectionRange(start + inserted.length, start + inserted.length); }
+    });
+  };
   const protocolMode = protocolModeOverride ?? (modeTouched ? "free-text" : activeProtocols.length > 0 ? "saved" : "free-text");
   const [protocolSearch, setProtocolSearch] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -2359,6 +2407,12 @@ function ProtocolAssignmentModal({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // The dictation dialog owns Escape and editing; never save or move cases
+      // through the assignment shortcuts while a recording session is open.
+      if (dictationTarget) {
+        if (((event.ctrlKey || event.metaKey) && ["s", "S", "Enter"].includes(event.key)) || (event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key))) event.preventDefault();
+        return;
+      }
       if (event.key === "Escape" && actionMenuOpen) { event.preventDefault(); setActionMenuOpen(false); return; }
       // The decision dialog owns Escape while open; during the request, keep
       // both it and the surrounding workspace stable until the server replies.
@@ -2385,7 +2439,7 @@ function ProtocolAssignmentModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actionMenuOpen, embedded, examTypeProtocolDecisionOpen, examTypeUpdateMutation.isPending, executeSave, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+  }, [dictationTarget, actionMenuOpen, embedded, examTypeProtocolDecisionOpen, examTypeUpdateMutation.isPending, executeSave, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
 
   useEffect(() => {
     if (!actionMenuOpen) return;
@@ -2632,8 +2686,11 @@ function ProtocolAssignmentModal({
                             </button>
                           </div>
                         ) : null}
+                        <div className="relative">
                         <Field label="Free-text protocol">
                           <textarea
+                            ref={(element) => { dictationFieldsRef.current.freeTextProtocol = element; }}
+                            onSelect={() => rememberDictationSelection("freeTextProtocol")}
                             aria-label="Free-text protocol"
                             placeholder="Enter sequences or phases, coverage, contrast instructions, preparation, and any special instructions."
                             value={freeTextProtocol}
@@ -2642,14 +2699,16 @@ function ProtocolAssignmentModal({
                             style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}
                           />
                         </Field>
+                        {dictationButton("freeTextProtocol")}
+                        </div>
                       </div>
                     )}
                     <div className="mt-3 rounded-lg border" style={{ borderColor: "var(--border)" }}>
                       <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-start text-sm font-semibold" aria-expanded={additionalInstructionsOpen} onClick={() => setAdditionalInstructionsOpen((current) => !current)}>Additional instructions<span aria-hidden="true">{additionalInstructionsOpen ? "−" : "+"}</span></button>
                       {additionalInstructionsOpen ? <div className="space-y-3 border-t p-3" style={{ borderColor: "var(--border)" }}>
                         <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>Optional scanner selection.</span></Field>
-                        <Field label="Patient-specific instructions"><textarea aria-label="Protocol instructions" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
-                        <Field label="Contrast/preparation instructions"><textarea aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
+                        <div className="relative"><Field label="Patient-specific instructions"><textarea ref={(element) => { dictationFieldsRef.current.protocolNotes = element; }} onSelect={() => rememberDictationSelection("protocolNotes")} aria-label="Protocol instructions" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>{dictationButton("protocolNotes")}</div>
+                        <div className="relative"><Field label="Contrast/preparation instructions"><textarea ref={(element) => { dictationFieldsRef.current.contrastNotes = element; }} onSelect={() => rememberDictationSelection("contrastNotes")} aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>{dictationButton("contrastNotes")}</div>
                       </div> : null}
                     </div>
                     {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
@@ -2694,6 +2753,7 @@ function ProtocolAssignmentModal({
           </>
         )}
         {detailsOpen ? <ProtocolingAppointmentDetailsDrawer key={appointment.appointmentId} appointment={appointment} onClose={() => setDetailsOpen(false)} /> : null}
+        {dictationTarget?.appointmentId === appointment.appointmentId ? <ProtocolDictationDialog fieldLabel={PROTOCOL_DICTATION_FIELDS[dictationTarget.field]} onInsert={insertDictation} onClose={() => setDictationTarget(null)} /> : null}
         <ComplementaryRecallRequestDialog open={recallDialogOpen} onClose={() => setRecallDialogOpen(false)} examLabel={appointment.examTypeName ?? "Unspecified"} submitting={recallMutation.isPending} error={recallMutation.error instanceof Error ? recallMutation.error.message : null} onSubmit={(payload) => recallMutation.mutate(payload)} />
         <ComplementaryRecallWithdrawDialog open={withdrawRecallDialogOpen} status={appointment.activeComplementaryRecall?.status ?? "pending_scheduling"} submitting={withdrawRecallMutation.isPending} error={withdrawRecallMutation.error instanceof Error ? withdrawRecallMutation.error.message : null} onClose={() => setWithdrawRecallDialogOpen(false)} onConfirm={() => withdrawRecallMutation.mutate()} />
         <Dialog open={examTypeProtocolDecisionOpen} onClose={() => { if (!examTypeUpdateMutation.isPending) setExamTypeProtocolDecisionOpen(false); }}>

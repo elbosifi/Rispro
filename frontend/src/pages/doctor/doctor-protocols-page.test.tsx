@@ -1,15 +1,18 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render as renderTestingLibrary, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderTestingLibrary, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment, ProtocolAssignment } from "@/types/api";
 import type { ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow, ProtocolLibraryVersion, ProtocolLibraryVersionDetail } from "@/types/api";
 import * as apiHooks from "@/lib/api-hooks";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPatientUrl } from "@/lib/radiant";
 import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
+import { transcribeDictation } from "@/lib/medical-dictation-api";
+
+vi.mock("@/lib/medical-dictation-api", () => ({ transcribeDictation: vi.fn() }));
 
 function render(ui: ReactElement) {
   return renderTestingLibrary(<MemoryRouter>{ui}</MemoryRouter>);
@@ -219,6 +222,213 @@ describe("Doctor protocoling request documents", () => {
     renderTestingLibrary(<MemoryRouter initialEntries={["/doctor/protocols?appointmentId=42"]}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider></MemoryRouter>);
 
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
+  });
+
+  describe("protocol dictation", () => {
+    const stopTrack = vi.fn();
+    const cleaned = "Axial T1.\n\nNo contrast.";
+    let mediaDevicesDescriptor: PropertyDescriptor | undefined;
+    beforeEach(() => {
+      mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+      vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+      stopTrack.mockClear();
+      class Recorder {
+        static isTypeSupported() { return true; }
+        state = "inactive";
+        mimeType = "audio/webm";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        start() { this.state = "recording"; }
+        stop() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["synthetic audio"]) }); this.onstop?.(); }
+      }
+      vi.stubGlobal("MediaRecorder", Recorder);
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] })) } });
+      vi.mocked(transcribeDictation).mockReset();
+      vi.mocked(transcribeDictation).mockResolvedValue({ text: "Um axial T1 period new paragraph no contrast period</s>", processing_seconds: 1 });
+      vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
+    });
+    afterEach(() => {
+      cleanup();
+      vi.unstubAllGlobals();
+      vi.mocked(window.scrollTo).mockRestore();
+      if (mediaDevicesDescriptor) Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+    });
+    async function openAssignment() {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      const view = render(<QueryClientProvider client={client}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+      await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+      return { ...view, client };
+    }
+    async function dictate(label = "free-text protocol") {
+      await userEvent.click(screen.getByRole("button", { name: `Dictate ${label}` }));
+      const dialog = screen.getByRole("dialog", { name: `Dictate ${label}` });
+      expect(within(dialog).getByRole("button", { name: "Insert Text" })).toHaveProperty("disabled", true);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Start Recording" }));
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Stop Recording" })).toHaveProperty("disabled", false));
+      await userEvent.click(within(dialog).getByRole("button", { name: "Stop Recording" }));
+      await userEvent.click(within(dialog).getByRole("button", { name: "Transcribe" }));
+      return dialog;
+    }
+    async function readyPreview(dialog: HTMLElement) {
+      const preview = within(dialog).getByRole("textbox", { name: "Basic Cleaned Text" });
+      await waitFor(() => expect(preview).toHaveProperty("value", cleaned));
+      return preview;
+    }
+
+    it.each([
+      ["free-text protocol", "Free-text protocol"],
+      ["patient-specific instructions", "Protocol instructions"],
+      ["contrast/preparation instructions", "Contrast/preparation instructions"],
+    ])("reviews and inserts %s without saving or changing the selected mode", async (buttonLabel, fieldLabel) => {
+      if (buttonLabel !== "free-text protocol") vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([libraryProtocol]);
+      const { client } = await openAssignment();
+      if (buttonLabel !== "free-text protocol") {
+        expect(screen.queryByRole("button", { name: "Dictate free-text protocol" })).toBeNull();
+        await userEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
+      }
+      const field = screen.getByRole("textbox", { name: fieldLabel });
+      const dialog = await dictate(buttonLabel);
+      const preview = await readyPreview(dialog);
+      expect(field).toHaveProperty("value", "");
+      fireEvent.change(preview, { target: { value: cleaned + " Reviewed." } });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Insert Text" }));
+      expect(field).toHaveProperty("value", cleaned + " Reviewed.");
+      await waitFor(() => expect(document.activeElement).toBe(field));
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+      expect(mockUpdateProtocolExamType).not.toHaveBeenCalled();
+      expect(screen.getByRole("radio", { name: buttonLabel === "free-text protocol" ? "Free-text protocol" : "Saved protocol" }).getAttribute("aria-checked")).toBe("true");
+      if (buttonLabel === "free-text protocol") {
+        // Dictation must mark the mode touched, just like typing, even if the
+        // library refreshes from empty to populated after insertion.
+        act(() => client.setQueryData(["doctor", "protocol-library", "protocols"], [libraryProtocol]));
+        expect(screen.getByRole("radio", { name: "Free-text protocol" }).getAttribute("aria-checked")).toBe("true");
+      }
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
+      expect(stopTrack).toHaveBeenCalled();
+    });
+
+    it.each([
+      ["Before after", 7, 7, "Before Axial T1.\n\nNo contrast. after", 31],
+      ["Before OLD after", 7, 10, "Before Axial T1.\n\nNo contrast. after", 30],
+    ])("inserts at the captured cursor/selection in %j", async (original, start, end, expected, expectedCaret) => {
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
+      fireEvent.change(field, { target: { value: original } });
+      field.focus(); field.setSelectionRange(Number(start), Number(end)); fireEvent.select(field);
+      const dialog = await dictate();
+      await readyPreview(dialog);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Insert Text" }));
+      expect(field.value).toBe(expected);
+      await waitFor(() => expect(document.activeElement).toBe(field));
+      await waitFor(() => expect(field.selectionStart).toBe(expectedCaret));
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+
+    it("appends with spacing when the field has no captured cursor, then saves only on explicit Save", async () => {
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
+      fireEvent.change(field, { target: { value: "Existing instructions." } });
+      const dialog = await dictate();
+      await readyPreview(dialog);
+      await userEvent.keyboard("{Control>}s{/Control}{Control>}{Enter}{/Control}{Alt>}{ArrowRight}{/Alt}");
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: "Assign protocol" })).toBeTruthy();
+      await userEvent.click(within(dialog).getByRole("button", { name: "Insert Text" }));
+      expect(field).toHaveProperty("value", "Existing instructions. " + cleaned);
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: "Existing instructions. " + cleaned })));
+    });
+
+    it("keeps existing text on transcription failure and lets the doctor retry", async () => {
+      vi.mocked(transcribeDictation).mockRejectedValueOnce(new Error("MedASR is unavailable."));
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
+      fireEvent.change(field, { target: { value: "Keep this clinical instruction." } });
+      const dialog = await dictate();
+      expect((await within(dialog).findByRole("alert")).textContent).toContain("MedASR is unavailable.");
+      expect(field).toHaveProperty("value", "Keep this clinical instruction.");
+      expect(within(dialog).getByRole("button", { name: "Insert Text" })).toHaveProperty("disabled", true);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Transcribe" }));
+      await readyPreview(dialog);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(field).toHaveProperty("value", "Keep this clinical instruction.");
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+
+    it("shows microphone permission failures without changing the field", async () => {
+      vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
+      await openAssignment();
+      await userEvent.click(screen.getByRole("button", { name: "Dictate free-text protocol" }));
+      const dialog = screen.getByRole("dialog", { name: "Dictate free-text protocol" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Start Recording" }));
+      expect((await within(dialog).findByRole("alert")).textContent).toContain("Microphone access was denied");
+      expect(within(dialog).getByRole("button", { name: "Insert Text" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
+    });
+
+    it("discards a reviewed transcription on Cancel without dirtying the assignment", async () => {
+      await openAssignment();
+      const dialog = await dictate();
+      await readyPreview(dialog);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog", { name: "Assign protocol" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+
+    it.each(["Cancel", "Escape", "appointment close"])("releases the microphone on %s and keeps Escape scoped to dictation", async (action) => {
+      const view = await openAssignment();
+      await userEvent.click(screen.getByRole("button", { name: "Dictate free-text protocol" }));
+      const dialog = screen.getByRole("dialog", { name: "Dictate free-text protocol" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Start Recording" }));
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Stop Recording" })).toHaveProperty("disabled", false));
+      stopTrack.mockClear();
+      if (action === "appointment close") view.unmount();
+      else {
+        if (action === "Escape") await userEvent.keyboard("{Escape}");
+        else await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByRole("dialog", { name: "Dictate free-text protocol" })).toBeNull();
+        expect(screen.getByRole("dialog", { name: "Assign protocol" })).toBeTruthy();
+      }
+      expect(stopTrack).toHaveBeenCalled();
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+
+    it("does not open the parent's discard prompt when Escape closes dictation over unsaved text", async () => {
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
+      fireEvent.change(field, { target: { value: "Unsaved instruction." } });
+      await userEvent.click(screen.getByRole("button", { name: "Dictate free-text protocol" }));
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Dictate free-text protocol" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Discard unsaved changes?" })).toBeNull();
+      expect(field).toHaveProperty("value", "Unsaved instruction.");
+    });
+
+    it("discards a pending transcription when moving to another appointment", async () => {
+      let resolve!: (result: { text: string; processing_seconds: number }) => void;
+      vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+      const next = { ...appointment, appointmentId: 43 };
+      mockFetchAppointmentDetail.mockImplementation(async (id: number) => ({ appointment: id === 43 ? next : appointment, assignmentDetail: null }));
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      const workspace = (id: number) => <QueryClientProvider client={client}><ProtocolingAppointmentWorkspace appointmentId={id} canAssign onClose={vi.fn()} /></QueryClientProvider>;
+      const view = render(workspace(42));
+      await screen.findByRole("textbox", { name: "Free-text protocol" });
+      const dialog = await dictate();
+      expect(within(dialog).getByRole("button", { name: "Insert Text" })).toHaveProperty("disabled", true);
+      view.rerender(<MemoryRouter>{workspace(43)}</MemoryRouter>);
+      await waitFor(() => expect(screen.getByTestId("protocoling-request-documents").getAttribute("data-appointment-id")).toBe("43"));
+      await act(async () => resolve({ text: "Wrong patient period", processing_seconds: 1 }));
+      expect(screen.queryByRole("dialog", { name: "Dictate free-text protocol" })).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
   });
 
   it("renders the existing Protocoling workspace as an embedded single case without navigating or polling the worklist", async () => {
