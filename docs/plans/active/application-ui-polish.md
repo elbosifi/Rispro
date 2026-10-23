@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; patient management/search complete, execution/documents/override batch underway.
+Status: active; execution/documents/override batch complete. PACS/monitoring batch baseline captured.
 
 ## Baseline and safety
 
@@ -34,16 +34,16 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Patients | `/patients/merge` | `PatientMergePage` | P2 | Complete — batch 6 |
 | Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Complete — batch 6 |
 | Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
-| Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Discovered |
+| Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Complete — batch 7 |
 | Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Complete — batch 4 |
 | Operations | `/calendar` | `CalendarPage` | P1 | Complete — batch 5 |
 | Operations | `/registrations` | `RegistrationsPage` | P1 | Complete — batch 5 |
-| Documents | `/request-scans` | `RequestScansPage` | P1 | Discovered |
+| Documents | `/request-scans` | `RequestScansPage` | P1 | Complete — batch 7 |
 | Operations | `/queue` | `QueuePage` | P1 | Complete — batch 5 |
 | Operations | `/queue/check-in` | `QueueCheckInPage` | P1 | Complete — batch 5 |
 | Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Complete — batch 5 |
-| Modality | `/modality` | `ModalityPage` | P1 | Discovered |
-| Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Discovered |
+| Modality | `/modality` | `ModalityPage` | P1 | Complete — batch 7 |
+| Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Complete — batch 7 |
 | Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Complete — batch 4 |
@@ -247,3 +247,25 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Checks: 59 focused tests including shared registration workflow pass; existing patient navigation E2E 2/2 pass; top-level captures 5/5, Arabic 5/5, authorized views 2/2 each language, Search case 1/1 and dictionary row case 1/1 pass. Exact final frontend typecheck/build, targeted lint, harness:ui and whitespace checks pass. Existing build warning retained.
 - Temporary capture-helper corrections: used the existing Edit Patient/Save Changes labels; kept row selection stable while editing; prevented reload initialization from resetting Arabic to English. Corrected runs and actual screenshots were inspected; no UI text changed to satisfy a helper.
 - Counts: 35 complete (28 polished, 7 accepted unchanged), 78 remain (4 initially assessed, 74 unassessed). Original five passed the prior milestone; final regression remains required. No decisions pending. Next baseline: 66 focused execution/document/override UI tests and 2 Modality navigation E2E tests pass.
+
+### Execution batch — baseline failure checkpoint
+
+- Four localized presentation edits are uncommitted: Modality desktop title/control sizing, Request Scans/Document Ingestion compact controls and readable description, Override Requests compact controls and persistent page-only filter labels. Mobile Modality touch targets and all handlers are preserved. This batch is not complete.
+- Targeted run: 169 passed, 1 failed across four files. Failure: `modality-page.test.tsx:820` tries clicking “Scan Paper” with NAPS2 disabled and the retired scanner-app flag enabled. The unchanged shared document panel explicitly sets `scannerAppEnabled = false` and exposes only supported NAPS2 scanning.
+- Reproduced the exact failing test in the detached starting-main worktree: 1 failed, 103 skipped by the targeted name filter. Both test and document panel are unchanged by this goal. Log: `/tmp/rispro-ui-polish-20261022/modality-main-baseline.log`. No test/application workaround applied.
+- Proposed scoped repair: preserve all clinical-upload assertions, then assert the unsupported Scan Paper action is absent and `createScanSessionMock` is not called. Enabled NAPS2 coverage already exists in Modality and RequestDocumentsPanel tests. User authorization requested under AGENTS rule 6; further implementation stopped pending response.
+- Four initial after capture cases passed at desktop/phone, but comparison, populated/dialog/RTL coverage, final targeted checks and exact-tree typecheck/build remain pending. No completion credit added.
+- Latest validated rollback checkpoint: `8daf5e69` on local-only `codex/application-ui-polish-goal`; main remains at the starting SHA. No push/PR/deploy or squash-apply.
+
+### Batch 7 — Modality, document operations and overrides complete
+
+- Completed/polished four entries: Modality Board, Document Ingestion, Request Scans and Override Requests. Desktop Modality heading no longer squeezed by the action row; desktop controls use established compact tokens. Previously polished phone touch targets remain unchanged.
+- Request Scans/Document Ingestion: readable wrapping description, blue selected tab, consistent compact buttons/fields/dialogs, muted row dividers, and existing SearchInput fixes assignment search-icon overlap. Native table scrolling, actions, assignments, scanner/PACS/export handlers and dialog geometry remain unchanged.
+- Override Requests: localized persistent page filter labels and compact controls. Drawer accessible names and filter behavior retained; no approval/rejection authority, validation, re-authentication or scheduling rules changed. Existing English-only summary/action copy inside Arabic layouts remains a localization limitation.
+- User authorized the stale Modality test repair: preserved all upload assertions; asserts Scan Paper absent and retired scanner-session API not called when NAPS2 is disabled. Existing enabled-NAPS2 tests retained. Reproduced old failure on starting main before repair; historical failure checkpoint above is resolved.
+- Browser: four initial after desktop/phone cases, two populated modality/document cases, four actual Arabic cases, three populated synthetic read-fixture cases before/after (including assignment/archive dialogs and rejection forms), three Arabic synthetic cases, and two existing real Modality navigation/deep-link E2E tests pass. Read fixtures explicitly assert zero workflow mutation requests. External scanner, archive and PACS integrations are not validated by these fixtures.
+- Capture-helper correction: narrowed an overbroad interception matching a Vite module URL; rejected blank captures, terminated those two temporary runs and reran successfully. Corrected an unsupported helper assumption that blank rejection disables its button; verified empty required reason without submitting instead. No app behavior changed to satisfy helpers.
+- Checks: 170 focused tests pass; final Request Scans styling delta 44/44 pass; exact final frontend typecheck/build pass; targeted lint passes with one existing hook warning; harness:ui and whitespace checks pass. Existing build/jsdom warnings retained.
+- Five references recaptured against starting main with current synthetic data: ten viewport pairs have matching dimensions; Appointment/Registration/Scheduling pixel-identical, others differ only by dynamic clock text (0.009–0.022%). Earlier reporting discrepancy was stale fixture data; fresh matching-data pairs resolve it. Final reference checks still required after future shared edits.
+- Counts: 39 complete (32 polished, 7 accepted unchanged), 74 remain (5 PACS/monitoring initially assessed, 69 unassessed). No product decisions pending. Next baseline: 115 PACS/remap/Orthanc/monitor component tests and five initial capture cases pass.
+- Rollback checkpoint follows locally on retained goal branch; no push, PR, deployment or main squash-apply.

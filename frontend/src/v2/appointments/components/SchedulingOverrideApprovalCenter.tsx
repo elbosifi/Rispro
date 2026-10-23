@@ -441,16 +441,28 @@ export function SchedulingOverrideRequestsWorkspace({
   return (
     <div className={variant === "page" ? "space-y-4" : "flex min-h-0 flex-1 flex-col"}>
       <div className={`grid grid-cols-2 gap-2 ${variant === "drawer" ? "border-b border-border p-3 sm:grid-cols-4" : "rounded-2xl border border-border bg-card p-3 shadow-sm sm:grid-cols-4"}`}>
-        <select aria-label={t(language, "overrideRequests.statusFilter")} className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
+        <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">
+          {variant === "page" ? <span>{t(language, "calendar.statusFilter")}</span> : null}
+          <select aria-label={t(language, "overrideRequests.statusFilter")} className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
           {STATUS_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value || t(language, "calendar.allStatuses")}</option>)}
-        </select>
-        <select aria-label={t(language, "overrideRequests.requestTypeFilter")} className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">
+          {variant === "page" ? <span>{t(language, "overrideRequests.requestType")}</span> : null}
+          <select aria-label={t(language, "overrideRequests.requestTypeFilter")} className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
           {REQUEST_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatRequestType(value) : t(language, "overrideRequests.allRequestTypes")}</option>)}
-        </select>
-        <select aria-label={t(language, "overrideRequests.overrideTypeFilter")} className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">
+          {variant === "page" ? <span>{t(language, "overrideRequests.overrideType")}</span> : null}
+          <select aria-label={t(language, "overrideRequests.overrideTypeFilter")} className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
           {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : t(language, "overrideRequests.allOverrideTypes")}</option>)}
-        </select>
-        <Input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">
+          {variant === "page" ? <span>{t(language, "common.date")}</span> : null}
+          <Input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+        </label>
         <div className="col-span-2 flex justify-end sm:col-span-4">
           <Button type="button" size="sm" variant="secondary" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}>
             {t(language, listQuery.isFetching ? "common.refreshing" : "common.refreshNow")}

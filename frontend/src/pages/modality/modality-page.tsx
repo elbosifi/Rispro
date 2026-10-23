@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -956,12 +957,12 @@ export default function ModalityPage() {
     : null;
 
   return (
-    <div data-testid="modality-page-root" className="min-h-screen bg-slate-50 lg:bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
+    <div data-testid="modality-page-root" className={`${!isNarrowViewport ? "compact-controls " : ""}min-h-screen bg-slate-50 lg:bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]`} dir={isArabic ? "rtl" : "ltr"}>
       <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-1 p-2.5 sm:gap-3 sm:p-4 lg:p-5">
         <header data-testid="modality-board-header" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-none lg:rounded-2xl lg:border-slate-200/80 lg:bg-white/90 lg:px-4 lg:py-3 lg:shadow-[0_12px_30px_rgba(15,23,42,0.06)] lg:backdrop-blur-md">
           {!isNarrowViewport ? <>
           <div className={`hidden flex-col gap-2 lg:flex lg:gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
-            <div className={`flex items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
+            <div className={`flex shrink-0 items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className="hidden h-11 w-11 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-sm lg:flex">
                 <span className="text-xs font-bold tracking-[0.18em]">NCCB</span>
               </div>
@@ -978,7 +979,7 @@ export default function ModalityPage() {
               </div>
             </div>
 
-            <div className={`flex w-full items-center justify-end gap-1.5 lg:flex-wrap lg:gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+            <div className={`flex w-full items-center justify-end gap-1.5 lg:flex-wrap lg:gap-2 xl:w-auto xl:flex-1 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className={`hidden flex-wrap items-center gap-1.5 lg:flex ${isArabic ? "flex-row-reverse" : ""}`}>
                 {headerCounterChips.map((chip) => (
                   <button
