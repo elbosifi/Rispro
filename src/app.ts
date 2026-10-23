@@ -44,6 +44,7 @@ import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
 import { emailSettingsRouter } from "./routes/email-settings.js";
+import { medicalDictationRouter } from "./modules/medical-dictation/medical-dictation-routes.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 import { incidentsRouter } from "./routes/incidents.js";
 import { sopsRouter } from "./modules/sops/routes.js";
@@ -182,6 +183,7 @@ export function createApp(): Application {
   app.use("/api/comparisons", comparisonsRouter);
   app.use("/api/ir-referrals", irReferralsRouter);
   app.use("/api/settings/email-notifications", emailSettingsRouter);
+  app.use("/api/medical-dictation", medicalDictationRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/user-notifications", userNotificationsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);

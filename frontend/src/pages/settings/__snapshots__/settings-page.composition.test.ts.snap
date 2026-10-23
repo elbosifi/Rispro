@@ -139,6 +139,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
+    "medical_dictation",
+    "integrations",
+  ],
+  [
     "authoritative_orthanc",
     "integrations",
   ],
