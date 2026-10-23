@@ -68,3 +68,23 @@ it("rejects empty and oversized recordings", async () => {
   act(() => instances.at(-1)!.ondataavailable?.({ data: new Blob([new Uint8Array(15 * 1024 * 1024 + 1)]) }));
   expect(result.current.error).toBe("oversized"); expect(result.current.recording).toBeNull(); expect(stopTrack).toHaveBeenCalled();
 });
+it("cancels a pending microphone request on early release without starting a recorder", async () => {
+  let grant!: (value: MediaStream) => void;
+  const previousInstances = instances.length;
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((resolve) => { grant = resolve; }));
+  const { result } = renderHook(useAudioRecorder);
+  act(() => { void result.current.start(); }); expect(result.current.phase).toBe("requesting");
+  act(() => result.current.stop()); expect(result.current.phase).toBe("idle");
+  await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
+  expect(instances).toHaveLength(previousInstances); expect(stopTrack).toHaveBeenCalled(); expect(result.current.recording).toBeNull();
+  expect(result.current.notice).toContain("cancelled before");
+});
+it.each(["NotFoundError", "OverconstrainedError", "NotReadableError"])("falls back from an unavailable selected microphone (%s) to the workstation default", async (name) => {
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Unavailable", name));
+  const { result, unmount } = renderHook(() => useAudioRecorder("speechmike-usb"));
+  await act(() => result.current.start());
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenNthCalledWith(1, { audio: { deviceId: { exact: "speechmike-usb" } } });
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenNthCalledWith(2, { audio: true });
+  expect(result.current.phase).toBe("recording"); expect(result.current.notice).toContain("default microphone");
+  unmount(); expect(stopTrack).toHaveBeenCalled();
+});

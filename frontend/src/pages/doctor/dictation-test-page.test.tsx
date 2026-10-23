@@ -13,7 +13,7 @@ beforeEach(() => {
   clearMedGemmaTestText();
   vi.mocked(api.getDictationHealth).mockResolvedValue({ status: "connected", model: "google/medasr", credentialsValidated: false });
   vi.mocked(api.transcribeDictation).mockResolvedValue({ text: "Normal chest radiograph.", processing_seconds: 2.8 });
-  vi.mocked(useAudioRecorder).mockReturnValue({ phase: "idle", recording: new Blob(["audio"]), duration: 3, error: null, start: vi.fn(), stop: vi.fn(), clear: vi.fn() });
+  vi.mocked(useAudioRecorder).mockReturnValue({ phase: "idle", recording: new Blob(["audio"]), duration: 3, error: null, notice: "", start: vi.fn(), stop: vi.fn(), clear: vi.fn(), cancel: vi.fn() });
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 function mount() { render(<MemoryRouter><EnglishLanguageScope><DictationTestPage /></EnglishLanguageScope></MemoryRouter>); }
