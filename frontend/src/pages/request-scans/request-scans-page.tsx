@@ -1,5 +1,5 @@
 import "@/components/shared/compact-controls.css";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -54,6 +54,8 @@ import { useLanguage } from "@/providers/language-provider";
 import { useAuth } from "@/providers/auth-provider";
 import type { Role } from "@/types/api";
 import { deriveRequestScanActions, extractFilenameAccession, type RequestScanActionKind } from "./request-scan-action-policy";
+
+const RequestScanFilePreview = lazy(() => import("./request-scan-file-preview"));
 
 type Job = {
   id: number;
@@ -536,9 +538,8 @@ function RequestScanRow({ language, job, userRole, showClinicalExport, canRetryC
 }
 
 function AssignmentPreview({ job, language, scopeQuery, onError }: { job: Job; language: Language; scopeQuery: string; onError: (message: string) => void }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<Blob | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const url = useRef<string | null>(null);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -547,15 +548,10 @@ function AssignmentPreview({ job, language, scopeQuery, onError }: { job: Job; l
     void fetch(fileUrl, { credentials: "include" })
       .then(async (response) => {
         if (!response.ok) throw new Error(await message(response, t(language, "requestScans.preview.failed")));
-        return URL.createObjectURL(await response.blob());
+        return response.blob();
       })
-      .then((nextUrl) => {
-        if (currentRequestId !== requestId.current) {
-          URL.revokeObjectURL(nextUrl);
-          return;
-        }
-        url.current = nextUrl;
-        setPreviewUrl(nextUrl);
+      .then((file) => {
+        if (currentRequestId === requestId.current) setPreviewFile(file);
       })
       .catch((error: unknown) => {
         if (currentRequestId !== requestId.current) return;
@@ -565,12 +561,11 @@ function AssignmentPreview({ job, language, scopeQuery, onError }: { job: Job; l
       });
     return () => {
       requestId.current += 1;
-      if (url.current) URL.revokeObjectURL(url.current);
-      url.current = null;
     };
   }, [job, language, onError, scopeQuery]);
 
-  return <div className="mt-3 min-h-[360px] flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white sm:min-h-[460px] lg:min-h-0">{previewUrl ? (job.filename.toLowerCase().endsWith(".pdf") ? <iframe className="h-full w-full" src={`${previewUrl}#view=FitH`} title={t(language, "requestScans.assignment.scannedPreview")} /> : <div className="flex h-full w-full items-center justify-center"><img className="h-full w-full object-contain" src={previewUrl} alt={job.filename} /></div>) : previewError ? <p role="alert" className="flex h-full items-center justify-center p-4 text-sm text-red-700">{previewError}</p> : <p className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</p>}</div>;
+  const loading = <p role="status" className="p-4 text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</p>;
+  return <div className="mt-3 h-[360px] min-h-[360px] flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white sm:h-[460px] sm:min-h-[460px] lg:h-auto lg:min-h-0">{previewFile ? <Suspense fallback={loading}><RequestScanFilePreview file={previewFile} filename={job.filename} language={language} title={t(language, "requestScans.assignment.scannedPreview")} /></Suspense> : previewError ? <p role="alert" className="flex h-full items-center justify-center p-4 text-sm text-red-700">{previewError}</p> : loading}</div>;
 }
 
 export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void; orthancState?: "connected" | "disabled" | "unavailable" } }) {
@@ -586,7 +581,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
   const [preview, setPreview] = useState<Job | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<Blob | null>(null);
   const [details, setDetails] = useState<Job | null>(null);
   const [archiveDetailsOpen, setArchiveDetailsOpen] = useState(false);
   const [openMenuJobId, setOpenMenuJobId] = useState<number | null>(null);
@@ -609,17 +604,15 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const [generateAppointmentId, setGenerateAppointmentId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [manageAppointmentId, setManageAppointmentId] = useState<number | null>(null);
-  const url = useRef<string | null>(null);
   const previewRequest = useRef(0);
   const client = useQueryClient();
-  const revokePreviewUrl = () => { if (url.current) URL.revokeObjectURL(url.current); url.current = null; };
-  const closePreview = () => { previewRequest.current += 1; revokePreviewUrl(); setPreviewUrl(null); setPreview(null); };
+  const closePreview = () => { previewRequest.current += 1; setPreviewFile(null); setPreview(null); };
   const loadRequestScanPreviewBlob = async (job: Job) => {
     const response = await fetch(job.scoped_file_url || (scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id)), { credentials: "include" });
     if (!response.ok) throw new Error(await message(response, t(language, "requestScans.preview.failed")));
-    return URL.createObjectURL(await response.blob());
+    return response.blob();
   };
-  useEffect(() => () => { previewRequest.current += 1; revokePreviewUrl(); }, []);
+  useEffect(() => () => { previewRequest.current += 1; }, []);
 
   const status = useQuery({ queryKey: ["request-scans-status", scopeKey], queryFn: () => request<RequestScanStatus>("/status"), refetchInterval: (q) => requestScanStatusPollInterval(q.state.data), refetchIntervalInBackground: false });
   const jobs = useQuery({ queryKey: ["request-scans", scopeKey, tab, category], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}${category ? `&category=${category}` : ""}`), refetchInterval: () => requestScanJobsPollInterval(tab, status.data), refetchIntervalInBackground: false });
@@ -642,7 +635,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
   const bulkDismissMutation = useMutation({ mutationFn: ({ ids, reason }: { ids: number[]; reason?: string }) => request("/bulk-dismiss", { method: "POST", body: JSON.stringify({ jobIds: ids, reason }) }), onSuccess: () => { setBulkDismissOpen(false); setDismissReason(""); setSelected([]); setNotice(t(language, "requestScans.dismiss.success")); refresh(); }, onError: (error: Error) => setNotice(localizeError(language, error)) });
   const testConnection = useMutation({ mutationFn: () => request<{ state: string }>("/archive-destination/test", { method: "POST" }), onSuccess: () => { setNotice(t(language, "requestScans.archive.connectionSucceeded")); refresh(); }, onError: (error: Error) => setNotice(localizeError(language, error)) });
   const assignMutation = useMutation({ mutationFn: () => request(`/${assign!.id}/manual-assign`, { method: "POST", body: JSON.stringify({ appointmentId: Number(appointmentId), patientIdentityConfirmed: assignmentConfirmed }) }), onSuccess: () => { setAssignmentConfirmationOpen(false); setAssign(null); setNotice(t(language, "requestScans.assignment.queued")); refresh(); }, onError: (error: Error) => setAssignmentError(localizeError(language, error)) });
-  const openPreview = async (job: Job) => { const requestId = ++previewRequest.current; revokePreviewUrl(); setPreviewUrl(null); setPreview(job); try { const nextUrl = await loadRequestScanPreviewBlob(job); if (requestId !== previewRequest.current) { URL.revokeObjectURL(nextUrl); return; } url.current = nextUrl; setPreviewUrl(nextUrl); } catch (error) { if (requestId === previewRequest.current) setNotice(error instanceof Error ? error.message : t(language, "requestScans.preview.failed")); } };
+  const openPreview = async (job: Job) => { const requestId = ++previewRequest.current; setPreviewFile(null); setPreview(job); try { const file = await loadRequestScanPreviewBlob(job); if (requestId === previewRequest.current) setPreviewFile(file); } catch (error) { if (requestId === previewRequest.current) setNotice(error instanceof Error ? error.message : t(language, "requestScans.preview.failed")); } };
   const visible = (jobs.data?.jobs ?? []).map((job) => ({ ...job, scoped_file_url: scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id) }));
   const archiveCandidates = [...visible, ...(archiveJobs.data?.jobs ?? [])].filter(archivePending).filter((job, index, jobsForFilter) => jobsForFilter.findIndex((candidate) => candidate.id === job.id) === index);
   const selectedArchive = archiveCandidates.filter((job) => selected.includes(job.id));
@@ -752,7 +745,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
         <DialogFooter className="!mt-4"><Button type="button" variant="secondary" onClick={() => { setAssignmentConfirmationOpen(false); setAssignmentConfirmed(false); }} disabled={assignMutation.isPending}>{t(language, "requestScans.actions.cancel")}</Button><Button type="button" onClick={() => assignMutation.mutate()} disabled={!assignmentConfirmed || assignMutation.isPending || !selectedAppointmentAllowed}>{assignMutation.isPending ? t(language, "requestScans.assignment.confirming") : t(language, "requestScans.assignment.confirmAndAttach")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={Boolean(preview)} onClose={closePreview}><DialogContent maxWidth="min(96vw, 1500px)" className="compact-controls flex h-[94vh] flex-col overflow-hidden"><DialogHeader closeLabel={t(language, "requestScans.actions.close")} className="shrink-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><DialogTitle className="min-w-0 flex-1 truncate"><TechnicalValue>{preview?.filename}</TechnicalValue></DialogTitle>{preview ? <div className="flex shrink-0 flex-wrap gap-2"><a href={preview.scoped_file_url || requestScanFileUrl(preview.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />{t(language, "requestScans.actions.openBrowser")}</a>{preview.document_id ? <a href={attachedDocumentUrl(preview.document_id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><FileText className="h-3.5 w-3.5" aria-hidden="true" />{t(language, "requestScans.actions.viewAttached")}</a> : null}</div> : null}</div></DialogHeader><div className="min-h-0 flex-1 overflow-hidden">{previewUrl ? (preview?.filename.toLowerCase().endsWith(".pdf") ? <iframe className="h-full w-full" src={previewUrl} title={t(language, "requestScans.preview.title")} /> : <div className="flex h-full w-full items-center justify-center"><img className="h-full w-full object-contain" src={previewUrl} alt={preview?.filename} /></div>) : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</div>}</div></DialogContent></Dialog>
+    <Dialog open={Boolean(preview)} onClose={closePreview}><DialogContent maxWidth="min(96vw, 1500px)" className="compact-controls flex h-[94vh] flex-col overflow-hidden"><DialogHeader closeLabel={t(language, "requestScans.actions.close")} className="shrink-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><DialogTitle className="min-w-0 flex-1 truncate"><TechnicalValue>{preview?.filename}</TechnicalValue></DialogTitle>{preview ? <div className="flex shrink-0 flex-wrap gap-2"><a href={preview.scoped_file_url || requestScanFileUrl(preview.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />{t(language, "requestScans.actions.openBrowser")}</a>{preview.document_id ? <a href={attachedDocumentUrl(preview.document_id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><FileText className="h-3.5 w-3.5" aria-hidden="true" />{t(language, "requestScans.actions.viewAttached")}</a> : null}</div> : null}</div></DialogHeader><div className="min-h-0 flex-1 overflow-hidden"><Suspense fallback={<LoadingState message={t(language, "requestScans.preview.loading")} />}>{previewFile && preview ? <RequestScanFilePreview key={preview.id} file={previewFile} filename={preview.filename} language={language} title={t(language, "requestScans.preview.title")} /> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t(language, "requestScans.preview.loading")}</div>}</Suspense></div></DialogContent></Dialog>
     <Dialog open={Boolean(details)} onClose={() => setDetails(null)}><DialogContent className="compact-controls" maxWidth="680px"><DialogHeader closeLabel={t(language, "requestScans.actions.close")}><DialogTitle>{t(language, "requestScans.details.title")}</DialogTitle><DialogDescription>{details ? <TechnicalValue>{details.filename}</TechnicalValue> : null}</DialogDescription></DialogHeader>{details ? <div className="space-y-5"><dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="font-semibold">{t(language, "requestScans.details.stage")}</dt><dd dir="ltr" className="font-mono-data">{details.processing_stage || t(language, "requestScans.details.notRecorded")}</dd></div><div><dt className="font-semibold">{t(language, "requestScans.details.failureCategory")}</dt><dd dir="ltr" className="font-mono-data">{details.failure_category || t(language, "requestScans.details.notRecorded")}</dd></div><div><dt className="font-semibold">{t(language, "requestScans.details.processingAttempts")}</dt><dd dir="ltr" className="font-mono-data">{details.attempt_count}</dd></div><div><dt className="font-semibold">{t(language, "requestScans.details.archiveAttempts")}</dt><dd dir="ltr" className="font-mono-data">{details.archive_attempt_count ?? 0}</dd></div><div><dt className="font-semibold">{t(language, "requestScans.details.archiveError")}</dt><dd>{details.archive_last_error || t(language, "requestScans.details.none")}</dd></div><div><dt className="font-semibold">{t(language, "requestScans.details.errorMessage")}</dt><dd>{details.error_message || t(language, "requestScans.details.none")}</dd></div></dl>{details.clinical_document_export_status ? <section className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm" aria-label="Clinical document export details"><h3 className="font-semibold">{exportLabel(language, "Clinical document export", "تصدير المستند السريري")}</h3><dl className="mt-2 grid gap-2 sm:grid-cols-2"><div><dt className="text-muted-foreground">{exportLabel(language, "Representation", "التمثيل")}</dt><dd>{details.clinical_document_export_representation_type === "secondary_capture" ? "Secondary Capture" : details.clinical_document_export_representation_type || t(language, "requestScans.details.notRecorded")}</dd></div><div><dt className="text-muted-foreground">{exportLabel(language, "Pages", "الصفحات")}</dt><dd>{Number.isSafeInteger(Number(details.clinical_document_export_expected_page_count)) && Number(details.clinical_document_export_expected_page_count) > 0 ? `${details.clinical_document_export_exported_page_count ?? 0}/${details.clinical_document_export_expected_page_count} exported; ${details.clinical_document_export_verified_page_count ?? 0}/${details.clinical_document_export_expected_page_count} verified` : t(language, "requestScans.details.notRecorded")}</dd></div><div><dt className="text-muted-foreground">{exportLabel(language, "Failed page", "الصفحة الفاشلة")}</dt><dd>{details.clinical_document_export_failed_page_number ?? t(language, "requestScans.details.none")}</dd></div><div><dt className="text-muted-foreground">{exportLabel(language, "Last attempt", "آخر محاولة")}</dt><dd>{formatDateTime(language, details.clinical_document_export_last_attempt_at)}</dd></div><div><dt className="text-muted-foreground">{exportLabel(language, "Next retry", "إعادة المحاولة التالية")}</dt><dd>{formatDateTime(language, details.clinical_document_export_next_retry_at)}</dd></div><div><dt className="text-muted-foreground">{exportLabel(language, "Exported", "تم التصدير")}</dt><dd>{formatDateTime(language, details.clinical_document_exported_at)}</dd></div><div className="sm:col-span-2"><dt className="text-muted-foreground">{exportLabel(language, "Export error", "خطأ التصدير")}</dt><dd>{sanitizeClinicalDocumentExportError(details.clinical_document_export_last_error) || t(language, "requestScans.details.none")}</dd></div></dl></section> : null}</div> : null}</DialogContent></Dialog>
     <AppointmentManageModal appointmentId={manageAppointmentId} open={manageAppointmentId !== null} onClose={() => setManageAppointmentId(null)} />
   </main>;

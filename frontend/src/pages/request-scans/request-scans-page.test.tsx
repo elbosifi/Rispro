@@ -1,7 +1,31 @@
+import { useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const pdfFile = vi.hoisted(() => vi.fn());
+const pdfFailure = vi.hoisted(() => ({ load: false, render: false }));
+vi.mock("react-pdf", () => ({
+  pdfjs: { GlobalWorkerOptions: {} },
+  Document: ({ file, children, onLoadSuccess, error }: { file: Blob; children: ReactNode; error: ReactNode; onLoadSuccess: (pdf: { numPages: number }) => void }) => {
+    pdfFile(file);
+    useEffect(() => { onLoadSuccess({ numPages: 2 }); }, [file, onLoadSuccess]);
+    return <div data-testid="pdf-document">{pdfFailure.load ? error : children}</div>;
+  },
+  Page: ({ pageNumber, onRenderError }: { pageNumber: number; onRenderError: () => void }) => {
+    useEffect(() => { if (pdfFailure.render) onRenderError(); }, [onRenderError]);
+    return <div data-testid={`pdf-page-${pageNumber}`} />;
+  },
+}));
+
+function stubObjectUrls(createObjectURL = vi.fn(() => "blob:request-scan-default"), revokeObjectURL = vi.fn()) {
+  class PreviewURL extends URL {
+    static createObjectURL = createObjectURL;
+    static revokeObjectURL = revokeObjectURL;
+  }
+  vi.stubGlobal("URL", PreviewURL);
+}
 
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const authState = vi.hoisted(() => ({ role: "super_admin" as string }));
@@ -66,7 +90,12 @@ async function openMenu(filename = "request.pdf") {
   return screen.findByRole("menu", { name: `Actions for ${filename}` });
 }
 
-beforeEach(() => vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:request-scan-default"), revokeObjectURL: vi.fn() }));
+beforeEach(() => {
+  pdfFailure.load = false;
+  pdfFailure.render = false;
+  stubObjectUrls();
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+});
 afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
@@ -106,30 +135,43 @@ describe("RequestScansPage", () => {
   it("prefills one filename accession without selecting an appointment", async () => {
     const createObjectURL = vi.fn(() => "blob:request-scan-22");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    stubObjectUrls(createObjectURL, revokeObjectURL);
     const fetchMock = mock([unassignedFailure]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
     const search = await screen.findByLabelText("Find RIS appointment");
     expect((search as HTMLInputElement).value).toBe("V2-003838");
-    const preview = await screen.findByTitle("Scanned request preview");
+    const preview = await screen.findByRole("region", { name: "Scanned request preview" });
     const fileCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/request-scans/22/file"));
     expect(fileCall?.[0]).toBe("/api/request-scans/22/file");
     expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(preview.getAttribute("src")).toBe("blob:request-scan-22#view=FitH");
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(pdfFile).toHaveBeenCalledWith(expect.any(Blob));
+    expect(await within(preview).findByTestId("pdf-page-1")).toBeTruthy();
+    expect(await within(preview).findByTestId("pdf-page-2")).toBeTruthy();
+    expect(preview.querySelector("iframe")).toBeNull();
     expect(screen.getByRole("link", { name: "Open full size" }).getAttribute("href")).toBe("/api/request-scans/22/file");
     expect(screen.getByRole("heading", { name: "Search results" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Selected appointment" }).textContent).toContain("No appointment selected");
     expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:request-scan-22");
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it.each(["load", "render"] as const)("shows a visible error when PDF %s fails and preserves the full-size link", async (failure) => {
+    pdfFailure[failure] = true;
+    mock([unassignedFailure]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Preview could not be loaded.");
+    expect(screen.getByRole("link", { name: "Open full size" }).getAttribute("href")).toBe("/api/request-scans/22/file");
+    expect((screen.getByRole("button", { name: "Attach to appointment" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("renders an image assignment with the same authenticated Blob preview pipeline", async () => {
     const createObjectURL = vi.fn(() => "blob:request-scan-23");
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
+    stubObjectUrls(createObjectURL);
     const fetchMock = mock([{ ...unassignedFailure, id: 23, filename: "request.jpg" }]);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
@@ -138,6 +180,8 @@ describe("RequestScansPage", () => {
     expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(image.getAttribute("src")).toBe("blob:request-scan-23");
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:request-scan-23");
   });
 
   it("matches the selected numeric modality ID, opens confirmation, and keeps another modality disabled", async () => {
@@ -599,38 +643,40 @@ describe("RequestScansPage", () => {
     expect(screen.getAllByText("Connection unavailable").length).toBeGreaterThan(0);
   });
 
-  it("uses a large authenticated Blob preview and revokes it on close", async () => {
+  it("renders a large authenticated PDF preview without a native iframe", async () => {
     const createObjectURL = vi.fn(() => "blob:request-scan-9");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    stubObjectUrls(createObjectURL, revokeObjectURL);
     const fetchMock = mock();
     renderPage();
     const menu = await openMenu();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Preview scanned document" }));
-    const iframe = await screen.findByTitle("Request scan preview");
+    const preview = await screen.findByRole("region", { name: "Request scan preview" });
     const fileCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/request-scans/9/file"));
     expect(fileCall?.[0]).toBe("/api/request-scans/9/file");
     expect(fileCall?.[1]).toMatchObject({ credentials: "include" });
-    expect(iframe.getAttribute("src")).toBe("blob:request-scan-9");
-    const content = iframe.parentElement?.parentElement;
+    expect(pdfFile).toHaveBeenCalledWith(expect.any(Blob));
+    expect(await within(preview).findByTestId("pdf-page-2")).toBeTruthy();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    const content = preview.parentElement?.parentElement;
     expect(content?.style.maxWidth).toBe("min(96vw, 1500px)");
     expect(content?.className).toContain("h-[94vh]");
     expect(screen.getByRole("link", { name: "Open in browser" }).getAttribute("href")).toBe("/api/request-scans/9/file");
     expect(screen.getByRole("link", { name: "View attached document" }).getAttribute("href")).toBe("/api/documents/55/view");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:request-scan-9");
+    expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
   it("revokes the previous Blob URL when a preview is replaced", async () => {
     const createObjectURL = vi.fn().mockReturnValueOnce("blob:first").mockReturnValueOnce("blob:second");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
-    mock([archiveFailure, completed]);
+    stubObjectUrls(createObjectURL, revokeObjectURL);
+    mock([{ ...archiveFailure, filename: "request.jpg" }, { ...completed, filename: "completed.jpg" }]);
     renderPage();
-    const firstMenu = await openMenu();
+    const firstMenu = await openMenu("request.jpg");
     fireEvent.click(within(firstMenu).getByRole("menuitem", { name: "Preview scanned document" }));
-    await screen.findByTitle("Request scan preview");
-    const secondMenu = await openMenu("completed.pdf");
+    await screen.findByAltText("request.jpg");
+    const secondMenu = await openMenu("completed.jpg");
     fireEvent.click(within(secondMenu).getByRole("menuitem", { name: "Preview scanned document" }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2));
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:first");
