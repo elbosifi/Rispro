@@ -114,7 +114,7 @@ describe("ReportCenter", () => {
     renderCenter();
     await screen.findAllByText("Print & Reports Center");
     await userEvent.selectOptions(screen.getByLabelText("Report template"), "printed-documents-audit");
-    await screen.findByText("daily-appointments");
+    await screen.findByRole("cell", { name: "Daily appointment list" });
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
     expect(directPrintReportCenterMock).toHaveBeenCalledWith(expect.objectContaining({ source: "audit", templateId: "printed-documents-audit" }));
   });
@@ -187,14 +187,14 @@ describe("ReportCenter", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Report template"), "no-show-list");
     expect(screen.queryByRole("combobox", { name: "Status" })).toBeNull();
-    expect(screen.getByText(/Status:/).textContent).toContain("no-show");
+    expect(screen.getByText(/Status:/).textContent).toContain("No-show");
   });
 
   it("uses exam grouping and the specialized registration printer", async () => {
     renderCenter();
     await screen.findAllByText("Print & Reports Center");
     await userEvent.selectOptions(screen.getByLabelText("Report template"), "exam-type-volume");
-    expect(await screen.findByText((_, element) => element?.textContent === "Grouped by: exam")).toBeTruthy();
+    expect(await screen.findByText((_, element) => element?.textContent === "Grouped by: Exam")).toBeTruthy();
     expect((await screen.findAllByText("Brain")).length).toBeGreaterThan(0);
 
     await userEvent.selectOptions(screen.getByLabelText("Report template"), "registration-list");
@@ -274,7 +274,7 @@ describe("ReportCenter", () => {
   it("disables output actions when no permitted appointment columns remain", async () => {
     renderCenter();
     await userEvent.click(screen.getByLabelText("Select column: Phone"));
-    for (const label of ["Time", "Patient", "Accession", "Modality", "Exam", "Category", "Priority", "Status"]) await userEvent.click(screen.getByLabelText(`Select column: ${label}`));
+    for (const label of ["Time", "Patient", "Accession", "Modality", "Exam", "Case Category", "Priority", "Status"]) await userEvent.click(screen.getByLabelText(`Select column: ${label}`));
     expect(screen.getByRole("button", { name: "Print" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Download PDF" }).hasAttribute("disabled")).toBe(true);
   });

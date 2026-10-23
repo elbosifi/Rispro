@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; PACS/monitoring batch validated; authorized printing baseline repairs pass. Printing UI batch underway.
+Status: active; primary printing batch complete. Reporting/document delivery batch underway.
 
 ## Baseline and safety
 
@@ -48,10 +48,10 @@ Total discovered composed screen entries: **119**, including **5** regression re
 | Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Complete — batch 8 |
-| Printing | `/print` | `PrintPage / ReportCenter` | P2 | Assessed — batch 9 |
-| Printing | `/print?appointmentId=:id` | `DirectAppointmentPrintPage` | P2 | Discovered — batch 9 |
-| Printing | `/print/day-list` | `DayListPrintPage` | P2 | Discovered |
-| Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Discovered |
+| Printing | `/print` | `PrintPage / ReportCenter` | P2 | Complete — batch 9 |
+| Printing | `/print?appointmentId=:id` | `DirectAppointmentPrintPage` | P2 | Complete — batch 9 |
+| Printing | `/print/day-list` | `DayListPrintPage` | P2 | Complete — batch 9 |
+| Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Complete — batch 9 |
 | Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Discovered |
 | Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Discovered |
 | Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
@@ -65,7 +65,7 @@ Total discovered composed screen entries: **119**, including **5** regression re
 | SOP | `/sops` | `SopsPage (library)` | P2 | Discovered |
 | SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Discovered |
 | SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Discovered |
-| Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Discovered |
+| Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Complete — batch 9 |
 | Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Discovered |
 | Reference | `/v2/appointments/admin` | `SchedulingAdminPage` | P2 | Regression reference |
 | Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Discovered |
@@ -293,3 +293,15 @@ Total discovered composed screen entries: **119**, including **5** regression re
 - User authorized the six scoped expectation updates. The localized audit-template expectation was scoped to its table cell because the same label legitimately appears in a heading and option; this preserves the audit-row readiness check. All original printing, audit, filter and disabled-output assertions remain. Repaired baseline: 48/48 pass. No printing application change made for these repairs.
 - Added the separately navigable appointment-slip preview (`/print?appointmentId=:id`) discovered during actual print routing assessment. Inventory now 119 total entries: 5 references and 114 remaining-scope entries. Completion stays 44; 70 remain. No screen silently excluded.
 - Next batch: Report Center, appointment preview, day-list output, reporting-board output and workstation printing/scanning. Internal slip/registration renderers follow separately. Report Center phone clipping is a concrete priority; external printer/scanner integration remains outside browser fixture claims.
+
+### Batch 9 — Primary printing and workstation UI complete
+
+- Five entries polished: Report Center, appointment-slip preview, day-list output, reporting-board output and workstation printing/scanning. Report Center grid/cards now constrain intrinsic table width so phone controls, filters, columns and all output actions stay visible; only the data table scrolls. Reused shared Input and compact controls; labels use normal clinical typography. No output filters, templates, column permissions, audit calls or printing/scanning handlers changed.
+- Slip preview now uses the configured A5/A4 paper dimensions inside its existing scroll container. Previously the fixed-width RTL paper began at negative x in a narrow iframe, clipping fields; now the full sheet is aligned within the iframe and the outer container supports horizontal panning. Underlying generated slip HTML is unchanged. Browser geometry checks cover A5/A4 in both shell languages.
+- Day-list/reporting output: consistent blue brand/header colors, readable normal header tracking, responsive on-screen header and horizontal table scrolling without changing the A4 landscape printed table. Reporting output and workstation setup retain existing predominantly English content with explicit LTR direction; day-list output retains actual Arabic RTL. Existing raw category/status codes in some output fields remain a localization limitation.
+- Browser: five after desktop/phone cases and five Arabic-preference cases; appointment preview before/after; two populated control scenarios verify all five output buttons within the viewport, grouped/patient reports, paper geometry and advanced workstation diagnostics. No physical print, scanner test, setup installation, mapping save or clinical mutation was invoked. Existing autoprint/audit component checks remain intact.
+- PDF evidence: applied PDF skill; generated four before/four after Chromium A4 landscape PDFs (day-list/reporting, English/Arabic), rendered via native PDFKit because Poppler is unavailable. All eight are one page; latest four PNGs visually inspected without clipping/overlap. Synthetic accession sets match: 15/15 day-list and 8/8 reporting in each language. Artifacts stay outside tracked source in `pdf/`, with `comparison.json`; these are UI/output evidence, not physical-printer verification.
+- Checks: repaired baseline and final focused suite 48/48 pass; final affected ReportCenter 17/17 and preview 14/14 reruns pass. Exact final frontend typecheck/build pass; targeted lint and harness:ui pass; whitespace clean. Existing jsdom navigation/build warnings retained.
+- Development corrections: localized audit label occurs in multiple places, so scoped the authorized expectation to its actual table cell; removed unsupported Testing Library `exact` option caught by TypeScript. Corrected uppercase paper-size comparison to the existing lowercase type. Corrected the A4 read fixture to the existing nested setting-value shape; final A4/A5 browser geometry checks pass. Capture comparison helper now tolerates changed full-page dimensions. None of these failures was hidden or reported as passing before correction.
+- Counts: 49 complete (42 polished, 7 accepted unchanged) of 114 remaining-scope entries, 65 remain (3 reporting/document entries initially assessed, 62 unassessed), plus final five-reference verification. PACS rollback checkpoint `0ca06b02`; printing checkpoint follows locally. No decisions pending, no push/PR/deploy or main squash-apply.
+- Next: saved reporting view, Personal Reporting Desk, its case documents and the two internal print renderers. Next component baseline: 90/90 mobile/reporting-document tests pass; initial three route captures pass with real synthetic saved token and assigned case.

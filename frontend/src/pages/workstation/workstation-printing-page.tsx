@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useCallback, useEffect, useState } from "react";
 import { Input } from "@/components/shared/Input";
 import type { IntegrationStatus } from "@/lib/api/documents-printing";
@@ -39,7 +40,7 @@ type BootstrapManifest = {
 };
 
 export default function WorkstationPrintingPage() {
-  return <div className="mx-auto w-full max-w-6xl space-y-4"><div><h1 className="text-2xl font-semibold">Workstation printing and scanning</h1><p className="text-sm text-muted-foreground">Configure QZ Tray, physical printer mappings, and the NAPS2 scanner endpoint for this browser only.</p></div><WorkstationSetupCard /><QzTrayPrintingSection /><WorkstationNaps2Section /></div>;
+  return <div dir="ltr" className="compact-controls mx-auto w-full max-w-6xl space-y-4"><div><h1 className="text-2xl font-semibold">Workstation printing and scanning</h1><p className="text-sm text-muted-foreground">Configure QZ Tray, physical printer mappings, and the NAPS2 scanner endpoint for this browser only.</p></div><WorkstationSetupCard /><QzTrayPrintingSection /><WorkstationNaps2Section /></div>;
 }
 
 export function WorkstationNaps2Section() {
