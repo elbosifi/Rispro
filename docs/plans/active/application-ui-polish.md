@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; execution/documents/override batch complete. PACS/monitoring batch baseline captured.
+Status: active; PACS/monitoring batch validated; authorized printing baseline repairs pass. Printing UI batch underway.
 
 ## Baseline and safety
 
@@ -22,7 +22,7 @@ Redirect-only aliases excluded: `/`, `/appointments/legacy`, `/v2/appointments`,
 
 ## Inventory
 
-Total discovered composed screen entries: **118**, including **5** regression references; **113** remaining entries. Inventory completeness will be checked against reachable nested views during browser assessment.
+Total discovered composed screen entries: **119**, including **5** regression references; **114** remaining entries. Inventory completeness will be checked against reachable nested views during browser assessment.
 
 | Module | Route / view | Component | Priority | Status |
 | --- | --- | --- | --- | --- |
@@ -47,18 +47,19 @@ Total discovered composed screen entries: **118**, including **5** regression re
 | Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Complete — batch 4 |
 | Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Complete — batch 4 |
-| Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Discovered |
-| Printing | `/print` | `PrintPage` | P2 | Discovered |
+| Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Complete — batch 8 |
+| Printing | `/print` | `PrintPage / ReportCenter` | P2 | Assessed — batch 9 |
+| Printing | `/print?appointmentId=:id` | `DirectAppointmentPrintPage` | P2 | Discovered — batch 9 |
 | Printing | `/print/day-list` | `DayListPrintPage` | P2 | Discovered |
 | Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Discovered |
 | Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Discovered |
 | Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Discovered |
 | Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
 | Patients | `/search` | `SearchPage` | P2 | Complete — batch 6 |
-| PACS | `/pacs` | `PacsPage` | P2 | Discovered |
-| PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Discovered |
-| PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Discovered |
-| Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Discovered |
+| PACS | `/pacs` | `PacsPage` | P2 | Complete — batch 8 |
+| PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Complete — batch 8 |
+| PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Complete — batch 8 |
+| Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Complete — batch 8 |
 | Settings | `/settings` | `SettingsPage` | P2 | Discovered |
 | Monitoring | `/incidents` | `IncidentsPage` | P2 | Discovered |
 | SOP | `/sops` | `SopsPage (library)` | P2 | Discovered |
@@ -269,3 +270,26 @@ Total discovered composed screen entries: **118**, including **5** regression re
 - Five references recaptured against starting main with current synthetic data: ten viewport pairs have matching dimensions; Appointment/Registration/Scheduling pixel-identical, others differ only by dynamic clock text (0.009–0.022%). Earlier reporting discrepancy was stale fixture data; fresh matching-data pairs resolve it. Final reference checks still required after future shared edits.
 - Counts: 39 complete (32 polished, 7 accepted unchanged), 74 remain (5 PACS/monitoring initially assessed, 69 unassessed). No product decisions pending. Next baseline: 115 PACS/remap/Orthanc/monitor component tests and five initial capture cases pass.
 - Rollback checkpoint follows locally on retained goal branch; no push, PR, deployment or main squash-apply.
+
+### Batch 8 — PACS administration and MWL monitoring validated
+
+- Five entries polished: PACS Search, DICOM Remap, comparison-linked Remap, Authoritative Orthanc Operations and MWL Monitor. Reused 38 Buttons, 7 Inputs and the shared Card shell. Native file/folder selectors, clinical acknowledgments, wizard controls, history selectors and domain-specific non-modal monitor drawer remain local.
+- Fixed inconsistent teal remap styling, oversized controls, unassociated PACS form labels, low-contrast result descriptions and truncated operational metric values. Orthanc metric grid uses four columns until the wide breakpoint; full values wrap. Existing English-only Orthanc/monitor content now explicitly LTR inside either shell language; this does not claim Arabic localization. Remap and PACS search retain actual Arabic RTL support.
+- Populated browser inspection found MWL drawer Close hidden under the z-50 application header. Raised the existing drawer from z-40 to z-70 without moving actions or changing its non-modal layout. Before capture and intercepted-pointer log reproduce the problem; after desktop/phone Close clicks pass.
+- Remap preview produced generic “Task completed” before sending anything. Suppressed only its global preview toast; local scan progress/completion and preview error messages remain. No clinical remap/send/identity calls or logic changed. Phone review comparison now wraps full original/replacement values within the existing three-column table, with muted dividers and header. Warning, file review, confirmation checkbox and disabled send behavior remain.
+- Browser: five before/after top-level desktop/phone cases; five Arabic-preference cases (actual RTL for PACS/remap; explicit English/LTR for monitoring); four populated synthetic fixture cases before/after; two actual Arabic remap/comparison cases; existing Orthanc browser scenarios 2/2 pass before and after. Synthetic DICOM headers parsed locally in the real browser through Source, Patient, Destination and Review; comparison patient lock verified. Preview/replacement/search responses mocked explicitly, no remap/send/remote integration execution claimed. Monitor Orthanc/Sante previews and Close verified.
+- Capture corrections: changed a helper locator to the actual patient result text; rejected that failed baseline helper. Initial monitor helper exposed the real stacking bug, then baseline capture navigated away solely to inspect the second tab; current helper requires normal Close clicks. One styling edit helper used the wrong working directory and made no changes; reapplied with absolute paths. Sticky header positions in full-page stitched captures are screenshot artifacts, not a page-layout defect.
+- Checks: 115 focused component tests pass; final Remap delta 85/85 pass. Exact final frontend typecheck/build pass. Targeted lint, harness:ui and whitespace checks pass; existing build/jsdom warnings retained. Shared base primitives unchanged; five-reference regression remains valid from batch 7 and requires final recheck after future work.
+- Counts: 44 complete (37 polished, 7 accepted unchanged), 69 remain (4 printing screens initially assessed, 65 unassessed). Batch 7 rollback commit is `16c292b0`. Batch 8 validated source is uncommitted because the next baseline exposed unrelated failures before its checkpoint commit. Main remains unchanged at `50514e03`; no push/PR/deploy or squash-apply.
+
+### Printing baseline — required stop
+
+- Before any printing application edit: 43 passed, 5 failed across five test files. Two unchanged test files fail due stale text expectations after existing localization. All five failures reproduced in the detached starting-main worktree: autoprint targeted case 1 failed/13 filtered skips; ReportCenter 4 failed/13 passed.
+- Proposed test-only updates: autoprint list assertions use `print.reportCenter.title` and `print.reportTemplate.daily-appointments.title`, matching that file's existing translation-key mock; ReportCenter expectations use existing “Daily appointment list,” “No-show,” “Grouped by: Exam” and “Case Category.” No print/audit/filter/disabled-output assertion removed or weakened. Approval requested under AGENTS rule 6; no repair applied yet.
+- Logs and initial printing captures remain in the external artifact directory (`print-baseline-vitest.log`, `print-main-baseline.log`, `report-center-main-baseline.log`, before `print-center`, `day-list-print`, `reporting-print`, `workstation-printing`). Those four screens are assessed only, not complete.
+
+### Printing baseline repair authorized and passed
+
+- User authorized the six scoped expectation updates. The localized audit-template expectation was scoped to its table cell because the same label legitimately appears in a heading and option; this preserves the audit-row readiness check. All original printing, audit, filter and disabled-output assertions remain. Repaired baseline: 48/48 pass. No printing application change made for these repairs.
+- Added the separately navigable appointment-slip preview (`/print?appointmentId=:id`) discovered during actual print routing assessment. Inventory now 119 total entries: 5 references and 114 remaining-scope entries. Completion stays 44; 70 remain. No screen silently excluded.
+- Next batch: Report Center, appointment preview, day-list output, reporting-board output and workstation printing/scanning. Internal slip/registration renderers follow separately. Report Center phone clipping is a concrete priority; external printer/scanner integration remains outside browser fixture claims.

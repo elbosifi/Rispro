@@ -1,3 +1,5 @@
+import "@/components/shared/compact-controls.css";
+import { Button, Input } from "@/components/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -328,7 +330,7 @@ function RemapProgressBar({
         dir="ltr"
       >
         <div
-          className={`h-full rounded-full ${state === "failed" ? "bg-red-500" : state === "success" ? "bg-emerald-600" : shownPercent == null ? "w-1/3 animate-pulse bg-teal-500" : "bg-teal-600"}`}
+          className={`h-full rounded-full ${state === "failed" ? "bg-red-500" : state === "success" ? "bg-emerald-600" : shownPercent == null ? "w-1/3 animate-pulse bg-blue-500" : "bg-blue-600"}`}
           style={shownPercent != null ? { width: `${shownPercent}%` } : undefined}
         />
       </div>
@@ -868,6 +870,7 @@ export default function PacsRemapPage() {
   };
 
   const scanMutation = useMutation({
+    meta: { suppressGlobalToast: true },
     mutationFn: async (sourceFiles: File[]) => previewDicomStudiesFromFiles(sourceFiles, {
       endpoint: `/api${remapApiPath("/pacs/remap/preview-multipart")}`,
     }),
@@ -1680,20 +1683,20 @@ export default function PacsRemapPage() {
   const uiStepOrder: RemapWizardUiStep[] = ["source", "patient", "destination", "review", "processing"];
   const currentStepIndex = uiStepOrder.indexOf(effectiveUiStep);
   const activeCardProps = {
-    className: "card-shell min-h-[28rem] border border-teal-500 p-5 shadow-md shadow-teal-900/5",
+    className: "card-shell min-h-[28rem] border border-blue-500 p-5 shadow-md shadow-blue-900/5",
     "aria-busy": effectiveUiStep === "source" && (scanMutation.isPending || completeScanStatus === "running"),
   } as const;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="compact-controls max-w-7xl mx-auto space-y-6">
       <div className="card-shell overflow-hidden border border-slate-200/70">
-        <div className="relative p-5 space-y-4 bg-gradient-to-br from-slate-50 via-white to-teal-50/60">
+        <div className="relative p-5 space-y-4 bg-gradient-to-br from-slate-50 via-white to-blue-50/60">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-teal-700">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
                 {language === "ar" ? "أداة آمنة لإعادة الربط" : "Safe DICOM remap"}
               </p>
-              <h2 className="text-2xl font-bold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.title")}</h2>
+              <h2 className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>{t(language, "pacs.remap.title")}</h2>
               <p className="max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.subtitle")}</p>
             </div>
             <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 shadow-sm md:max-w-sm">
@@ -1702,14 +1705,14 @@ export default function PacsRemapPage() {
             </div>
           </div>
           {comparisonRequestId || irReferralId ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-950">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-950">
               <div>
                 <strong>{comparisonRequestId ? t(language, "comparisons.remapTitle") : "IR referral imaging preparation"}</strong>
                 <span className="ms-2">{comparisonRequestId ? t(language, "comparisons.remapLocked", { id: comparisonRequestId }) : `Referral #${irReferralId}`}</span>
               </div>
-              <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(scopedReturnPath)}>
+              <Button variant="secondary" type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(scopedReturnPath)}>
                 {t(language, "comparisons.return")}
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
@@ -1720,7 +1723,7 @@ export default function PacsRemapPage() {
             return (
               <div
                 key={label}
-                className={`min-w-[5.5rem] flex-1 rounded-xl border px-3 py-2 text-center font-medium ${completed ? "border-teal-500 bg-teal-50 text-teal-800" : current ? "border-teal-600 bg-teal-600 text-white shadow-sm" : "border-slate-200 bg-white/70 text-slate-500"}`}
+                className={`min-w-[5.5rem] flex-1 rounded-xl border px-3 py-2 text-center font-medium ${completed ? "border-blue-500 bg-blue-50 text-blue-800" : current ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white/70 text-slate-500"}`}
                 aria-current={current ? "step" : undefined}
                 aria-label={`${label}${completed ? (language === "ar" ? " مكتملة" : " complete") : current ? (language === "ar" ? " الحالية" : " current") : ""}`}
               >
@@ -1752,7 +1755,7 @@ export default function PacsRemapPage() {
         )}
 
         {fastStagedWorkflow && effectiveUiStep !== "processing" && (
-          <section className="rounded-2xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-950" aria-live="polite">
+          <section className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-xs text-blue-950" aria-live="polite">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <strong>{language === "ar" ? "رفع المصدر الآمن" : "Secure source staging"}</strong>
               <span>
@@ -1778,14 +1781,14 @@ export default function PacsRemapPage() {
                 ? (language === "ar" ? "لن تبدأ المعالجة أو الإرسال قبل التأكيد النهائي." : "Backend validation, rewriting and PACS sending will not start before final confirmation.")
                 : (language === "ar" ? "يمكنك متابعة اختيار المريض والوجهة أثناء الرفع." : "Patient and destination selection remain available while the source uploads.")}
             </p>
-            {effectiveResumedJobMessage && <p className="mt-1 font-semibold text-teal-800">{effectiveResumedJobMessage}</p>}
+            {effectiveResumedJobMessage && <p className="mt-1 font-semibold text-blue-800">{effectiveResumedJobMessage}</p>}
             {stagedProvisionalIdentity && (
               <p className="mt-1">
                 {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
                 {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
               </p>
             )}
-            <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+            <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-blue-300 bg-white px-3 py-1.5 font-semibold text-blue-900">
               {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
             </button>
           </section>
@@ -1801,22 +1804,22 @@ export default function PacsRemapPage() {
         <div {...activeCardProps}>
           {effectiveUiStep === "source" && <>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <h3 ref={mainHeadingRef} id="remap-active-step" tabIndex={-1} className="text-lg font-semibold" style={{ color: "var(--text)" }}>
+              <h3 ref={mainHeadingRef} id="remap-active-step" tabIndex={-1} className="text-lg font-semibold" style={{ color: "var(--foreground)" }}>
                 {stepLabels[0]}
               </h3>
-              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
                 {t(language, "pacs.remap.fastPreviewAndCompleteScan")}
               </span>
             </div>
             <div className="hidden" aria-hidden="true">
-              <h3 className="text-base font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
-              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+              <h3 className="text-base font-semibold" style={{ color: "var(--foreground)" }}>{t(language, "pacs.remap.step1")}</h3>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
                 {t(language, "pacs.remap.fastPreviewAndCompleteScan")}
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
-                <label htmlFor="remap-file-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-teal-400 focus-within:ring-2 focus-within:ring-teal-500">
+                <label htmlFor="remap-file-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500">
                   <span>{language === "ar" ? "اختيار الملفات" : "Choose files"}</span>
                   <span className="mt-1 text-xs font-normal text-slate-500">{t(language, "pacs.remap.selectDicomFiles")}</span>
                 </label>
@@ -1850,8 +1853,8 @@ export default function PacsRemapPage() {
                   className="sr-only"
                 />
               </div>
-              <div className="rounded-2xl border border-dashed border-teal-300 bg-teal-50/50 p-4">
-                <label htmlFor="remap-folder-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-teal-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500">
+              <div className="rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 p-4">
+                <label htmlFor="remap-folder-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500">
                   <span>{language === "ar" ? "اختيار مجلد" : "Choose folder"}</span>
                   <span className="mt-1 text-xs font-normal text-slate-500">{t(language, "pacs.remap.selectFolder")}</span>
                 </label>
@@ -1896,7 +1899,7 @@ export default function PacsRemapPage() {
               </span>
             </div>
             {scanResult && (
-              <div className={`rounded-xl border px-3 py-2 text-xs ${completeScanStatus === "skipped" ? "border-amber-300 bg-amber-50 text-amber-900" : completeScanStatus === "complete" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+              <div className={`rounded-xl border px-3 py-2 text-xs ${completeScanStatus === "skipped" ? "border-amber-300 bg-amber-50 text-amber-900" : completeScanStatus === "complete" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
                 <p className="font-semibold" aria-live="polite">
                   {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "failed" ? t(language, "pacs.remap.completeScanFailed") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
                 </p>
@@ -1916,17 +1919,17 @@ export default function PacsRemapPage() {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <button
+              <Button variant="primary"
                 type="button"
                 onClick={() => scanMutation.mutate(files)}
                 disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
                 {scanMutation.isPending ? t(language, "pacs.remap.scanningFiles") : t(language, "pacs.remap.scanSelected")}
-              </button>
-              <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
+              </Button>
+              <Button variant="secondary" type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
                 {t(language, "pacs.remap.resetWorkflow")}
-              </button>
+              </Button>
             </div>
 
             {visibleErrorMessage && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{visibleErrorMessage}</div>}
@@ -1975,14 +1978,14 @@ export default function PacsRemapPage() {
                             : "I confirm this preliminary source study."}
                         </span>
                       </label>
-                      <button
+                      <Button variant="primary"
                         type="button"
                         onClick={() => confirmPreliminaryStudy(selectedScannedStudy.studyInstanceUid)}
                         disabled={!skipAcknowledged}
                         className="btn-primary px-3 py-2 rounded-lg disabled:opacity-50"
                       >
                         {language === "ar" ? "تأكيد الدراسة والمتابعة إلى المريض" : "Confirm study and continue to Patient"}
-                      </button>
+                      </Button>
                     </>
                   )}
                 </div>
@@ -2004,7 +2007,7 @@ export default function PacsRemapPage() {
                 {scanResult.studies.map((study) => {
                   const isSelected = selectedStudyInstanceUid === study.studyInstanceUid;
                   return (
-                  <label key={study.studyInstanceUid} className={`block cursor-pointer rounded-2xl border p-4 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 hover:border-teal-300 hover:bg-slate-50"}`}>
+                  <label key={study.studyInstanceUid} className={`block cursor-pointer rounded-2xl border p-4 text-xs transition-all ${isSelected ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}>
                     <div className="flex items-start gap-2">
                       <input
                         type="radio"
@@ -2018,10 +2021,10 @@ export default function PacsRemapPage() {
                       <div className="min-w-0 flex-1 space-y-3">
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{study.studyDescription || study.modality || "—"}</p>
+                            <p className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>{study.studyDescription || study.modality || "—"}</p>
                             <p className="font-mono text-[11px]" title={study.studyInstanceUid} style={{ color: "var(--text-muted)" }}>{compactUid(study.studyInstanceUid)}</p>
                           </div>
-                          {isSelected && <span className="rounded-full bg-teal-600 px-2 py-1 text-[11px] font-medium text-white">{language === "ar" ? "مختارة" : "Selected"}</span>}
+                          {isSelected && <span className="rounded-full bg-blue-600 px-2 py-1 text-[11px] font-medium text-white">{language === "ar" ? "مختارة" : "Selected"}</span>}
                         </div>
                         <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
                           <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientName")}</span><strong>{study.patientName || "—"}</strong></div>
@@ -2046,9 +2049,9 @@ export default function PacsRemapPage() {
                     : ""}
               </p>
               {selectedStudy && <p className="text-xs text-slate-600">{language === "ar" ? "السلاسل" : "Series"}: {selectedStudy.seriesCount}</p>}
-              <button type="button" onClick={() => navigateTo("patient")} disabled={!canContinueStudy} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">
+              <Button variant="primary" type="button" onClick={() => navigateTo("patient")} disabled={!canContinueStudy} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">
                 {language === "ar" ? "متابعة إلى المريض" : "Continue to Patient"}
-              </button>
+              </Button>
             </div>
           </>}
 
@@ -2057,13 +2060,13 @@ export default function PacsRemapPage() {
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[1]}</h3>
                 {selectedPatientLabel && (
-                  <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
                     {language === "ar" ? "مريض RISPro محدد" : "RISPro patient selected"}
                   </span>
                 )}
               </div>
               {comparisonRequestId ? (
-                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-4 text-sm" data-testid="comparison-remap-context">
+                <div className="rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm" data-testid="comparison-remap-context">
                   <p className="font-semibold">{t(language, "comparisons.uploadLocked")}</p>
                   {comparisonContextQuery.isLoading ? <p className="mt-1 text-xs text-slate-600">{t(language, "comparisons.loadingRequest")}</p> : null}
                   {comparisonContextQuery.isError ? <p className="mt-1 text-xs text-red-700">{t(language, "comparisons.requestLoadError")}</p> : null}
@@ -2072,7 +2075,7 @@ export default function PacsRemapPage() {
                       <p><strong>{t(language, "comparisons.patient")}:</strong> {comparisonContext.patientEnglishName || comparisonContext.patientArabicName || comparisonContext.patientMrn || `#${comparisonContext.patientId}`}</p>
                       <p><strong>{t(language, "comparisons.previousStudy")}:</strong> {[comparisonContext.linkedStudyDate, comparisonContext.linkedExamName, comparisonContext.linkedPreviousAccessionNumber].filter(Boolean).join(" | ")}</p>
                       <p><strong>{t(language, "comparisons.reason")}:</strong> {comparisonContext.reason}</p>
-                      <p className="font-semibold text-teal-800">{t(language, "comparisons.patientLocked")}</p>
+                      <p className="font-semibold text-blue-800">{t(language, "comparisons.patientLocked")}</p>
                     </div>
                   ) : null}
                 </div>
@@ -2099,7 +2102,7 @@ export default function PacsRemapPage() {
                     <option value="yesterday">{t(language, "pacs.remap.yesterday")}</option>
                     <option value="custom">{t(language, "pacs.remap.chooseDate")}</option>
                   </select>
-                  <input
+                  <Input
                     type="date"
                     value={customStudyDate}
                     onChange={(e) => setCustomStudyDate(e.target.value)}
@@ -2119,7 +2122,7 @@ export default function PacsRemapPage() {
                       </option>
                     ))}
                   </select>
-                  <input
+                  <Input
                     type="text"
                     value={scopedPatientSearch}
                     onChange={(e) => setScopedPatientSearch(e.target.value)}
@@ -2147,7 +2150,7 @@ export default function PacsRemapPage() {
                           key={appointment.id}
                           type="button"
                           onClick={() => selectPatient(String(appointment.patient_id))}
-                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
                           <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
@@ -2175,7 +2178,7 @@ export default function PacsRemapPage() {
                           key={`all-dates-${appointment.id}`}
                           type="button"
                           onClick={() => selectPatient(String(appointment.patient_id))}
-                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
                           <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
@@ -2200,7 +2203,7 @@ export default function PacsRemapPage() {
                           key={`directory-${patient.id}`}
                           type="button"
                           onClick={() => selectPatient(String(patient.id))}
-                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
                         >
                           <p><strong>{formatDirectoryPatientName(language, patient)}</strong></p>
                           <p>{patient.national_id || patient.mrn || "—"}</p>
@@ -2215,14 +2218,14 @@ export default function PacsRemapPage() {
               </div>
               )}
               {selectedAppointmentPatient && (
-                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-3 text-xs space-y-1">
+                <div className="rounded-2xl border border-blue-300 bg-blue-50 p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)}</p>
                   <p><strong>{t(language, "pacs.remap.appointmentDateLabel")}:</strong> {selectedAppointmentPatient.appointment_date} • <strong>ACC</strong>: {selectedAppointmentPatient.accession_number}</p>
                   <p><strong>{t(language, "common.modality")}:</strong> {selectedAppointmentPatient.modality_name_en || selectedAppointmentPatient.modality_name_ar || formatFallbackModalityLabel(language, selectedAppointmentPatient.modality_id)}</p>
                 </div>
               )}
               {!selectedAppointmentPatient && selectedDirectoryPatient && (
-                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-3 text-xs space-y-1">
+                <div className="rounded-2xl border border-blue-300 bg-blue-50 p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {formatDirectoryPatientName(language, selectedDirectoryPatient)}</p>
                   <p><strong>{t(language, "pacs.remap.directoryPatientBadge")}:</strong> {selectedDirectoryPatient.national_id || selectedDirectoryPatient.mrn || "—"}</p>
                 </div>
@@ -2230,8 +2233,8 @@ export default function PacsRemapPage() {
               {replacementPreviewQuery.isError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700" role="alert">{language === "ar" ? "تعذر تحميل معاينة الاستبدال. أصلح الخطأ قبل المتابعة." : "Replacement preview failed. Resolve the error before continuing."}</p>}
               {replacementPreviewQuery.isLoading && scopedPatientId && <p className="text-xs text-slate-500" aria-live="polite">{language === "ar" ? "جارٍ تحميل معاينة الاستبدال…" : "Loading replacement preview…"}</p>}
               <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <button type="button" onClick={() => navigateTo("source")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
-                <button type="button" onClick={() => navigateTo("destination")} disabled={!canContinuePatient} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى الوجهة" : "Continue to Destination"}</button>
+                <Button variant="secondary" type="button" onClick={() => navigateTo("source")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</Button>
+                <Button variant="primary" type="button" onClick={() => navigateTo("destination")} disabled={!canContinuePatient} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى الوجهة" : "Continue to Destination"}</Button>
               </div>
             </div>
           )}
@@ -2257,8 +2260,8 @@ export default function PacsRemapPage() {
                 </select>
               </div>
               <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <button type="button" onClick={() => navigateTo("patient")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
-                <button type="button" onClick={() => navigateTo("review")} disabled={!canContinueDestination} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى المراجعة" : "Continue to Review"}</button>
+                <Button variant="secondary" type="button" onClick={() => navigateTo("patient")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</Button>
+                <Button variant="primary" type="button" onClick={() => navigateTo("review")} disabled={!canContinueDestination} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى المراجعة" : "Continue to Review"}</Button>
               </div>
             </div>
           )}
@@ -2272,10 +2275,10 @@ export default function PacsRemapPage() {
                 </span>
               </div>
               <div className="overflow-x-auto rounded-2xl border border-slate-200 text-xs">
-                <table className="w-full border-collapse">
-                  <thead className="bg-black/5">
+                <table className="w-full table-fixed border-collapse sm:table-auto [&_td]:[overflow-wrap:anywhere] [&_th]:[overflow-wrap:anywhere] [&_tr]:border-border">
+                  <thead className="bg-muted/70">
                     <tr>
-                      <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "الحقل" : "Field"}</th>
+                      <th scope="col" className="w-[24%] px-3 py-2 text-start font-semibold sm:w-auto">{language === "ar" ? "الحقل" : "Field"}</th>
                       <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "القيمة الأصلية من DICOM" : "Original DICOM"}</th>
                       <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "القيمة بعد الاستبدال" : "Replacement / Target"}</th>
                     </tr>
@@ -2386,8 +2389,8 @@ export default function PacsRemapPage() {
                   <span>{t(language, "pacs.remap.confirmIdentity")}</span>
                 </label>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <button type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
-                  <button
+                  <Button variant="secondary" type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</Button>
+                  <Button variant="primary"
                     type="button"
                     onClick={() => deferredStagingWorkflow ? requestStagedConfirmation() : processMutation.mutate()}
                     disabled={!canSubmit}
@@ -2396,7 +2399,7 @@ export default function PacsRemapPage() {
                     {deferredStagingWorkflow
                       ? (language === "ar" ? "تأكيد المريض والوجهة وبدء إعادة الربط" : "Confirm patient and destination; begin remap")
                       : t(language, "pacs.remap.uploadSelectedStudy")}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -2406,7 +2409,7 @@ export default function PacsRemapPage() {
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
               {recoveryIsProcessing && (
-                <p className="rounded border border-teal-200 bg-teal-50 p-3 text-sm text-teal-950" role="status">
+                <p className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950" role="status">
                   {t(language, "pacs.remap.orthancRecoveryProcessing")}
                 </p>
               )}
@@ -2424,12 +2427,12 @@ export default function PacsRemapPage() {
                       <input type="checkbox" checked={incompleteStudyAcknowledged} onChange={(event) => setIncompleteStudyAcknowledged(event.target.checked)} />
                       <span>{uncertainOnly ? "I understand that RISpro could not determine whether every likely-DICOM file belonged to the selected study, and I reviewed this warning." : "I understand that the remapped study is incomplete and have reviewed the skipped-file warning."}</span>
                     </label>
-                    <button type="button" className="btn-primary rounded-lg px-3 py-2 disabled:opacity-50" disabled={!incompleteStudyAcknowledged || confirmIncompleteStudyMutation.isPending} onClick={() => effectiveJobId && confirmIncompleteStudyMutation.mutate(effectiveJobId)}>Acknowledge and send to PACS</button>
+                    <Button variant="primary" type="button" className="btn-primary rounded-lg px-3 py-2 disabled:opacity-50" disabled={!incompleteStudyAcknowledged || confirmIncompleteStudyMutation.isPending} onClick={() => effectiveJobId && confirmIncompleteStudyMutation.mutate(effectiveJobId)}>Acknowledge and send to PACS</Button>
                   </div>
                 );
               })()}
               {pendingStagedConfirmation && secureStagingStatus === "uploading" && (
-                <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-950" role="status">
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-950" role="status">
                   <p>{language === "ar"
                     ? "تم تسجيل التأكيد. يستمر الرفع الآمن؛ وستبدأ المعالجة تلقائياً."
                     : "Confirmation recorded. Secure staging is continuing; processing will start automatically."}</p>
@@ -2441,7 +2444,7 @@ export default function PacsRemapPage() {
                       detail={uploadTotal > 0 ? `${formatBytes(uploadLoaded)} / ${formatBytes(uploadTotal)}` : undefined}
                     />
                   </div>
-                  <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+                  <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-blue-300 bg-white px-3 py-1.5 font-semibold text-blue-900">
                     {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
                   </button>
                 </div>
@@ -2460,7 +2463,7 @@ export default function PacsRemapPage() {
                   const activeIndex = stages.findIndex(([stageKey]) => stageKey === effectiveProcessingStage);
                   const complete = index < activeIndex;
                   const current = index === activeIndex;
-                  return <li key={key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${complete ? "border-teal-200 bg-teal-50 text-teal-800" : current ? "border-teal-500 bg-white text-teal-900" : "border-slate-200 bg-white text-slate-500"}`}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold">{complete ? "✓" : index + 1}</span><span>{label}</span>{current && <span className="ms-auto">{language === "ar" ? "جارٍ" : "Active"}</span>}</li>;
+                  return <li key={key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${complete ? "border-blue-200 bg-blue-50 text-blue-800" : current ? "border-blue-500 bg-white text-blue-900" : "border-slate-200 bg-white text-slate-500"}`}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold">{complete ? "✓" : index + 1}</span><span>{label}</span>{current && <span className="ms-auto">{language === "ar" ? "جارٍ" : "Active"}</span>}</li>;
                 })}
               </ol>
               <div className="hidden">
@@ -2473,14 +2476,14 @@ export default function PacsRemapPage() {
                   const currentIndex = activeStages.indexOf(effectiveProcessingStage);
                   const stageIndex = activeStages.indexOf(stage.key);
                   return (
-                    <div key={stage.key} className={`rounded-xl border px-3 py-2 text-center font-medium ${stageIndex <= currentIndex ? "border-teal-500 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-500"}`}>
+                    <div key={stage.key} className={`rounded-xl border px-3 py-2 text-center font-medium ${stageIndex <= currentIndex ? "border-blue-500 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-500"}`}>
                       {stage.label}
                     </div>
                   );
                 })}
               </div>
               <p className="text-xs" style={{ color: "var(--text-muted)" }} aria-live="polite">
-                {effectiveResumedJobMessage && <span className="block font-medium text-teal-800">{effectiveResumedJobMessage}</span>}
+                {effectiveResumedJobMessage && <span className="block font-medium text-blue-800">{effectiveResumedJobMessage}</span>}
                 {effectiveProcessingStage === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
                 {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
@@ -2528,9 +2531,9 @@ export default function PacsRemapPage() {
                 </p>
               )}
               {currentJob && ["uploaded", "processing", "remapped", "sending"].includes(currentJob.status) && (
-                <button type="button" onClick={startNewUpload} className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm">
+                <Button variant="secondary" type="button" onClick={startNewUpload} className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm">
                   {t(language, "pacs.remap.startNewUpload")}
-                </button>
+                </Button>
               )}
               {effectiveProcessingStage === "enqueueing_send" && currentJob?.send_error_code && (
                 <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
@@ -2588,9 +2591,9 @@ export default function PacsRemapPage() {
               )}
               <div className="flex flex-wrap gap-2">
                 {gatewayUploadLimitRejected ? (
-                  <button type="button" onClick={() => navigateTo("review")} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.backToReview")}</button>
+                  <Button variant="secondary" type="button" onClick={() => navigateTo("review")} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.backToReview")}</Button>
                 ) : (
-                  <button type="button" onClick={startNewUpload} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
+                  <Button variant="secondary" type="button" onClick={startNewUpload} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</Button>
                 )}
                 {effectiveJobId && (
                   <>
@@ -2601,44 +2604,44 @@ export default function PacsRemapPage() {
                           <input type="checkbox" checked={destinationCheckedForResend} onChange={(event) => setDestinationCheckedForResend(event.target.checked)} />
                           <span>I checked the destination PACS and confirmed this study is not already present.</span>
                         </label>
-                        <button
+                        <Button variant="secondary"
                           type="button"
                           onClick={() => resendJobMutation.mutate({ targetJobId: effectiveJobId, confirmDestinationChecked: true })}
                           disabled={!destinationCheckedForResend || resendJobMutation.isPending}
                           className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                         >
                           {t(language, "pacs.remap.resendToPacs")}
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {canResendJob(currentJob) && (
-                      <button
+                      <Button variant="secondary"
                         type="button"
                         onClick={() => resendJobMutation.mutate({ targetJobId: effectiveJobId })}
                         disabled={resendJobMutation.isPending}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                       >
                         {t(language, "pacs.remap.resendToPacs")}
-                      </button>
+                      </Button>
                     )}
                     {canRetryWithOrthanc(currentJob) && (
-                      <button
+                      <Button variant="secondary"
                         type="button"
                         onClick={() => orthancRecoveryMutation.mutate({ targetJobId: effectiveJobId })}
                         disabled={orthancRecoveryMutation.isPending}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                       >
                         {orthancRecoveryMutation.isPending ? t(language, "pacs.remap.orthancRecoveryProcessing") : t(language, "pacs.remap.retryWithOrthanc")}
-                      </button>
+                      </Button>
                     )}
                     {canRecoverSource(currentJob) && (
-                      <button
+                      <Button variant="secondary"
                         type="button"
                         onClick={() => recoverSource(effectiveJobId)}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm"
                       >
                         {t(language, "pacs.remap.recoverSource")}
-                      </button>
+                      </Button>
                     )}
                     {requiresDicomReupload(currentJob) && (
                       <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
@@ -2650,14 +2653,14 @@ export default function PacsRemapPage() {
                         Preserved source files are no longer available.
                       </p>
                     )}
-                    <button
+                    <Button variant="secondary"
                       type="button"
                       onClick={() => resetJobMutation.mutate({ targetJobId: effectiveJobId })}
                       disabled={resetJobMutation.isPending}
                       className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                     >
                       {t(language, "pacs.remap.resetCurrentUpload")}
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>
@@ -2669,8 +2672,8 @@ export default function PacsRemapPage() {
           <details className="card-shell p-4 space-y-2 text-xs">
             <summary className="cursor-pointer font-semibold text-sm">{language === "ar" ? "سجل إعادة التعيين" : "Remap History"}</summary>
             <div className="flex gap-1" role="group" aria-label="Remap history scope">
-              <button type="button" onClick={() => setHistoryScope("mine")} aria-pressed={historyScope === "mine"} className="btn-secondary px-2 py-1 rounded-lg text-xs">My Jobs</button>
-              <button type="button" onClick={() => setHistoryScope("all")} aria-pressed={historyScope === "all"} className="btn-secondary px-2 py-1 rounded-lg text-xs">All Users</button>
+              <Button variant="secondary" type="button" onClick={() => setHistoryScope("mine")} aria-pressed={historyScope === "mine"} className="btn-secondary px-2 py-1 rounded-lg text-xs">My Jobs</Button>
+              <Button variant="secondary" type="button" onClick={() => setHistoryScope("all")} aria-pressed={historyScope === "all"} className="btn-secondary px-2 py-1 rounded-lg text-xs">All Users</Button>
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {(jobsQuery.data?.jobs || []).map((job) => (
@@ -2704,38 +2707,38 @@ export default function PacsRemapPage() {
                     {isSendFailedJob(job) && (
                       <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
                     )}
-                    {job.orthanc_recovery_status === "processing" && <p className="text-[11px] font-semibold text-teal-800">{t(language, "pacs.remap.orthancRecoveryProcessing")}</p>}
+                    {job.orthanc_recovery_status === "processing" && <p className="text-[11px] font-semibold text-blue-800">{t(language, "pacs.remap.orthancRecoveryProcessing")}</p>}
                     {requiresDicomReupload(job) && <p className="text-[11px] font-semibold text-amber-800">{t(language, "pacs.remap.reuploadRequired")}</p>}
                     {job.status === "failed" && job.source_recovery_available === false && <p className="text-[11px] font-semibold text-amber-800">Preserved source files are no longer available.</p>}
                   </button>
                   {canResendJob(job) && viewedRecentJobId !== job.id && (
-                    <button
+                    <Button variant="secondary"
                       type="button"
                       onClick={() => resendJobMutation.mutate({ targetJobId: job.id, viewTargetJob: job })}
                       disabled={resendJobMutation.isPending}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >
                       {t(language, "pacs.remap.resendToPacs")}
-                    </button>
+                    </Button>
                   )}
                   {canRetryWithOrthanc(job) && viewedRecentJobId !== job.id && (
-                    <button
+                    <Button variant="secondary"
                       type="button"
                       onClick={() => orthancRecoveryMutation.mutate({ targetJobId: job.id, viewTargetJob: job })}
                       disabled={orthancRecoveryMutation.isPending}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >
                       {t(language, "pacs.remap.retryWithOrthanc")}
-                    </button>
+                    </Button>
                   )}
                   {canRecoverSource(job) && viewedRecentJobId !== job.id && (
-                    <button
+                    <Button variant="secondary"
                       type="button"
                       onClick={() => recoverSource(job.id)}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs"
                     >
                       {t(language, "pacs.remap.recoverSource")}
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))}
@@ -2745,9 +2748,9 @@ export default function PacsRemapPage() {
             <summary className="cursor-pointer font-semibold">{language === "ar" ? "صيانة المشرف" : "Supervisor maintenance"}</summary>
             <div className="mt-3 space-y-2">
               <p className="text-slate-500">{language === "ar" ? "إجراء مشرف للصيانة فقط." : "Supervisor-only maintenance action."}</p>
-              <button type="button" onClick={() => clearFailedStudiesMutation.mutate()} disabled={clearFailedStudiesMutation.isPending} className="btn-secondary rounded-lg px-3 py-2 text-xs">
+              <Button variant="secondary" type="button" onClick={() => clearFailedStudiesMutation.mutate()} disabled={clearFailedStudiesMutation.isPending} className="btn-secondary rounded-lg px-3 py-2 text-xs">
                 {t(language, "pacs.remap.clearFailedStudies")}
-              </button>
+              </Button>
             </div>
           </details>
         </div>

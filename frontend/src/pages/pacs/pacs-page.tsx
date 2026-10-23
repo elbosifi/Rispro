@@ -1,3 +1,5 @@
+import "@/components/shared/compact-controls.css";
+import { Button, Input } from "@/components/shared";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
@@ -173,27 +175,27 @@ export default function PacsPage() {
   }));
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="compact-controls max-w-7xl mx-auto space-y-6">
       {/* Page Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
           <Monitor className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1">
-          <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+          <h2 className="text-xl font-bold" style={{ color: "var(--foreground)" }}>
             {t(language, "pacs.title")}
           </h2>
           <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
             {t(language, "pacs.searchBtn")}
           </p>
         </div>
-        <button
+        <Button variant="secondary"
           type="button"
           onClick={() => navigate("/pacs/remap")}
           className="btn-secondary px-3 py-2 rounded-lg text-xs"
         >
           {language === "ar" ? "إعادة ربط DICOM" : "DICOM Remap"}
-        </button>
+        </Button>
       </div>
 
       {/* Search Form */}
@@ -202,11 +204,11 @@ export default function PacsPage() {
         <form onSubmit={handleSearch} className="space-y-4">
           {/* Primary search: National ID */}
           <div>
-            <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+            <label htmlFor="pacs-nationalId" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
               <Hash className="w-3 h-3 inline mr-1" />
               {t(language, "pacs.fieldNationalId")}
             </label>
-            <input
+            <Input id="pacs-nationalId"
               type="text"
               value={nationalId}
               onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 12))}
@@ -214,66 +216,66 @@ export default function PacsPage() {
               inputMode="numeric"
               maxLength={12}
               className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-              style={{ color: "var(--text)" }}
+              style={{ color: "var(--foreground)" }}
             />
           </div>
 
           {/* Advanced criteria */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+              <label htmlFor="pacs-patientName" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <Monitor className="w-3 h-3 inline mr-1" />
                 {t(language, "pacs.fieldPatientName")}
               </label>
-              <input
+              <Input id="pacs-patientName"
                 type="text"
                 value={patientName}
                 onChange={(e) => setPatientName(e.target.value)}
                 placeholder={t(language, "pacs.patientNamePlaceholder")}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-                style={{ color: "var(--text)" }}
+                style={{ color: "var(--foreground)" }}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+              <label htmlFor="pacs-accessionNumber" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <FileText className="w-3 h-3 inline mr-1" />
                 {t(language, "pacs.fieldAccessionNumber")}
               </label>
-              <input
+              <Input id="pacs-accessionNumber"
                 type="text"
                 value={accessionNumber}
                 onChange={(e) => setAccessionNumber(e.target.value)}
                 placeholder={t(language, "pacs.accessionPlaceholder")}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-                style={{ color: "var(--text)" }}
+                style={{ color: "var(--foreground)" }}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+              <label htmlFor="pacs-studyDate" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <Calendar className="w-3 h-3 inline mr-1" />
                 {t(language, "pacs.fieldStudyDate")}
               </label>
-              <input
+              <Input id="pacs-studyDate"
                 type="date"
                 value={studyDate}
                 onChange={(e) => setStudyDate(e.target.value)}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-                style={{ color: "var(--text)" }}
+                style={{ color: "var(--foreground)" }}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+              <label htmlFor="pacs-modality" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <Activity className="w-3 h-3 inline mr-1" />
                 {t(language, "pacs.fieldModality")}
               </label>
-              <select
+              <select id="pacs-modality"
                 value={modality}
                 onChange={(e) => setModality(e.target.value)}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-                style={{ color: "var(--text)" }}
+                style={{ color: "var(--foreground)" }}
               >
                 <option value="">{t(language, "pacs.allModalities")}</option>
                 <option value="CT">{modalityLabel("CT", language)}</option>
@@ -292,15 +294,15 @@ export default function PacsPage() {
 
           {activeTargets.length > 1 && (
             <div>
-              <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+              <label htmlFor="pacs-selectedTargetKey" className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <Monitor className="w-3 h-3 inline mr-1" />
                 Orthanc target
               </label>
-              <select
+              <select id="pacs-selectedTargetKey"
                 value={selectedTargetKey}
                 onChange={(e) => setSelectedTargetKey(e.target.value || "local")}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
-                style={{ color: "var(--text)" }}
+                style={{ color: "var(--foreground)" }}
               >
                 {activeTargets.map((target) => (
                   <option key={target.key} value={target.key}>{target.name}{target.is_default ? " (default)" : ""}</option>
@@ -311,22 +313,22 @@ export default function PacsPage() {
 
           {/* Actions */}
           <div className="flex gap-3">
-            <button
+            <Button variant="primary"
               type="submit"
               disabled={isSearching}
               className="btn-primary flex-1 py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50"
             >
               <Search className="w-4 h-4" />
               {isSearching ? t(language, "pacs.searching") : t(language, "pacs.searchBtn")}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary"
               type="button"
               onClick={handleReset}
               className="btn-secondary px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all"
             >
               <RefreshCw className="w-4 h-4" />
               {t(language, "pacs.resetBtn") || "Reset"}
-            </button>
+            </Button>
           </div>
 
           {error && (
@@ -340,7 +342,7 @@ export default function PacsPage() {
         <div className="p-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 rounded-full" style={{ background: "var(--accent)" }} />
-            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
+            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--foreground)" }}>
               {t(language, "pacs.studies", { count: searchResults.length })}
             </h3>
           </div>
@@ -366,17 +368,17 @@ export default function PacsPage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <p className="font-medium font-mono-data" style={{ color: "var(--text)" }}>
+                    <p className="font-medium font-mono-data" style={{ color: "var(--foreground)" }}>
                       {study.patientName || study.patientId || t(language, "pacs.studyLabel", { num: index + 1 })}
                     </p>
                     <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
                       {t(language, "pacs.fieldDate")}: {study.studyDate || "—"} • {t(language, "pacs.fieldModality")}: {study.modality || "—"}
                     </p>
-                    <p className="text-xs font-mono-data mt-0.5" style={{ color: "var(--text-muted)", opacity: 0.7 }}>
+                    <p className="text-xs font-mono-data mt-0.5" style={{ color: "var(--text-muted)" }}>
                       {t(language, "pacs.fieldDescription")}: {study.description || "—"}
                     </p>
                     {study.accessionNumber && (
-                      <p className="text-xs font-mono-data mt-0.5" style={{ color: "var(--text-muted)", opacity: 0.7 }}>
+                      <p className="text-xs font-mono-data mt-0.5" style={{ color: "var(--text-muted)" }}>
                         Acc: {study.accessionNumber}
                       </p>
                     )}
