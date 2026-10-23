@@ -139,6 +139,8 @@ test("hospital addresses are accepted, HTTP needs acknowledgement and invalid se
   await settings(connection);
 });
 test("instruction presets and generation controls persist, forward immediately and restore defaults", async () => {
+  const taskIds = ["cleanup_dictation", "correct_terminology", "format_radiology_report", "review_radiology_report"] as const;
+  assert.deepEqual(MEDGEMMA_TASKS, taskIds);
   const previous = (await json("/medgemma/settings")).data.settings;
   const instructions = Object.fromEntries(MEDGEMMA_TASKS.map((task) => [task, `Custom synthetic instructions for ${task}`]));
   const saved = await settings({ ...connection, instructions, temperature: 0.2, maxGeneratedTokens: 1024 });
@@ -146,10 +148,18 @@ test("instruction presets and generation controls persist, forward immediately a
   const fresh = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'const {getMedGemmaSettings}=await import("./src/modules/medgemma/medgemma-settings-service.ts");const {pool}=await import("./src/db/pool.ts");console.log(JSON.stringify(await getMedGemmaSettings()));await pool.end();']);
   const loaded = JSON.parse(fresh.stdout);
   assert.deepEqual(loaded.instructions, instructions); assert.equal(loaded.temperature, 0.2); assert.equal(loaded.maxGeneratedTokens, 1024);
-  for (const task of MEDGEMMA_TASKS) {
+  for (const task of taskIds) {
     const body = { task, text: "Synthetic original medical text" };
     assert.equal((await json("/medgemma/generate", doctor, "POST", body)).status, 200);
     assert.deepEqual(received, { ...body, instructions: instructions[task], temperature: 0.2, max_new_tokens: 1024 });
+  }
+  // Verify saved changes are forwarded, including a zero temperature, rather
+  // than a client default or stale configuration. RISpro does no model work.
+  assert.equal((await settings({ ...connection, temperature: 0, maxGeneratedTokens: 8192 })).status, 200);
+  for (const task of taskIds) {
+    const body = { task, text: "Unchanged synthetic original medical text" };
+    assert.equal((await json("/medgemma/generate", doctor, "POST", body)).status, 200);
+    assert.deepEqual(received, { ...body, instructions: instructions[task], temperature: 0, max_new_tokens: 8192 });
   }
   // Saving the backend-supplied default is the same action used by Restore Default in Settings.
   assert.equal((await settings({ ...connection, instructions: { cleanup_dictation: loaded.instructionDefaults.cleanup_dictation } })).status, 200);
@@ -160,7 +170,7 @@ test("instruction presets and generation controls persist, forward immediately a
   assert.equal((received as { instructions: string }).instructions, DEFAULT_MEDGEMMA_INSTRUCTIONS.cleanup_dictation);
   // Old clients saving connection fields alone must retain these new settings.
   await settings(connection);
-  assert.equal((await json("/medgemma/settings")).data.settings.temperature, 0.2);
+  assert.equal((await json("/medgemma/settings")).data.settings.temperature, 0);
   await settings(previous);
 });
 test("legacy saved connections acquire defaults without replacing encrypted credentials", async () => {

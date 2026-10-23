@@ -43,15 +43,28 @@ it("keeps original input and submitted snapshot, allows explicit editing, copy a
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
   for (const label of ["Original Text Input", "Original Text", "MedGemma Result"]) expect(screen.getByLabelText(label)).toHaveProperty("value", "");
 });
-it("preserves original text after failure and clears any old output before a new request", async () => {
-  vi.mocked(api.generateMedGemmaText).mockRejectedValue(new Error("MedGemma request timed out."));
+it.each([
+  ["cleanup_dictation", "MedGemma request timed out or was cancelled."],
+  ["correct_terminology", "MedGemma returned an unsuccessful response."],
+  ["format_radiology_report", "MedGemma server is unreachable."],
+  ["review_radiology_report", "MedGemma returned an invalid generation response."],
+] as const)("displays %s failures, clears stale output and preserves the exact submitted text", async (task, message) => {
   mount(); await screen.findByText("Model: google/medgemma");
-  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: "Keep original" } });
+  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: "Previous input" } });
   fireEvent.click(screen.getByRole("button", { name: "Process Text" }));
-  expect(await screen.findByText("MedGemma request timed out.")).toBeTruthy();
-  expect(screen.getByLabelText("Original Text Input")).toHaveProperty("value", "Keep original");
-  expect(screen.getByLabelText("Original Text")).toHaveProperty("value", "Keep original");
-  expect(screen.getByLabelText("MedGemma Result")).toHaveProperty("value", "");
+  await waitFor(() => expect(screen.getByLabelText("MedGemma Result")).toHaveProperty("value", "No left frontal lesion."));
+  vi.mocked(api.generateMedGemmaText).mockRejectedValueOnce(new Error(message));
+  const original = "  No left-sided lesion.\nMeasurement: 1.2 cm; possible artifact.  ";
+  fireEvent.change(screen.getByLabelText("Processing Task"), { target: { value: task } });
+  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: original } });
+  fireEvent.click(screen.getByRole("button", { name: "Process Text" }));
+  expect(await screen.findByText(message)).toBeTruthy();
+  expect(screen.getByLabelText("Original Text Input")).toHaveProperty("value", original);
+  expect(screen.getByLabelText("Original Text")).toHaveProperty("value", original);
+  expect(screen.getByLabelText(task === "review_radiology_report" ? "Potential Issues" : "MedGemma Result")).toHaveProperty("value", "");
+  expect(screen.getByRole("button", { name: "Copy Result" })).toHaveProperty("disabled", true);
+  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: "Next input" } });
+  expect(screen.getByLabelText("Original Text")).toHaveProperty("value", original);
 });
 it("disables generation when MedGemma is disabled but still allows manual input", async () => {
   vi.mocked(api.getMedGemmaHealth).mockResolvedValue({ status: "disabled" });
