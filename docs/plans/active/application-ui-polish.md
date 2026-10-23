@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; monitoring/access batch validated; Settings and Teaching remain.
+Status: active; core Settings batch validated; remaining Settings and Teaching assessment continues.
 
 ## Baseline and safety
 
@@ -60,7 +60,7 @@ Total discovered composed screen entries: **120**, including **5** regression re
 | PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Complete — batch 8 |
 | PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Complete — batch 8 |
 | Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Complete — batch 8 |
-| Settings | `/settings` | `SettingsPage` | P2 | Discovered |
+| Settings | `/settings` | `SettingsPage` | P2 | Complete — batch 13 |
 | Monitoring | `/incidents` | `IncidentsPage` | P2 | Complete — batch 12 |
 | SOP | `/sops` | `SopsPage (library)` | P2 | Complete — batch 11 |
 | SOP | `/sops/json-example` | `SopJsonExamplePage` | P2 | Complete — batch 11 |
@@ -95,12 +95,12 @@ Total discovered composed screen entries: **120**, including **5** regression re
 | Protocols | `/doctor/protocols?area=library&section=scanners` | `DoctorProtocolsPage / scanners` | P1 | Complete — batch 3 |
 | Protocols | `/doctor/protocols?area=library&section=ctPhases` | `DoctorProtocolsPage / ctPhases` | P1 | Complete — batch 3 |
 | Protocols | `/doctor/protocols?area=library&section=mriSequences` | `DoctorProtocolsPage / mriSequences` | P1 | Complete — batch 3 |
-| Settings | `/settings?section=mobile_widget` | `MobileWidgetAccessSection` | P2 | Discovered |
-| Settings | `/settings?section=patient_registration` | `SimpleSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=mobile_widget` | `MobileWidgetAccessSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=patient_registration` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
 | Settings | `/settings?section=patient_import` | `PatientImportSection` | P2 | Discovered |
 | Settings | `/settings?section=patient_duplicate_resolver` | `PatientDuplicateResolverSection` | P2 | Discovered |
-| Settings | `/settings?section=scheduling_and_capacity` | `SimpleSettingsSection` | P2 | Discovered |
-| Settings | `/settings?section=queue_and_arrival` | `SimpleSettingsSection` | P2 | Discovered |
+| Settings | `/settings?section=scheduling_and_capacity` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=queue_and_arrival` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
 | Settings | `/settings?section=scheduling_engine_config` | `SchedulingEngineConfigSection` | P2 | Discovered |
 | Settings | `/settings?section=pacs_connection` | `PacsSettingsSection` | P2 | Discovered |
 | Settings | `/settings?section=dicom_gateway_config` | `DicomGatewaySettingsSection` | P2 | Discovered |
@@ -356,3 +356,12 @@ Total discovered composed screen entries: **120**, including **5** regression re
 - Browser: 8 final route/language cases (Statistics, Incidents, Login, invalid public link), 4 synthetic legacy/public cases, 2 synthetic incident cases, and 1 Statistics loading/empty/error case, each including desktop/phone, PASS. Synthetic legacy Search/Reset run; no workflow writes. Original public-helper duplicate-text locator and incident-helper guessed Arabic action label were corrected to actual heading/catalog labels; rejected/interrupted helper runs are not passes. Login/public show existing language limitations, not claimed fully localized. External MDB import/physical printing/WebAuthn not validated.
 - Checks: baseline and final 67/67 focused tests PASS. Exact final frontend typecheck/build PASS after final app edit; targeted lint PASS; harness:ui PASS; whitespace clean. Existing bundle/jsdom warnings retained. Shared base primitives/tokens unchanged; original-five reference verification remains valid from batch 11 and will be rerun at final handoff.
 - Counts: 63/115 remaining-scope entries complete (52 polished, 11 accepted unchanged), 52 remain unassessed: 35 Settings entries and 17 Teaching entries. No pending product decisions. Rollback commits: reporting `5e851c32`, SOP `168fd64e`; this milestone checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 13 — Settings landing, mobile access and core clinical preferences complete
+
+- Five entries polished: Settings landing, Mobile Widget Access, Patient Registration settings, Scheduling & Capacity, Queue & Arrival. Reused SearchInput/Button/Input/LoadingState and existing compact tokens. Landing search icon/text no longer overlap; readable summary labels and one existing Back label replace duplicate “Back - Back to Settings Menu.” Menu grouping, navigation handlers and section routing unchanged.
+- Simple setting rows now stack label/control on phones and preserve compact desktop rows. Previously similar-name labels collapsed to a few characters per line and selectors extended beyond cards. Labels associate with native/shared fields, MRN prefix retains its explicit Save, and auto-save controls retain the same values, handlers, min/max/step and pending behavior. No setting/rule values changed during browser QA.
+- Shared Settings shell now opts into compact controls for its descendants. Remaining Settings entries still require individual assessment and are NOT credited complete. Future before captures use the unchanged starting-main frontend at port 5174 so this common polish does not conceal earlier baseline issues. Mobile create/rotate/revoke dialogs opt in locally because they render through portals.
+- Browser: initial loading-only protected-setting captures rejected; replaced by settled English/Arabic desktop/phone views after normal password re-authentication. Actual re-auth flow unchanged. Two core settled-state cases, four landing/mobile route cases before/after, and two populated synthetic device cases before/after PASS. Active/expired/revoked device cards, long name wrapping, create/rotate/revoke dialogs and Cancel verified without generating, rotating or revoking tokens. Settings writes remain zero. Original helper Arabic rotation wording corrected from a guessed synonym to the existing catalog label; failed helper runs not credited.
+- Checks: baseline/final 18/18 focused Settings navigation/reauth/mobile/composition tests PASS. Exact final frontend typecheck/build PASS; targeted lint PASS; harness:ui PASS; whitespace clean. Base shared primitives/tokens and original-five screens unchanged. Existing mixed English/Arabic setting labels and raw fallback key labels remain localization limitations; no language catalogs or auth/setting persistence logic changed.
+- Counts: 68/115 complete (57 polished, 11 accepted unchanged). 47 remain unassessed: 30 Settings views and 17 Teaching views. No pending decisions. Previous rollback `69d158cd`; this checkpoint follows locally. No push/PR/deploy or main squash-apply.
