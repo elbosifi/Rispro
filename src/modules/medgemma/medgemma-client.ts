@@ -2,9 +2,11 @@ import http from "node:http";
 import https from "node:https";
 import { HttpError } from "../../utils/http-error.js";
 import { CLEANUP_DICTATION_INSTRUCTIONS } from "./cleanup-instructions.js";
+import type { MedGemmaTask } from "./task-instructions.js";
 
 export interface MedGemmaConnection { baseUrl: string; timeoutSeconds: number; allowInsecureHttp: boolean }
 export interface MedGemmaResult { text: string; processing_seconds: number }
+export interface MedGemmaGeneration { task: MedGemmaTask; text: string; instructions: string; temperature: number; maxGeneratedTokens: number }
 export const MAX_TEXT_LENGTH = 32_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 
@@ -71,8 +73,12 @@ export async function checkMedGemmaHealth(connection: MedGemmaConnection, apiKey
 }
 
 export async function cleanupMedGemmaDictation(connection: MedGemmaConnection, apiKey: string, text: string, signal?: AbortSignal): Promise<MedGemmaResult> {
-  validateDictationText(text);
-  const body = Buffer.from(JSON.stringify({ task: "cleanup_dictation", text, instructions: CLEANUP_DICTATION_INSTRUCTIONS }));
+  return generateMedGemma(connection, apiKey, { task: "cleanup_dictation", text, instructions: CLEANUP_DICTATION_INSTRUCTIONS, temperature: 0.1, maxGeneratedTokens: 2048 }, signal);
+}
+
+export async function generateMedGemma(connection: MedGemmaConnection, apiKey: string, input: MedGemmaGeneration, signal?: AbortSignal): Promise<MedGemmaResult> {
+  validateDictationText(input.text);
+  const body = Buffer.from(JSON.stringify({ task: input.task, text: input.text, instructions: input.instructions, temperature: input.temperature, max_new_tokens: input.maxGeneratedTokens }));
   const result = await request(connection, "/generate", apiKey, body, signal) as Record<string, unknown> | null;
   if (!result || typeof result.text !== "string" || !result.text.trim() || result.text.length > MAX_TEXT_LENGTH || typeof result.processing_seconds !== "number" || !Number.isFinite(result.processing_seconds) || result.processing_seconds < 0) throw new HttpError(502, "MedGemma returned an invalid generation response.");
   return { text: result.text, processing_seconds: result.processing_seconds };

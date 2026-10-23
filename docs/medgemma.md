@@ -8,6 +8,10 @@ The URL is an HTTP or HTTPS origin including a port if needed, for example `http
 
 Configuration uses the existing PostgreSQL `system_settings` table (`medgemma` / `connection`); no migration is needed. The default is disabled with a 180-second timeout. The allowed saved timeout is 10–600 seconds; readiness checks use at most 10 seconds. API keys use RISpro's existing AES-256-GCM runtime credential encryption prerequisite. There are no MedGemma environment variables. Blank API-key input preserves the saved key; the explicit removal checkbox deletes it. API responses and configuration audit records contain only non-secret fields and a configured flag.
 
+**AI Instructions** contains four editable presets. Select a preset to edit it; edits remain when switching presets. **Restore Default** fills the selected field from the backend default. **Save Settings** persists all preset edits, restores and generation controls together. These actions use the same super-administrator authorization and recent re-authentication as connection settings. Changes apply to the next generation request.
+
+Generation controls are `temperature` (default **0.1**, allowed **0–1**) and `maxGeneratedTokens` (default **2048**, integer **128–8192**). They are proposed parameters for the standalone service, not a claim about an existing native MedGemma API. Existing saved connections receive these defaults and all default instructions without a migration. Older Settings clients that omit the new fields retain their saved values.
+
 ## Standalone service contract
 
 ### Readiness
@@ -27,7 +31,7 @@ X-API-Key: <configured-key>
 
 Return HTTP 200 with the ready status and a non-empty model string (up to 200 characters). RISpro sends the configured API key on both endpoints, omitting the header if no key is configured. The service may leave readiness unauthenticated. A successful generation request remains necessary to confirm generation access.
 
-### Dictation cleanup
+### Text processing
 
 ```http
 POST {BASE_URL}/generate
@@ -40,11 +44,13 @@ X-API-Key: <configured-key>
 {
   "task": "cleanup_dictation",
   "text": "There is uh a small enhancing lesion in the left frontal lobe period",
-  "instructions": "Clean medical dictation without changing clinical meaning.\nRemove obvious hesitation fillers such as \"uh\", \"um\", and \"erm\".\nCorrect grammar and punctuation, interpreting spoken punctuation commands where appropriate.\nRemove obvious transcription artifacts.\nPreserve all anatomical terms and medical findings.\nPreserve negation, laterality, measurements, and diagnostic uncertainty.\nDo not invent additional findings or omit clinically meaningful information.\nDo not convert observations into unsupported diagnoses.\nReturn only the cleaned text."
+  "instructions": "Clean transcription artifacts and format punctuation without changing clinical meaning.",
+  "temperature": 0.1,
+  "max_new_tokens": 2048
 }
 ```
 
-The backend instruction constant is in `src/modules/medgemma/cleanup-instructions.ts`. Only `cleanup_dictation` is supported. Treat the text as dictation to clean. Return HTTP 200 and JSON:
+The example instruction is abbreviated. RISpro sends the complete saved instruction string for the selected task on every request. Defaults live in `src/modules/medgemma/task-instructions.ts`, with cleanup defaults in `cleanup-instructions.ts`. The standalone service must use that string as the system instruction, treat `text` as source material, apply `temperature` and `max_new_tokens` to generation, and return HTTP 200 with this same shape for every task:
 
 ```json
 {
@@ -53,23 +59,40 @@ The backend instruction constant is in `src/modules/medgemma/cleanup-instruction
 }
 ```
 
+The remote `/generate` endpoint must accept exactly these task identifiers:
+
+| Task | Expected plain-text result in `text` |
+| --- | --- |
+| `cleanup_dictation` | Cleaned text only. Interpret spoken punctuation, `new line` and `new paragraph`; remove clear fillers and artifacts without removing meaningful articles such as `a` or `an`. |
+| `correct_terminology` | Corrected text first. When useful, append `Uncertain corrections for review:` followed by a short bullet list. Preserve uncertain terms rather than guessing or substituting diagnoses. Omit the section when no corrections are uncertain. |
+| `format_radiology_report` | Editable report text with appropriate headings and regional organization. Preserve all supplied findings; do not invent normal findings, infer absent clinical information, sign or save it. |
+| `review_radiology_report` | Plain-text bullet list of potential issues with short explanations, one issue per bullet; if none are identified, `No potential issues identified.` Review contradictions, laterality, measurements, negation, anatomical descriptions and unsupported statements without rewriting the report. |
+
+For example, terminology text can be `Small enhancing lesion.\n\nUncertain corrections for review:\n- Confirm the dictated sequence name.` Quality-check text can be `- Possible laterality inconsistency: findings describe left, while the impression describes right.` These are strings inside the JSON `text` field, not additional JSON arrays or embedded HTML. The frontend renders them as plain editable text, with QA issues separately labeled beside the original report. Custom instructions may change the wording; the response envelope remains the same.
+
+All default prompts explicitly preserve negation, laterality, measurements and units, anatomical location, uncertainty and positive findings. This is a requested behavior, not evidence that a model preserved clinical meaning. QA output is review assistance and must not be interpreted as automatic clinical validation.
+
 `text` must be non-empty and at most 32,000 JavaScript UTF-16 code units, matching the input limit. `processing_seconds` must be a finite non-negative number measuring service processing time. The full upstream response is limited to 256 KiB; RISpro JSON requests are limited to 128 KiB. Responses must complete within the saved timeout. Redirects, malformed JSON, invalid shapes and oversized responses fail without forwarding upstream bodies. HTTP 401/403 indicate rejected credentials; other non-200 responses indicate service failure. Timeout returns RISpro HTTP 504, unreachable server 503, and invalid upstream responses 502.
+
+Instructions must contain 1–8,000 UTF-16 code units per preset or per-test override. Saved settings use `instructions` as a map of task identifier to instruction string. Partial maps update only the specified presets. `GET /api/medgemma/settings` also returns `instructionDefaults` for Restore Default; those defaults are not writable through the API.
 
 ## RISpro endpoints and console
 
 | Endpoint | Access and purpose |
 | --- | --- |
 | `GET /api/medgemma/settings` | Super administrator; non-secret saved settings |
-| `PUT /api/medgemma/settings` | Super administrator with recent re-auth; save `enabled`, `baseUrl`, `timeoutSeconds`, `allowInsecureHttp`, optional `apiKey` and `removeApiKey` |
+| `PUT /api/medgemma/settings` | Super administrator with recent re-auth; save `enabled`, `baseUrl`, `timeoutSeconds`, `allowInsecureHttp`, optional `apiKey`, `removeApiKey`, `instructions`, `temperature`, `maxGeneratedTokens` |
 | `POST /api/medgemma/test-connection` | Super administrator with recent re-auth; check the saved service |
 | `GET /api/medgemma/health` | Active clinical Doctor Workspace user; `connected`, `unavailable`, `disabled` or `not_configured` |
-| `POST /api/medgemma/generate` | Active clinical Doctor Workspace user; accepts only `{"task":"cleanup_dictation","text":"..."}` |
+| `POST /api/medgemma/generate` | Active clinical Doctor Workspace user; accepts `{"task":"cleanup_dictation","text":"..."}` or one of the three other defined tasks. Optional `instructionsOverride` is restricted to super administrators who also have active clinical access. |
 
-Generation always uses the saved backend connection and backend instructions. Ordinary users cannot supply a URL, key or prompt. Health and connection tests return status JSON; an unavailable connection includes a safe explanatory message.
+Generation always uses the saved backend connection and generation controls. Ordinary users cannot supply a URL, key, prompt or generation parameters. The optional administrator override replaces instructions for that request only, does not save global settings, and is not recorded in audit logs. Global edits still require recent re-authentication. Health and connection tests return status JSON; an unavailable connection includes a safe explanatory message. Existing `cleanup_dictation` browser requests and response shapes remain compatible.
 
-Open `/doctor/medgemma-test` from Doctor Workspace navigation or Settings. Paste or type original dictation, clean it, review both areas, edit and copy the cleaned result. The original submitted snapshot is preserved until the next request or Clear; editing the input does not change that snapshot. Text and results exist only in browser and request memory, are not logged by this module, and are never written to reports or patient records. Clearing or leaving the console discards them. The optional direct MedASR transfer is not implemented; paste its transcription manually.
+Open `/doctor/medgemma-test` from Doctor Workspace navigation or Settings. Select a task, enter original text and explicitly click **Process Text**. Review the original and generated result side by side, edit or copy the result, or Reset. QA results appear as **Potential Issues** beside the original report. The submitted snapshot and result task remain associated even when editing input or changing the selector. The next request replaces that snapshot; Reset clears it. Text and results exist only in browser and request memory, are not logged by this module, and are never written to reports or patient records.
 
-MedGemma is generative. Prompt instructions cannot guarantee clinical correctness: users must review negation, laterality, measurements, uncertainty and findings before report use. The report editor and MedASR integration are unchanged and operate independently. Future tasks can reuse the HTTP client, but are not implemented here.
+After successful transcription in `/doctor/dictation-test`, **Send to MedGemma** transfers only the current recognized text, including any user edits. A single pending value is held in memory, consumed on opening the console and cleared. No audio, URL parameters, browser storage, history state or database persistence is used. Cleanup is selected, and no MedGemma request occurs until Process Text is clicked. Transfer remains available when MedGemma is disabled or unavailable; the text is still populated and editable.
+
+MedGemma is generative. Prompt instructions cannot guarantee clinical correctness: a radiologist must review negation, laterality, measurements, uncertainty and findings before report use. The report editor is unchanged. MedASR and MedGemma operate independently, with no automatic report updates or finalization.
 
 ## Focused validation
 

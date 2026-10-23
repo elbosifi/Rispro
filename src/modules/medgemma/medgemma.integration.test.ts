@@ -8,6 +8,7 @@ import { createApp } from "../../app.js";
 import { pool } from "../../db/pool.js";
 import { decryptRuntimeSecret } from "../../services/runtime-secret-crypto.js";
 import { createTestAuthCookie, createTestSupervisorReauthCookie } from "../appointments-v2/tests/integration/helpers.js";
+import { DEFAULT_MEDGEMMA_INSTRUCTIONS, MEDGEMMA_TASKS } from "./task-instructions.js";
 
 let app: http.Server;
 let origin: string;
@@ -136,6 +137,60 @@ test("hospital addresses are accepted, HTTP needs acknowledgement and invalid se
   assert.equal((await settings({ ...connection, baseUrl: "http://192.9.101.55:8000" })).status, 200);
   for (const change of [{ allowInsecureHttp: false }, { baseUrl: "ftp://host" }, { timeoutSeconds: 1 }, { timeoutSeconds: 601 }, { enabled: "true" }, { apiKey: "bad\r\nkey" }, { apiKey: "key", removeApiKey: true }]) assert.equal((await settings({ ...connection, ...change })).status, 400);
   await settings(connection);
+});
+test("instruction presets and generation controls persist, forward immediately and restore defaults", async () => {
+  const previous = (await json("/medgemma/settings")).data.settings;
+  const instructions = Object.fromEntries(MEDGEMMA_TASKS.map((task) => [task, `Custom synthetic instructions for ${task}`]));
+  const saved = await settings({ ...connection, instructions, temperature: 0.2, maxGeneratedTokens: 1024 });
+  assert.equal(saved.status, 200); assert.deepEqual(saved.data.settings.instructions, instructions);
+  const fresh = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", 'const {getMedGemmaSettings}=await import("./src/modules/medgemma/medgemma-settings-service.ts");const {pool}=await import("./src/db/pool.ts");console.log(JSON.stringify(await getMedGemmaSettings()));await pool.end();']);
+  const loaded = JSON.parse(fresh.stdout);
+  assert.deepEqual(loaded.instructions, instructions); assert.equal(loaded.temperature, 0.2); assert.equal(loaded.maxGeneratedTokens, 1024);
+  for (const task of MEDGEMMA_TASKS) {
+    const body = { task, text: "Synthetic original medical text" };
+    assert.equal((await json("/medgemma/generate", doctor, "POST", body)).status, 200);
+    assert.deepEqual(received, { ...body, instructions: instructions[task], temperature: 0.2, max_new_tokens: 1024 });
+  }
+  // Saving the backend-supplied default is the same action used by Restore Default in Settings.
+  assert.equal((await settings({ ...connection, instructions: { cleanup_dictation: loaded.instructionDefaults.cleanup_dictation } })).status, 200);
+  const restored = (await json("/medgemma/settings")).data.settings;
+  assert.equal(restored.instructions.cleanup_dictation, DEFAULT_MEDGEMMA_INSTRUCTIONS.cleanup_dictation);
+  assert.equal(restored.instructions.correct_terminology, instructions.correct_terminology);
+  await json("/medgemma/generate", doctor, "POST", { task: "cleanup_dictation", text: "input" });
+  assert.equal((received as { instructions: string }).instructions, DEFAULT_MEDGEMMA_INSTRUCTIONS.cleanup_dictation);
+  // Old clients saving connection fields alone must retain these new settings.
+  await settings(connection);
+  assert.equal((await json("/medgemma/settings")).data.settings.temperature, 0.2);
+  await settings(previous);
+});
+test("legacy saved connections acquire defaults without replacing encrypted credentials", async () => {
+  const stored = (await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value;
+  await pool.query("update system_settings set setting_value=setting_value - 'instructions' - 'temperature' - 'maxGeneratedTokens' where category='medgemma'");
+  const loaded = (await json("/medgemma/settings")).data.settings;
+  assert.deepEqual(loaded.instructions, DEFAULT_MEDGEMMA_INSTRUCTIONS); assert.equal(loaded.temperature, 0.1); assert.equal(loaded.maxGeneratedTokens, 2048);
+  assert.equal(loaded.apiKeyConfigured, true);
+  assert.equal((await json("/medgemma/generate", doctor, "POST", { task: "cleanup_dictation", text: "input" })).status, 200);
+  await pool.query("update system_settings set setting_value=$1 where category='medgemma'", [stored]);
+});
+test("per-test instructions are restricted to clinical super admins and never change saved presets", async () => {
+  const body = { task: "review_radiology_report", text: "Synthetic original report", instructionsOverride: "Only flag possible laterality contradictions." };
+  assert.equal((await json("/medgemma/generate", doctor, "POST", body)).status, 403);
+  assert.equal((await json("/medgemma/generate", admin, "POST", body)).status, 403);
+  await pool.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active) values($1,'Clinical admin test','consultant',true)", [users[0]]);
+  const previous = (await json("/medgemma/settings")).data.settings;
+  try {
+    assert.equal((await json("/medgemma/generate", admin, "POST", body)).status, 200);
+    assert.equal((received as { instructions: string }).instructions, body.instructionsOverride);
+    for (const instructionsOverride of ["", " ", "x".repeat(8001), 123]) assert.equal((await json("/medgemma/generate", admin, "POST", { ...body, instructionsOverride })).status, 400);
+    assert.deepEqual((await json("/medgemma/settings")).data.settings, previous);
+    const audit = await pool.query("select old_values,new_values from audit_log where changed_by_user_id=any($1::bigint[])", [users]);
+    assert.doesNotMatch(JSON.stringify(audit.rows), /Synthetic original report|Only flag possible laterality contradictions/);
+  } finally { await pool.query("delete from doctor_portal.doctor_profiles where user_id=$1", [users[0]]); }
+});
+test("rejects invalid generation settings and unknown or empty instruction presets", async () => {
+  for (const change of [{ temperature: -0.1 }, { temperature: 1.1 }, { temperature: "0.1" }, { maxGeneratedTokens: 127 }, { maxGeneratedTokens: 8193 }, { maxGeneratedTokens: 200.5 }, { instructions: null }, { instructions: [] }, { instructions: { unknown: "test" } }, { instructions: { cleanup_dictation: "" } }, { instructions: { correct_terminology: "x".repeat(8001) } }]) {
+    assert.equal((await settings({ ...connection, ...change })).status, 400);
+  }
 });
 test("disable/not configured, key removal, failed auth and platform encryption failure are explicit; MedASR is unchanged", async () => {
   await settings({ ...connection, enabled: false });

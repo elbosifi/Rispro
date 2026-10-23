@@ -7,6 +7,7 @@ import { getDoctorMe } from "../doctor-portal/profile-service.js";
 import { getMedGemmaSettings, saveMedGemmaSettings } from "./medgemma-settings-service.js";
 import { generateMedGemmaText, medGemmaHealth } from "./medgemma-service.js";
 import { validateDictationText } from "./medgemma-client.js";
+import { isMedGemmaTask, validateMedGemmaInstructions } from "./task-instructions.js";
 
 export const medGemmaRouter = Router();
 medGemmaRouter.use(requireAuth, (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
@@ -21,11 +22,15 @@ medGemmaRouter.use(asyncRoute(async (req, _res, next) => {
 medGemmaRouter.get("/health", asyncRoute(async (_req, res) => res.json(await medGemmaHealth())));
 medGemmaRouter.post("/generate", asyncRoute(async (req, res) => {
   const input = req.body as Record<string, unknown> | null;
-  if (!input || input.task !== "cleanup_dictation" || Object.keys(input).some((key) => key !== "task" && key !== "text")) throw new HttpError(400, "Send only task cleanup_dictation and original text.");
+  if (!input || !isMedGemmaTask(input.task) || Object.keys(input).some((key) => !["task", "text", "instructionsOverride"].includes(key))) throw new HttpError(400, "Send a supported MedGemma task and original text.");
   validateDictationText(input.text);
+  if (input.instructionsOverride !== undefined) {
+    if (req.user!.role !== "super_admin") throw new HttpError(403, "Only a super administrator may override test instructions.");
+    validateMedGemmaInstructions(input.instructionsOverride);
+  }
   const controller = new AbortController();
   const abort = () => { if (!res.writableEnded) controller.abort(); };
   res.once("close", abort);
-  try { res.json(await generateMedGemmaText(input.text, controller.signal)); }
+  try { res.json(await generateMedGemmaText(input.task, input.text, input.instructionsOverride as string | undefined, controller.signal)); }
   finally { res.off("close", abort); }
 }));

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import http from "node:http";
-import { checkMedGemmaHealth, cleanupMedGemmaDictation, validateMedGemmaUrl, type MedGemmaConnection } from "./medgemma-client.js";
+import { checkMedGemmaHealth, cleanupMedGemmaDictation, generateMedGemma, validateMedGemmaUrl, type MedGemmaConnection } from "./medgemma-client.js";
 import { CLEANUP_DICTATION_INSTRUCTIONS } from "./cleanup-instructions.js";
+import { DEFAULT_MEDGEMMA_INSTRUCTIONS, MEDGEMMA_TASKS } from "./task-instructions.js";
 
 async function withServer(handler: http.RequestListener, run: (connection: MedGemmaConnection) => Promise<void>) {
   const server = http.createServer(handler);
@@ -31,7 +32,7 @@ test("mock server receives the exact task, text, backend instructions and key; o
     const chunks: Buffer[] = [];
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => {
-      assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), { task: "cleanup_dictation", text: original, instructions: CLEANUP_DICTATION_INSTRUCTIONS });
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), { task: "cleanup_dictation", text: original, instructions: CLEANUP_DICTATION_INSTRUCTIONS, temperature: 0.1, max_new_tokens: 2048 });
       res.end(JSON.stringify({ text: "There is no left-sided lesion.", processing_seconds: 2.5, extra: "not forwarded" }));
     });
   }, async (connection) => {
@@ -50,6 +51,20 @@ test("rejects redirects, failed authentication and unsuccessful responses withou
       assert.match(error.message, status === 302 ? /redirects/ : status === 401 || status === 403 ? /authentication/ : /unsuccessful/);
       return true;
     });
+  });
+});
+
+test("one generation client forwards each task, its instructions and configured generation controls", async () => {
+  for (const task of MEDGEMMA_TASKS) await withServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+      assert.deepEqual(JSON.parse(body), { task, text: "Synthetic medical input", instructions: DEFAULT_MEDGEMMA_INSTRUCTIONS[task], temperature: 0.2, max_new_tokens: 1024 });
+      res.end(JSON.stringify({ text: task === "review_radiology_report" ? "- Possible laterality discrepancy: review left versus right." : "Processed medical text.", processing_seconds: 1 }));
+    });
+  }, async (connection) => {
+    const result = await generateMedGemma(connection, "key", { task, text: "Synthetic medical input", instructions: DEFAULT_MEDGEMMA_INSTRUCTIONS[task], temperature: 0.2, maxGeneratedTokens: 1024 });
+    assert.equal(typeof result.text, "string"); assert.equal(result.processing_seconds, 1);
   });
 });
 

@@ -6,8 +6,11 @@ import { ApiError } from "@/lib/api-client";
 import * as api from "@/lib/medgemma-api";
 import MedGemmaSection from "./medgemma-section";
 
-vi.mock("@/lib/medgemma-api");
-const settings: api.MedGemmaSettings = { enabled: false, baseUrl: "", timeoutSeconds: 180, allowInsecureHttp: false, apiKeyConfigured: true, encryptionReady: true };
+vi.mock("@/lib/medgemma-api", async (importOriginal) => ({
+  ...await importOriginal<typeof api>(),
+  getMedGemmaSettings: vi.fn(), saveMedGemmaSettings: vi.fn(), testMedGemmaConnection: vi.fn(), getMedGemmaHealth: vi.fn(), generateMedGemmaText: vi.fn(),
+}));
+const settings: api.MedGemmaSettings = { enabled: false, baseUrl: "", timeoutSeconds: 180, allowInsecureHttp: false, apiKeyConfigured: true, encryptionReady: true, temperature: 0.1, maxGeneratedTokens: 2048, instructions: { cleanup_dictation: "Default cleanup", correct_terminology: "Default terminology", format_radiology_report: "Default formatting", review_radiology_report: "Default review" }, instructionDefaults: { cleanup_dictation: "Default cleanup", correct_terminology: "Default terminology", format_radiology_report: "Default formatting", review_radiology_report: "Default review" } };
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(api.getMedGemmaSettings).mockResolvedValue({ settings });
@@ -35,4 +38,19 @@ it("requests existing re-auth without discarding unsaved edits", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save Settings" }));
   await waitFor(() => expect(onReauth).toHaveBeenCalled());
   expect(url).toHaveProperty("value", "https://model.hospital:8000");
+});
+it("edits all presets, retains edits while switching, restores one default and saves generation controls", async () => {
+  mount(); await screen.findByLabelText("Instruction Preset");
+  fireEvent.change(screen.getByLabelText("System Instructions"), { target: { value: "Custom cleanup instructions" } });
+  fireEvent.change(screen.getByLabelText("Instruction Preset"), { target: { value: "correct_terminology" } });
+  fireEvent.change(screen.getByLabelText("System Instructions"), { target: { value: "Custom terminology instructions" } });
+  fireEvent.change(screen.getByLabelText("Instruction Preset"), { target: { value: "cleanup_dictation" } });
+  expect(screen.getByLabelText("System Instructions")).toHaveProperty("value", "Custom cleanup instructions");
+  fireEvent.click(screen.getByRole("button", { name: "Restore Default" }));
+  expect(screen.getByLabelText("System Instructions")).toHaveProperty("value", "Default cleanup");
+  fireEvent.change(screen.getByLabelText("Temperature (0–1)"), { target: { value: "0.2" } });
+  fireEvent.change(screen.getByLabelText("Maximum Generated Tokens (128–8192)"), { target: { value: "1024" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Settings" }));
+  await screen.findByText("Settings saved. Changes are active immediately.");
+  expect(api.saveMedGemmaSettings).toHaveBeenCalledWith({ ...settings, instructions: { ...settings.instructions, correct_terminology: "Custom terminology instructions" }, temperature: 0.2, maxGeneratedTokens: 1024 }, "", false);
 });

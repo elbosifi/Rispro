@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button, Card, ErrorState, Textarea } from "@/components/shared";
 import { useLanguage } from "@/providers/language-provider";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { getDictationHealth, transcribeDictation, type DictationHealth } from "@/lib/medical-dictation-api";
+import { setMedGemmaTestText } from "@/lib/medgemma-test-transfer";
 
 export function DictationTestPage() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const recorder = useAudioRecorder();
   const [health, setHealth] = useState<DictationHealth | null>(null);
   const [text, setText] = useState("");
@@ -59,6 +62,7 @@ export function DictationTestPage() {
       <Textarea id="dictation-text" dir="ltr" className="min-h-48 w-full" value={text} disabled={processing} onChange={(e) => { setText(e.target.value); setCopied(false); }} />
       {processingSeconds !== null && <p className="text-sm">{t("dictation.processingTime", { seconds: processingSeconds })}</p>}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={!text || processing} onClick={() => void copy()}>{copied ? t("dictation.copied") : t("dictation.copy")}</Button><Button variant="secondary" disabled={processing || (!text && processingSeconds === null)} onClick={() => { setText(""); setProcessingSeconds(null); setCopied(false); }}>{t("dictation.clearText")}</Button></div>
+      <Button variant="secondary" disabled={processing || processingSeconds === null || !text.trim()} onClick={() => { setMedGemmaTestText(text); navigate("/doctor/medgemma-test"); }}>{t("medgemma.sendToMedGemma")}</Button>
     </Card>
     {processing && <p role="status">{t("dictation.processingHint")}</p>}
     {error && <ErrorState message={error} />}
