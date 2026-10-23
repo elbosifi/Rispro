@@ -107,3 +107,48 @@ it("consumes transferred text in memory, selects Cleanup and waits for a Process
   expect(screen.getByLabelText("Processing Task")).toHaveProperty("value", "cleanup_dictation");
   expect(api.generateMedGemmaText).not.toHaveBeenCalled(); expect(getMedGemmaTestText()).toBeNull();
 });
+
+it.each(["disabled", "unavailable", "not_configured"] as const)("performs basic cleanup with MedGemma %s, without generation or input changes", async (status) => {
+  vi.mocked(api.getMedGemmaHealth).mockResolvedValue({ status });
+  const original = "Um no right lesion period no left edema period";
+  setMedGemmaTestText(original);
+  mount();
+  await waitFor(() => expect(api.getMedGemmaHealth).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Basic Cleanup (Instant)" }));
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", "No right lesion. No left edema.");
+  expect(screen.queryByLabelText("MedGemma Result")).toBeNull();
+  expect(screen.getByLabelText("Original Text Input")).toHaveProperty("value", original);
+  expect(screen.getByLabelText("Original Text")).toHaveProperty("value", original);
+  expect(api.generateMedGemmaText).not.toHaveBeenCalled();
+  expect(getMedGemmaTestText()).toBeNull();
+  expect(screen.queryByText(/Processing time:/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Result" }));
+  await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith("No right lesion. No left edema."));
+  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: "Next input" } });
+  expect(screen.getByLabelText("Original Text")).toHaveProperty("value", original);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Result" }));
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("readOnly", false);
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.queryByLabelText("Basic Cleaned Text")).toBeNull();
+  expect(screen.getByLabelText("MedGemma Result")).toHaveProperty("value", "");
+  expect(screen.getByRole("button", { name: "Basic Cleanup (Instant)" })).toHaveProperty("disabled", true);
+});
+
+it("keeps optional AI processing available and labels results by their actual source", async () => {
+  mount(); await screen.findByText("Model: google/medgemma");
+  const original = "Um no right lesion period";
+  fireEvent.change(screen.getByLabelText("Original Text Input"), { target: { value: original } });
+  fireEvent.click(screen.getByRole("button", { name: "Basic Cleanup (Instant)" }));
+  fireEvent.change(screen.getByLabelText("Processing Task"), { target: { value: "review_radiology_report" } });
+  expect(screen.queryByRole("button", { name: "Basic Cleanup (Instant)" })).toBeNull();
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", "No right lesion.");
+  fireEvent.click(screen.getByRole("button", { name: "Process Text" }));
+  await waitFor(() => expect(screen.getByLabelText("Potential Issues")).toHaveProperty("value", "No left frontal lesion."));
+  expect(api.generateMedGemmaText).toHaveBeenCalledWith("review_radiology_report", original, undefined);
+  expect(screen.queryByLabelText("Basic Cleaned Text")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Processing Task"), { target: { value: "cleanup_dictation" } });
+  fireEvent.click(screen.getByRole("button", { name: "Basic Cleanup (Instant)" }));
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", "No right lesion.");
+  expect(screen.queryByLabelText("Potential Issues")).toBeNull();
+  expect(screen.queryByText(/Processing time:/)).toBeNull();
+});

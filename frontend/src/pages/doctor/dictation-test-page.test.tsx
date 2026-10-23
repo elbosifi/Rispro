@@ -47,3 +47,25 @@ it("transfers only successful transcription text to MedGemma using memory", asyn
   fireEvent.click(screen.getByRole("button", { name: "Send to MedGemma" }));
   expect(getMedGemmaTestText()).toBe("Edited recognized text");
 });
+
+it("previews, copies and transfers cleaned text while keeping the original editable", async () => {
+  const original = "Um no right lesion period no left edema period";
+  const cleaned = "No right lesion. No left edema.";
+  mount(); await screen.findByText("Model: google/medasr");
+  expect(screen.getByRole("button", { name: "Send Cleaned to MedGemma" })).toHaveProperty("disabled", true);
+  fireEvent.change(screen.getByLabelText("Transcription"), { target: { value: original } });
+  expect(screen.getByLabelText("Transcription")).toHaveProperty("value", original);
+  expect(screen.getByLabelText("Transcription")).toHaveProperty("readOnly", false);
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", cleaned);
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("readOnly", true);
+  fireEvent.click(screen.getByRole("button", { name: "Copy Cleaned Text" }));
+  await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(cleaned));
+  fireEvent.click(screen.getByRole("button", { name: "Send Cleaned to MedGemma" }));
+  expect(getMedGemmaTestText()).toBe(cleaned);
+  expect(api.transcribeDictation).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Transcription"), { target: { value: "No mass period" } });
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", "No mass.");
+  fireEvent.click(screen.getByRole("button", { name: "Clear Text" }));
+  expect(screen.getByLabelText("Basic Cleaned Text")).toHaveProperty("value", "");
+  expect(screen.getByRole("button", { name: "Copy Cleaned Text" })).toHaveProperty("disabled", true);
+});

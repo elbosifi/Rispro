@@ -5,6 +5,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { getDictationHealth, transcribeDictation, type DictationHealth } from "@/lib/medical-dictation-api";
 import { setMedGemmaTestText } from "@/lib/medgemma-test-transfer";
+import { cleanupMedicalDictation } from "@/lib/medical-dictation-cleanup";
 
 export function DictationTestPage() {
   const { t } = useLanguage();
@@ -15,8 +16,9 @@ export function DictationTestPage() {
   const [processingSeconds, setProcessingSeconds] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"original" | "cleaned" | null>(null);
   const [checking, setChecking] = useState(false);
+  const basicCleaned = cleanupMedicalDictation(text);
   const check = useCallback(async () => {
     setChecking(true); setError("");
     try { setHealth(await getDictationHealth()); }
@@ -26,13 +28,13 @@ export function DictationTestPage() {
   useEffect(() => { void check(); }, [check]);
   const transcribe = async () => {
     if (!recorder.recording) return;
-    setProcessing(true); setError(""); setCopied(false);
+    setProcessing(true); setError(""); setCopied(null);
     try { const result = await transcribeDictation(recorder.recording); setText(result.text); setProcessingSeconds(result.processing_seconds); }
     catch (e) { setError(e instanceof Error ? e.message : t("dictation.actionError")); }
     finally { setProcessing(false); }
   };
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); }
+  const copy = async (source: "original" | "cleaned") => {
+    try { await navigator.clipboard.writeText(source === "original" ? text : basicCleaned); setCopied(source); }
     catch { setError(t("dictation.copyError")); }
   };
   const recordingBusy = recorder.phase !== "idle";
@@ -59,10 +61,19 @@ export function DictationTestPage() {
     </Card>
     <Card className="space-y-3">
       <label className="block font-semibold" htmlFor="dictation-text">{t("dictation.transcription")}</label>
-      <Textarea id="dictation-text" dir="ltr" className="min-h-48 w-full" value={text} disabled={processing} onChange={(e) => { setText(e.target.value); setCopied(false); }} />
+      <Textarea id="dictation-text" dir="ltr" className="min-h-48 w-full" value={text} disabled={processing} onChange={(e) => { setText(e.target.value); setCopied(null); }} />
       {processingSeconds !== null && <p className="text-sm">{t("dictation.processingTime", { seconds: processingSeconds })}</p>}
-      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={!text || processing} onClick={() => void copy()}>{copied ? t("dictation.copied") : t("dictation.copy")}</Button><Button variant="secondary" disabled={processing || (!text && processingSeconds === null)} onClick={() => { setText(""); setProcessingSeconds(null); setCopied(false); }}>{t("dictation.clearText")}</Button></div>
+      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={!text || processing} onClick={() => void copy("original")}>{copied === "original" ? t("dictation.copied") : t("dictation.copy")}</Button><Button variant="secondary" disabled={processing || (!text && processingSeconds === null)} onClick={() => { setText(""); setProcessingSeconds(null); setCopied(null); }}>{t("dictation.clearText")}</Button></div>
       <Button variant="secondary" disabled={processing || processingSeconds === null || !text.trim()} onClick={() => { setMedGemmaTestText(text); navigate("/doctor/medgemma-test"); }}>{t("medgemma.sendToMedGemma")}</Button>
+    </Card>
+    <Card className="space-y-3">
+      <label className="block font-semibold" htmlFor="dictation-basic-cleaned">{t("dictation.basicCleanedText")}</label>
+      <p className="text-sm text-muted-foreground">{t("dictation.basicCleanupHint")}</p>
+      <Textarea rows={6} id="dictation-basic-cleaned" dir="ltr" className="min-h-48 w-full" value={basicCleaned} readOnly />
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" disabled={processing || !basicCleaned} onClick={() => void copy("cleaned")}>{copied === "cleaned" ? t("dictation.copied") : t("dictation.copyCleaned")}</Button>
+        <Button variant="secondary" disabled={processing || !basicCleaned} onClick={() => { setMedGemmaTestText(basicCleaned); navigate("/doctor/medgemma-test"); }}>{t("medgemma.sendCleanedToMedGemma")}</Button>
+      </div>
     </Card>
     {processing && <p role="status">{t("dictation.processingHint")}</p>}
     {error && <ErrorState message={error} />}
