@@ -31,6 +31,7 @@ import type { DoctorMe, User } from "@/types/api";
 import { canRoleAccessRoute, DEFAULT_PAGE_VISIBILITY_MATRIX, normalizePageVisibilityMatrix } from "@/lib/page-visibility";
 import { t } from "@/lib/i18n";
 import { DoctorCasesPage } from "./doctor-cases-page";
+import { MedGemmaTestPage } from "./medgemma-test-page";
 import { DictationTestPage } from "./dictation-test-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
@@ -67,6 +68,7 @@ type DoctorSearchSelection =
 const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
+  { path: "/doctor/medgemma-test", label: t("en", "medgemma.navLabel"), icon: ClipboardList },
   { path: "/doctor/dictation-test", label: t("en", "dictation.navLabel"), icon: ClipboardList },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
   { path: "/doctor/additional-imaging", label: "Additional Imaging", icon: ClipboardList },
@@ -286,6 +288,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
         element={canAccessClinical ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route path="cases" element={<Navigate to="/doctor/today-cases" replace />} />
+      <Route path="medgemma-test" element={canAccessClinical ? <MedGemmaTestPage /> : <Navigate to="/doctor/my-work" replace />} />
       <Route path="dictation-test" element={canAccessClinical ? <DictationTestPage /> : <Navigate to="/doctor/my-work" replace />} />
       <Route
         path="reporting-board"

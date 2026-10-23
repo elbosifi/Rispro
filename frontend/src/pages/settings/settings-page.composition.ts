@@ -34,6 +34,7 @@ export type SettingsSection =
   | "system_diagnostics"
   | "request_scan_automation"
   | "email_notifications"
+  | "medgemma"
   | "medical_dictation"
   | "authoritative_orthanc";
 
@@ -76,6 +77,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "request_scan_automation",
   "email_notifications",
   "medical_dictation",
+  "medgemma",
   "authoritative_orthanc",
 ];
 
@@ -115,6 +117,7 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   request_scan_automation: "integrations",
   email_notifications: "integrations",
   medical_dictation: "integrations",
+  medgemma: "integrations",
   authoritative_orthanc: "integrations",
 };
 
@@ -133,7 +136,7 @@ export function initialSettingsSection(search: string): SettingsSection {
 
 export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?: string): boolean {
   if (section === "mobile_widget" && role !== "supervisor" && role !== "super_admin") return false;
-  if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications" || section === "medical_dictation" || section === "deployment_identity") && role !== "super_admin") {
+  if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications" || section === "medical_dictation" || section === "medgemma" || section === "deployment_identity") && role !== "super_admin") {
     return false;
   }
   return true;

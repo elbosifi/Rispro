@@ -143,6 +143,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
+    "medgemma",
+    "integrations",
+  ],
+  [
     "authoritative_orthanc",
     "integrations",
   ],

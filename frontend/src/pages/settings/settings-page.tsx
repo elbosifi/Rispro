@@ -25,6 +25,7 @@ import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import RequestScanAutomationSection from "./request-scan-automation-section";
 import EmailNotificationsSection from "./email-notifications-section";
+import MedGemmaSection from "./medgemma-section";
 import MedicalDictationSection from "./medical-dictation-section";
 import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import QzTrayPrintingSection from "./qz-tray-printing-section";
@@ -258,6 +259,7 @@ export default function SettingsPage() {
             {section === "system_diagnostics" && user?.role === "super_admin" && <SystemDiagnosticsSection onReAuthRequired={requestReAuth} />}
             {section === "request_scan_automation" && user?.role === "super_admin" && <RequestScanAutomationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "email_notifications" && user?.role === "super_admin" && <EmailNotificationsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
+            {section === "medgemma" && user?.role === "super_admin" && <MedGemmaSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "medical_dictation" && user?.role === "super_admin" && <MedicalDictationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "authoritative_orthanc" && (user?.role === "supervisor" || user?.role === "super_admin") && <AuthoritativeOrthancSection onReAuthRequired={requestReAuth} />}
 

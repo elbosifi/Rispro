@@ -44,6 +44,8 @@ import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
 import { emailSettingsRouter } from "./routes/email-settings.js";
+import { medGemmaRouter } from "./modules/medgemma/medgemma-routes.js";
+import { HttpError } from "./utils/http-error.js";
 import { medicalDictationRouter } from "./modules/medical-dictation/medical-dictation-routes.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 import { incidentsRouter } from "./routes/incidents.js";
@@ -127,6 +129,12 @@ export function createApp(): Application {
       // Let route-specific body parsers handle it.
       return next();
     }
+    if (req.path.startsWith("/api/medgemma/")) {
+      express.json({ limit: "128kb" })(req, _res, (error?: { status?: number }) => {
+        next(error ? new HttpError(error.status === 413 ? 413 : 400, "Invalid or oversized MedGemma JSON request.") : undefined);
+      });
+      return;
+    }
     // Normal global parser for everything else.
     express.json({ limit: env.requestBodyLimit })(req, _res, next);
   });
@@ -184,6 +192,7 @@ export function createApp(): Application {
   app.use("/api/ir-referrals", irReferralsRouter);
   app.use("/api/settings/email-notifications", emailSettingsRouter);
   app.use("/api/medical-dictation", medicalDictationRouter);
+  app.use("/api/medgemma", medGemmaRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/user-notifications", userNotificationsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);

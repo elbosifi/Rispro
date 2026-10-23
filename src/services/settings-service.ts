@@ -105,6 +105,7 @@ export async function listSettingsCatalog(): Promise<GroupedSettings<SettingsRow
     `
       select id, category, setting_key, setting_value, updated_at
       from system_settings
+      where category <> 'medgemma'
       order by category asc, setting_key asc
     `
   );
@@ -123,6 +124,7 @@ export async function listSettingsCatalog(): Promise<GroupedSettings<SettingsRow
 }
 
 export async function getSettingsByCategory(category: string): Promise<SettingsRow[]> {
+  if (category === "medgemma") throw new HttpError(404, "MedGemma settings have a dedicated endpoint.");
   const { rows } = await pool.query(
     `
       select id, category, setting_key, setting_value, updated_at
@@ -141,6 +143,7 @@ export async function upsertSettings(
   entries: SettingsEntryInput[],
   updatedByUserId: UserId
 ): Promise<SettingsRow[]> {
+  if (category === "medgemma") throw new HttpError(404, "MedGemma settings have a dedicated endpoint.");
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new HttpError(400, "entries must be a non-empty array.");
   }
