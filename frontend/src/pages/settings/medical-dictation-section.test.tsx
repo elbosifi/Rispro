@@ -33,6 +33,15 @@ it("supports replacement and explicit key removal", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save Settings" }));
   await waitFor(() => expect(api.saveDictationSettings).toHaveBeenLastCalledWith(settings, "", true));
 });
+it("requires explicit HTTP acknowledgement for the configured hospital destination", async () => {
+  mount(); const address = await screen.findByLabelText("MedASR Server Address");
+  fireEvent.change(address, { target: { value: "http://192.9.101.244:8000" } });
+  const acknowledgement = screen.getByLabelText(/Allow unencrypted HTTP to the configured MedASR server/);
+  expect(acknowledgement).toHaveProperty("checked", false);
+  fireEvent.click(acknowledgement);
+  fireEvent.click(screen.getByRole("button", { name: "Save Settings" }));
+  await waitFor(() => expect(api.saveDictationSettings).toHaveBeenCalledWith({ ...settings, baseUrl: "http://192.9.101.244:8000", allowInsecureHttp: true }, "", false));
+});
 it("preserves unsaved edits while requesting sensitive-settings re-authentication", async () => {
   vi.mocked(api.saveDictationSettings).mockRejectedValue(new ApiError("Recent supervisor re-authentication is required.", 403));
   mount(); const address = await screen.findByLabelText("MedASR Server Address"); fireEvent.change(address, { target: { value: "https://replacement.example.org" } });

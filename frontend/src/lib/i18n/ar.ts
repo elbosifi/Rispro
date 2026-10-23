@@ -3125,7 +3125,7 @@ export const ar = {
   "dictation.keyConfigured": "مفتاح API: تم ضبطه",
   "dictation.keyNotConfigured": "مفتاح API: غير مضبوط",
   "dictation.removeKey": "إزالة مفتاح API المحفوظ عند الحفظ",
-  "dictation.httpAcknowledgement": "السماح بـ HTTP على شبكة داخلية محمية فقط. أؤكد أن الوصول إلى شبكة MedASR مقيّد ومحمي؛ يُفضّل HTTPS للتسجيلات الطبية.",
+  "dictation.httpAcknowledgement": "السماح باتصال HTTP غير مشفّر بخادم MedASR المحدّد. أؤكد أن هذه الوجهة موثوقة وأن الوصول إلى الشبكة مقيّد ومحمي؛ يُفضّل HTTPS للتسجيلات الطبية.",
   "dictation.encryptionMissing": "تشفير بيانات الاعتماد غير متاح. يجب على مسؤول النظام تهيئة متطلب التشفير الموجود في RISpro قبل التفعيل أو حفظ مفتاح.",
   "dictation.save": "حفظ الإعدادات",
   "dictation.saved": "تم حفظ الإعدادات وتطبيق التغييرات فوراً.",

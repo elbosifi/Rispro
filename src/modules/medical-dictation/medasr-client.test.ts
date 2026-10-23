@@ -11,7 +11,7 @@ let mode = "ready";
 let received = Buffer.alloc(0);
 let server: http.Server;
 let port: number;
-let answers = [{ address: "10.20.30.40", family: 4 }];
+let answers = [{ address: "192.9.101.244", family: 4 }];
 before(async () => {
   server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -46,15 +46,24 @@ before(async () => {
 });
 after(async () => { mock.restoreAll(); server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
 
-test("URL and DNS protection permits private services while rejecting unsafe targets", () => {
+test("URL and DNS protection rejects unsafe targets even when HTTP is allowed", () => {
   assert.equal(validateMedAsrUrl(connection), connection.baseUrl);
   assert.equal(validateMedAsrUrl({ ...connection, baseUrl: "https://medasr.example.org:8443/" }), "https://medasr.example.org:8443");
-  for (const baseUrl of ["invalid", "file:///etc/passwd", "http://user:key@10.0.0.1", "http://10.0.0.1/path", "http://10.0.0.1?url=x", "http://10.0.0.1#x", "http://localhost", "http://127.1", "http://169.254.169.254", "http://100.100.100.200", "http://[::1]", "http://[::ffff:127.0.0.1]", "http://8.8.8.8"]) assert.throws(() => validateMedAsrUrl({ ...connection, baseUrl }));
+  for (const baseUrl of ["invalid", "file:///etc/passwd", "http://user:key@10.0.0.1", "http://10.0.0.1/path", "http://10.0.0.1?url=x", "http://10.0.0.1#x", "http://localhost", "http://127.1", "http://169.254.169.254", "http://100.100.100.200", "http://[::1]", "http://[::ffff:127.0.0.1]"]) assert.throws(() => validateMedAsrUrl({ ...connection, baseUrl }));
   assert.throws(() => validateMedAsrUrl({ ...connection, allowInsecureHttp: false }));
-  assert.throws(() => validateMedAsrUrl({ ...connection, baseUrl: "HTTP://8.8.8.8" }));
-  for (const address of ["127.0.0.1", "169.254.1.1", "0.0.0.0", "224.1.1.1", "::1", "fe80::1", "::ffff:a00:1", "fd00:ec2::254"]) assert.throws(() => validateTargetAddress(address, { ...connection, baseUrl: "https://medasr.test" }));
+  for (const baseUrl of ["http://medasr.test", "https://medasr.test"]) {
+    for (const address of ["127.0.0.1", "169.254.1.1", "0.0.0.0", "224.1.1.1", "::1", "fe80::1", "::ffff:a00:1", "fd00:ec2::254"]) assert.throws(() => validateTargetAddress(address, { ...connection, baseUrl }));
+  }
   validateTargetAddress("fd00::1", connection);
   validateTargetAddress("192.168.1.100", connection);
+});
+test("explicit HTTP opt-in permits configured destinations outside private ranges", () => {
+  for (const baseUrl of ["http://192.9.101.244:8000", "http://8.8.8.8", "HTTP://8.8.8.8"]) {
+    assert.equal(validateMedAsrUrl({ ...connection, baseUrl }), new URL(baseUrl).origin);
+    assert.throws(() => validateMedAsrUrl({ ...connection, baseUrl, allowInsecureHttp: false }), /acknowledgement/);
+  }
+  validateTargetAddress("192.9.101.244", connection);
+  assert.throws(() => validateTargetAddress("192.9.101.244", { ...connection, allowInsecureHttp: false }), /acknowledgement/);
 });
 test("rejects missing, oversized, spoofed and unsupported audio", () => {
   assert.equal(validateAudio(audio), "audio/webm");
@@ -86,9 +95,9 @@ test("bounds total response time and aborts cancelled requests", async () => {
 });
 test("revalidates DNS each request, rejects mixed DNS answers and reports unreachable service", async () => {
   mode = "ready";
-  answers = [{ address: "10.0.0.4", family: 4 }, { address: "169.254.169.254", family: 4 }];
+  answers = [{ address: "192.9.101.244", family: 4 }, { address: "169.254.169.254", family: 4 }];
   await assert.rejects(checkMedAsrHealth(connection), /prohibited/);
-  answers = [{ address: "10.0.0.4", family: 4 }];
+  answers = [{ address: "192.9.101.244", family: 4 }];
   assert.equal((await checkMedAsrHealth(connection)).model, "google/medasr");
   server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
   await assert.rejects(checkMedAsrHealth(connection), /unreachable/);

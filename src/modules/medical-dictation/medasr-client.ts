@@ -23,14 +23,12 @@ for (const [address, prefix] of [["0.0.0.0", 8], ["127.0.0.0", 8], ["169.254.0.0
 for (const [address, prefix] of [["::", 96], ["::ffff:0:0", 96], ["fe80::", 10], ["ff00::", 8], ["2001::", 32], ["2002::", 16], ["64:ff9b::", 96]] as const) blockedV6.addSubnet(address, prefix, "ipv6");
 blockedV6.addAddress("::1", "ipv6");
 blockedV6.addAddress("fd00:ec2::254", "ipv6");
-const internal = new BlockList();
-internal.addSubnet("10.0.0.0", 8); internal.addSubnet("172.16.0.0", 12); internal.addSubnet("192.168.0.0", 16); internal.addSubnet("fc00::", 7, "ipv6");
 
 export function validateTargetAddress(address: string, connection: MedAsrConnection): void {
   const family = isIP(address) === 6 ? "ipv6" : "ipv4";
   if (!isIP(address) || (family === "ipv6" ? blockedV6 : blocked).check(address, family)) throw new HttpError(400, "MedASR address resolves to a prohibited destination.");
-  if (new URL(connection.baseUrl).protocol === "http:" && (!connection.allowInsecureHttp || !internal.check(address, family))) {
-    throw new HttpError(400, "HTTP MedASR requires a private-network address and protected-network acknowledgement. Use HTTPS otherwise.");
+  if (new URL(connection.baseUrl).protocol === "http:" && !connection.allowInsecureHttp) {
+    throw new HttpError(400, "HTTP MedASR requires explicit protected-network acknowledgement. Use HTTPS otherwise.");
   }
 }
 
@@ -43,7 +41,7 @@ export function validateMedAsrUrl(connection: MedAsrConnection): string {
   const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "metadata.google.internal" || hostname.endsWith(".metadata.google.internal")) throw new HttpError(400, "MedASR address is prohibited.");
   if (isIP(hostname)) validateTargetAddress(hostname, connection);
-  if (url.protocol === "http:" && !connection.allowInsecureHttp) throw new HttpError(400, "Acknowledge the protected internal network before using HTTP MedASR.");
+  if (url.protocol === "http:" && !connection.allowInsecureHttp) throw new HttpError(400, "Acknowledge the protected network before using HTTP MedASR.");
   return url.origin;
 }
 

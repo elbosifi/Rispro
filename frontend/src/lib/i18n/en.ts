@@ -3125,7 +3125,7 @@ export const en = {
   "dictation.keyConfigured": "API key: Configured",
   "dictation.keyNotConfigured": "API key: Not configured",
   "dictation.removeKey": "Remove saved API key on Save",
-  "dictation.httpAcknowledgement": "Allow HTTP only on a protected internal network. I confirm this MedASR network is access-controlled and protected; HTTPS is preferred for clinical audio.",
+  "dictation.httpAcknowledgement": "Allow unencrypted HTTP to the configured MedASR server. I confirm this destination is trusted and the network is access-controlled and protected; HTTPS is preferred for clinical audio.",
   "dictation.encryptionMissing": "Platform credential encryption is unavailable. An administrator must configure RISpro’s existing encryption prerequisite before enabling dictation or saving a key.",
   "dictation.save": "Save Settings",
   "dictation.saved": "Settings saved. Changes are active immediately.",
