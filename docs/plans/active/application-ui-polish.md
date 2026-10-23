@@ -1,6 +1,6 @@
 # Complete application UI polish — progress
 
-Status: active; reporting delivery and four SOP screens validated; monitoring/access batch next.
+Status: active; monitoring/access batch validated; Settings and Teaching remain.
 
 ## Baseline and safety
 
@@ -26,7 +26,7 @@ Total discovered composed screen entries: **120**, including **5** regression re
 
 | Module | Route / view | Component | Priority | Status |
 | --- | --- | --- | --- | --- |
-| Access | `/login` | `LoginPage` | P2 | Discovered |
+| Access | `/login` | `LoginPage` | P2 | Complete — batch 12 |
 | Reference | `/dashboard` | `DashboardPage` | P2 | Regression reference |
 | Patients | `/patients` | `PatientsPage` | P2 | Complete — batch 6 |
 | Reference | `/patients/new` | `PatientsPage / PatientForm` | P2 | Regression reference |
@@ -54,22 +54,22 @@ Total discovered composed screen entries: **120**, including **5** regression re
 | Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Complete — batch 9 |
 | Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Complete — batch 10 |
 | Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Complete — batch 10 |
-| Monitoring | `/statistics` | `StatisticsPage` | P2 | Discovered |
+| Monitoring | `/statistics` | `StatisticsPage` | P2 | Complete — batch 12 |
 | Patients | `/search` | `SearchPage` | P2 | Complete — batch 6 |
 | PACS | `/pacs` | `PacsPage` | P2 | Complete — batch 8 |
 | PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Complete — batch 8 |
 | PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Complete — batch 8 |
 | Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Complete — batch 8 |
 | Settings | `/settings` | `SettingsPage` | P2 | Discovered |
-| Monitoring | `/incidents` | `IncidentsPage` | P2 | Discovered |
+| Monitoring | `/incidents` | `IncidentsPage` | P2 | Complete — batch 12 |
 | SOP | `/sops` | `SopsPage (library)` | P2 | Complete — batch 11 |
 | SOP | `/sops/json-example` | `SopJsonExamplePage` | P2 | Complete — batch 11 |
 | SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Complete — batch 11 |
 | SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Complete — batch 11 |
 | Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Complete — batch 9 |
-| Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Discovered |
+| Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Complete — batch 12 |
 | Reference | `/v2/appointments/admin` | `SchedulingAdminPage` | P2 | Regression reference |
-| Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Discovered |
+| Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Complete — batch 12 |
 | Reporting | `/reporting/worklist/:token` | `ReportingBoardMobilePage` | P2 | Complete — batch 10 |
 | Documents | `/reporting/worklist/:token/cases/:caseId/documents` | `ReportingWorklistDocumentsPage` | P1 | Complete — batch 10 |
 | Doctor | `/doctor/my-work` | `DoctorPortalHome` | P1 | Complete — batch 1 |
@@ -345,3 +345,14 @@ Total discovered composed screen entries: **120**, including **5** regression re
 - Browser: two populated synthetic read-fixture scenarios (English/Arabic, each desktop/phone) before/after; library register, published content/history, owner/review/revision/archive dialogs, JSON import, toolbar and JSON example/reset. Escape closes dialogs. No SOP create/save/review/publish/archive/import/reset writes executed in these browser fixtures. Six final real route captures (three routes, two languages), plus five original references, pass at desktop/phone. Safe synthetic bilingual content only.
 - Checks: authorized baseline repair 33/33 PASS; final SOP focused tests 33/33 PASS. Exact final frontend typecheck/build PASS; targeted lint PASS; harness:ui PASS; whitespace clean. Existing build/jsdom warnings retained. Original-five image dimensions match; tiny dynamic text differences recorded in reference-diff.json, no layout regression. Before/after pairs in external comparisons/sop-*; 11 final route/reference capture cases and 2 populated-state cases PASS.
 - Counts: 58/115 remaining-scope entries complete (49 polished, 9 accepted unchanged), 57 remain unassessed. Inventory 120 including five reference screens. No pending product decisions. Next batch: Statistics, Incidents, Login, Public Appointment and active Legacy Access Viewer. No push, PR, deployment or main squash-apply.
+
+### Batch 12 — Operational statistics, incident UI and access screens complete
+
+- Five entries assessed: Statistics, Incidents and active Legacy Access Viewer polished; Login and Public Appointment accepted unchanged after desktop/phone, Arabic and synthetic populated/invalid-link inspection. Existing patient-facing portal layout retained. Passkey copy and “or” remain English in Arabic login; no physical passkey validation claimed.
+- Statistics: compact controls, readable metric/column labels, muted row dividers, and screen-only table minimum widths keep status rows readable while preserving horizontal scrolling. Print minimum widths reset to the original automatic behavior. Replaced an unassociated common Select instance with the existing modality-specific native select inside its visible label; option values/filter update handler unchanged. Loading/empty/error browser inspection reproduced corrupted em-dash placeholders in three rate cards; corrected only displayed text, with all rate arithmetic and output data unchanged.
+- Incidents: compact shared controls in page/dialogs and blue selected radio-card states. Labels, form validation, attachments, review transitions and submission/audit handlers unchanged. Populated details and create dialog verified in English/Arabic; Escape closes them. No incident submission, review save, upload or printing performed in the browser fixtures.
+- Legacy Access Viewer: reused shared Button/Input; replaced hard-coded teal/gray visual constants with existing tokens; raised unreadably small labels/cells, associated filter labels, wrapped existing filter groups/toolbar on phones, and retained table scrolling and all print/search/reset/upload handlers. Domain-specific inline group geometry and native MDB file selector remain local; no second generic primitive introduced. Printed HTML generators and all MDB/API/query logic are unchanged.
+- Data-safety correction: the first generic legacy navigation unexpectedly loaded existing non-seeded MDB rows from outside the disposable DB. Removed its six screenshots/body/metadata/crop artifacts immediately, without changing the MDB. Replaced them with explicit synthetic fixtures intercepting every legacy API request before navigation. Retained legacy images contain only SYNTHETIC-UI.mdb and clearly synthetic patient text. No such row data entered tracked files or commits. Future legacy capture uses only this helper.
+- Browser: 8 final route/language cases (Statistics, Incidents, Login, invalid public link), 4 synthetic legacy/public cases, 2 synthetic incident cases, and 1 Statistics loading/empty/error case, each including desktop/phone, PASS. Synthetic legacy Search/Reset run; no workflow writes. Original public-helper duplicate-text locator and incident-helper guessed Arabic action label were corrected to actual heading/catalog labels; rejected/interrupted helper runs are not passes. Login/public show existing language limitations, not claimed fully localized. External MDB import/physical printing/WebAuthn not validated.
+- Checks: baseline and final 67/67 focused tests PASS. Exact final frontend typecheck/build PASS after final app edit; targeted lint PASS; harness:ui PASS; whitespace clean. Existing bundle/jsdom warnings retained. Shared base primitives/tokens unchanged; original-five reference verification remains valid from batch 11 and will be rerun at final handoff.
+- Counts: 63/115 remaining-scope entries complete (52 polished, 11 accepted unchanged), 52 remain unassessed: 35 Settings entries and 17 Teaching entries. No pending product decisions. Rollback commits: reporting `5e851c32`, SOP `168fd64e`; this milestone checkpoint follows locally. No push/PR/deploy or main squash-apply.
