@@ -14,6 +14,15 @@ it.each([
   ["no mass[PERIOD]no edema{comma}no shift{semicolon}no bleed[question mark]", "No mass. No edema, no shift; no bleed?"],
   ["findings new line no right lesion next line no left lesion new paragraph impression next paragraph no acute disease period", "Findings\nNo right lesion\nNo left lesion\n\nImpression\n\nNo acute disease."],
   ["findings{new line}no mass[next line]no edema[new paragraph]impression{next paragraph}no acute disease{ period }", "Findings\nNo mass\nNo edema\n\nImpression\n\nNo acute disease."],
+  ["no right lesion period {newline} no left edema period", "No right lesion.\nNo left edema."],
+  ["no right lesion period [newline] no left edema period", "No right lesion.\nNo left edema."],
+  ["no right lesion period newline no left edema period", "No right lesion.\nNo left edema."],
+  ["findings{ NEWLINE }no mass[NewLine]no edema NEWLINE no shift", "Findings\nNo mass\nNo edema\nNo shift"],
+  ["no mass period</s>", "No mass."],
+  ["no mass period </s> \t\r\n", "No mass."],
+  ["no mass period </s> </s>", "No mass."],
+  ["</s>", ""],
+  ["no right mass{comma}no left edema[semicolon]no shift{question mark}{newline}a 1 point 8 cm lesion[period]</s>", "No right mass, no left edema; no shift?\nA 1.8 cm lesion."],
   ["Um, no uh left-sided mass erm or right-sided edema period", "No left-sided mass or right-sided edema."],
   ["A 1 point 8 by 1 point 2 cm right lesion and a 0 point 05 cm left lesion period", "A 1.8 by 1.2 cm right lesion and a 0.05 cm left lesion."],
   ["Measurement -0 point 5 mm; 1.8 x 1.2 cm; 5 um; 1,200 cells.", "Measurement -0.5 mm; 1.8 x 1.2 cm; 5 um; 1,200 cells."],
@@ -44,6 +53,12 @@ it.each([
   "Measurement 1 point eight; point 8; 1.8 point 2; 1 point 8.2; 1 point 8 point 2.",
   "Use [colon], {point}, [period} and {period] as literal text.",
   "Symptoms period severity uncertain.",
+  "Last menstrual period was normal. No point tenderness over the colon. A 1.8 cm right lesion and no left lesion.</s> remain literal here.",
+  "No <finding>left lesion</finding>. <s>Right lesion absent</s> today.",
+  "No left lesion.</finding>",
+  "No left lesion.</S>",
+  "No left lesion.</s >",
+  "The newline is literal. A newline of text and newline-associated artifacts are described.",
 ] as const)("preserves meaningful or ambiguous wording: %s", (input) => {
   expect(cleanupMedicalDictation(input)).toBe(input);
   expect(cleanupMedicalDictation(cleanupMedicalDictation(input))).toBe(input);

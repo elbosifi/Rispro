@@ -1,13 +1,14 @@
 const commands: Record<string, string> = {
   period: ".", comma: ",", semicolon: ";", "question mark": "?",
-  "new line": "\n", "next line": "\n",
+  newline: "\n", "new line": "\n", "next line": "\n",
   "new paragraph": "\n\n", "next paragraph": "\n\n",
 };
-const commandPattern = "period|comma|semicolon|question[ \\t]+mark|(?:new|next)[ \\t]+(?:paragraph|line)";
+const commandPattern = "period|comma|semicolon|question[ \\t]+mark|newline|(?:new|next)[ \\t]+(?:paragraph|line)";
 
 /** Local formatting only: no terminology correction, inference or report writes. */
 export function cleanupMedicalDictation(input: string): string {
-  let text = input.replace(/\r\n?/g, "\n");
+  // Remove only exact MedASR end tokens at the end, never arbitrary tags.
+  let text = input.replace(/\r\n?/g, "\n").replace(/(?:<\/s>\s*)+$/, "");
 
   text = text.replace(/(?<![\p{L}\p{N}_'-])(?:um|uh|erm)(?![\p{L}\p{N}_'-])(?:[ \t]*,)?/giu, (match, offset: number, source: string) => {
     // "5 um" is a measurement; uppercase tokens may be clinical abbreviations.
@@ -33,7 +34,7 @@ export function cleanupMedicalDictation(input: string): string {
     if (command === "period") {
       // A bare "period" is accepted only at the end or before a clear new
       // sentence/formatting command. Use [period] for ambiguous positions.
-      if (!before.trim() || !/^(?:\s*$|\s*(?:[.!?]|\n)|[ \t]+(?:there|no|not|neither|without|a|an|the|it|this|that|these|those|findings|impression|new|next)\b)/i.test(after)) return match;
+      if (!before.trim() || !/^(?:\s*$|\s*(?:[.!?]|\n)|[ \t]+(?:there|no|not|neither|without|a|an|the|it|this|that|these|those|findings|impression|new|next|newline)\b)/i.test(after)) return match;
     }
     return ` ${commands[command]} `;
   });
