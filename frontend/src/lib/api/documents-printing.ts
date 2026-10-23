@@ -103,7 +103,7 @@ export async function listReportingBoardAppointmentDocuments(token: string, appo
   const raw = await api<{ documents: RawRecord[] }>(basePath);
   return (raw.documents ?? []).map((record) => {
     const document = mapRequestDocument(record);
-    return { ...document, viewUrl: `${basePath}/${document.id}/view` };
+    return { ...document, viewUrl: `/api${basePath}/${document.id}/view` };
   });
 }
 

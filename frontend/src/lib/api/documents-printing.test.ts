@@ -7,6 +7,7 @@ import {
   createScanSession,
   deleteAppointmentDocument,
   fetchIntegrationStatus,
+  getRequestDocumentViewUrl,
   listAppointmentDocuments,
   listReportingBoardAppointmentDocuments,
   mapRequestDocument,
@@ -42,7 +43,11 @@ describe("documents and printing API contracts", () => {
     const documents = await listReportingBoardAppointmentDocuments("work list/token", 8);
 
     expect(api).toHaveBeenCalledWith("/reporting/saved-views/public/work%20list%2Ftoken/mobile/cases/8/documents");
-    expect(documents[0]?.viewUrl).toBe("/reporting/saved-views/public/work%20list%2Ftoken/mobile/cases/8/documents/12/view");
+    expect(documents[0]?.viewUrl).toBe("/api/reporting/saved-views/public/work%20list%2Ftoken/mobile/cases/8/documents/12/view");
+  });
+
+  it("retains the generic document view URL when no scoped URL is supplied", () => {
+    expect(getRequestDocumentViewUrl(mapRequestDocument({ id: 12 }))).toBe("/api/documents/12/view");
   });
 
   it("preserves scan integration and administrative storage routes", async () => {
